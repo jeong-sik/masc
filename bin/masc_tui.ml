@@ -1655,7 +1655,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 22 then begin
       (* Ctrl-V: the clipboard's image, staged for the next message. The key
-         reaches here only because [Masc_tui_termios.disable_literal_next]
+         reaches here only because [Masc_tui_termios.reclaim]
          turned off VLNEXT -- with the terminal's default the tty layer eats
          this byte and passes the next one through raw, so the composer would
          see the letter after Ctrl-V and never Ctrl-V itself. *)
@@ -2066,7 +2066,7 @@ type async_msg =
      way to tell a late answer for the scope just left from an answer for the
      scope now open (#33946). *)
   | Code_entries_loaded of
-      (code_workspace_scope * string)
+      (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
@@ -3559,39 +3559,43 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_code_entries_load state ~mailbox =
-  if state.code_entries_inflight then ()
-  else begin
-    state.code_entries_inflight <- true;
-    let host = server_peer_host in
-    let port = state.port in
-    let dir = state.code_dir in
-    (* Read here, not inside the daemon. The daemon runs later, and the scope it
-       read then was whichever one was current by then -- so a request made in
-       one scope could be sent under another. *)
-    let scope = state.code_scope in
-    let key = (scope, dir) in
-    let run () =
-      let result =
-        try
-          let keeper, repo = code_scope_axes_of scope in
-          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-            ~path:dir ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+  (* Read here, not inside the daemon. The daemon runs later, and the scope it
+     read then was whichever one was current by then -- so a request made in
+     one scope could be sent under another. *)
+  let scope = state.code_scope in
+  let dir = state.code_dir in
+  (* One listing per key. A request for the key already loading is not sent
+     twice; a request for any other key is, and the answer to the one it
+     replaced is dropped when it lands. *)
+  match
+    Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_listing
+      ~key:(scope, dir)
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (listing, request) -> (
+      state.code_listing <- listing;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            let keeper, repo = code_scope_axes_of scope in
+            Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+              ~path:dir ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Code_entries_loaded (request, result))
       in
-      enqueue_async mailbox (Code_entries_loaded (key, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.code_entries_inflight <- false;
-        enqueue_async mailbox
-          (Code_entries_loaded (key, Error "Eio switch is unavailable"))
-  end
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Code_entries_loaded (request, Error "Eio switch is unavailable")))
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -4610,7 +4614,7 @@ let launch_browser_lane state ~mailbox operation =
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
-        clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
+        clients = (match operation with Discover Choose_client -> None | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to
@@ -4640,7 +4644,7 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence {tab_id;_} -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
@@ -5022,8 +5026,7 @@ let open_repository_change_in_code state ~mailbox ~scope
   let parent = Filename.dirname change.rc_path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
-  state.code_entries <- [];
-  state.code_entries_error <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
@@ -5803,7 +5806,7 @@ let row_list (state : state) : row_list option =
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
-        windowed ~count:(List.length state.code_entries)
+        windowed ~count:(List.length (code_entries state))
           ~cursor:state.code_cursor (fun index -> state.code_cursor <- index)
   | Board ->
       (match state.board_mode with
@@ -12201,16 +12204,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error detail ->
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
-  | Code_entries_loaded (key, result) ->
-      state.code_entries_inflight <- false;
-      if code_scope_path_equal key (state.code_scope, state.code_dir) then (
-        match result with
-        | Ok entries ->
-            state.code_entries <- entries;
-            state.code_entries_error <- None;
-            state.code_cursor <-
-              max 0 (min state.code_cursor (List.length entries - 1))
-        | Error detail -> state.code_entries_error <- Some detail)
+  | Code_entries_loaded (request, result) ->
+      state.code_listing <-
+        Masc_tui_fetched.complete ~equal:code_scope_path_equal
+          state.code_listing request result;
+      (match result with
+       | Ok _
+         when code_scope_path_equal
+                (Masc_tui_fetched.request_key request)
+                (code_listing_key state) ->
+           state.code_cursor <-
+             max 0
+               (min state.code_cursor (List.length (code_entries state) - 1))
+       | Ok _ | Error _ -> ())
   | Code_file_loaded (request, result) -> (
       let path = Masc_tui_fetched.request_key request in
       (* An answer for a file the operator has moved past describes bytes
@@ -14059,12 +14065,11 @@ let bracketed_paste_disable = "\x1b[?2004l"
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
    filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
-   among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
-   that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
-   key. VDISCARD similarly consumes Ctrl-O on BSD terminals. Reclaiming both
-   here keeps the three places that take raw mode
-   back (session start, the return from Ctrl-Z, the return from $EDITOR) from
-   taking it back without the key.
+   among them, so every call puts back the keys the tty layer takes for itself:
+   Ctrl-V (paste), and on BSD terminals Ctrl-O (Browser screenshot) and Ctrl-Y
+   (speak) -- see [Masc_tui_termios.reclaimed_key]. Reclaiming them here keeps
+   the three places that take raw mode back (session start, the return from
+   Ctrl-Z, the return from $EDITOR) from taking it back without the keys.
 
    The result is not checked because there is nothing left for it to report:
    the [tcsetattr] on the line above just succeeded on this descriptor, so it
@@ -14072,10 +14077,9 @@ let bracketed_paste_disable = "\x1b[?2004l"
    calls, and that ends the session either way. *)
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
-  (* See above: a refusal is a hangup, which ends the session either way. *)
-  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
-  (* See masc_tui_termios_stubs.c: unsupported VDISCARD is a no-op; tty hangup follows the contract above. *)
-  ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
+  (* A key this platform lacks is skipped; a refusal is a hangup, which ends
+     the session either way. *)
+  Masc_tui_termios.reclaim Unix.stdin
 ;;
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
@@ -14186,14 +14190,13 @@ let main
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
-  (* Read beside [old_term] because the record cannot carry it. The literal-next
-     character is turned off for as long as this program owns the terminal
+  (* Read beside [old_term] because the record cannot carry them. The reclaimed
+     keys are turned off for as long as this program owns the terminal
      ([apply_raw_mode]) and handed back whenever the terminal is -- at exit and
      around Ctrl-Z. Restoring [old_term] alone leaves the shell without the
-     key, which the PTY harness catches as a terminal this program did not put
+     keys, which the PTY harness catches as a terminal this program did not put
      back the way it found it. *)
-  let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
-  let old_discard_output = Masc_tui_termios.discard_output Unix.stdin in
+  let old_reclaimed_keys = Masc_tui_termios.snapshot Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -14249,16 +14252,9 @@ let main
         Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
     in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
-       terminal back, and this character is the part it cannot reach.
-       [-1] means the descriptor was never a terminal, so there is nothing to
-       return. *)
-    if old_literal_next >= 0
-    then
-      (* See the guard above: a refusal here is the terminal already gone. *)
-      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
-    if old_discard_output >= 0 then
-      (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+       terminal back, and these characters are the part it cannot reach. A
+       refusal here is the terminal already gone. *)
+    Masc_tui_termios.restore Unix.stdin old_reclaimed_keys;
     outcome
   in
   let restore_terminal () =
@@ -17758,9 +17754,9 @@ and is loaded on demand through keeper_skill.
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length view.clients - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt view.clients cursor with
+                     (match List.nth_opt (listed_clients view) cursor with
                       | None -> ()
                       | Some client ->
                           state.browser_lane <- Some (choose_client client view);
@@ -18865,8 +18861,7 @@ and is loaded on demand through keeper_skill.
                 state.code_dir <- dir;
                 if scope_changed || dir_changed then begin
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end;
                 (match file with
@@ -19674,8 +19669,7 @@ and is loaded on demand through keeper_skill.
                   state.code_dir <-
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else if state.code_scope <> Code_scope_project then begin
@@ -19683,8 +19677,7 @@ and is loaded on demand through keeper_skill.
                      project tree the surface started on. *)
                   state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else
@@ -19851,26 +19844,9 @@ and is loaded on demand through keeper_skill.
                   goto_surface state ~mailbox:async_messages Acting
             | Connectors -> state.view <- Keepers Keeper_detail
             | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  if Option.is_some state.search || state.search_last <> "" then begin
-                    state.search <- None;
-                    state.search_last <- "";
-                    state.memory_facts_cursor <- 0;
-                    state.memory_facts_scroll <- 0
-                  end
-                  else begin
-                    (* Close the fact browser back to the health table. The
-                       listing is dropped with it: facts are cheap to re-ask
-                       and a kept copy would redraw stale rows on reopen. *)
-                    state.memory_facts_keeper <- None;
-                    state.memory_facts <- None;
-                    state.memory_facts_error <- None;
-                    state.memory_facts_cursor <- 0;
-                    state.memory_facts_scroll <- 0;
-                    state.memory_facts_category <- Category_all
-                  end
-                end
-                else state.view <- Overview
+                (match memory_back state with
+                 | Memory_stays -> ()
+                 | Memory_leaves -> state.view <- Overview)
             | Tools ->
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
@@ -19905,15 +19881,13 @@ and is loaded on demand through keeper_skill.
                   state.code_dir <-
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
             | Keepers Keeper_detail ->
@@ -20060,7 +20034,7 @@ and is loaded on demand through keeper_skill.
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
-                      ~count:(List.length state.code_entries)
+                      ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
@@ -20445,7 +20419,7 @@ and is loaded on demand through keeper_skill.
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
-                      ~count:(List.length state.code_entries)
+                      ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
@@ -20881,13 +20855,12 @@ and is loaded on demand through keeper_skill.
                   | Some (_, _) | None -> ())
                 else if state.code_focus_file = Right_pane then ()
                 else
-                  match List.nth_opt state.code_entries state.code_cursor with
+                  match List.nth_opt (code_entries state) state.code_cursor with
                   | Some node ->
                       if node.Masc.Tui_decode.wt_has_children then begin
                         state.code_dir <- node.Masc.Tui_decode.wt_path;
                         state.code_cursor <- 0;
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         launch_code_entries_load state
                           ~mailbox:async_messages
                       end
@@ -21068,8 +21041,7 @@ and is loaded on demand through keeper_skill.
                           Code_scope_repo repo.Masc.Tui_decode.rp_id;
                         state.code_dir <- "";
                         state.code_cursor <- 0;
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
@@ -21466,8 +21438,7 @@ and is loaded on demand through keeper_skill.
                         let parent = Filename.dirname path in
                         state.code_dir <-
                           (if String.equal parent "." then "" else parent);
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_cursor <- 0;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;

@@ -161,6 +161,11 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+val surface_chrome_rows : int
+(** The rows {!surface_chrome} draws around its body: the top border, the
+    title and its rule, the bottom border and the footer. A key handler that
+    bounds a body's scroll subtracts this, the same number the frame does. *)
+
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
   Masc_tui_types.state ->
@@ -318,7 +323,7 @@ val runtime_config_status_lines :
   Masc_tui_types.state ->
   cols:int -> (Masc_tui_runtime_config_view.tone * string) list
 
-val help_ascii_banner : cols:int -> Masc_tui_types.state -> string list
+val help_masthead : Masc_tui_types.state -> string list
 
 val help_lines : Masc_tui_types.state -> string list
 

@@ -3209,14 +3209,17 @@ module Browser_lane_view = struct
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
-    | Viewport_cadence of { tab_id : int; expected_url : string }
+    | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* [clients] is what the last discovery answered, and [None] until one has:
+     a discovery that failed leaves no list rather than an empty one, so the
+     picker cannot tell an operator there is no browser when it could not ask. *)
   type t = {
-    clients : client list; selected_client : client option; client_picker : int option;
+    clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
@@ -3243,7 +3246,7 @@ module Browser_lane_view = struct
       Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
     | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
-    { clients = []; selected_client = None; client_picker = None;
+    { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
@@ -3291,6 +3294,7 @@ module Browser_lane_view = struct
     | Read_failed -> "HTTP failed"
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
+  let listed_clients t = Option.value t.clients ~default:[]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3298,14 +3302,14 @@ module Browser_lane_view = struct
   let selected_client_available t = match t.source, t.selected_client with
     | Automation, _ -> true
     | Live, None -> false
-    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
     if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
           && t.selected_tab = Some shot.tab_id ->
-          Some (Viewport_cadence {tab_id = shot.tab_id; expected_url = shot.url})
+          Some (Viewport_cadence shot.tab_id)
       | Some _ -> None
       | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
@@ -3332,10 +3336,10 @@ module Browser_lane_view = struct
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = []; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
-             let next = { t with clients; load = Idle } in
+             let next = { t with clients = Some clients; load = Idle } in
              match t.selected_client, clients, purpose with
              | None, [client], Read_after_discovery -> choose_client client next, true
              | Some _, _, _ when selected_client_available next ->
@@ -3618,12 +3622,15 @@ module Browser_lane_view = struct
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
-  (* Settle the browser operation even when a later key cancelled opening the
-     image. The caller separately checks image intent before drawing. *)
+  (* A cadence observes the selected tab, including navigation by another
+     actor. Its self-contained PNG and document/URL/viewport are accepted
+     together; the next gesture uses that displayed snapshot. Explicit refresh
+     and scroll retain their expected URL checks. Settle even when a later key
+     cancelled opening the image; the caller separately checks image intent. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_cadence {tab_id=requested_tab;_} | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_cadence requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -3631,7 +3638,7 @@ module Browser_lane_view = struct
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
-                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_cadence {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
                                   | _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
@@ -4648,9 +4655,16 @@ type state = {
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
-  mutable code_entries: Tui_decode.workspace_tree_node list;
-  mutable code_entries_error: string option;
-  mutable code_entries_inflight: bool;
+  mutable code_listing:
+    (code_workspace_scope * string, Tui_decode.workspace_tree_node list)
+    Masc_tui_fetched.t;
+      (** The file pane's directory listing, keyed by scope and directory.
+          It was three cells -- rows, an error, and an in-flight flag -- and
+          the flag was one bit for every directory: a listing asked while
+          another was in flight was dropped, so moving into a directory
+          before the last one answered left it unrequested and drawn as
+          "(loading…)" until [r]. The same two cells also drew a directory
+          that answered with no entries as "(loading…)". *)
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -5594,8 +5608,7 @@ let enter_keeper_code_file state ~keeper ~path =
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
-  state.code_entries <- [];
-  state.code_entries_error <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
@@ -6113,9 +6126,7 @@ let create_state
   link_previews_mode = `Rich;
   burn_hud_visible = false;
   code_dir = "";
-  code_entries = [];
-  code_entries_error = None;
-  code_entries_inflight = false;
+  code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
@@ -6288,6 +6299,20 @@ let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
 let page_failed_note = "  (load failed; nothing here is a reading)"
 
+(* The row the Browser Lane picker draws when it has no connection to offer,
+   and [None] when it has one. A discovery that failed used to leave an empty
+   list, so the picker answered "No active native browser connections" under
+   the red failure: the operator was told the browser was gone when the list
+   had not been read. Only a discovery that answered can say there are none. *)
+let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
+  let open Browser_lane_view in
+  match view.clients, view.load with
+  | Some (_ :: _), _ -> None
+  | (None | Some []), Loading _ -> Some "  Waiting for active connections\xe2\x80\xa6"
+  | Some [], (Idle | No_browser | Failed _) -> Some "  No active native browser connections"
+  | None, Failed _ -> Some page_failed_note
+  | None, (Idle | No_browser) -> Some page_unread_note
+
 (* What a title says where its counts would go. A read nobody has asked for and a
    read that failed both leave the snapshot empty, and the title is the row on
    top, so it is the answer that gets read: "not loaded" after a failure sends
@@ -6302,6 +6327,15 @@ let title_failed = "(load failed)"
 let title_missing_reading ~error =
   if Option.is_some error then title_failed else title_unread
 
+(* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
+   count once it has answered, and otherwise which of the two it is. Asked and
+   still waiting reads as not loaded, the way a title before any request does. *)
+let title_count_of_view view ~count =
+  match view with
+  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
+  | Masc_tui_fetched.Failed _ -> title_failed
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -6311,6 +6345,21 @@ type empty_page =
   | Page_unread
   | Page_failed
   | Page_empty
+
+(* The Code pane's listing for the scope and directory open now. A listing
+   answered for another key, one still loading, and one that failed hold no
+   rows for this key. *)
+let code_listing_key (state : state) = (state.code_scope, state.code_dir)
+
+let code_listing_view (state : state) =
+  Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing
+    ~key:(code_listing_key state)
+
+let code_entries (state : state) =
+  match code_listing_view state with
+  | Masc_tui_fetched.Ready rows -> rows
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Failed _ -> []
 
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with
@@ -6335,6 +6384,17 @@ let local_rows_page (state : state) ~error =
       (match state.local_workspace with
        | Local_workspace_unread -> None
        | Local_workspace_read -> Some ())
+
+(* What the Resources pane says under its header when no error is showing and
+   there is no row to draw, and [None] when there is one. The pane flattened
+   the list to [] before asking, so a read that answered with no resources and
+   a read not answered yet were the same empty list, and both said
+   "(loading...)" -- for good, on a server that exposes no resources. *)
+let resources_empty_note (list : Masc_tui_mcp.resource list option) =
+  match list with
+  | None -> Some " (loading\xe2\x80\xa6)"
+  | Some [] -> Some " (no resources)"
+  | Some (_ :: _) -> None
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =
@@ -6670,32 +6730,43 @@ let changes_budget_note_rows (state : state) =
    time for. *)
 let agenda (state : state) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules with
-    | None -> []
-    | Some snapshot ->
-      List.filter_map
-        (fun (row : schedule_row) ->
-           match row.sch_due_at_iso with
-           | None -> None
-           | Some at_iso ->
-             Some
-               { Masc_tui_agenda.at_iso
-               ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-               ; who = Option.value row.sch_payload_target ~default:""
-               ; what = Option.value row.sch_payload_summary ~default:""
-               ; recurrence = row.sch_recurrence_summary
-               })
-        snapshot.scs_rows
+    match state.schedules, state.schedules_error with
+    (* A store the server could not read answers with a status other than
+       "ok" and no rows; that is a failed read, not an empty schedule. *)
+    | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
+      Masc_tui_agenda.Read_failed
+    | None, Some _ -> Masc_tui_agenda.Read_failed
+    | None, None -> Masc_tui_agenda.Not_read
+    | Some snapshot, _ ->
+      Masc_tui_agenda.Read
+        (List.filter_map
+           (fun (row : schedule_row) ->
+              match row.sch_due_at_iso with
+              | None -> None
+              | Some at_iso ->
+                Some
+                  { Masc_tui_agenda.at_iso
+                  ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
+                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; what = Option.value row.sch_payload_summary ~default:""
+                  ; recurrence = row.sch_recurrence_summary
+                  })
+           snapshot.scs_rows)
   in
   let awaiting =
-    List.map
-      (fun (held : Tui_decode.keeper_tool_approval) ->
-         { Masc_tui_agenda.asked_by = held.kta_keeper
-         ; question = held.kta_tool
-         ; asked_at = held.kta_asked_at
-         ; timeout_sec = held.kta_timeout_sec
-         })
-      state.keeper_tool_approvals
+    match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
+    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, None -> Masc_tui_agenda.Not_read
+    | true, _ ->
+      Masc_tui_agenda.Read
+        (List.map
+           (fun (held : Tui_decode.keeper_tool_approval) ->
+              { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; question = held.kta_tool
+              ; asked_at = held.kta_asked_at
+              ; timeout_sec = held.kta_timeout_sec
+              })
+           state.keeper_tool_approvals)
   in
   Masc_tui_agenda.project ~scheduled ~awaiting
 ;;
@@ -6831,6 +6902,41 @@ let memory_overview_query (state : state) =
     | Some q -> String.lowercase_ascii (surface_search_query Memory q)
     | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
+
+(* What Esc does on Memory, nearest layer first: a filter, then the fact
+   browser, then the surface. The keeper table drew "[Esc to clear]" beside its
+   filter, but only the fact browser cleared one: on the table Esc left for
+   Overview and kept the filter, which narrowed the list again the next time
+   Memory opened. *)
+type memory_back = Memory_stays | Memory_leaves
+
+let memory_back (state : state) =
+  if Option.is_some state.search || state.search_last <> "" then begin
+    state.search <- None;
+    state.search_last <- "";
+    (match state.memory_facts_keeper with
+     | Some _ ->
+         state.memory_facts_cursor <- 0;
+         state.memory_facts_scroll <- 0
+     | None ->
+         state.memory_health_cursor <- 0;
+         state.memory_health_scroll <- 0);
+    Memory_stays
+  end
+  else
+    match state.memory_facts_keeper with
+    | Some _ ->
+        (* Close the fact browser back to the health table. The listing is
+           dropped with it: facts are cheap to re-ask and a kept copy would
+           redraw stale rows on reopen. *)
+        state.memory_facts_keeper <- None;
+        state.memory_facts <- None;
+        state.memory_facts_error <- None;
+        state.memory_facts_cursor <- 0;
+        state.memory_facts_scroll <- 0;
+        state.memory_facts_category <- Category_all;
+        Memory_stays
+    | None -> Memory_leaves
 
 let visible_memory_keepers (state : state) =
   let open Tui_decode in
@@ -7640,7 +7746,7 @@ let surface_row_texts (state : state) : surface -> string list option =
         Some
           (List.map
              (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-             state.code_entries)
+             (code_entries state))
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   (* The list, and only while the list is the pane: reading a post or
      writing one draws something else, and "/" there would move a cursor
@@ -8193,10 +8299,6 @@ let palette_entries (state : state) =
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
-  @ [ "metrics", Palette_goto Metrics ]
-  @ [ "telemetry", Palette_goto Metrics ]
-  @ [ "charts", Palette_goto Metrics ]
-  @ [ "stats", Palette_goto Metrics ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
@@ -8242,6 +8344,24 @@ let palette_subsequence ~needle haystack =
   in
   walk 0 0
 
+(* Other words an entry answers to, kept off its row. Metrics used to be five
+   rows -- "go Metrics", "metrics", "telemetry", "charts", "stats" -- each the
+   same jump, so an empty query listed one destination five times. The slash
+   commands fold their aliases into one entry the same way
+   (Masc_tui_command.spelled_catalog). *)
+let palette_action_words = function
+  | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+  | Palette_goto
+      ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Planning | Schedules | Verification | Harness | Fusion
+      | Repositories | Code | Changes | Connectors | Runtime | Config
+      | Resources | Tools | System_logs )
+  | Palette_browser_lane | Palette_hide_browser_lane | Palette_msx
+  | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
+  | Palette_chat _ | Palette_task _ | Palette_board_hearth _
+  | Palette_board_post _ | Palette_lsp _ ->
+      []
+
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
@@ -8256,10 +8376,11 @@ let palette_matches (state : state) =
      query, then one that contains it, then one that only has its characters
      in order. A K/D pre-fill of "def " therefore lists the cursor line's
      names before a post that merely mentions "deferred". *)
-  let rank (label, _) =
-    if palette_starts_with ~needle label then Some 0
-    else if palette_contains ~needle label then Some 1
-    else if palette_subsequence ~needle label then Some 2
+  let rank (label, action) =
+    let texts = label :: palette_action_words action in
+    if List.exists (palette_starts_with ~needle) texts then Some 0
+    else if List.exists (palette_contains ~needle) texts then Some 1
+    else if List.exists (palette_subsequence ~needle) texts then Some 2
     else None
   in
   entries

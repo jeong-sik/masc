@@ -30,6 +30,7 @@ type completion_state =
 type record = {
   goal_id : string;
   completion : completion_state;
+  submitted_evidence : Workspace_verification_store.submitted_evidence_item list;
   updated_at : string;
 }
 
@@ -42,6 +43,7 @@ type state = {
 let default_record ~goal_id =
   { goal_id
   ; completion = Completion_idle
+  ; submitted_evidence = []
   ; updated_at = Masc_domain.now_iso ()
   }
 
@@ -159,6 +161,7 @@ let record_to_yojson (record : record) =
   `Assoc
     [ "goal_id", `String record.goal_id
     ; "completion", completion_state_to_yojson record.completion
+    ; "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson record.submitted_evidence)
     ; "updated_at", `String record.updated_at
     ]
 
@@ -179,7 +182,10 @@ let relation_for_goal ~goal record =
 
 let record_to_yojson_for_goal ~goal record =
   match relation_for_goal ~goal record with
-  | Current -> record_to_yojson record
+  | Current -> `Assoc ["goal_id", `String record.goal_id;
+      "completion", completion_state_to_yojson record.completion;
+      "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_metadata_to_yojson record.submitted_evidence);
+      "updated_at", `String record.updated_at]
   | Stale_criterion ->
       `Assoc [ "goal_id", `String record.goal_id;
                "completion", `Assoc [ "state", `String "stale_criterion";
@@ -188,11 +194,18 @@ let record_to_yojson_for_goal ~goal record =
 
 let record_of_yojson json =
   let* json = object_fields "goal_verification.record"
-    [ "goal_id"; "completion"; "updated_at" ] json in
+    [ "goal_id"; "completion"; "submitted_evidence"; "updated_at" ] json in
   let* goal_id = required_string json "goal_id" in
   let* updated_at = required_string json "updated_at" in
   let* completion = completion_state_of_yojson (Yojson.Safe.Util.member "completion" json) in
-  Ok { goal_id; completion; updated_at }
+      let* submitted_evidence = match Yojson.Safe.Util.member "submitted_evidence" json with
+        | `List rows ->
+          List.fold_left (fun result row ->
+            let* acc = result in
+            let* item = Workspace_verification_store.submitted_evidence_item_of_yojson row in
+            Ok (item :: acc)) (Ok []) rows |> Result.map List.rev
+        | _ -> Error "goal_verification.record: submitted_evidence must be a list" in
+  Ok { goal_id; completion; submitted_evidence; updated_at }
 
 let state_to_yojson (state : state) =
   `Assoc
@@ -449,14 +462,24 @@ let reopen_goal config ~goal_id ~actor ~note =
 ;;
 
 (* A repeated request for the same criterion keeps its exact durable identity. *)
-let mark_proof_pending config ~goal_id ~criterion =
+let mark_proof_pending ?submitted_evidence config ~goal_id ~criterion =
   update_record config ~goal_id (fun current ->
+    let same_criterion = match current.completion with
+      | Completion_idle -> false
+      | Proof_pending pending -> Goal_store.criterion_equal pending.criterion criterion
+      | Proof_proven verdict | Proof_refuted verdict | Human_confirmed (verdict, _) ->
+          Goal_store.criterion_equal verdict.criterion criterion in
     let fresh () =
-      Ok { current with completion = Proof_pending
+      let submitted_evidence = match submitted_evidence with
+        | Some items -> items
+        | None when same_criterion -> current.submitted_evidence
+        | None -> [] in
+      Ok { current with submitted_evidence; completion = Proof_pending
         { requested_at = Masc_domain.now_iso (); request_id = Random_id.hex ~bytes:16; criterion } }
     in
     match current.completion with
-    | Proof_pending pending when Goal_store.criterion_equal pending.criterion criterion -> Ok current
+    | Proof_pending pending when Goal_store.criterion_equal pending.criterion criterion
+        && Option.fold ~none:true ~some:((=) current.submitted_evidence) submitted_evidence -> Ok current
     | Proof_proven verdict | Human_confirmed (verdict, _) when Goal_store.criterion_equal verdict.criterion criterion ->
         Error ("goal_verification: current criterion is already proven for " ^ goal_id)
     | Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _ -> fresh ())

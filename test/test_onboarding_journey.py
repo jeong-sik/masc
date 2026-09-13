@@ -350,7 +350,7 @@ class Journey(unittest.TestCase):
         response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
                 patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
-                patch.object(SETUP, 'pick', side_effect=[[0], [4]]), contextlib.redirect_stderr(io.StringIO()):
+                patch.object(SETUP, 'pick', side_effect=[[0], [5]]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
         prerequisites.assert_called_once_with('/bin/masc', 'docker', base_path='/workspace', port=8945)
 

@@ -151,6 +151,9 @@ type _ command =
   | Resume_direct_runtime_retry :
       { operation_id : Operation_id.t; observed : Keeper_semantic_execution.runtime_retry } ->
       (unit, error) result command
+  | Direct_gate_bindings : ((Operation_id.t * Keeper_semantic_execution.gate_binding) list, error) result command
+  | Reconcile_direct_gate_binding : {operation_id:Operation_id.t; binding:Keeper_semantic_execution.gate_binding;
+      waiting:Keeper_semantic_execution.gate_wait} -> (unit, error) result command
   | Direct_gate_waits : ((Operation_id.t * Keeper_semantic_execution.gate_wait_state) list, error) result command
   | Discharge_direct_gate : {operation_id:Operation_id.t; obligation:Keeper_semantic_execution.gate_obligation} -> (unit, error) result command
   | Direct_gate_state : Operation_id.t -> (Keeper_semantic_execution.gate_wait_state option, error) result command
@@ -1019,6 +1022,15 @@ let start
               ~operation_id ~observed) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Direct_gate_bindings, resolve) ->
+          let response = run_operation_read t ~label:"read unresolved direct Gate sources" (fun () ->
+            Chat_operation_store.direct_gate_bindings t.operation_store) in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
+        | Command (Reconcile_direct_gate_binding {operation_id; binding; waiting}, resolve) ->
+          let response = run_operation_command t ~label:"confirm original direct Gate source" (fun () ->
+            Chat_operation_store.reconcile_direct_gate_binding t.operation_store ~now:(t.now ())
+              ~operation_id ~binding ~waiting) |> Result.map fst in
+          Eio.Promise.resolve resolve response; loop state shutdown_operation_id
         | Command (Direct_gate_waits, resolve) ->
           let response = run_operation_read t ~label:"read waiting direct Gate operations" (fun () ->
             Chat_operation_store.direct_gate_waits t.operation_store) in
@@ -1493,3 +1505,7 @@ let defer_direct_gate_reconciliation t ~operation_id ~execution_digest ~binding 
   request t (Defer_direct_gate_reconciliation {operation_id; execution_digest; binding; diagnostic})
 
 let direct_gate_binding t ~operation_id = request t (Direct_gate_binding operation_id)
+
+let direct_gate_bindings t = request t Direct_gate_bindings
+let reconcile_direct_gate_binding t ~operation_id ~binding ~waiting =
+  request t (Reconcile_direct_gate_binding {operation_id; binding; waiting})

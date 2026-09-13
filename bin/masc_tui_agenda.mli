@@ -56,9 +56,18 @@ type awaiting =
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
 
+(** A list as the state holds it. An empty list is an answer only once it was
+    read: before the first answer, and after a read that failed with nothing
+    earlier to show, the overlay said "nothing is scheduled" about a list no
+    one had seen. *)
+type 'row reading =
+  | Not_read  (** nothing has answered yet *)
+  | Read_failed  (** the read failed and there is no earlier answer to show *)
+  | Read of 'row list
+
 type t
 
-val project : scheduled:scheduled list -> awaiting:awaiting list -> t
+val project : scheduled:scheduled reading -> awaiting:awaiting reading -> t
 (** Keeps the earliest {!Coming} row and counts the rest. Rows that are
     settled or unrecognised are not on the strip. *)
 
@@ -102,7 +111,8 @@ type line =
 val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
-    operator. Not just the one the strip names. *)
+    operator. Not just the one the strip names. A section whose list was not
+    read says that instead of saying it is empty. *)
 
 val short_who : string -> string
 (** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads

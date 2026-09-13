@@ -1206,6 +1206,15 @@ let test_current_image_checkpoint_survives_text_fallback () =
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
     Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
       true (restored.messages = history @ [ canonical_input ] @ suffix);
+    let sidecar = `Assoc ["original_task",`String "image-fallback-task"] in
+    let failed = Driver.For_testing.project_provider_attempt_result
+      ~checkpoint_after:{provider_checkpoint with working_context=Some sidecar}
+      ~replay_prefix_projection:projection (Error (retryable_network_error "checkpoint persistence failed")) in
+    let failed_checkpoint = Driver.For_testing.produced_checkpoint failed |> Option.get in
+    Alcotest.(check bool) "failed producer keeps canonical pixels and exact suffix"
+      true (failed_checkpoint.messages=restored.messages);
+    Alcotest.(check bool) "failed producer keeps its working context"
+      true (failed_checkpoint.working_context=Some sidecar);
     let persisted = ref [] in
     let sink = Driver.For_testing.canonical_checkpoint_sink
         ~replay_prefix_projection:projection
@@ -2046,6 +2055,12 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let native_settlement_fixture runtime_id : Masc.Keeper_official_client_session_store.t =
+  {client_kind=Masc.Keeper_official_client_session_store.Codex;runtime_id;
+   phase=Masc.Keeper_official_client_session_store.Settled {session_id="winning-session";turn_id="winning-turn"};
+   turn_count=1;tool_surface_sha256=String.make 64 'a';last_recovery_resolution=None;
+   last_transient_release=None;updated_at=1.}
+
 let test_cross_owner_fallback_returns_winning_runtime_authority () =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     let runtime runtime_id =
@@ -2064,7 +2079,10 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
           if String.equal runtime_id primary.id
           then
             attempt_without_effect
-              (Error (retryable_network_error "primary failed"))
+              (Driver.For_testing.selected_runtime_result
+                 ~official_client_settlement:(native_settlement_fixture primary.id)
+                 runtime ~lane_attempt_index:idx
+                 (Error (retryable_network_error "primary failed")))
               None
           else
             attempt_without_effect
@@ -2081,6 +2099,8 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         "expected fallback success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "failed native candidate cannot transfer its receipt to Core fallback"
+        true (selected.official_client_settlement = None);
       Alcotest.(check string)
         "selected runtime id"
         "primary.test_model"
@@ -2114,6 +2134,7 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
           attempt_without_effect
             (Driver.For_testing.selected_runtime_result
+               ~official_client_settlement:(native_settlement_fixture runtime.id)
                runtime
                ~lane_attempt_index:idx
                (Ok (completed_run_result ())))
@@ -2126,6 +2147,8 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         "expected first-candidate success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "winning native candidate keeps its exact producer settlement"
+        true (selected.official_client_settlement = Some (native_settlement_fixture primary.id));
       Alcotest.(check int)
         "no rotation: lane_attempt_index stays 0"
         0
@@ -3059,14 +3082,14 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
         | "small.test_model" ->
           attempt_without_effect
             (Error (context_overflow_error "prompt exceeds context window"))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | "fallback.test_model" ->
           attempt_without_effect
             (Error
                (Agent_core.Error.Api
                   (Agent_core.Retry.RateLimited
                      { retry_after = None; message = "weekly usage limit" })))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "fallback.test_model" ]
   in
@@ -3098,6 +3121,8 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
        the last dispatched fallback"
       "small.test_model"
       terminal.origin_runtime_id;
+    Alcotest.(check string) "checkpoint belongs to earlier terminal-error origin, not last candidate"
+      "small.test_model" (Option.get terminal.checkpoint_after).session_id;
     Alcotest.(check int) "origin attempt index is the first walk index" 0 terminal.origin_attempt;
     Alcotest.(check bool)
       "the reported lane error is the overflow itself"

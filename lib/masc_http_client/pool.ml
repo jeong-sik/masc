@@ -144,6 +144,27 @@ let with_selected_address (env : Eio_unix.Stdenv.base) uri address f =
   Fun.protect ~finally:(fun () -> selecting := false)
     (fun () -> f selected_env)
 
+(* An exception as one line of text, for the messages and log rows this pool
+   builds. [Printexc.to_string] reaches Eio's printer, which puts an [Io] error
+   in a vertical box, so each context step it carries starts a new line:
+   "...Unix_error (Connection refused, ...),\n  connecting to tcp:...". Every
+   caller here embeds the text in a one-line message -- "TCP connect failed: %s"
+   -- and a terminal row showed the break as an escaped "\x0A". A horizontal
+   box prints the same break hints as ", ". Any other exception prints as
+   [Printexc.to_string] prints it. *)
+let exn_message exn = Format.asprintf "@[<h>%a@]" Eio.Exn.pp exn
+
+(* Piaf renders [`Exn] through [Printexc.to_string] as well; the rest of its
+   errors are its own one-line text. *)
+let piaf_error_message (err : Piaf.Error.t) =
+  match err with
+  | `Exn exn -> exn_message exn
+  | ( `Protocol_error _ | `TLS_error _ | `Upgrade_not_supported | `Msg _
+    | `Invalid_response_body_length _ | `Malformed_response _
+    | `Connect_error _ | `Bad_gateway | `Bad_request
+    | `Internal_server_error ) as err ->
+    Piaf.Error.to_string err
+
 let reraise_after_close close exn =
   let bt = Printexc.get_raw_backtrace () in
   Eio.Cancel.protect (fun () ->
@@ -154,7 +175,7 @@ let reraise_after_close close exn =
       Printexc.raise_with_backtrace exn bt
     | cleanup_exn ->
       Log.Http.warn "HTTP client scope cleanup: %s"
-        (Printexc.to_string cleanup_exn));
+        (exn_message cleanup_exn));
   Printexc.raise_with_backtrace exn bt
 
 let create_scoped_client ~sw env uri =
@@ -341,7 +362,7 @@ let start_eviction_fiber t =
                "[masc_http_client.pool] eviction fiber caught \
                 exception (count=%d): %s"
                t.counters.evict_failure_count_total
-               (Printexc.to_string exn));
+               (exn_message exn));
         loop ()
       end
     in
@@ -362,7 +383,7 @@ let shutdown t =
       List.iter (fun e ->
         try close_client e.client with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Log.Http.warn "HTTP pool shutdown: %s" (Printexc.to_string exn))
+        | exn -> Log.Http.warn "HTTP pool shutdown: %s" (exn_message exn))
         leftover))
 
 let create ~sw ~env ?(config = default_config) () : t =
@@ -484,8 +505,8 @@ type connect_failure =
 
 let connect_failure_to_string = function
   | No_addresses -> "DNS resolution failed: no stream addresses"
-  | Dns_failure exn -> "DNS resolution failed: " ^ Printexc.to_string exn
-  | Tcp_failure exn -> "TCP connect failed: " ^ Printexc.to_string exn
+  | Dns_failure exn -> "DNS resolution failed: " ^ exn_message exn
+  | Tcp_failure exn -> "TCP connect failed: " ^ exn_message exn
   | Establishment_timeout -> "connect timeout"
   | Client_failure msg -> msg
 
@@ -553,7 +574,7 @@ let create_probed_client t key uri =
         match with_selected_address t.env uri address (fun env ->
           create_scoped_client ~sw:t.sw env uri) with
         | Ok client -> pending := Some client; Ok client
-        | Error err -> Error (Piaf.Error.to_string (err :> Piaf.Error.t)))
+        | Error err -> Error (piaf_error_message (err :> Piaf.Error.t)))
     in
     (match result with
      | Error _ -> Option.iter close_client !pending
@@ -672,7 +693,7 @@ let close_unreleased_client released release_once =
       | exn ->
         Log.Misc.debug
           "masc_http_client pool ignored close-only release failure: %s"
-          (Printexc.to_string exn))
+          (exn_message exn))
 
 let path_and_query uri =
   let p = Uri.path uri in
@@ -784,13 +805,13 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
                      ~meth:(method_to_piaf method_) path)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn -> Error (`Msg (Printexc.to_string exn)))
+               | exn -> Error (`Msg (exn_message exn)))
         in
         match result with
         | Error err ->
           (* Connection is suspect; close, do not park. *)
           release_once ~close_only:true;
-          Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+          Error (piaf_error_message (err :> Piaf.Error.t))
         | Ok resp ->
           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
           let headers_list =
@@ -802,7 +823,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
           (match body_result with
            | Error err ->
              release_once ~close_only:true;
-             Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+             Error (piaf_error_message (err :> Piaf.Error.t))
            | Ok body_str ->
              release_once ~close_only:false;
              Ok { status; headers = headers_list; body = body_str }))
@@ -888,7 +909,7 @@ let read_body_with_idle
        match Piaf.Body.iter_string ~f:observe body with
        | Ok () -> Ok (Buffer.contents buf, !progress)
        | Error err ->
-         Error (Piaf.Error.to_string (err :> Piaf.Error.t), !progress))
+         Error (piaf_error_message (err :> Piaf.Error.t), !progress))
     (fun () ->
        (* Idle watcher: sleep one idle window, then compare the last
           observed chunk timestamp. If the body fiber did not record a
@@ -979,12 +1000,12 @@ let do_request_streaming
                      ~meth:(method_to_piaf method_) path)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn -> Error (`Msg (Printexc.to_string exn)))
+               | exn -> Error (`Msg (exn_message exn)))
         in
         match result with
         | Error err ->
           release_once ~close_only:true;
-          Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+          Error (piaf_error_message (err :> Piaf.Error.t))
         | Ok resp ->
           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
           let headers_list =
@@ -997,7 +1018,7 @@ let do_request_streaming
             if status_is_success status then Some on_chunk else None
           in
           (match
-             with_client_scope client ~on_error:Printexc.to_string (fun () ->
+             with_client_scope client ~on_error:exn_message (fun () ->
                read_body_with_idle ?on_chunk ~clock ~start_sec ~idle_timeout_sec
                  (Piaf.Response.body resp)
                |> Result.map_error fst)

@@ -623,10 +623,16 @@ let render_overview (state : state) =
           ^ fit_width err (cols - 8)
           ^ Ansi.reset)
    | None | Some _ -> ());
-  if row_budget.task_rows > 0 && List.is_empty state.tasks
-     && Option.is_none tasks_error then
-    box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
-  else begin
+  let no_tasks_note =
+    match local_rows_page state ~error:tasks_error with
+    | Page_empty -> Some "  (no tasks)"
+    | Page_unread -> Some page_unread_note
+    | Page_failed -> None
+  in
+  (match no_tasks_note with
+   | Some note when row_budget.task_rows > 0 && List.is_empty state.tasks ->
+     box_line buf cols (Ansi.dim ^ note ^ Ansi.reset)
+   | Some _ | None -> begin
     (* The panel is shorter than the list can get, so the cursor can sit below
        the last visible row; the window follows it the way Board's does. *)
     let task_scroll_offset =
@@ -645,7 +651,7 @@ let render_overview (state : state) =
           box_line buf cols ("  " ^ task_line t)
       end
     done
-  end;
+  end);
 
   (* Carry the frame to the bottom of the terminal. Without this the surface
      stops where its content does and the footer under it lands wherever that
@@ -3235,10 +3241,6 @@ let schedule_source_warning (state : state) =
     of the whole store this page is. *)
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface lays
-     out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -3248,42 +3250,40 @@ let render_schedule_list (state : state) =
     timestamp
     (connection_badge state) in
 
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
+    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
        (match schedule_source_warning state with
         | Some err ->
-            box_line buf cols (data_unreliable_row ~cols err)
+            c.push (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows do
-         box_empty buf cols
-       done
+            c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with
          | None -> 0
          | Some err ->
-             box_line buf cols (data_unreliable_row ~cols err);
+             c.push (data_unreliable_row ~cols err);
              1
        in
-       let rows = rows - warning_rows in
+       (* The arm and the server's last refusal take a row each under the
+          list while they stand. *)
+       let cancel_rows =
+         (if Option.is_some state.schedule_cancel_armed then 1 else 0)
+         + (if Option.is_some state.schedule_cancel_error then 1 else 0)
+       in
        if not (String.equal snapshot.scs_status "ok") then begin
          (* The server's "unknown" is a failed store read, not an empty list;
             the row says which, so a dead ledger cannot read as "nothing is
             scheduled". *)
          (match snapshot.scs_read_error with
           | Some err ->
-              box_line buf cols (data_unreliable_row ~cols err)
+              c.push (data_unreliable_row ~cols err)
           | None ->
-              box_line buf cols
-                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
-         for _ = 1 to rows - boxed_surface_chrome_rows do
-           box_empty buf cols
-         done
+              c.push
+                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset))
        end else begin
          let count_text =
            match snapshot.scs_request_count with
@@ -3301,16 +3301,13 @@ let render_schedule_list (state : state) =
                  (Tui_decode.short_timestamp_for_terminal iso)
            | None -> ""
          in
-         box_line buf cols (Ansi.bold ^ count_text ^ Ansi.reset);
-         box_line buf cols (Ansi.dim ^ next_due_text ^ Ansi.reset);
-         box_divider buf cols;
+         c.push (Ansi.bold ^ count_text ^ Ansi.reset);
+         c.push (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         c.push_divider ();
 
          let count = List.length snapshot.scs_rows in
          if count = 0 then begin
-           box_line buf cols (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset);
-           for _ = 1 to rows - 12 do
-             box_empty buf cols
-           done
+           c.push (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,
@@ -3325,7 +3322,12 @@ let render_schedule_list (state : state) =
                16 snapshot.scs_rows
              |> min 40
            in
-           let content_height = rows - 14 in
+           (* The body outside the list: the source warning, the request count,
+              next due and its divider, the two delivery rows, and the cancel
+              rows. *)
+           let content_height =
+             max 1 (budget - warning_rows - 3 - 2 - cancel_rows)
+           in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
                state.schedule_cursor - content_height + 1
@@ -3335,7 +3337,7 @@ let render_schedule_list (state : state) =
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
              match Rows.at scs_rows_window idx with
-             | None -> box_empty buf cols
+             | None -> c.push_empty ()
              | Some row -> begin
                let is_selected = idx = state.schedule_cursor in
                let due =
@@ -3391,25 +3393,25 @@ let render_schedule_list (state : state) =
                  else
                    "  " ^ line
                in
-               box_line buf cols content
+               c.push content
              end
            done;
            (match List.nth_opt snapshot.scs_rows state.schedule_cursor with
             | None ->
-                box_empty buf cols;
-                box_empty buf cols
+                c.push_empty ();
+                c.push_empty ()
             | Some selected ->
                 let identity, delivery = schedule_delivery_summary selected in
-                box_line_styled buf cols ~style:(Theme.recede ())
+                c.push_styled ~style:(Theme.recede ())
                   ("  " ^ identity);
-                box_line_styled buf cols ~style:(Theme.recede ())
+                c.push_styled ~style:(Theme.recede ())
                   ("  " ^ delivery))
          end;
          (* The arm and the server's last refusal sit under the list, the
             same rows the goal detail carries them on. *)
          (match state.schedule_cancel_armed with
           | Some schedule_id ->
-              box_line buf cols
+              c.push
                 ((Theme.warn ())
                 ^ Printf.sprintf
                     "  armed: cancel %s -- same key again to send"
@@ -3418,21 +3420,12 @@ let render_schedule_list (state : state) =
           | None -> ());
          (match state.schedule_cancel_error with
           | Some err ->
-              box_line buf cols
+              c.push
                 ((Theme.bad ()) ^ "  "
                 ^ fit_width (Terminal_text.single_line err) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
-       end);
-
-  box_bottom buf cols;
-
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
-
-  finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
-      ~cols buf
+       end))
 
 (* What became of the wake. The pane could say a schedule fired and stop
    there: [LAST WAKE] reports the dispatch and [DELIVERY EVIDENCE] reports one
@@ -3852,21 +3845,19 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
   match runtime with
   | None -> Ansi.dim ^ "- -" ^ Ansi.reset
   | Some row ->
+      let module Mark = Masc_tui_keeper_mark in
       let sandbox =
-        match row.kr_sandbox_profile with
-        | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> (Theme.category Theme.Slot_2) ^ "M" ^ Ansi.reset
-        | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
-        | other when String.length other > 0 ->
+        match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
+        | Some (Mark.Docker as known), _ ->
+          (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Microvm as known), _ ->
+          (Theme.category Theme.Slot_2) ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Local as known), _ -> Ansi.dim ^ Mark.sandbox_letter known ^ Ansi.reset
+        | None, other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
-        | _ -> Ansi.dim ^ "?" ^ Ansi.reset
+        | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      (match row.kr_activation_mode with
-       | Activation_manual -> "M"
-       | Activation_on_demand -> "D"
-       | Activation_autonomous -> "A")
-      ^ " "
-      ^ sandbox
+      Mark.activation_letter row.kr_activation_mode ^ " " ^ sandbox
 
 (* Column header labels line up with the cell budgets
    [Render_schedule.allocate_keeper_columns] hands out, so the arithmetic lives
@@ -4106,6 +4097,7 @@ let render_keeper_list (state : state) =
   let selected_reading =
     Option.map (keeper_reading state) (selected_keeper state)
   in
+  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
   Buffer.add_char buf '\n';
 
@@ -4116,17 +4108,17 @@ let render_keeper_list (state : state) =
   in
   let heading =
     screen_title
-      (Printf.sprintf " MASC Keepers (%d)" (List.length state.keepers))
-    ^ (match state.search with
-       | Some query ->
-           Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (Terminal_text.single_line query) Ansi.reset Ansi.reset
-       | None ->
-           if state.search_last = "" then ""
-           else
-             Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
-               (Terminal_text.single_line state.search_last)
-               Ansi.reset)
+      (Printf.sprintf " MASC Keepers %s"
+         (match state.keepers, local_rows_page state ~error:keepers_error with
+          | _ :: _, _ | [], Page_empty ->
+              Printf.sprintf "(%d)" (List.length state.keepers)
+          | [], (Page_unread | Page_failed) ->
+              title_missing_reading ~error:keepers_error))
+    (* The same marker the footer draws. These two said different things
+       about the same pair of fields: the heading kept its own spelling and
+       so reported no count, and named n/N on surfaces where those keys do
+       nothing. *)
+    ^ search_marker_styled state
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -4214,15 +4206,10 @@ let render_keeper_list (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  Health = heartbeat/readiness   Lifecycle = keeper process   Last = time since last turn";
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  Mode: M manual / D on demand / A autonomous   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
 
-  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
@@ -4243,10 +4230,19 @@ let render_keeper_list (state : state) =
   let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
   let readings_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows readings in
   if keeper_count = 0 then begin
-    if keeper_rows > 0 && Option.is_none keepers_error then
-      box_line buf cols
-        (Ansi.dim ^ "   no keeper metadata under .masc/keepers/" ^ Ansi.reset);
-    let filled = if Option.is_none keepers_error then 1 else 0 in
+    (* A roster that was never read is as empty as one that holds no files;
+       only the second is "no keeper metadata". *)
+    let note =
+      match local_rows_page state ~error:keepers_error with
+      | Page_empty -> Some "   no keeper metadata under .masc/keepers/"
+      | Page_unread -> Some page_unread_note
+      | Page_failed -> None
+    in
+    Option.iter
+      (fun note ->
+        if keeper_rows > 0 then box_line buf cols (Ansi.dim ^ note ^ Ansi.reset))
+      note;
+    let filled = if Option.is_some note then 1 else 0 in
     for _ = 1 to max 0 (keeper_rows - filled) do
       box_empty buf cols
     done
@@ -6664,11 +6660,15 @@ let render_system_logs (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* The scroll indicator is a real row whenever this page has more entries
-     than fit. Reserving it unconditionally keeps the bottom border and footer
-     from becoming the frame's overflow casualty. *)
-  let chrome_rows = system_log_listing_chrome ~error:state.system_logs_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The scroll row is a frame row while the page holds more entries than
+     fit, and only then; the layout the keypress reads says so. *)
+  let content_height =
+    match scrolled_surface state System_logs with
+    | Some s ->
+        Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
+          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+    | None -> max 1 (rows - listing_chrome ~error:state.system_logs_error)
+  in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min state.system_logs_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
@@ -6803,11 +6803,16 @@ let render_verification_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* The same frame the other listings draw, and the same two rows for a load
-     error -- written out here as its own 9-or-7 rather than asked for. A
-     surface that re-types the count does not move when the frame does. *)
-  let chrome_rows = listing_chrome ~error:state.verification_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The height the keypress bounds its step with, asked of the same layout:
+     it counts the rows drawn under the list as well as the frame. *)
+  let content_height =
+    match scrolled_surface state Verification with
+    | Some layout ->
+        Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+          ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+          ~overflow_takes_row:layout.sc_overflow_takes_row
+    | None -> max 1 (rows - listing_chrome ~error:state.verification_error)
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.verification_scroll max_scroll) in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in
@@ -8999,7 +9004,15 @@ let render_changes_list (state : state) =
     | Some _ when shown = 0 -> 0
     | Some keep -> Masc_tui_scroll.preview_height ~total:total_content ~keep
   in
-  let content_height = max 1 (total_content - preview_height) in
+  (* The list's rows as the keypress counts them: what the preview leaves,
+     less the scroll row while the list overflows. *)
+  let content_height =
+    match scrolled_surface state Changes with
+    | Some s ->
+        Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
+          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+    | None -> max 1 (total_content - preview_height)
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
   let changes_window = Rows.of_list ~first:scroll ~height:content_height changes in
@@ -9107,13 +9120,7 @@ let render_changes_tree_diff (state : state)
    is held as an index, so a refresh that shortens the list closes the diff
    rather than drawing a change the answer no longer holds. *)
 let render_changes (state : state) =
-  let opened =
-    match (state.changes_diff_row, state.changes) with
-    | Some row, Some snapshot ->
-        List.nth_opt snapshot.Masc.Tui_decode.fcs_changes row
-    | Some _, None | None, (Some _ | None) -> None
-  in
-  match opened with
+  match Masc_tui_types.opened_file_change state with
   | Some change ->
       (* A path being read names the tree reading. Both readings of the same
          row exist at once; which one is drawn is the operator's last key, not
@@ -12924,19 +12931,7 @@ let render_context_inspector state =
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
-  let search_marker =
-    match state.search with
-    | Some query ->
-        Printf.sprintf "  %s/%s▌%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-          (Terminal_text.single_line query)
-          Ansi.reset
-    | None ->
-        if state.search_last = "" then ""
-        else
-          Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
-            (Terminal_text.single_line state.search_last)
-            Ansi.reset
-  in
+  let search_marker = search_marker_styled state in
   framed_top buf cols;
   framed_line buf cols
     (Printf.sprintf "%s Context  %s%s  %s  %s"

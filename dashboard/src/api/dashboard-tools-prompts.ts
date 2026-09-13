@@ -1676,6 +1676,7 @@ interface DashboardPromptsResponse {
 }
 
 interface PromptMutationResponse {
+  curator_refresh?: { status: 'queued' | 'no_owner' } | { status: 'unavailable'; detail: string } | null
   ok: boolean
   message?: string
   key?: string

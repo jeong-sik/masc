@@ -38,10 +38,16 @@ let contains ~needle haystack =
   let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
   go 0
 
-let transcribe ~command =
+(* The audio is a WAV header, which the transport reads before it spawns
+   anything; what is under test is the spawn. *)
+let transcribe ~dir ~command =
+  let audio_file = Filename.concat dir "utterance.wav" in
+  let channel = open_out_bin audio_file in
+  output_string channel "RIFF\x24\x00\x00\x00WAVEfmt ";
+  close_out channel;
   Voice_bridge_transport.transcribe_via_command
     (endpoint command)
-    ~audio_file:"/nonexistent/utterance.wav"
+    ~audio_file
     ~model:"/nonexistent/model.bin"
 
 let with_process_runtime f =
@@ -56,7 +62,9 @@ let with_process_runtime f =
 let test_a_command_that_is_not_there_is_not_installed () =
   with_process_runtime
   @@ fun () ->
-  match transcribe ~command:"masc-test-no-such-transcriber" with
+  with_temp_dir
+  @@ fun dir ->
+  match transcribe ~dir ~command:"masc-test-no-such-transcriber" with
   | Ok transcript -> Alcotest.failf "a missing command answered %S" transcript
   | Error reason ->
     Alcotest.(check string)
@@ -76,7 +84,7 @@ let test_a_file_without_an_execute_bit_is_not_called_uninstalled () =
   (* No execute bit for anyone. execve refuses this even for root, so the case
      holds in a CI container that runs as root. *)
   Unix.chmod path 0o644;
-  match transcribe ~command:path with
+  match transcribe ~dir ~command:path with
   | Ok transcript -> Alcotest.failf "a non-executable file answered %S" transcript
   | Error reason ->
     Alcotest.(check bool)

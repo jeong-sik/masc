@@ -3024,6 +3024,112 @@ let test_prefix_ordering_invariant () =
     cases
 ;;
 
+(* ── Anthropic thinking wire without a declared policy ─────────── *)
+
+(* Adversarial F195. An Anthropic model that no catalog or manifest row
+   declares a thinking policy for used to be serialized as if the row had
+   said [adaptive_default]: [build_request_payload] fabricated
+   [Capabilities.Anthropic_adaptive_default] whenever [anthropic_thinking_control]
+   was [None]. The wire now carries the absent case as
+   [Backend_anthropic.Anthropic_no_policy]. These cases prove that the absent
+   wire serializes no [thinking] block, that an explicit [enable_thinking]
+   on it is a typed rejection rather than a fabricated policy, and that the
+   legacy validator and the request builder read the absent case the same
+   way. On origin/main the constructor does not exist, so this section does
+   not compile there. *)
+
+let no_policy_anthropic_config ?enable_thinking ?reasoning_effort () =
+  Provider_config.make
+    ~kind:Provider_config.Anthropic
+    ~model_id:"agent-core-no-policy-anthropic-fixture"
+    ~base_url:"https://api.anthropic.com"
+    ~max_tokens:1024
+    ?enable_thinking
+    ?reasoning_effort
+    ()
+;;
+
+let no_policy_expected_rejection =
+  "model \"agent-core-no-policy-anthropic-fixture\" has no catalog-declared Anthropic \
+   thinking-control policy; an explicit enable_thinking value cannot be encoded \
+   safely"
+;;
+
+let test_anthropic_no_policy_row_resolves_to_absent_wire () =
+  check
+    bool
+    "the fixture id has no declared policy"
+    true
+    (Capabilities.anthropic_thinking_control_for_model_id
+       "agent-core-no-policy-anthropic-fixture"
+     = None);
+  let config = no_policy_anthropic_config () in
+  check
+    (option string)
+    "absent wire serializes no thinking block"
+    None
+    (Option.map
+       Yojson.Safe.to_string
+       (Backend_anthropic.thinking_config_for_config
+          Backend_anthropic.Anthropic_no_policy
+          config));
+  check
+    (result unit string)
+    "absent wire with no toggle validates"
+    (Ok ())
+    (Backend_anthropic.validate_thinking_controls
+       Backend_anthropic.Anthropic_no_policy
+       config)
+;;
+
+let test_anthropic_no_policy_request_body_has_no_thinking_block () =
+  let body =
+    Backend_anthropic.build_request
+      ~config:(no_policy_anthropic_config ())
+      ~messages:[ Types.make_message ~role:Types.User [ Types.Text "hi" ] ]
+      ()
+  in
+  check
+    bool
+    "request body carries no thinking field"
+    true
+    (Yojson.Safe.Util.member "thinking" (Yojson.Safe.from_string body) = `Null)
+;;
+
+let test_anthropic_no_policy_rejects_explicit_toggle () =
+  List.iter
+    (fun enable_thinking ->
+       let config = no_policy_anthropic_config ~enable_thinking () in
+       check
+         (result unit string)
+         (Printf.sprintf "enable_thinking=%b on the absent wire is rejected" enable_thinking)
+         (Error no_policy_expected_rejection)
+         (Backend_anthropic.validate_thinking_controls
+            Backend_anthropic.Anthropic_no_policy
+            config);
+       check
+         (result unit string)
+         (Printf.sprintf
+            "enable_thinking=%b legacy validator agrees with the wire"
+            enable_thinking)
+         (Error no_policy_expected_rejection)
+         (Backend_anthropic.validate_nonexact_thinking_controls config);
+       match
+         Backend_anthropic.build_request
+           ~config
+           ~messages:[ Types.make_message ~role:Types.User [ Types.Text "hi" ] ]
+           ()
+       with
+       | (_ : string) ->
+         failf "enable_thinking=%b should not serialize without a policy" enable_thinking
+       | exception Invalid_argument reason ->
+         check_contains
+           (Printf.sprintf "enable_thinking=%b builder names the rejection" enable_thinking)
+           reason
+           no_policy_expected_rejection)
+    [ true; false ]
+;;
+
 (* ── Suite ───────────────────────────────────────────── *)
 
 let () =
@@ -3377,6 +3483,20 @@ let () =
             "a named provider still refuses the bare row"
             `Quick
             test_a_named_provider_still_refuses_the_bare_row
+        ] )
+    ; ( "anthropic_thinking_wire"
+      , [ test_case
+            "a row with no policy resolves to the absent wire (F195)"
+            `Quick
+            test_anthropic_no_policy_row_resolves_to_absent_wire
+        ; test_case
+            "a row with no policy serializes no thinking block"
+            `Quick
+            test_anthropic_no_policy_request_body_has_no_thinking_block
+        ; test_case
+            "a row with no policy rejects an explicit toggle"
+            `Quick
+            test_anthropic_no_policy_rejects_explicit_toggle
         ] )
     ]
 ;;

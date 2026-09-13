@@ -3977,13 +3977,16 @@ def clients_footer_interaction(
     # has not loaded. Each step below changes the footer row itself, so the
     # presenter has to draw it again -- an unchanged row can be skipped.
     palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
-    send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
-    send_and_wait(process, master_fd, output, b"analyst", b"/analyst  ")
+    # A query being typed ends in the caret search_marker draws, and carries
+    # the count of rows it reaches when the surface can count them.
+    send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  j/k:move")
+    typed_query = re.compile(rb"/analyst(?: \((?:\d+|none)\))?\xe2\x96\x8c  ")
+    send_and_wait(process, master_fd, output, b"analyst", typed_query)
     # Resizing keeps the armed query on screen even when the roster scrolls.
     for rows, columns in ((16, 80), (30, 100)):
         frame = resize_and_wait(
             process, master_fd, output, rows=rows, columns=columns,
-            needle=b"/analyst  ", controls=(FULL_REDRAW,),
+            needle=typed_query, controls=(FULL_REDRAW,),
         )
         if b"j/k:move" not in CSI_RE.sub(b"", frame):
             raise AssertionError(f"Clients resize lost its key hints: {frame!r}")

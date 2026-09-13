@@ -43,7 +43,7 @@ let test_explicit_base_path_reaches_reviewer () =
   with_reviewer
     (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
        received := Some base_path;
-       Ok None)
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
        ignore
          (AR.review ~evaluator_runtime:"task-reviewer"
@@ -76,7 +76,7 @@ let configure_prompt_registry () =
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-       Ok (Some (AR.Approve "")))
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "")})
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -92,7 +92,7 @@ let test_structured_tool_is_the_only_semantic_verdict () =
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-       Ok None)
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -254,7 +254,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
       ~on_runtime_attempt_error:_
       () ->
        received := Some report_tool_schema;
-       Ok None)
+       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
     (fun () ->
        ignore (review ());
        match !received with

@@ -135,9 +135,9 @@ let adapter_for_endpoint_kind = function
 ;;
 
 let adapter_for_endpoint (endpoint : Voice_config.endpoint) =
-  match resolve_adapter endpoint.id with
-  | Some adapter -> adapter
-  | None -> adapter_for_endpoint_kind endpoint.kind
+  (* IDs name entries; only the declared kind chooses their transport.
+     Provider selection still accepts aliases through resolve_adapter. *)
+  adapter_for_endpoint_kind endpoint.kind
 ;;
 
 let endpoint_matches_provider_label label (endpoint : Voice_config.endpoint) =
@@ -184,16 +184,28 @@ let endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
   auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
 ;;
 
-let transport_supports_http_tts (adapter : adapter) =
-  match adapter.transport with
-  | Openai_compat | Elevenlabs_direct -> true
-  (* Neither of these speaks HTTP. They are reached by running a command, and
-     the caller picks that path by asking for a command request instead. *)
-  | Voice_mcp | Macos_say | Whisper_cli -> false
+(* How a transport speaks, if it does. A type rather than a predicate, the way
+   [Voice_bridge.transcriber] already is (#35558). The boolean this replaces
+   answered false for three unrelated reasons: macos_say speaks by running a
+   command, voice_mcp speaks through a tool call, and whisper_cli does not speak
+   at all. A transport added to {!transport} joined the false side without a
+   word and its endpoints were reported as not asked; now it cannot be added
+   until it says which of the four it is. *)
+type speaker =
+  | Over_http
+  | By_command
+  | By_mcp_tool
+  | Does_not_speak
+
+let speaker_of_transport = function
+  | Openai_compat | Elevenlabs_direct -> Over_http
+  | Macos_say -> By_command
+  | Voice_mcp -> By_mcp_tool
+  | Whisper_cli -> Does_not_speak
 ;;
 
-let endpoint_supports_http_tts endpoint =
-  adapter_for_endpoint endpoint |> transport_supports_http_tts
+let speaker_of_endpoint endpoint =
+  (adapter_for_endpoint endpoint).transport |> speaker_of_transport
 ;;
 
 (* RFC-0166: the default per-agent voice mapping was a closed roster

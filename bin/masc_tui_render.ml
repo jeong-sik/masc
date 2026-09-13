@@ -3241,10 +3241,6 @@ let schedule_source_warning (state : state) =
     of the whole store this page is. *)
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface lays
-     out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -3254,42 +3250,40 @@ let render_schedule_list (state : state) =
     timestamp
     (connection_badge state) in
 
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
+    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
        (match schedule_source_warning state with
         | Some err ->
-            box_line buf cols (data_unreliable_row ~cols err)
+            c.push (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
-       for _ = 1 to rows - boxed_surface_chrome_rows do
-         box_empty buf cols
-       done
+            c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with
          | None -> 0
          | Some err ->
-             box_line buf cols (data_unreliable_row ~cols err);
+             c.push (data_unreliable_row ~cols err);
              1
        in
-       let rows = rows - warning_rows in
+       (* The arm and the server's last refusal take a row each under the
+          list while they stand. *)
+       let cancel_rows =
+         (if Option.is_some state.schedule_cancel_armed then 1 else 0)
+         + (if Option.is_some state.schedule_cancel_error then 1 else 0)
+       in
        if not (String.equal snapshot.scs_status "ok") then begin
          (* The server's "unknown" is a failed store read, not an empty list;
             the row says which, so a dead ledger cannot read as "nothing is
             scheduled". *)
          (match snapshot.scs_read_error with
           | Some err ->
-              box_line buf cols (data_unreliable_row ~cols err)
+              c.push (data_unreliable_row ~cols err)
           | None ->
-              box_line buf cols
-                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
-         for _ = 1 to rows - boxed_surface_chrome_rows do
-           box_empty buf cols
-         done
+              c.push
+                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset))
        end else begin
          let count_text =
            match snapshot.scs_request_count with
@@ -3307,16 +3301,13 @@ let render_schedule_list (state : state) =
                  (Tui_decode.short_timestamp_for_terminal iso)
            | None -> ""
          in
-         box_line buf cols (Ansi.bold ^ count_text ^ Ansi.reset);
-         box_line buf cols (Ansi.dim ^ next_due_text ^ Ansi.reset);
-         box_divider buf cols;
+         c.push (Ansi.bold ^ count_text ^ Ansi.reset);
+         c.push (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         c.push_divider ();
 
          let count = List.length snapshot.scs_rows in
          if count = 0 then begin
-           box_line buf cols (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset);
-           for _ = 1 to rows - 12 do
-             box_empty buf cols
-           done
+           c.push (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,
@@ -3331,7 +3322,12 @@ let render_schedule_list (state : state) =
                16 snapshot.scs_rows
              |> min 40
            in
-           let content_height = rows - 14 in
+           (* The body outside the list: the source warning, the request count,
+              next due and its divider, the two delivery rows, and the cancel
+              rows. *)
+           let content_height =
+             max 1 (budget - warning_rows - 3 - 2 - cancel_rows)
+           in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
                state.schedule_cursor - content_height + 1
@@ -3341,7 +3337,7 @@ let render_schedule_list (state : state) =
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
              match Rows.at scs_rows_window idx with
-             | None -> box_empty buf cols
+             | None -> c.push_empty ()
              | Some row -> begin
                let is_selected = idx = state.schedule_cursor in
                let due =
@@ -3397,25 +3393,25 @@ let render_schedule_list (state : state) =
                  else
                    "  " ^ line
                in
-               box_line buf cols content
+               c.push content
              end
            done;
            (match List.nth_opt snapshot.scs_rows state.schedule_cursor with
             | None ->
-                box_empty buf cols;
-                box_empty buf cols
+                c.push_empty ();
+                c.push_empty ()
             | Some selected ->
                 let identity, delivery = schedule_delivery_summary selected in
-                box_line_styled buf cols ~style:(Theme.recede ())
+                c.push_styled ~style:(Theme.recede ())
                   ("  " ^ identity);
-                box_line_styled buf cols ~style:(Theme.recede ())
+                c.push_styled ~style:(Theme.recede ())
                   ("  " ^ delivery))
          end;
          (* The arm and the server's last refusal sit under the list, the
             same rows the goal detail carries them on. *)
          (match state.schedule_cancel_armed with
           | Some schedule_id ->
-              box_line buf cols
+              c.push
                 ((Theme.warn ())
                 ^ Printf.sprintf
                     "  armed: cancel %s -- same key again to send"
@@ -3424,21 +3420,12 @@ let render_schedule_list (state : state) =
           | None -> ());
          (match state.schedule_cancel_error with
           | Some err ->
-              box_line buf cols
+              c.push
                 ((Theme.bad ()) ^ "  "
                 ^ fit_width (Terminal_text.single_line err) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
-       end);
-
-  box_bottom buf cols;
-
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
-
-  finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
-      ~cols buf
+       end))
 
 (* What became of the wake. The pane could say a schedule fired and stop
    there: [LAST WAKE] reports the dispatch and [DELIVERY EVIDENCE] reports one

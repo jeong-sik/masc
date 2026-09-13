@@ -17,14 +17,14 @@ const browser = {
   }},
   tabs: {query: () => new Promise(resolve => {finishRead = resolve;})},
 };
-const context = vm.createContext({browser, TextEncoder,
+const context = vm.createContext({browser, TextEncoder, AbortController,
   setTimeout(fn) {const id = ++timerId; timers.set(id, fn); return id;},
   clearTimeout(id) {timers.delete(id);}});
 vm.runInContext(source, context);
 const first = connections[0];
 vm.runInContext('connect(); connect();', context);
 assert.equal(connections.length, 1, 'an active port must not be duplicated');
-const pending = first.message({id: 'old-request', verb: 'tabs.list', args: {}});
+const pending = first.message({id: 'old-request', verb: 'tabs.list', deadlineMs:Date.now()+20000, args: {}});
 first.disconnect();
 assert.equal(timers.size, 1);
 const reconnect = [...timers.values()][0];
@@ -37,7 +37,7 @@ assert.equal(first.replies[0].id, 'old-request');
 assert.equal(second.replies.length, 0, 'an old response must not enter the new host');
 first.disconnect();
 assert.equal(timers.size, 0, 'a stale disconnect must not retire the current host');
-await second.message({id: 'new-request', verb: 'unknown-fixture', args: {}});
+await second.message({id: 'new-request', verb: 'unknown-fixture', deadlineMs:Date.now()+20000, args: {}});
 assert.equal(second.replies[0].id, 'new-request');
 second.disconnect();
 assert.equal(timers.size, 1, 'the current host still reconnects');

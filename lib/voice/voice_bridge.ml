@@ -1609,12 +1609,14 @@ let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
       "%s is not installed; it comes with sox. `masc prerequisite-actions \
        whisper` names the install."
       program
+  (* The same sentence every other voice command gives for a refusal that is
+     not a missing program -- one wording for "could not start", kept where the
+     transport keeps it. *)
   | (Process_eio.Empty_argv
     | Process_eio.Spawn_failed _
     | Process_eio.Child_setup_failed _
     | Process_eio.Cwd_unavailable _) as refusal ->
-    Printf.sprintf "the recorder could not start: %s"
-      (Process_eio.spawn_refusal_to_string refusal)
+    Voice_bridge_transport.command_refusal_reason ~command:"the recorder" refusal
 ;;
 
 let record_and_transcribe

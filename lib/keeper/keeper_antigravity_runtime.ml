@@ -376,7 +376,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -441,6 +441,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~native_posture tools
     in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Antigravity ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -1078,7 +1084,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1096,7 +1102,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle
+      run_without_lifecycle ~official_client_continuation
         ~runtime_id
         ~keeper_name
         ~on_model_input_window_observation

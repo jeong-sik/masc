@@ -71,6 +71,28 @@ there is no port to pick, nothing to start before speaking, and nothing left
 running afterwards. Installing them is still the operator's step, which is what
 `prerequisite-actions` is — it names the commands and asks.
 
+### A fresh mac has no Homebrew
+
+Two of those steps are Homebrew steps, and a machine that has just been
+unboxed does not have Homebrew. Running one with `brew` absent from `PATH`,
+measured 2026-09-13:
+
+| Build | Receipt `reason` |
+|---|---|
+| before | `The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend.` |
+| after | `Homebrew is not installed (brew is not on PATH), so nothing ran. Install it from https://brew.sh, then retry.` |
+
+The first sentence sent the reader to terminal output that did not exist:
+`brew` never started. The same shape for any other program — the model
+download with `curl` absent — now reads `curl is not on PATH, so nothing ran.`
+The install journey prints this reason as it is, so the reader sees it at the
+menu they chose from.
+
+The reason is built from *which way* the step failed and from the argv this
+catalog wrote, never from anything the child printed: a receipt is kept free of
+child diagnostics on purpose, and the failure kind carries no text for them to
+travel in.
+
 Without a `HOME` to build a cache path from, the second step opens the model
 downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an
@@ -151,6 +173,51 @@ Install or start the selected prerequisite
 Speaking stayed on. The model path is read from the action that downloads it
 rather than spelled here, so the section cannot name a file the download put
 somewhere else.
+
+### Walked again with nothing exported, 2026-09-13
+
+The walk above ran in a shell that had `MASC_BASE_PATH` set, which hid two
+defects. Walked a second time with only `HOME` (a fresh directory holding the
+model) and `PATH` (`whisper-cli` and `/usr/bin`, no `rec`), answering 9, 1, 5:
+
+| | before | after |
+|---|---|---|
+| the voice question | **not shown** — the step printed nothing at all | 9 Korean voices, as above |
+| the model the step found | `…/ggml-large-v3-turbo.bin.part` — never exists after a download | `…/ggml-large-v3-turbo.bin` |
+| hearing | always "speak but not listen" | configured |
+| no `rec` on PATH | nothing said | `imp can transcribe audio sent to it, but masc records from the microphone with sox's rec, which is not installed. …` |
+
+**The question was not shown** because the voice listing ran without
+`--base-path`. Every masc command resolves a workspace before it runs, the
+listing included, and this step comes before the one that records a default
+workspace. With nothing to resolve the listing exits 1:
+
+| `voice-local-setup --list-voices` | exit | stdout |
+|---|---|---|
+| no `--base-path`, no `MASC_BASE_PATH`, no recorded default | 1 | 0 bytes |
+| `--base-path` at a directory never initialized | 0 | 14,420 bytes |
+| `--base-path` at an initialized workspace | 0 | 14,420 bytes |
+
+The step discarded stderr and read the empty list as "this computer has no
+voices", so it returned without a word. It now passes the workspace it is
+setting up, and a listing that fails prints its last stderr line instead.
+
+**The model was never found** because the step took curl's `-o` argument as the
+model's location, and the download fetches to a `.part` beside the final path
+and moves it only after curl succeeds. The catalog now publishes the final path
+as `writes` on the download action, and the step reads that. A test reads the
+real binary's catalog as well as the fixture, because the fixture was the copy
+that had kept the old argv while the catalog moved on.
+
+The workspace this walk wrote was then checked end to end:
+
+```
+voice-verify --audio utterance.wav
+  macos-say       answered: 85908 bytes of audio in "Yuna"
+  whisper-local   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
+```
+
+With `rec` on `PATH` the same walk printed no sox line.
 
 ### Cancelling here does not cancel setup
 
@@ -271,9 +338,26 @@ not have — it speaks in the system voice.
 ### Outside the journey
 
 ```
-masc voice-local-setup --list-voices
-masc voice-local-setup --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc init --base-path ~/work                      # once; voice is a section of what this writes
+masc voice-local-setup --list-voices              # needs no workspace
+masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
 ```
+
+On a directory that was never initialized, measured 2026-09-13:
+
+| Build | `voice-local-setup --voice Yuna` answered |
+|---|---|
+| before | exit 1, `runtime.toml could not be read: … Sys_error("…/runtime.toml: No such file or directory")` |
+| after | exit 1, `No masc workspace at …: …/runtime.toml does not exist. Run masc init --base-path '…' first, then this again.` |
+
+Either way nothing is created. Following the second message — `masc init`, then
+the same command — answered `voice is configured`, exit 0.
+
+`--list-voices` reads `say` and nothing under the workspace, so a directory
+that was never initialized is enough. It still needs *a* base path, like every
+masc command: with no `--base-path`, no `MASC_BASE_PATH` and no recorded
+default it exits 1 with an empty stdout. Measured the same day — `--base-path`
+at an uninitialized directory answered 14,420 bytes.
 
 ### What the configuration then says
 
@@ -794,6 +878,34 @@ its own.
 `voice_mcp` endpoints are `not asked` for transcription: that kind synthesizes
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
+
+### "Not installed" means not there
+
+For the two command kinds, a `refused` line names why the command did not
+run. Measured 2026-09-13 with `voice-verify --audio` on a `whisper_cli`
+endpoint whose `command` was pointed at each case in turn:
+
+| `command` points at | Before | After |
+|---|---|---|
+| a name nothing installs | `… is not installed` | `… is not installed` |
+| a file with no execute bit | `… is not installed` | `… could not start: spawn of "…" failed: Permission denied` |
+| the real `whisper-cli` | `heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.` | the same sentence |
+
+The second row was the wrong advice. Reinstalling whisper-cpp does not add an
+execute bit to a file somewhere else, so the operator would follow the message
+and meet it again.
+
+The cause was reading exit 127 as the reason. The process runner these
+commands used returns 127 for a program that is not there, and also for every
+other failure before a process exists — a permission denied, a working
+directory that would not open. The speak, transcribe and voice-listing commands
+now use the runner that returns that refusal as a value, and only
+`Executable_not_found` is called not installed. A child that runs and itself
+exits 127 is reported as an exit with the end of its output, which is what it
+is.
+
+`test/voice_command_refusal` spawns both failing cases for real; putting the
+127 reading back turns the permission case red with `… is not installed`.
 
 ### Setting voice up over HTTP, measured end to end
 

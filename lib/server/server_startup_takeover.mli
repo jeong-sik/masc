@@ -73,12 +73,38 @@ type base_path_lock_rejection =
       ; reason : string
       }
 
+(* Only the process-local table establishes ownership identity. The recorded
+   number is written after locking and may describe a previous owner or a
+   different PID namespace; local process liveness cannot verify it. *)
+type base_path_owner =
+  | Owner_this_process of int
+      (** This process already holds the lease. A second acquisition in the
+          same process would take the same kernel lock, which is why the
+          in-process table is consulted first. *)
+  | Owner_recorded of int
+      (** A number recorded in the lease, with no verified PID namespace or
+          current-holder identity. It may be stale or identify another process. *)
+  | Owner_unnamed
+      (** The lease file carried no readable number. *)
+
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { pid : int option }
+  | Base_path_already_owned of { owner : base_path_owner; lock_path : string }
+      (** [lock_path] is the lease file whose kernel lock was refused. The file
+          identifies the contested resource, not a process in the contender's
+          PID namespace. *)
   | Base_path_rejected of base_path_lock_rejection
 
 val base_path_lock_rejection_to_string : base_path_lock_rejection -> string
+
+val base_path_owner_pid : base_path_owner -> int option
+(** The number the lease file carried, whatever became of that process. For a
+    caller that only reports or compares it; a caller that tells an operator
+    what to do must match on the variant instead. *)
+
+val base_path_contention_message :
+  base_path:string -> lock_path:string -> base_path_owner -> string
+(** Recovery guidance shared by HTTP and stdio entrypoints. *)
 
 val pid_lock_path : int -> string
 

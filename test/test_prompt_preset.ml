@@ -297,6 +297,23 @@ let test_restore_puts_the_saved_state_back () =
    operator's prompt. It restores, and it keeps the binding it was captured
    with, so the catalog can say the default moved under it rather than
    presenting it as written against today's text. *)
+let test_restore_preserves_manifest_while_journal_retained () =
+  let open Alcotest in
+  with_base (fun ~base_path ~keepers ~config:_ ->
+    let morning = or_fail (Preset.capture ~base_path ~name:"guarded" ~description:"") in
+    or_fail (Preset.save ~base_path morning);
+    write_file (Filename.concat keepers "alpha.toml") (keeper_toml "Keep this edit.");
+    let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+    write_file journal_path "{corrupt";
+    let report = or_fail (Preset.restore ~base_path "guarded") in
+    check (list string) "no manifest restoration was applied" []
+      report.Preset.instructions_result.Preset.applied;
+    check (option string) "retained journal preserves newer instructions" (Some "Keep this edit.")
+      (instructions_of ~keepers);
+    check bool "instruction failure is reported" true
+      (List.mem_assoc "alpha" report.Preset.instructions_result.Preset.skipped))
+;;
+
 let test_override_written_against_an_older_default_still_restores () =
   let open Alcotest in
   with_base (fun ~base_path ~keepers:_ ~config:_ ->
@@ -423,6 +440,8 @@ let () =
             test_saved_settings_read_durable_overrides_without_reloading
         ; Alcotest.test_case "restore puts the saved state back and autosaves first" `Quick
             test_restore_puts_the_saved_state_back
+        ; Alcotest.test_case "restore preserves manifest while journal retained" `Quick
+            test_restore_preserves_manifest_while_journal_retained
         ; Alcotest.test_case "the runtime.toml text transform keeps every other line" `Quick
             test_runtime_text_transform
         ; Alcotest.test_case "an override written against an older default still restores" `Quick

@@ -295,8 +295,10 @@ let config_reconciliation_required_of_result result =
 ;;
 
 type manifest_publication =
-  | Publication_rolled_back of
-      Keeper_turn_up_config_persistence.outcome * tool_result
+  | Publication_failed of
+      Keeper_turn_up_config_persistence.outcome
+      * Keeper_turn_up_config_persistence.config_revision
+      * tool_result
   | Publication_applied of
       Keeper_turn_up_config_persistence.outcome
       * keeper_meta
@@ -504,111 +506,39 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
             tool_result_error ~class_:Tool_result.Runtime_failure
               (Keeper_shutdown_supersession.error_to_string error)
           | Ok supersession ->
-            let publish runtime_transaction outcome =
-              match
-                apply_profile
-                     ~base_path:ctx.config.base_path
-                     ~keeper_name:updated.name
-                     (profile_update_command updated)
-              with
+            let publish outcome config_revision =
+              let failed detail =
+                Publication_failed
+                  (outcome, config_revision,
+                   tool_result_error ~class_:Tool_result.Runtime_failure
+                     ("configuration saved, but owner publication failed: " ^ detail))
+              in
+              match apply_profile ~base_path:ctx.config.base_path
+                      ~keeper_name:updated.name (profile_update_command updated) with
               | Error error ->
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string WriteMetaFailures)
-                     ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-                     ();
-                Keeper_turn_up_config_persistence.Rollback
-                  (Publication_rolled_back
-                     ( outcome
-                     , config_publication_rollback_result
-                         (Keeper_owner_registry.command_error_to_string error) ))
-              | Ok None ->
-                Keeper_turn_up_config_persistence.Rollback
-                  (Publication_rolled_back
-                     ( outcome
-                     , config_publication_rollback_result
-                         "Keeper owner metadata disappeared during update" ))
+                failed (Keeper_owner_registry.command_error_to_string error)
+              | Ok None -> failed "Keeper owner metadata disappeared during update"
               | Ok (Some published_meta) ->
-                let runtime_assignment_result =
-                  Runtime.commit_keeper_assignment ?egress_allow:p.egress_allow_opt runtime_transaction
-                    ~runtime_id:
-                      (match p.runtime_id_opt with
-                       | Some runtime_id -> Some runtime_id
-                       | None ->
-                            (match expected_config_revision.runtime_assignment with
-                             | Runtime.Runtime_config_missing -> None
-                             | Runtime.Runtime_config_present { assignment; _ } ->
-                               (match assignment with
-                                | Runtime.Assignment_missing -> None
-                                | Runtime.Assignment_present runtime_id -> Some runtime_id)))
-                in
-                (match runtime_assignment_result with
-                    | Ok runtime_write ->
-                      let runtime_warnings =
-                        Keeper_turn_up_config_persistence
-                        .warnings_of_runtime_assignment_write runtime_write
-                      in
-                      let runtime_assignment =
-                        match runtime_write with
-                        | Runtime.Assignment_unchanged revision -> revision
-                        | Runtime.Assignment_committed { revision; _ } -> revision
-                      in
-                      let config_revision :
-                          Keeper_turn_up_config_persistence.config_revision =
-                        { Keeper_turn_up_config_persistence.manifest = outcome.revision
-                        ; runtime_assignment
-                        }
-                      in
-                      (match resume_operator_pause ctx published_meta with
-                       | Error message ->
-                         Keeper_turn_up_config_persistence.Commit_with_warnings
-                           ( Publication_applied_with_runtime_failure
-                               (outcome, config_revision, message)
-                           , runtime_warnings )
-                       | Ok resumed_meta ->
-                         Keeper_turn_up_config_persistence.Commit_with_warnings
-                           ( Publication_applied
-                               (outcome, resumed_meta, config_revision)
-                           , runtime_warnings ))
-                    | Error err ->
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string TurnUpUpdateFailures)
-                        ~labels:
-                          [ ( "keeper", p.name )
-                          ; ( "site"
-                            , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
-                            )
-                          ]
-                        ();
-                      Log.Keeper.warn
-                        "update_keeper failed runtime assignment for %s: %s"
-                        p.name
-                        err;
-                      let rollback_profile =
-                        apply_profile
-                          ~base_path:ctx.config.base_path
-                          ~keeper_name:old.name
-                          (profile_update_command old)
-                      in
-                      let detail =
-                        match rollback_profile with
-                        | Ok (Some _) -> err
-                        | Ok None ->
-                          err ^ "; Keeper metadata disappeared during rollback"
-                        | Error rollback_error ->
-                          err ^ "; metadata rollback failed: "
-                          ^ Keeper_owner_registry.command_error_to_string rollback_error
-                      in
-                      Keeper_turn_up_config_persistence.Rollback
-                        (Publication_rolled_back
-                           (outcome, config_publication_rollback_result detail)))
+                (match resume_operator_pause ctx published_meta with
+                 | Error message ->
+                   Publication_applied_with_runtime_failure
+                     (outcome, config_revision, message)
+                 | Ok resumed_meta ->
+                   Publication_applied (outcome, resumed_meta, config_revision))
             in
             (match
-               Keeper_turn_up_config_persistence.persist_with_publication
+               Keeper_turn_up_config_persistence.commit_configuration
                  ~expected_revision:expected_config_revision
                  ~config:ctx.config
                  ~parsed:p
                  ~meta:updated
-                 ~publish
+                 ~publish:(fun outcome revision ->
+                   try publish outcome revision with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn -> Publication_failed
+                       (outcome, revision,
+                        tool_result_error ~class_:Tool_result.Runtime_failure
+                          ("configuration saved, but owner publication raised: " ^ Printexc.to_string exn)))
                  ()
              with
              | Error
@@ -626,8 +556,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                      )
                    ]
                  ();
-               tool_result_error ~class_:Tool_result.Runtime_failure
-                 (Printf.sprintf "declarative keeper config write failed: %s" detail)
+               config_publication_rollback_result detail
+               |> with_config_receipt ~revision:expected_config_revision
+                    ~warnings:[] ~applied:false
              | Error
                  (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
                tool_result_error_data
@@ -644,30 +575,21 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                     { detail; _ }) ->
                tool_result_error ~class_:Tool_result.Runtime_failure
                  ("keeper config publication raised and was rolled back: " ^ detail)
-             | Ok
-                 { value = Publication_rolled_back (_outcome, result)
-                 ; warnings
-                 } ->
+             | Ok { value = publication; warnings } ->
+               match publication with
+             | Publication_failed (_outcome, revision, result) ->
                with_config_receipt
-                 ~revision:expected_config_revision
+                 ~revision
                  ~warnings
-                 ~applied:false
+                 ~applied:true
                  result
-             | Ok
-                 { value = Publication_applied (_outcome, updated, revision)
-                 ; warnings
-                 } ->
+             | Publication_applied (_outcome, updated, revision) ->
                finish_published_update ~supersession ctx updated
                |> with_config_receipt
                     ~revision
                     ~warnings
                     ~applied:true
-             | Ok
-                 { value =
-                     Publication_applied_with_runtime_failure
-                       (_outcome, revision, detail)
-                 ; warnings
-                 } ->
+             | Publication_applied_with_runtime_failure (_outcome, revision, detail) ->
                finish_publication_after_runtime_failure
                  ~supersession ctx detail
                |> with_config_receipt

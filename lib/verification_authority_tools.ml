@@ -395,7 +395,12 @@ let is_mp4 path bytes =
    one byte past the ceiling is what separates "this is the whole file" from
    "this file is over the limit" without loading the rest of it. Sits above the
    image byte limit, which stays the binding number for images. *)
-let max_media_source_bytes = 64 * 1024 * 1024
+(* One ceiling for every whole-media escalation on this surface. The number is
+   the PDF inspection's, because that is where it was first needed and main now
+   carries it; MP4 escalates through the same read and must not grow a second
+   copy that can drift away from it. The name says media because both formats
+   are bounded here. *)
+let max_media_source_bytes = Verification_pdf_inspection.max_source_bytes
 
 let video_result t ~name ~path ~bytes ~start_time =
   match Verification_video_inspection.inspect ~base_path:t.config.base_path ~bytes with

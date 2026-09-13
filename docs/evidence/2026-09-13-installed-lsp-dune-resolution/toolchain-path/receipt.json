@@ -1,0 +1,141 @@
+{
+  "scope": "Direct owned ocamllsp process; same existing fixture URI/source and backend initialize envelope; not installed proxy replay",
+  "pid": 73141,
+  "exit_code": 0,
+  "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+  "published_diagnostics": {
+    "params": {
+      "diagnostics": [
+        {
+          "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 1
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        },
+        {
+          "code": "hole",
+          "message": "This typed hole should be replaced with an expression of type 'a",
+          "range": {
+            "end": {
+              "character": 11,
+              "line": 0
+            },
+            "start": {
+              "character": 11,
+              "line": 0
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        },
+        {
+          "message": "Syntax error, expecting fun_expr",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 1
+            },
+            "start": {
+              "character": 0,
+              "line": 1
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        }
+      ],
+      "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+    },
+    "method": "textDocument/publishDiagnostics",
+    "jsonrpc": "2.0"
+  },
+  "server_messages": [
+    {
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": []
+    },
+    {
+      "id": 4,
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32603,
+        "message": "Request not supported yet!"
+      }
+    },
+    {
+      "id": 3,
+      "jsonrpc": "2.0",
+      "result": []
+    },
+    {
+      "params": {
+        "diagnostics": [
+          {
+            "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+            "range": {
+              "end": {
+                "character": 0,
+                "line": 1
+              },
+              "start": {
+                "character": 0,
+                "line": 0
+              }
+            },
+            "severity": 1,
+            "source": "ocamllsp"
+          },
+          {
+            "code": "hole",
+            "message": "This typed hole should be replaced with an expression of type 'a",
+            "range": {
+              "end": {
+                "character": 11,
+                "line": 0
+              },
+              "start": {
+                "character": 11,
+                "line": 0
+              }
+            },
+            "severity": 1,
+            "source": "ocamllsp"
+          },
+          {
+            "message": "Syntax error, expecting fun_expr",
+            "range": {
+              "end": {
+                "character": 0,
+                "line": 1
+              },
+              "start": {
+                "character": 0,
+                "line": 1
+              }
+            },
+            "severity": 1,
+            "source": "ocamllsp"
+          }
+        ],
+        "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+      },
+      "method": "textDocument/publishDiagnostics",
+      "jsonrpc": "2.0"
+    },
+    {
+      "id": 99,
+      "jsonrpc": "2.0",
+      "result": null
+    }
+  ]
+}

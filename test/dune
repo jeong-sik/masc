@@ -1126,7 +1126,7 @@
  (name test_tui_config_key_help_matches_the_panes)
  (modules test_tui_config_key_help_matches_the_panes)
  ; The pane count is read out of the renderer source, so it is a dep.
- (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (deps %{workspace_root}/bin/masc_tui_render_prim.ml)
  (libraries alcotest ast_grep masc_tui_keys masc_tui_types))
 
 (test

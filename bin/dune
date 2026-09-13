@@ -416,10 +416,16 @@
  (libraries yojson))
 
 (library
+ (name masc_tui_lane_subscriptions)
+ (wrapped false)
+ (modules masc_tui_lane_subscriptions)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_lane_declaration yojson))
+ (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_lane_subscriptions yojson))
 
 (library
  (name masc_tui_command)
@@ -1061,6 +1067,8 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries mtime.clock.os masc_tui_esc_interrupt
+  ;; [sch_last_wake_status] is the schedule contract's wake_status.
+  masc.masc_schedule
   masc_tui_answering
   masc.voice_wizard
   masc.voice_setup
@@ -1350,6 +1358,7 @@
   masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.

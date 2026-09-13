@@ -62,8 +62,9 @@ TUI에서 href가 관측된 control의 Enter는 일반 click이 아니라 관찰
 다음 scene read에 넘겨 같은 URL reload나 오래된 document를 완료로 오인하지 않는다.
 TUI의 `m`은 semantic shortcut이다. 처음에는 `regions`를 관측하고, 다음 `m`에서
 정확히 하나인 `main` landmark를, 없을 때 정확히 하나인 `article` landmark를 scope로
-읽는다. 여러 후보는 자동 선택하지 않고 `v` 영역 목록에서 운영자가 고른다. 텍스트·URL·
-CSS selector 추측으로 primary 영역을 정하지 않는다.
+읽는다. role 문자열은 관측 경계에서 semantic variant로 분류하며, 알 수 없는 role은
+목록에 남겨도 primary로 추측하지 않는다. 여러 후보는 자동 선택하지 않고 `v` 영역 목록에서
+운영자가 고른다. 텍스트·URL·CSS selector 추측으로 primary 영역을 정하지 않는다.
 
 본문이 충분하면 그 결과로 다음 채널을 이어가거나 답한다. 보이는 내용·scope·truncated를
 확인해 실제 수집 범위와 근거 링크를 남긴다. 잘렸다면 더 작은 관측 영역, 지원되는

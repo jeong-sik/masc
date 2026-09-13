@@ -3321,6 +3321,71 @@ let test_configuration_removal_replays_a_completed_deletion () =
     check int "the replay runs no second cleanup" 1 !cleanups)
 ;;
 
+(* F020: a removal transaction whose lifecycle reservation release came back
+   [Release_missing] used to answer with the body result, so a Removed receipt
+   was reported on top of ownership evidence that was gone. The reservation
+   map is process-local and only the token the transaction holds can remove
+   its entry, so no caller can make the entry vanish around a real [submit]
+   without a mutation backdoor; the settlement is therefore proved on the
+   function [with_authority] folds every release through. [Release_missing]
+   and [Release_not_owner] both turn a completed receipt into [Conflict];
+   [Released] and an unrecorded release keep it. On origin/main the settlement
+   is not a named function and [Release_missing] keeps the body result. *)
+let test_configuration_removal_reports_a_vanished_reservation () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  let base_dir = temp_dir "keeper-configuration-removal-vanished" in
+  Fun.protect ~finally:(fun () -> R.For_testing.clear (); cleanup_dir base_dir) (fun () ->
+    let config = Masc.Workspace.default_config base_dir in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    Eio.Switch.run @@ fun sw ->
+    install_owner_inventory_exn ~sw config;
+    let module Removal = Masc.Keeper_configuration_removal in
+    let keeper_name = "reservation-vanished" in
+    let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base_dir)
+      (keeper_name ^ ".toml") in
+    write_file path "[keeper]\nautoboot = false\n";
+    let completed = match Removal.submit ~config ~keeper_name ~actor:"operator"
+      ~cleanup:(fun _ -> Ok ()) with
+      | Ok receipt -> receipt | Error error -> fail (Removal.error_to_string error) in
+    (match completed.state with Removed -> () | _ -> fail "the removal did not complete");
+    (match Keeper_lifecycle_reservation.current ~base_path:base_dir ~keeper_name with
+     | None -> ()
+     | Some owner ->
+       failf "the completed removal left its reservation behind: %s"
+         (Keeper_lifecycle_reservation.snapshot_to_string owner));
+    let settle release =
+      Removal.settle_reservation_release ~keeper_name release (Ok completed) in
+    (match settle (Some Keeper_lifecycle_reservation.Release_missing) with
+     | Error (Removal.Conflict detail) ->
+       check string "the vanished reservation names its Keeper"
+         ("lifecycle reservation vanished during configuration removal: keeper="
+          ^ keeper_name) detail
+     | Error error -> failf "a vanished reservation was not a Conflict: %s"
+         (Removal.error_to_string error)
+     | Ok _ -> fail "a vanished reservation was reported as a completed removal");
+    let other : Keeper_lifecycle_reservation.snapshot =
+      {owner_id = "someone-else"; purpose = Keeper_lifecycle_reservation.Keepalive_launch} in
+    (match settle (Some (Keeper_lifecycle_reservation.Release_not_owner other)) with
+     | Error (Removal.Conflict _) -> ()
+     | Error error -> failf "a taken-over reservation was not a Conflict: %s"
+         (Removal.error_to_string error)
+     | Ok _ -> fail "a taken-over reservation was reported as a completed removal");
+    (match settle (Some Keeper_lifecycle_reservation.Released) with
+     | Ok receipt ->
+       check bool "a released reservation keeps the body receipt" true
+         (Shutdown_types.Operation_id.equal receipt.operation_id completed.operation_id)
+     | Error error -> failf "a released reservation changed the result: %s"
+         (Removal.error_to_string error));
+    (match settle None with
+     | Ok receipt ->
+       check bool "an unrecorded release keeps the body receipt" true
+         (Shutdown_types.Operation_id.equal receipt.operation_id completed.operation_id)
+     | Error error -> failf "an unrecorded release changed the result: %s"
+         (Removal.error_to_string error)))
+;;
+
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
   install_test_env env;
@@ -5312,6 +5377,8 @@ let () =
         test_configuration_removal_retries_exact_revision_without_runtime;
       test_case "a completed configuration removal answers the race loser" `Quick
         test_configuration_removal_replays_a_completed_deletion;
+      test_case "a vanished lifecycle reservation is not a completed removal" `Quick
+        test_configuration_removal_reports_a_vanished_reservation;
       test_case "Librarian rejection unregisters with lifecycle authority" `Quick
         test_librarian_rejection_unregisters_with_lifecycle_authority;
       test_case "shutdown prepare joins idle lane" `Quick

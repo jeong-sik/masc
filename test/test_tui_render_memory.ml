@@ -483,6 +483,24 @@ let three_kinds_state ?(keeper = "alpha") () =
   state.memory_facts_cursor <- 0;
   state
 
+(* The category row is the shared strip: the key first, then the entries
+   with the one being read marked, two cells apart. It drew its own bracketed
+   pills before, a third shape for a strip on one screen. *)
+let test_the_category_row_is_the_shared_strip () =
+  let state = three_kinds_state () in
+  state.view <- Types.Memory;
+  state.memory_facts_keeper <- Some "alpha";
+  let lines = facts_body_lines state in
+  match List.filter (contains "c/C:category") lines with
+  | [ row ] ->
+      check bool "All is read, with its count" true
+        (contains "c/C:category  \xe2\x96\xb8All 4" row);
+      check bool "the other categories follow two cells apart, unmarked" true
+        (contains "  source 1  " row || contains "  source 1" row);
+      check bool "no bracketed pill" false (contains "[" row)
+  | [] -> fail "no row on the facts body walks the categories"
+  | _ :: _ -> fail "the categories are walked on more than one row"
+
 let stats_row lines =
   match List.filter (contains "Sort [s]:") lines with
   | [ row ] -> row
@@ -893,6 +911,8 @@ let () =
             test_the_breakdown_and_the_sort_sit_on_one_row
         ; test_case "the breakdown counts the rows the screen lists" `Quick
             test_the_breakdown_counts_the_rows_the_screen_lists
+        ; test_case "the category row is the shared strip" `Quick
+            test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
         ] )

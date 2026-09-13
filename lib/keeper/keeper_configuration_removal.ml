@@ -177,6 +177,29 @@ let require_configuration_only config keeper_name =
   if owned then Error (Conflict "Keeper still owns active Tasks; reconcile ownership before configuration removal")
   else Ok ()
 
+(* The reservation is process-local and only the token this transaction holds
+   can remove its entry, so the release outcome is evidence about the
+   ownership the receipt rests on. [Release_not_owner] says another owner took
+   the key over; [Release_missing] says the entry is gone although nobody but
+   this transaction could have removed it. Neither can be reported as a
+   completed removal (F020). [Released] keeps the body result. [None] is the
+   untouched ref: [Fun.protect] always runs [finally] on a normal return, so
+   this arm keeps the body result instead of inventing an error for a state
+   it cannot reach. *)
+let settle_reservation_release ~keeper_name release result =
+  match release with
+  | Some (Keeper_lifecycle_reservation.Release_not_owner snapshot) ->
+    Error
+      (Conflict
+         ("lifecycle reservation was taken over during configuration removal: "
+          ^ Keeper_lifecycle_reservation.snapshot_to_string snapshot))
+  | Some Keeper_lifecycle_reservation.Release_missing ->
+    Error
+      (Conflict
+         ("lifecycle reservation vanished during configuration removal: keeper="
+          ^ keeper_name))
+  | Some Keeper_lifecycle_reservation.Released | None -> result
+
 let with_authority config keeper_name f = protect (fun () ->
   match Keeper_shutdown_intake_fence.run_durable_intake_if_open
     ~base_path:config.Workspace.base_path ~keeper_name (fun _ ->
@@ -190,11 +213,10 @@ let with_authority config keeper_name f = protect (fun () ->
            contract, so a restart drops it either way. The durable record is
            the receipt, and no boot or registration path reads it (#34768).
 
-           The outcome is not discarded, though. [Release_not_owner] says a
-           different owner holds the reservation this transaction acquired,
-           which the transaction cannot correct here and must not swallow.
+           The outcome is not discarded, though: [settle_reservation_release]
+           folds it into the result, the way
            [keeper_paused_work_source_terminal_transaction] carries the same
-           outcome into its error for the same reason. *)
+           outcome into its error. *)
         let release_outcome = ref None in
         let result =
           Fun.protect
@@ -211,16 +233,7 @@ let with_authority config keeper_name f = protect (fun () ->
               | Body_completed { release_error = Some error; _ } ->
                 Error (Storage_error (File_lock_eio.durable_lock_error_to_string error)))
         in
-        (match !release_outcome with
-         | Some (Keeper_lifecycle_reservation.Release_not_owner snapshot) ->
-           Error
-             (Conflict
-                ("lifecycle reservation was taken over during configuration \
-                  removal: "
-                 ^ Keeper_lifecycle_reservation.snapshot_to_string snapshot))
-         | Some (Keeper_lifecycle_reservation.Released
-                | Keeper_lifecycle_reservation.Release_missing)
-         | None -> result)) with
+        settle_reservation_release ~keeper_name !release_outcome result) with
   | Intake_committed result -> result
   | Intake_shutdown_reserved id -> Error (Conflict ("Keeper shutdown already owns intake: " ^ Id.to_string id)))
 

@@ -684,7 +684,15 @@ let decode_schedule_row json =
   let* sch_payload_target = optional_string_field json "payload_target" in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
-    optional_nested_string_field json "last_wake" "status"
+    (* The server writes this from [wake_status_to_string], so a word the
+       contract does not list is a wire error, not a fourth status. *)
+    let* word = optional_nested_string_field json "last_wake" "status" in
+    match word with
+    | None -> Ok None
+    | Some word ->
+        Schedule_contract_values.wake_status_of_string word
+        |> Result.map_error Schedule_contract_values.decode_error_to_string
+        |> Result.map Option.some
   in
   let* sch_last_wake_started_at_iso =
     optional_nested_string_field json "last_wake" "started_at_iso"
@@ -876,7 +884,11 @@ let load_schedules ~(host : string) ~(port : int) :
   | Ok json -> decode_schedule_snapshot json
 
 let decode_schedule_wake json =
-  let* swk_status = required_string_field json "status" in
+  let* swk_status =
+    let* word = required_string_field json "status" in
+    Schedule_contract_values.wake_status_of_string word
+    |> Result.map_error Schedule_contract_values.decode_error_to_string
+  in
   let* swk_started_at_iso = optional_string_field json "started_at_iso" in
   let* swk_finished_at_iso = optional_string_field json "finished_at_iso" in
   let* swk_error = optional_string_field json "error" in
@@ -1048,7 +1060,7 @@ let load_runtime_params ~(host : string) ~(port : int) :
 
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
-    ((string * string) list, string) result =
+    ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result =
   match fetch_keeper_tool_approval_modes ~host ~port with
   | Error err -> Error ("tool approval modes load failed: " ^ err)
   | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json

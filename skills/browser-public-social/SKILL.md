@@ -21,6 +21,56 @@ selected region. A tag alone is not evidence that a region contains the
 requested posts. Do not start with the page's full div tree or a guessed CSS
 selector.
 
+## TUI-first route
+
+When the page is already open in Browser Lane, keep the TUI observation as the
+shared context instead of asking the Keeper to rediscover the DOM. From the
+text reader, press `s` to open the semantic scene; pressing `s` again returns
+to the text reader. Use `v` for the observed region list and `m` for the
+guarded primary-region shortcut. On a feed with several `article` regions,
+use `n`/`p` or `Tab`/`Shift-Tab` to choose the observed article, then `Enter`
+to read that region. `Enter` on an observed same-tab HTTP(S) link follows the
+link and refreshes the destination scene; it never reuses the old article
+scope. Once the region list is visible, `N`/`P` cycle only exact observed
+`article` regions, skipping non-article regions. Use `J`/`K`
+to scroll the top-level page by the observed viewport
+height, then verify the refreshed document and post identities. Use `Ctrl-O`
+when the painted layout or a nested scroll container is needed; `j`/`k` in
+the text scene only move the terminal reader.
+The scene status composition (`articles`, `links`, `controls`, and `images`)
+is a typed observation hint for choosing a route; it does not prove that a
+feed is complete or that every reply is loaded.
+Text nodes and observed controls with an observed `h1`–`h6` ancestor use that
+heading level as a small outline prefix, including text nested under a span and
+links whose control node is the observed heading target. An explicit
+`role="heading"` is included only with a valid `aria-level` from 1 to 6. Use
+that visual cue to find a post title or section boundary, but do not infer a
+missing heading from styling, font size, text resemblance, or class names.
+The TUI keeps one blank row when eligible observed block-tag geometry has a
+positive gap, so an article's title and body can be scanned as separate groups.
+An intervening inline metadata node breaks that comparison. This is measured
+scene geometry, not a CSS display guarantee, site-specific selector, or claim
+that hidden feed items are loaded.
+Content nodes retain their nearest observed semantic region label and identity;
+an `article` is preferred for a post or comment, then `main`, then another
+observed landmark. The TUI prints a compact boundary when that context changes,
+and scoped article reads avoid repeating their own scope label. Preserve this
+observed region with copied context instead of reconstructing a post or channel
+from text or a CSS class.
+
+After an article is scoped, keep the displayed role and label with the body
+when reporting it. The copied context must retain that observed scope label
+alongside its document/node identity; do not replace it with an inferred author
+or post ID.
+
+This route is useful for Reddit listings, post pages, and X/Twitter-style
+timelines because the selection is based on observed semantic roles and
+document/node identities. It does not make a generic page parser into a site
+adapter: if the page exposes no usable `main`/`article`/named region, keep the
+region picker or continue from an actually observed control/body; report the
+missing observation rather than falling back to a guessed CSS selector or
+display-name match.
+
 If the observed document exposes an RSS or Atom alternate link, read
 browser-lanes' extraction reference before choosing it. Use the feed only when
 the current tools can read that observed URL and it covers the requested

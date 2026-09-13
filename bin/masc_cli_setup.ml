@@ -260,7 +260,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
         let original = In_channel.with_open_text path In_channel.input_all in
         let host = Sandbox.detect_host ~run:Sandbox.system_runner in
-        let selection = match Sandbox.selection_of_contents ~host ~path ~contents:original
+        let selection = match Sandbox.selection_of_contents ~path ~contents:original
           ~profile:sandbox_profile ~microvm_backend ~network_mode with
           | Ok selection -> selection | Error reason -> fail reason in
         let staged = match sandbox_profile, microvm_backend, network_mode with

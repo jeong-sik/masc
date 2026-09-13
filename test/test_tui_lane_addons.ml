@@ -263,7 +263,20 @@ let guided_actions () =
   let absent = UI.lines ~width:100 {UI.initial with snapshot=Some
     {snapshot with instances=[{instance with display}];output={rows=[{row with fields=[]}];coverage=[]}}} in
   check bool "missing readings are unavailable rather than zero" true
-    (List.mem "    Missing records: unavailable (field unavailable)" absent)
+    (List.mem "    Missing records: unavailable (field unavailable)" absent);
+  let wrong_type = UI.lines ~width:100 {UI.initial with snapshot=Some
+    {snapshot with instances=[{instance with display}];
+      output={rows=[{row with fields=["missing",`String "3"]}];coverage=[]}}} in
+  check bool "numeric display does not coerce text into a measurement" true
+    (List.mem "    Missing records: unavailable (field does not match declared display format)" wrong_type);
+  let other = {instance with id="worker-other";incarnation="worker-other"} in
+  let foreign = UI.lines ~width:100 {UI.initial with snapshot=Some
+    {snapshot with instances=[{instance with display};other];
+      output={rows=[{row with lane_id="worker-other/quality"}];coverage=[]}}} in
+  check bool "another instance retains its generic reading" true
+    (List.mem "    missing=3" foreign);
+  check bool "presentation metadata cannot cross instance namespaces" false
+    (List.exists (fun line -> String.starts_with ~prefix:"    Missing records:" line) foreign)
 
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";

@@ -275,7 +275,37 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
     runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
     runtime_failed (dispatch Runtime.Slice []))
 
+let test_direct_attach_validates_package_binding () =
+  with_fixture (fun env _sw config dir state ->
+    let path = manifest dir "binding-contract" in
+    write path (Fs_compat.load_file path ^ {|
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
+|});
+    let attach_binding binding = Lane_addon_runtime.dispatch ~config
+      ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;
+        "run_id",`String "binding-run";"binding",`Assoc binding]) in
+    List.iter (fun binding ->
+      (match attach_binding binding with
+       | Error (Lane_addon_runtime.Request_rejected _) -> ()
+       | Error (Runtime_failed detail) -> failf "invalid binding became runtime failure: %s" detail
+       | Ok _ -> fail "direct attach bypassed the package binding schema");
+      check Alcotest.int "invalid binding starts no worker" 0 (Hashtbl.length state.modes);
+      check Alcotest.int "invalid binding creates no instance" 0
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+      [["sources",`List []]; ["sources",`List [];"limit",`Int 0];
+       ["sources",`List [];"limit",`String "2"]];
+    let accepted = attach_binding ["sources",`List [];"limit",`Int 2]
+      |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+    let id = text "instance_id" accepted in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    detach config id;
+    await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "direct attach enforces package binding before worker startup" `Quick
+    test_direct_attach_validates_package_binding;
   test_case "missing targets refuse while storage failures remain faults" `Quick
     test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;

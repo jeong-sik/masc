@@ -480,6 +480,9 @@ let for_surface = function
       ; b Navigate "c" "clients"
           ~help:"everyone attached to this workspace, off the ring under \
                  Runtime"
+      ; b Act "e" "add failover"
+          ~help:"append a failover candidate to the lane under the cursor \
+                 (keeper lanes only)"
       ; b Act "Left / Esc" "back"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching lane id or runtime id"
@@ -678,6 +681,29 @@ let footer_hints_code ~pane =
        if String.equal b.key "j/k" then
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
        else b)
+  |> hints_of_bindings
+
+(* The Runtime footer is the table's, with the two keys that depend on the
+   reading on screen: [p] names where it goes from here, and [e] exists only on
+   the keeper-lane reading, where a row names a lane to append to. The renderer
+   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
+   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
+   or [Esc], the way back to Config, and called the global refresh a live
+   one. *)
+let footer_hints_runtime ~(mode : runtime_mode) =
+  for_surface Runtime
+  |> List.filter_map (fun binding ->
+         if String.equal binding.key "e" then
+           (match mode with Runtime_lanes -> Some binding | Runtime_all -> None)
+         else if String.equal binding.key "p" then
+           Some
+             { binding with
+               label =
+                 (match mode with
+                  | Runtime_lanes -> "all runtimes"
+                  | Runtime_all -> "service lanes")
+             }
+         else Some binding)
   |> hints_of_bindings
 
 let footer_hints_resources ~detail_focus =

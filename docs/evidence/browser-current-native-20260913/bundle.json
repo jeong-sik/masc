@@ -1,0 +1,80 @@
+{
+  "source_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+  "server_sha256": "dee2fe0b4bf7fb0f8490ca10c9ecc6cbb245ad522a947351f671d1a9628c7fc3",
+  "binaries": {
+    "masc-macos-arm64": "dee2fe0b4bf7fb0f8490ca10c9ecc6cbb245ad522a947351f671d1a9628c7fc3",
+    "masc-tui-macos-arm64": "48714436edee2adacd49fbd1d234eabd2009993772074c45ca7ff701322d9911",
+    "masc-browser-host-macos-arm64": "ea6d1564066e17891ef782c40d6c3252f5c148a3e497f0e1576ae8b7bd3c0fdc"
+  },
+  "binary_source_proof": {
+    "source_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+    "runtime": "/tmp/browser-live-context-native-3446/runtime",
+    "sha256": {
+      "masc-macos-arm64": "dee2fe0b4bf7fb0f8490ca10c9ecc6cbb245ad522a947351f671d1a9628c7fc3",
+      "masc-tui-macos-arm64": "48714436edee2adacd49fbd1d234eabd2009993772074c45ca7ff701322d9911",
+      "masc-browser-host-macos-arm64": "ea6d1564066e17891ef782c40d6c3252f5c148a3e497f0e1576ae8b7bd3c0fdc"
+    }
+  },
+  "runtime_provenance": {
+    "libraries": [
+      {
+        "name": "libcrypto.3.dylib",
+        "upstream_sha256": "c853c9fefb6d391ab52d8db288b21c106db98e22efd148f2812cb7c27531cd41"
+      },
+      {
+        "name": "libgmp.10.dylib",
+        "upstream_sha256": "03091509d91b059bb22432c77b5aabecf918d32eb3b66b90b0c0c78f74c177b9"
+      },
+      {
+        "name": "libssl.3.dylib",
+        "upstream_sha256": "4a466b82b563ce7bcf90062811ca36c8d57ce5f7fca22333dd68b2f7f41ee7ba"
+      },
+      {
+        "name": "libzstd.1.5.7.dylib",
+        "upstream_sha256": "34c960d7a0c76409111fa77423cf61b6177da9b30901b4d588b190cb351fd1e8"
+      }
+    ],
+    "minimum_macos": "14.0",
+    "platform": "macos-arm64",
+    "python": {
+      "browser_download_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "digest": "sha256:d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+      "name": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "release": "20260901",
+      "size": 25147663,
+      "upstream": "astral-sh/python-build-standalone"
+    },
+    "schema": "masc.macos-runtime.v1",
+    "source_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead"
+  },
+  "packages": {
+    "browser-lanes": {
+      "SKILL.md": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+      "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+      "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+      "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+      "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+      "references/observation.md": "c5e7274527cfdd8bb72a6f9903bdd8b5cd6994cd65fd6de5700bc6e8fd4e046c",
+      "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+    },
+    "browser-live-click-content": {
+      "SKILL.md": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107"
+    }
+  },
+  "exports": [
+    {
+      "package": "browser-lanes",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-live-context-native-3446/bundled-skills/browser-lanes\nbundled revision: f4dc3e2f2da2bf037385324edd5dad12ae369a487c8a1e0569752c305f8f413d\n",
+      "stderr": "[2026-09-13 13:02:59] [INFO] [MCP] Tag registry initialized: 174 tools registered\n"
+    },
+    {
+      "package": "browser-live-click-content",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-live-context-native-3446/bundled-skills/browser-live-click-content\nbundled revision: a5387473ce40a24f0d69767a27e7b9226aadf2755ac7effdd84759caabd16b43\n",
+      "stderr": "[2026-09-13 13:02:59] [INFO] [MCP] Tag registry initialized: 174 tools registered\n"
+    }
+  ],
+  "origin": "candidate binary skills-refresh --export-to",
+  "result": "exported"
+}

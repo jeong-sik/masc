@@ -332,6 +332,9 @@ type karma_event = {
 }
 
 type store = {
+  mutable posts_load_result : (unit, string) result;
+  mutable comments_load_result : (unit, string) result;
+  (** Derived last full-load outcome; never persisted as another authority. *)
   workspace_masc_dir: string option;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;

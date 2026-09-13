@@ -272,6 +272,9 @@ type flusher_msg =
   | Sweep
 
 type store = {
+  mutable posts_load_result : (unit, string) result;
+  mutable comments_load_result : (unit, string) result;
+  (** Derived last full-load outcome; never persisted as another authority. *)
   workspace_masc_dir : string option;
   (** Canonical workspace directory captured before the global store is loaded.
       Unlike environment-derived path helpers, this identity does not change

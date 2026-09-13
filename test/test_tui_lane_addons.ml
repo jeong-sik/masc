@@ -193,10 +193,17 @@ let selection_stays_visible () =
     kind=Row.Event; title=String.make 160 'x'; observed_at=float_of_int index;
     subject_id="fixture"; clock=None; actor=None; fields=[]; evidence=[]; related_ids=[]
   } : Row.row)) in
-  let snapshot : UI.snapshot = {instances=[]; configuration=None;
+  let instance : UI.instance = {id=String.make 120 'i'; run_id="run"; addon_id="fixture";
+    title=String.make 120 't'; revision="1"; phase=Row.Attached; observation_seq=1;
+    rows_count=80; source_path=None; binding=`Assoc []; outputs=[];
+    skills_directory=None; incarnation="instance"; action_schema=None} in
+  let snapshot : UI.snapshot = {instances=[instance]; configuration=None;
     output={rows;coverage=[]}; complete=None} in
   List.iter (fun (width,height) ->
-    let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;row_cursor=79} in
+    let request : UI.action_request = {instance_id=instance.id;incarnation=instance.incarnation;
+      request_id="long-receipt";action=`Assoc []} in
+    let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;row_cursor=79;
+      last_action=Some request;receipt=Some (`String (String.make 1000 'r'))} in
     let lines = UI.lines ~height ~width view in
     let first_screen = List.filteri (fun index _ -> index < height) lines in
     check bool "last selection visible without manually scrolling inventory" true

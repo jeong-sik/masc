@@ -12305,7 +12305,7 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            b"left/Esc:list",
+            b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(

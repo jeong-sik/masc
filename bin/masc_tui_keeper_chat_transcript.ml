@@ -83,6 +83,7 @@ type tool_projection =
    outcome from these two booleans. *)
 type live_tool_call =
   { local_id : int
+  ; segment : int
   ; started_at : float
       (** When TOOL_CALL_START arrived. A turn age says how long the turn has
           run; only this says whether the thing it is in right now has been
@@ -184,6 +185,7 @@ type t =
   ; mutable reversed_tool_calls : live_tool_call list
   ; mutable reversed_trail : trail_node list
   ; mutable next_tool_local_id : int
+  ; mutable segment : int
   ; mutable phase : phase
   ; mutable ended_at : float option
         (* [Some] the instant the run said it was over -- finished or failed.
@@ -241,6 +243,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; reversed_tool_calls = []
   ; reversed_trail = []
   ; next_tool_local_id = 0
+  ; segment = 0
   ; phase = Waiting
   ; ended_at = None
   ; interrupt = Not_requested
@@ -299,6 +302,10 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let awaiting_continuation t =
+  match t.phase, t.reply with
+  | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
+  | (Waiting | Working | Stream_ended | Stream_failed _), _ -> false
 let admission t = t.admission
 let interrupt t = t.interrupt
 let note_interrupt t interrupt =
@@ -342,7 +349,7 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
   (* An ended attempt cannot still be waiting. Keep recorded results ahead
      of this projection so late result evidence can complete its own call. *)
   let attempt_ended =
-    call.attempt <> t.attempt
+    call.segment <> t.segment || call.attempt <> t.attempt
     || (match t.phase with
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
@@ -1100,7 +1107,7 @@ let phase_text ~now t =
          attempts remain in the transcript and in the total tool mix. *)
       let current_calls =
         t.reversed_tool_calls
-        |> List.filter (fun (call : live_tool_call) -> call.attempt = t.attempt)
+        |> List.filter (fun (call : live_tool_call) -> call.segment = t.segment && call.attempt = t.attempt)
         |> List.rev
       in
       let awaiting_call =
@@ -1371,7 +1378,7 @@ let occurrence_label (occurrence : Live.tool_occurrence) =
 let update_occurrence t occurrence f =
   match
     List.find_opt
-      (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+      (fun (call : live_tool_call) -> call.segment = t.segment && same_occurrence call.occurrence occurrence)
       t.reversed_tool_calls
   with
   | None -> Call_missing
@@ -1388,7 +1395,7 @@ let update_occurrence t occurrence f =
 let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
   match
     List.find_opt
-      (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+      (fun (call : live_tool_call) -> call.segment = t.segment && same_occurrence call.occurrence occurrence)
       t.reversed_tool_calls
   with
   | None ->
@@ -1465,6 +1472,13 @@ let settle t ~now =
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
+      if awaiting_continuation t then begin
+        t.segment <- t.segment + 1;
+        Buffer.clear t.text_buffer;
+        Buffer.clear t.thinking_buffer;
+        t.reply <- None;
+        t.interrupt <- Not_requested
+      end;
       match t.phase with
       | Waiting -> t.phase <- Working
       (* A second RUN_STARTED is a stream defect the strict decode reports as
@@ -1536,7 +1550,7 @@ let apply_delta ~now t (delta : Live.delta) =
       t.endpoint_streaming <- true;
       (match
          List.find_opt
-           (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+           (fun (call : live_tool_call) -> call.segment = t.segment && same_occurrence call.occurrence occurrence)
            t.reversed_tool_calls
        with
        | Some call
@@ -1558,6 +1572,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.next_tool_local_id <- local_id + 1;
          t.reversed_tool_calls <-
            { local_id
+           ; segment = t.segment
            ; started_at = now
            ; attempt = t.attempt
            ; occurrence
@@ -1673,13 +1688,21 @@ let apply_delta ~now t (delta : Live.delta) =
       t.ended_at <- Some now;
       settle t ~now
   | Live.Run_finished ->
-      t.phase <- Stream_ended;
-      t.ended_at <- Some now;
-      settle t ~now
+      (match t.reply with
+       | Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } ->
+         t.phase <- Waiting;
+         t.ended_at <- None;
+         t.settled_at <- None
+       | Some _ | None ->
+         t.phase <- Stream_ended;
+         t.ended_at <- Some now;
+         settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
       t.reply <-
         Some { reply_text = reply; reply_outcome = turn_outcome; reply_turn_ref = turn_ref };
-      settle t ~now
+      (match turn_outcome with
+       | Masc.Keeper_turn_outcome.Continuation_checkpoint -> ()
+       | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> settle t ~now)
   | Live.Undecodable detail ->
       note_unreadable t detail
 

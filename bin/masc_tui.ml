@@ -2490,6 +2490,11 @@ let post_keeper_chat_watching ~mailbox ~port ~log request =
             ~since_seq request
         in
         match result with
+        | Ok (Keeper_chat.Turn_completed { turn_outcome = Keeper_chat.Continuation_checkpoint; _ }) ->
+            (* A checkpoint closes this transport segment, not the durable
+               request. Subscribe after its last journal sequence to receive
+               the eventual answer under the same operation identity. *)
+            watch ~since_seq:(resume_position ()) false
         | Error error
           when Keeper_chat.error_certainty ~was_unverified error
                = Keeper_chat.Outcome_unverified ->
@@ -6966,11 +6971,8 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
            (keeper_name, runtime_id, Error "Eio switch is unavailable"))
 
 let inflight_for state keeper_name =
-  Option.map
-    (fun entry -> entry.sent_request)
-    (List.find_opt
-       (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
-       state.msg_inflight)
+  Option.map (fun entry -> entry.sent_request)
+    (blocking_inflight_for_keeper state keeper_name)
 ;;
 
 let drop_inflight state request =
@@ -12825,7 +12827,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let now = Unix.gettimeofday () in
            List.iter
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
-             deltas
+             deltas;
+           if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
+           then drain_queued_message state ~base_path ~mailbox
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       (match

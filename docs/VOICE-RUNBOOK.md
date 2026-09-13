@@ -795,6 +795,34 @@ its own.
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
 
+### "Not installed" means not there
+
+For the two command kinds, a `refused` line names why the command did not
+run. Measured 2026-09-13 with `voice-verify --audio` on a `whisper_cli`
+endpoint whose `command` was pointed at each case in turn:
+
+| `command` points at | Before | After |
+|---|---|---|
+| a name nothing installs | `… is not installed` | `… is not installed` |
+| a file with no execute bit | `… is not installed` | `… could not start: spawn of "…" failed: Permission denied` |
+| the real `whisper-cli` | `heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.` | the same sentence |
+
+The second row was the wrong advice. Reinstalling whisper-cpp does not add an
+execute bit to a file somewhere else, so the operator would follow the message
+and meet it again.
+
+The cause was reading exit 127 as the reason. The process runner these
+commands used returns 127 for a program that is not there, and also for every
+other failure before a process exists — a permission denied, a working
+directory that would not open. The speak, transcribe and voice-listing commands
+now use the runner that returns that refusal as a value, and only
+`Executable_not_found` is called not installed. A child that runs and itself
+exits 127 is reported as an exit with the end of its output, which is what it
+is.
+
+`test/voice_command_refusal` spawns both failing cases for real; putting the
+127 reading back turns the permission case red with `… is not installed`.
+
 ### Setting voice up over HTTP, measured end to end
 
 Run on this machine 2026-09-13 (macOS 26, M3 Max) against a scratch workspace,

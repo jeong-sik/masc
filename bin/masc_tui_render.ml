@@ -13764,7 +13764,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
             else c.push (String.concat "" (List.map (fun (tone,text) ->
               let style = match tone with
                 | Masc_tui_lane_addons.Normal -> Ansi.reset
-                | Dim -> Theme.recede () | Accent -> Theme.info () | Attention -> Theme.warn () in
+                | Masc_tui_lane_addons.Dim -> Theme.recede ()
+                | Masc_tui_lane_addons.Accent -> Theme.info ()
+                | Masc_tui_lane_addons.Attention -> Theme.warn () in
               style ^ text ^ Ansi.reset) line.cells)))
       | None ->
           let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in

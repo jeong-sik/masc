@@ -392,6 +392,14 @@ let value_summary = function
       Option.map (fun value -> key ^ "=" ^ value) (scalar_text value)) |> String.concat " · "
   | value -> Option.value ~default:(Yojson.Safe.to_string value) (scalar_text value)
 
+(* The row title is the producer's human label. Numeric/boolean readings fit
+   the overview; full strings, nested coordinates and evidence remain in D. *)
+let reading_summary fields =
+  fields |> List.filter_map (fun (key,value) -> match value with
+    | (`Int _ | `Intlit _ | `Float _ | `Bool _) ->
+        Some (key ^ "=" ^ Yojson.Safe.to_string value)
+    | _ -> None) |> String.concat " · "
+
 let compact_lines ~width view =
   let outcome = match view.last_action,view.action_receipt with
     | None,_ -> []
@@ -434,7 +442,7 @@ let compact_lines ~width view =
            else List.concat (List.mapi (fun index (row : Row.row) ->
              [(if index=view.row_cursor && view.focus=Rows then "> " else "  ")
               ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
-              "    " ^ value_summary (`Assoc row.fields)]) snapshot.output.rows)) in
+              "    " ^ reading_summary row.fields]) snapshot.output.rows)) in
         let gaps = List.filter_map (fun (coverage : Row.coverage) ->
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in

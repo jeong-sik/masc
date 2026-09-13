@@ -2057,7 +2057,7 @@ type async_msg =
      way to tell a late answer for the scope just left from an answer for the
      scope now open (#33946). *)
   | Code_entries_loaded of
-      (code_workspace_scope * string)
+      (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
@@ -3372,39 +3372,43 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_code_entries_load state ~mailbox =
-  if state.code_entries_inflight then ()
-  else begin
-    state.code_entries_inflight <- true;
-    let host = server_peer_host in
-    let port = state.port in
-    let dir = state.code_dir in
-    (* Read here, not inside the daemon. The daemon runs later, and the scope it
-       read then was whichever one was current by then -- so a request made in
-       one scope could be sent under another. *)
-    let scope = state.code_scope in
-    let key = (scope, dir) in
-    let run () =
-      let result =
-        try
-          let keeper, repo = code_scope_axes_of scope in
-          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-            ~path:dir ()
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+  (* Read here, not inside the daemon. The daemon runs later, and the scope it
+     read then was whichever one was current by then -- so a request made in
+     one scope could be sent under another. *)
+  let scope = state.code_scope in
+  let dir = state.code_dir in
+  (* One listing per key. A request for the key already loading is not sent
+     twice; a request for any other key is, and the answer to the one it
+     replaced is dropped when it lands. *)
+  match
+    Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_listing
+      ~key:(scope, dir)
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (listing, request) -> (
+      state.code_listing <- listing;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            let keeper, repo = code_scope_axes_of scope in
+            Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+              ~path:dir ()
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Code_entries_loaded (request, result))
       in
-      enqueue_async mailbox (Code_entries_loaded (key, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.code_entries_inflight <- false;
-        enqueue_async mailbox
-          (Code_entries_loaded (key, Error "Eio switch is unavailable"))
-  end
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Code_entries_loaded (request, Error "Eio switch is unavailable")))
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -4835,8 +4839,7 @@ let open_repository_change_in_code state ~mailbox ~scope
   let parent = Filename.dirname change.rc_path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
-  state.code_entries <- [];
-  state.code_entries_error <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
@@ -5616,7 +5619,7 @@ let row_list (state : state) : row_list option =
          | Some (_, Masc_tui_fetched.Absent)
          | None -> None)
       else
-        windowed ~count:(List.length state.code_entries)
+        windowed ~count:(List.length (code_entries state))
           ~cursor:state.code_cursor (fun index -> state.code_cursor <- index)
   | Board ->
       (match state.board_mode with
@@ -11966,16 +11969,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       | Error detail ->
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
-  | Code_entries_loaded (key, result) ->
-      state.code_entries_inflight <- false;
-      if code_scope_path_equal key (state.code_scope, state.code_dir) then (
-        match result with
-        | Ok entries ->
-            state.code_entries <- entries;
-            state.code_entries_error <- None;
-            state.code_cursor <-
-              max 0 (min state.code_cursor (List.length entries - 1))
-        | Error detail -> state.code_entries_error <- Some detail)
+  | Code_entries_loaded (request, result) ->
+      state.code_listing <-
+        Masc_tui_fetched.complete ~equal:code_scope_path_equal
+          state.code_listing request result;
+      (match result with
+       | Ok _
+         when code_scope_path_equal
+                (Masc_tui_fetched.request_key request)
+                (code_listing_key state) ->
+           state.code_cursor <-
+             max 0
+               (min state.code_cursor (List.length (code_entries state) - 1))
+       | Ok _ | Error _ -> ())
   | Code_file_loaded (request, result) -> (
       let path = Masc_tui_fetched.request_key request in
       (* An answer for a file the operator has moved past describes bytes
@@ -18566,8 +18572,7 @@ and is loaded on demand through keeper_skill.
                 state.code_dir <- dir;
                 if scope_changed || dir_changed then begin
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end;
                 (match file with
@@ -19370,8 +19375,7 @@ and is loaded on demand through keeper_skill.
                   state.code_dir <-
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else if state.code_scope <> Code_scope_project then begin
@@ -19379,8 +19383,7 @@ and is loaded on demand through keeper_skill.
                      project tree the surface started on. *)
                   state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else
@@ -19601,15 +19604,13 @@ and is loaded on demand through keeper_skill.
                   state.code_dir <-
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   state.code_scope <- Code_scope_project;
                   state.code_cursor <- 0;
-                  state.code_entries <- [];
-                  state.code_entries_error <- None;
+                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
             | Keepers Keeper_detail ->
@@ -19756,7 +19757,7 @@ and is loaded on demand through keeper_skill.
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
-                      ~count:(List.length state.code_entries)
+                      ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
@@ -20137,7 +20138,7 @@ and is loaded on demand through keeper_skill.
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
-                      ~count:(List.length state.code_entries)
+                      ~count:(List.length (code_entries state))
                       state.code_cursor
             | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
@@ -20571,13 +20572,12 @@ and is loaded on demand through keeper_skill.
                   | Some (_, _) | None -> ())
                 else if state.code_focus_file = Right_pane then ()
                 else
-                  match List.nth_opt state.code_entries state.code_cursor with
+                  match List.nth_opt (code_entries state) state.code_cursor with
                   | Some node ->
                       if node.Masc.Tui_decode.wt_has_children then begin
                         state.code_dir <- node.Masc.Tui_decode.wt_path;
                         state.code_cursor <- 0;
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         launch_code_entries_load state
                           ~mailbox:async_messages
                       end
@@ -20758,8 +20758,7 @@ and is loaded on demand through keeper_skill.
                           Code_scope_repo repo.Masc.Tui_decode.rp_id;
                         state.code_dir <- "";
                         state.code_cursor <- 0;
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
@@ -21156,8 +21155,7 @@ and is loaded on demand through keeper_skill.
                         let parent = Filename.dirname path in
                         state.code_dir <-
                           (if String.equal parent "." then "" else parent);
-                        state.code_entries <- [];
-                        state.code_entries_error <- None;
+                        state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_cursor <- 0;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_focus_file <- Left_pane;

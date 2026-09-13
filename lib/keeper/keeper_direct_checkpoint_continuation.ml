@@ -54,9 +54,15 @@ let consume ~base_path ~keeper_name ~operation_id admission =
   Owner.resume_direct_checkpoint ~base_path ~keeper_name ~operation_id
     ~observed:admission.observed |> owner
 
-let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
+let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~checkpoint =
+  let* expected_session_id = Keeper_id.Trace_id.of_string session_id in
+  let* produced = Checkpoint.exact_snapshot_of_value ~expected_session_id checkpoint
+    |> Result.map_error (fun _ -> "producer returned an invalid cooperative checkpoint") in
   let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
     |> Result.map_error (fun _ -> "cooperative checkpoint is unavailable or invalid") in
+  let* () = if Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference produced)
+      (Checkpoint.exact_snapshot_reference snapshot) then Ok ()
+    else Error "canonical checkpoint is not the checkpoint returned by this turn" in
   let* _ = validate_scope ~operation_id (Checkpoint.exact_snapshot_checkpoint snapshot) in
   let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
     | Checkpoint.Installed { auxiliary = []; _ } -> Ok ()

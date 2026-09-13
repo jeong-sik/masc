@@ -7,4 +7,4 @@ val load : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_op
 val consume : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
 val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
-  session_dir:string -> session_id:string -> (unit, string) result
+  session_dir:string -> session_id:string -> checkpoint:Agent_core.Checkpoint.t -> (unit, string) result

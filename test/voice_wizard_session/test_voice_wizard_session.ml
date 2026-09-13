@@ -140,6 +140,28 @@ let test_enter_commits_the_highlighted_first_voice () =
   Alcotest.(check string) "Enter commits the highlighted voice" "Yuna"
     next.T.vws_draft.Voice_wizard.voice
 
+(* The marked row and what Enter commits are one value. A cursor kept beside
+   the input stayed on the first row after a backspace emptied the input, and
+   Enter committed a blank the review then refused. *)
+let test_the_marked_voice_follows_every_edit () =
+  let s = T.voice_wizard_go (session ()) Voice_wizard.Voice in
+  let s = T.voice_wizard_with_voices s [ "Yuna", "Korean"; "Alex", "English" ] in
+  Alcotest.(check (option int)) "the suggestion is marked" (Some 0) (T.voice_wizard_voice_index s);
+  let emptied = T.voice_wizard_backspace s in
+  Alcotest.(check string) "one backspace empties the suggested input" "" emptied.T.vws_input;
+  Alcotest.(check (option int)) "and no row stays marked" None
+    (T.voice_wizard_voice_index emptied);
+  let typed = T.voice_wizard_append emptied "Alex" in
+  Alcotest.(check (option int)) "typing another listed id marks that row" (Some 1)
+    (T.voice_wizard_voice_index typed);
+  let cleared = T.voice_wizard_clear typed in
+  Alcotest.(check (option int)) "Ctrl-U unmarks it" None (T.voice_wizard_voice_index cleared);
+  let walked = T.voice_wizard_walk_voices cleared ~ahead:false in
+  Alcotest.(check string) "walking back from no row starts at the last" "Alex"
+    walked.T.vws_input;
+  Alcotest.(check (option int)) "and marks the row it chose" (Some 1)
+    (T.voice_wizard_voice_index walked)
+
 let test_catalogue_reply_preserves_typing_and_rejects_old_requests () =
   let s = T.voice_wizard_go (session ()) Voice_wizard.Voice in
   let pending, request = T.voice_wizard_begin_catalogue s in
@@ -149,8 +171,8 @@ let test_catalogue_reply_preserves_typing_and_rejects_old_requests () =
   in
   Alcotest.(check string) "typing wins over a late first-row suggestion"
     "my-voice" received.T.vws_input;
-  Alcotest.(check int) "no catalogue row falsely represents manual input"
-    (-1) received.T.vws_voice_cursor;
+  Alcotest.(check (option int)) "no catalogue row falsely represents manual input"
+    None (T.voice_wizard_voice_index received);
   let next, newer = T.voice_wizard_begin_catalogue pending in
   let stale = T.voice_wizard_catalogue_result next ~request (Ok [ "old", "old" ]) in
   Alcotest.(check (list (pair string string))) "superseded response is ignored"
@@ -197,6 +219,8 @@ let () =
     [ ( "opening"
       , [ Alcotest.test_case "endpoint switches reject previous catalogues" `Quick
             test_endpoint_switch_rejects_the_previous_catalogue
+        ; Alcotest.test_case "the marked voice follows every edit" `Quick
+            test_the_marked_voice_follows_every_edit
         ; Alcotest.test_case "a session opens on the first question" `Quick
             test_a_session_opens_on_the_first_question
         ; Alcotest.test_case "the last step is review and next stays there" `Quick

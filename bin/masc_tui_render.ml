@@ -12674,20 +12674,30 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Voice when session.vws_voices <> [] ->
      let count = List.length session.vws_voices in
      let window = 5 in
-     let first = max 0 (min (session.vws_voice_cursor - (window / 2)) (count - window)) in
+     let marked = Masc_tui_types.voice_wizard_voice_index session in
+     let first =
+       max 0 (min (Option.value marked ~default:0 - (window / 2)) (count - window))
+     in
      List.iteri
        (fun index (_id, label) ->
          let label = Terminal_text.single_line label in
          if index >= first && index < first + window
          then
            box_line buf cols
-             (if index = session.vws_voice_cursor
+             (if marked = Some index
               then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold label Ansi.reset
               else Printf.sprintf "    %s  %s%s" Ansi.dim label Ansi.reset))
        session.vws_voices;
      box_line buf cols
-       (Printf.sprintf "    %s%d of %d  \xe2\x86\x90/\xe2\x86\x92 to walk, or type an id%s"
-          Ansi.dim (session.vws_voice_cursor + 1) count Ansi.reset)
+       (match marked with
+        | Some index ->
+          Printf.sprintf "    %s%d of %d  \xe2\x86\x90/\xe2\x86\x92 to walk, or type an id%s"
+            Ansi.dim (index + 1) count Ansi.reset
+        (* Typed, or cleared: no row is what Enter would commit, so none is
+           marked and the count does not claim a position. *)
+        | None ->
+          Printf.sprintf "    %snone of these %d  \xe2\x86\x90/\xe2\x86\x92 to walk, or type an id%s"
+            Ansi.dim count Ansi.reset)
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->

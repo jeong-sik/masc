@@ -2699,7 +2699,6 @@ type voice_wizard_session =
             voice, so a name typed from memory is wrong silently. Empty when
             the kind publishes no catalogue, and the step is a plain field
             then. *)
-  ; vws_voice_cursor : int
   ; vws_catalogue_request : unit ref option
   ; vws_identity : unit ref
   ; vws_probe : string list
@@ -2841,30 +2840,34 @@ let voice_wizard_open ~section ~revision =
   ; vws_status = None
   ; vws_saving = false
   ; vws_voices = []
-  ; vws_voice_cursor = 0
   ; vws_catalogue_request = None
   ; vws_identity = ref ()
   ; vws_probe = []
   }
 
-(* Highlight the current input if it is listed. Only an untouched empty input
-   accepts the first-row suggestion; a late reply must not replace typing. *)
+(* The offered row the voice step marks: the one whose id is the input, which is
+   what Enter commits. Worked out from the input on every frame rather than kept
+   beside it. A kept cursor was set once when the list arrived, and typing,
+   backspace or Ctrl-U changed the input under it -- the first row stayed marked
+   while Enter committed a blank, refused later as [Voice_is_blank]. *)
+let voice_wizard_voice_index session =
+  let rec find index = function
+    | [] -> None
+    | (id, _) :: rest ->
+      if String.equal id session.vws_input then Some index else find (index + 1) rest
+  in
+  find 0 session.vws_voices
+
+(* Only an untouched empty input accepts the first-row suggestion; a late reply
+   must not replace typing. *)
 let voice_wizard_with_voices session voices =
   let input =
     if session.vws_replace_on_type && session.vws_input = "" then
       match voices with (id, _) :: _ -> id | [] -> ""
     else session.vws_input
   in
-  let cursor =
-    let rec find index = function
-      | [] -> -1
-      | (id, _) :: rest -> if String.equal id input then index else find (index + 1) rest
-    in
-    find 0 voices
-  in
   { session with
     vws_voices = voices
-  ; vws_voice_cursor = cursor
   ; vws_input = input
   ; vws_status = None
   ; vws_catalogue_request = None
@@ -2875,7 +2878,6 @@ let voice_wizard_begin_catalogue session =
   ({ session with
      vws_catalogue_request = Some request
    ; vws_voices = []
-   ; vws_voice_cursor = -1
    ; vws_status = None
    }, request)
 
@@ -2886,7 +2888,7 @@ let voice_wizard_catalogue_result session ~request result =
      | Ok voices -> voice_wizard_with_voices session voices
      | Error message ->
        { session with
-         vws_catalogue_request = None; vws_voices = []; vws_voice_cursor = -1
+         vws_catalogue_request = None; vws_voices = []
        ; vws_status = Some message })
   | Some _ | None -> session
 
@@ -2897,11 +2899,16 @@ let voice_wizard_walk_voices session ~ahead =
   | [] -> session
   | voices ->
     let count = List.length voices in
-    let cursor = ((session.vws_voice_cursor + (if ahead then 1 else -1)) + count) mod count in
+    (* From an input that is not one of the rows, the walk starts at the end
+       it moves toward. *)
+    let cursor =
+      match voice_wizard_voice_index session with
+      | Some index -> (index + (if ahead then 1 else -1) + count) mod count
+      | None -> if ahead then 0 else count - 1
+    in
     let id = match List.nth_opt voices cursor with Some (id, _) -> id | None -> "" in
     { session with
-      vws_voice_cursor = cursor
-    ; vws_input = id
+      vws_input = id
     ; vws_replace_on_type = false
     ; vws_status = None
     }
@@ -2997,7 +3004,6 @@ let voice_wizard_cycle_provider session =
     ; vws_replace_on_type = true
     ; vws_status = None
     ; vws_voices = []
-    ; vws_voice_cursor = -1
     ; vws_catalogue_request = None
     }
 
@@ -8134,6 +8140,5 @@ let voice_wizard_cycle_section session =
   ; vws_replace_on_type = true
   ; vws_status = None
   ; vws_voices = []
-  ; vws_voice_cursor = -1
   ; vws_catalogue_request = None
   }

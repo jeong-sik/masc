@@ -12296,7 +12296,9 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            b"left/Esc:list",
+            # #35734 capitalized key names in hint rows to the key table's
+            # spelling; this needle kept the old lower-case form.
+            b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(

@@ -412,8 +412,18 @@ let test_an_unread_section_does_not_say_it_is_empty () =
     (contains ~needle:"nothing is scheduled" unread);
   check bool "or that nobody is waiting" false
     (contains ~needle:"nobody is waiting" unread);
-  let failed = text Agenda.Read_failed Agenda.Read_failed in
-  check bool "a failed read says so" true (contains ~needle:"load failed" failed);
+  let failed =
+    text
+      (Agenda.Read_failed "schedule load failed: HTTP 503")
+      (Agenda.Read_failed "tool approvals load failed: HTTP 503")
+  in
+  (* "load failed" alone named neither the source nor the fault, on an overlay
+     with no refresh key: the reader had to leave it to find out which read
+     failed. The loader's message already opens with the read, so the row
+     carries it as sent rather than behind a second "load failed:". *)
+  check bool "a failed read says which read and why" true
+    (contains ~needle:"schedule load failed: HTTP 503" failed
+     && contains ~needle:"tool approvals load failed: HTTP 503" failed);
   check bool "and does not say nothing is scheduled" false
     (contains ~needle:"nothing is scheduled" failed)
 ;;
@@ -421,7 +431,10 @@ let test_an_unread_section_does_not_say_it_is_empty () =
 (* The strip names no row it does not have, so an unread list keeps it down
    the same as an empty one; the frame and the bound still read one number. *)
 let test_an_unread_agenda_keeps_the_strip_down () =
-  let t = Agenda.project ~scheduled:Agenda.Not_read ~awaiting:Agenda.Read_failed in
+  let t =
+    Agenda.project ~scheduled:Agenda.Not_read
+      ~awaiting:(Agenda.Read_failed "tool approvals load failed: HTTP 503")
+  in
   check bool "no strip" true (strip_of t = None);
   check int "and no row taken" 0 (Agenda.rows_taken t)
 ;;
@@ -440,8 +453,8 @@ let test_the_state_says_which_lists_were_read () =
   let failed = state () in
   failed.Masc_tui_types.schedules_error <- Some "connect failed";
   failed.Masc_tui_types.keeper_tool_approvals_error <- Some "connect failed";
-  check bool "two failed reads say load failed" true
-    (contains ~needle:"load failed" (panel failed));
+  check bool "two failed reads carry the state's own reason" true
+    (contains ~needle:"connect failed" (panel failed));
   let answered = state () in
   answered.Masc_tui_types.keeper_tool_approvals_observed <- true;
   check bool "an answered empty held-call list is nobody waiting" true

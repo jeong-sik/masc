@@ -406,6 +406,8 @@ let handle_keeper_turns_list state request reqd =
          ])
   | keeper_names ->
     let row keeper_name =
+      let interrupt_token = Keeper_registry.current_turn_interrupt_token
+        ~base_path:config.base_path keeper_name in
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
       with
@@ -443,6 +445,11 @@ let handle_keeper_turns_list state request reqd =
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
               ; ("started_at_unix", `Float turn.started_at)
+              ; ("interrupt_token",
+                  if interrupt_token = Keeper_registry.current_turn_interrupt_token
+                    ~base_path:config.base_path keeper_name then
+                    Option.fold ~none:`Null ~some:(fun token -> `String token) interrupt_token
+                  else `Null)
               ; ("preview", preview_json)
               ]
         in
@@ -534,6 +541,56 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
              ])))
 ;;
 
+let handle_keeper_run_next state ~actor request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try match Yojson.Safe.from_string body with
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields, List.assoc_opt "request_id" fields,
+          List.assoc_opt "interrupt_token" fields with
+         | Some (`String name), Some (`String id), token when String.trim name <> "" ->
+           let token = match token with
+             | None | Some `Null -> Ok None
+             | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Option.map Uuidm.to_string (Uuidm.of_string token))
+             | _ -> Error "interrupt_token must be a UUID or null" in
+           (match Keeper_chat_operation.Operation_id.of_string id, token with
+            | Ok operation_id, Ok token -> Ok (name, id, operation_id, token)
+            | Error error, _ | _, Error error -> Error error)
+         | _ -> Error "name and request_id are required")
+      | _ -> Error "JSON object required"
+      with Yojson.Json_error error -> Error error
+    in
+    let respond_error status error = respond_json_value_with_cors ~status request reqd
+      (`Assoc ["error", `String error]) in
+    match parsed with
+    | Error error -> respond_error `Bad_request error
+    | Ok (name, request_id, operation_id, token) ->
+      match Keeper_owner_registry.exact_operation ~base_path ~keeper_name:name operation_id with
+      | Error error -> respond_error `Service_unavailable (Keeper_owner_registry.command_error_to_string error)
+      | Ok None -> respond_error `Not_found "operation not found"
+      | Ok (Some operation) ->
+        match Keeper_chat_operation_payload.source_of_json operation.source with
+        | Error error -> respond_error `Service_unavailable error
+        | Ok source when not (String.equal actor source.submitted_by) ->
+          respond_error `Forbidden "only your own queued message can be prioritized"
+        | Ok _ ->
+          match Keeper_owner_registry.move_queued_operation_to_front ~base_path ~keeper_name:name operation_id with
+          | Error error -> respond_error `Conflict (Keeper_owner_registry.command_error_to_string error)
+          | Ok _ ->
+            let signal, detail = match token with
+              | None -> false, "queued first; no observed turn was interrupted"
+              | Some interrupt_token ->
+                match Keeper_registry.interrupt_observed_turn ~base_path name ~interrupt_token with
+                | Observed_turn_signalled -> true, "queued first; interrupt received; waiting for the turn to settle"
+                | Observed_turn_changed -> false, "queued first; the observed turn changed, so its successor was not interrupted"
+                | Observed_turn_signal_failed error -> false, "queued first; interrupt failed: " ^ error
+            in
+            respond_json_value_with_cors ~status:`OK request reqd
+              (`Assoc ["request_id", `String request_id; "prioritized", `Bool true;
+                "signalled", `Bool signal; "detail", `String detail]))
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -551,9 +608,19 @@ let handle_keeper_turn_interrupt state request reqd =
                | Some (`String _) -> Error "request_id must be non-blank"
                | Some _ -> Error "request_id must be a string when present"
              in
-             Result.map
-               (fun request_id -> String.trim s, request_id)
-               request_id_result
+             let interrupt_token_result =
+               match List.assoc_opt "interrupt_token" fields with
+               | None -> Ok None
+               | Some (`String token) ->
+                 (match Uuidm.of_string token with
+                  | Some token -> Ok (Some (Uuidm.to_string token))
+                  | None -> Error "interrupt_token must be a UUID")
+               | Some _ -> Error "interrupt_token must be a UUID"
+             in
+             (match request_id_result, interrupt_token_result with
+              | Ok (Some _), Ok (Some _) -> Error "choose request_id or interrupt_token, not both"
+              | Ok request_id, Ok interrupt_token -> Ok (String.trim s, request_id, interrupt_token)
+              | Error error, _ | _, Error error -> Error error)
            (* A blank name trims to "" and then reads as an unregistered
               keeper, so the caller saw 404 for what is a bad request. The
               request_id check below already worked this way. *)
@@ -567,12 +634,22 @@ let handle_keeper_turn_interrupt state request reqd =
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json msg)
-    | Ok (keeper_name, request_id) ->
+    | Ok (keeper_name, request_id, interrupt_token) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
-      else
+      else match interrupt_token with
+      | Some token ->
+        let fields = match Keeper_registry.interrupt_observed_turn ~base_path keeper_name ~interrupt_token:token with
+          | Keeper_registry.Observed_turn_signalled -> ["signalled", `Bool true]
+          | Observed_turn_changed -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
+          | Observed_turn_signal_failed detail ->
+            ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail]
+        in
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc (("interrupt_token", `String token) :: fields))
+      | None ->
         match request_id with
         | Some request_id ->
           (match Keeper_chat_operation.Operation_id.of_string request_id with

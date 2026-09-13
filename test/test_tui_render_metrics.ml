@@ -114,7 +114,7 @@ let test_calculate_kpis_populated () =
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
   state.keeper_turns <-
     [ { Decode.ktr_keeper_name = "running";
-        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; preview = None } };
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = None; preview = None } };
       { Decode.ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
       { Decode.ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;

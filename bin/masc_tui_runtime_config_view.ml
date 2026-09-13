@@ -144,7 +144,6 @@ let short_revision revision =
    to spend the rest of the row saying "0 error(s), 0 warning(s)".
 
    The counts are spelled with the plural the number asks for. *)
-let plural n word = if n = 1 then word else word ^ "s"
 
 let validation_line = function
   | Parse_error _ -> Bad, "Validation: invalid TOML"
@@ -153,8 +152,8 @@ let validation_line = function
       let errors = count Error_issue and warnings = count Warning_issue in
       let verdict = if report.valid then "valid" else "invalid" in
       let counts =
-        (if report.valid then [] else [ Printf.sprintf "%d %s" errors (plural errors "error") ])
-        @ (if warnings = 0 then [] else [ Printf.sprintf "%d %s" warnings (plural warnings "warning") ])
+        (if report.valid then [] else [ Masc_tui_message_layout.count_noun errors "error" ])
+        @ (if warnings = 0 then [] else [ Masc_tui_message_layout.count_noun warnings "warning" ])
       in
       (if report.valid then (if warnings = 0 then Good else Warning) else Bad),
       String.concat " \xc2\xb7 " (("Validation: " ^ verdict) :: counts)

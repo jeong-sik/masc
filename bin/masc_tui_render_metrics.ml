@@ -594,7 +594,7 @@ let render_metrics_body ~cols ~budget (state : state)
   if hint_rows > 0 then
     let inner_width = max 20 (framed_inner_width cols) in
     let hint_text =
-      Printf.sprintf "  [%d rows, scroll %d · j/k to scroll · 1-3 to switch section · Esc:overview]" total_lines scroll
+      Printf.sprintf "  [%s, scroll %d · j/k to scroll · 1-3 to switch section · Esc:overview]" (Masc_tui_message_layout.count_noun total_lines "row") scroll
     in
     let clipped =
       if Layout.display_width hint_text > inner_width then

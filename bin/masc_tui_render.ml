@@ -2108,8 +2108,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
 
   let header =
-    board_read_title ~screen:(screen_title " MASC Board") ~id:post.bp_id
-      ~hearth:post.bp_hearth ~votes:post.bp_votes ~replies:post.bp_comment_count
+    board_read_title ~screen:(screen_title " MASC Board")
+      ~id:(Terminal_text.single_line post.bp_id)
+      ~hearth:(Terminal_text.optional_single_line post.bp_hearth)
+      ~votes:post.bp_votes ~replies:post.bp_comment_count
   in
 
   box_top buf cols;

@@ -2322,6 +2322,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
       [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
     "board_read_pane"
     [ "bp_id"
+    ; "bp_hearth"
     ; "bp_author"
     ; "bp_title"
     ; "bp_created_at"

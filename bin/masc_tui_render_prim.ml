@@ -1752,11 +1752,9 @@ let bracketed ~max_cells text =
    and then "c0" at zero -- a second spelling for the same count -- and are one
    spelling now, receding at zero. *)
 let board_read_title ~screen ~id ~hearth ~votes ~replies =
-  let id =
-    bracketed ~max_cells:Render_schedule.board_id_width (Terminal_text.single_line id)
-  in
+  let id = bracketed ~max_cells:Render_schedule.board_id_width id in
   let hearth_tag =
-    match Terminal_text.optional_single_line hearth with
+    match hearth with
     | Some h when not (String.equal h "") ->
         Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
     | _ -> ""

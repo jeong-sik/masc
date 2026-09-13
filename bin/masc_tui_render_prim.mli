@@ -265,7 +265,10 @@ val board_read_title :
   string
 (** The Board reader's title row: [screen], the post id in brackets (folded
     only when it overruns the list's ID column), the hearth, the score and the
-    reply count. *)
+    reply count.
+
+    [id] and [hearth] arrive terminal-safe. The Board pane sanitizes them where
+    it reads the post, which is where [test_tui_http_ast] looks for it. *)
 
 val magnitude_tone : Magnitude.band -> string
 

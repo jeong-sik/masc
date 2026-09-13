@@ -6896,12 +6896,21 @@ let render_verification_list (state : state) =
           (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
-           beside a list of 12 would read as "that is all of them". *)
+           beside a list of 12 would read as "that is all of them".
+
+           Except when the tab's own badge already carries the total: it
+           wears the count once the queue is above zero, and a page holding
+           the whole queue then read "Task Review·2 (2 of 2)". The window
+           stays for a cut page, where it says how much of the badge's number
+           is on screen, and for an empty read, which has no badge to say
+           the read happened at all. *)
+        let total = snapshot.Masc.Tui_decode.vs_total in
+        let window =
+          if total > 0 && shown >= total then ""
+          else Printf.sprintf " (%d of %d)" shown total
+        in
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review
-             ~window:
-               (Printf.sprintf " (%d of %d)" shown
-                  snapshot.Masc.Tui_decode.vs_total))
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window)
           timestamp (connection_badge state)
   in
   box_top buf cols;
@@ -9337,9 +9346,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          let article_hint = match view.scene with
-            | Some scene when scene.content.view = Browser_lane.Regions -> "N/P:article  "
-            | Some _ | None -> "" in
+          let article_hint =
+            if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
           action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
           "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
@@ -9382,10 +9390,17 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                  let summary = match Browser_lane_view.scene_summary scene with
                    | None -> ""
                    | Some text -> " • " ^ text in
+                 let delta = match view.scene_delta with
+                   | None -> ""
+                   | Some {added; removed; unchanged; changed} ->
+                       let changed_text = if changed = 0 then ""
+                         else Printf.sprintf " · %d changed" changed in
+                       Printf.sprintf " • Δ +%d new · -%d out · =%d same%s"
+                         added removed unchanged changed_text in
                  let truncation = if scene.content.truncated then " • truncated" else "" in
-                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s" scene.elapsed_ms
+                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s%s" scene.elapsed_ms
                    (List.length scene.content.nodes)
-                   truncation summary, Theme.ok ()
+                   truncation summary delta, Theme.ok ()
              | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -9447,7 +9462,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match selected with
          | None -> "  No open tabs • Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab · 1-9:jump"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
@@ -9463,7 +9478,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                             (max 8 (cols - 32))
                     | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
-             "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
+             let viewport = Printf.sprintf "page scroll x=%.0f y=%.0f"
+                 scene.content.scroll_x scene.content.scroll_y in
+             "  " ^ scope ^ " · " ^ viewport ^ " · " ^
+             Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
          | None, Some page -> Printf.sprintf "  %s • %s%s%s"
              (Terminal_text.single_line page.url) (Masc_tui_message_layout.count_noun page.chars "char")

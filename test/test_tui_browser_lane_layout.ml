@@ -13,6 +13,7 @@ let node index : Masc.Browser_scene.node =
   ; tag = "p"
   ; text = Printf.sprintf "line %d 한글 본문" index
   ; heading_level = None
+  ; ancestor_region = None
   ; rects = [ { x = 0.; y = float_of_int index; width = 100.; height = 16. } ]
   ; color = "rgb(0, 0, 0)"
   ; font_size = 14.

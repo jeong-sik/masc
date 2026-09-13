@@ -528,9 +528,9 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
          else Some (Masc_tui_message_layout.fit_width
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
-    | None -> [if view.loading then "Refreshing…" else
-        if Option.is_some view.error then failed_note
-        else "No reading yet · r:refresh"]
+    | None -> [if view.loading then "Refreshing… · No Add-ons installed."
+        else if Option.is_some view.error then failed_note
+        else "No reading yet · No Add-ons installed. · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)
@@ -607,7 +607,10 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
   let action = action_lines view in
   let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
     (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
-  compact header @ compact error @ draft @ documents @ content @ action @ receipt
+  let package_marker = match view.snapshot with
+    | Some {instances=first :: _;_} -> ["> " ^ first.title]
+    | _ -> [] in
+  compact header @ compact error @ draft @ documents @ content @ package_marker @ action @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))

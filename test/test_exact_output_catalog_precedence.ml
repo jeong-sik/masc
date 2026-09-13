@@ -437,13 +437,35 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
     registry
 ;;
 
+let with_configured_verifier_cli f =
+  let saved = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "verifier-cli-runtime-" ".toml" in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved; Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun out -> output_string out {|[providers.official]
+protocol = "claude-code"
+command = "fixture-not-executed"
+is-non-interactive = true
+[models.verifier]
+api-name = "verifier-fixture"
+max-context = 400000
+tools-support = true
+[official.verifier]
+[runtime]
+default = "official.verifier"
+|});
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    f ())
+;;
+
 let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
+  with_configured_verifier_cli @@ fun () ->
   let snapshot =
     load_control_snapshot
       (Exact_output.Full_replacement
          { source = "cli-slot-carry"; contents = replacement_catalog })
   in
-  let cli = [ "antigravity_subscription.gemini-3-7-flash-high" ] in
+  let cli = [ "official.verifier" ] in
   (match
      Registry.publish
        ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli } ]

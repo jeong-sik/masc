@@ -22,9 +22,9 @@ function backendEmittedKinds(): string[] {
   const body = source.slice(start + EMITTER_FUNCTION.length)
   const kinds: string[] = []
   for (const line of body.split('\n').slice(1)) {
-    const arm = /^\s*\|\s*[A-Z][A-Za-z0-9_]*\s*->\s*"([a-z0-9_]+)"\s*$/.exec(line)
-    if (!arm) break
-    kinds.push(arm[1])
+    const kind = /^\s*\|\s*[A-Z][A-Za-z0-9_]*\s*->\s*"(?<kind>[a-z0-9_]+)"\s*$/.exec(line)?.groups?.kind
+    if (kind === undefined) break
+    kinds.push(kind)
   }
   expect(kinds.length, 'the emitter body was read arm by arm').toBeGreaterThan(0)
   return kinds

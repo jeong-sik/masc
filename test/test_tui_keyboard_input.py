@@ -5822,6 +5822,10 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
             if len(fixture.submitted) != 2 or fixture.operations[0]["operation_id"] != first_id:
                 raise AssertionError("edit submitted a replacement operation instead of retaining its identity")
             fixture.release.set()
+            # Replies stay in their original request blocks. The later /queue
+            # inspections fill the bottom viewport, so inspect older blocks
+            # with the same PageUp gesture an operator uses.
+            os.write(master_fd, b"\x1b[5~" * 5)
             wait_for_output(process, master_fd, output, b"reply-queued-one-fixed", start=0, timeout=10)
             wait_for_output(process, master_fd, output, b"reply-queued-two", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")

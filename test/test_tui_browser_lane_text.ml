@@ -223,3 +223,42 @@ let () =
   if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
     failwith "repeated selected text must retain its identity and first row";
   print_endline "PASS repeated scene node ids keep one number each"
+
+let () =
+  let region node_id role text : Masc.Browser_scene.node =
+    { node_id; kind = Region role; tag = role; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Regions; scope = None;
+    nodes = [region "nav" "navigation" "Navigation";
+             region "main" "main" "Timeline";
+             region "article" "article" "One post"] }
+  in
+  let scene : Lane.scene = {source = Live; client_id = None; tab_id = 3;
+    content; elapsed_ms = 1.} in
+  let view = {(Lane.create ()) with selected_tab = Some 3; scene = Some scene} in
+  (match Lane.primary_region_target view with
+   | Ok (index, target) ->
+       assert (index = 1 && target.Browser_lane.node_id = "main")
+   | Error _ -> failwith "unique main landmark was not selected");
+  let article_only = {view with scene = Some {scene with content =
+    {content with nodes = [region "article" "article" "One post"]}}} in
+  (match Lane.primary_region_target article_only with
+   | Ok (_, target) -> assert (target.Browser_lane.node_id = "article")
+   | Error _ -> failwith "article fallback was not selected");
+  let ambiguous = {view with scene = Some {scene with content =
+    {content with nodes = [region "main-a" "main" "A"; region "main-b" "main" "B"]}}} in
+  assert (Lane.primary_region_target ambiguous = Error Lane.Ambiguous_primary_region);
+  let guard : Lane.navigation_guard = {
+    expected_url = "https://example.org/feed#post";
+    navigation_source = {url = content.url; document_id = content.document_id} } in
+  (match Lane.primary_region_action {view with scene = None; scene_guard = Some guard} with
+   | Lane.Primary_guarded_regions {tab_id; guard = actual} ->
+       assert (tab_id = 3 && actual = guard)
+   | _ -> failwith "primary shortcut dropped the follow navigation guard");
+  print_endline "PASS primary landmark shortcut stays exact and ambiguity-safe"

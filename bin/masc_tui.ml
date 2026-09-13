@@ -17982,7 +17982,7 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
@@ -18032,6 +18032,28 @@ and is loaded on demand through keeper_skill.
                                (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
                            | None -> launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
                       | None -> ())
+                 | "m" when not (busy view) ->
+                     (match Browser_lane_view.primary_region_action view with
+                      | Primary_regions {tab_id} ->
+                          (* First [m] observes the landmark map. A second
+                             [m] focuses the exact main/article reference;
+                             no label or URL heuristic is used. *)
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_regions tab_id)
+                      | Primary_guarded_regions {tab_id;guard} ->
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
+                      | Primary_focus {tab_id;index;target} ->
+                          state.browser_lane <- Some {view with scene_cursor = index};
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_focus {tab_id;target})
+                      | Primary_error Browser_lane_view.No_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "No unambiguous main/article region observed; use v:regions"}
+                      | Primary_error Browser_lane_view.Ambiguous_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "Multiple main/article regions observed; use v:regions"}
+                      | Primary_unavailable -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> read {view with scene = None; scroll = 0}

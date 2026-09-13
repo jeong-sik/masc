@@ -12307,13 +12307,21 @@ let render_presets (state : state) =
         ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
-  if total = 0 then begin
-    incr drawn;
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (match state.presets_snapshot with
-       | None -> "  불러오는 중..."
-       | Some _ -> "  아직 프리셋이 없습니다 · s 로 지금 상태를 저장하세요")
-  end;
+  (* A read that failed said "불러오는 중..." under its own failure row: the
+     empty row asked only whether a snapshot had arrived. *)
+  (match state.presets_snapshot, state.presets_error with
+   | _, Some _ ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_failed_note
+   | None, None ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_unread_note
+   | Some snapshot, None ->
+       Option.iter
+         (fun line ->
+           incr drawn;
+           box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line))
+         (Masc_tui_preset_text.pane_empty_line snapshot));
   List.iteri
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + list_height then begin

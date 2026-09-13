@@ -6,6 +6,11 @@ val listing_lines : Masc.Tui_decode.presets_snapshot -> string list
 
 val saved_line : Masc.Tui_decode.preset_manifest -> string
 
+val pane_empty_line : Masc.Tui_decode.presets_snapshot -> string option
+(** The Config pane's row in place of an empty list, naming the pane's save
+    key; the unreadable-rows line when only unreadable directories came back;
+    [None] when there are presets to list. *)
+
 val pane_row : Masc.Tui_decode.preset_manifest -> string
 (** One row of the Config pane list: name, counts, saved-at. *)
 

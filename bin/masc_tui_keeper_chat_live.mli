@@ -104,6 +104,7 @@ type delta =
   | Accepted of
       { admission : admission
       ; queue_length : int
+      ; interactive : Masc_tui_keeper_chat_projection.interactive_receipt option
             (** How many operations the keeper's chat queue held when the
                 server accepted this one. The server counts the whole queue,
                 so this is not "how many are ahead of this one" and must not

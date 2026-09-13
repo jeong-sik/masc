@@ -1385,10 +1385,29 @@ let test_missing_file_is_named_in_the_error () =
          "masc-attach-probe.png")
 ;;
 
+let test_interactive_admission_wire_roundtrip () =
+  let module Stream = Server_routes_http_keeper_stream in
+  let body intent = Chat.request_body ~admission_intent:intent ~since_seq:Position.Whole_turn request in
+  let parse intent = match Stream.parse_keeper_chat_stream_request (body intent) with
+    | Ok request -> request.Stream.admission_intent | Error detail -> fail detail in
+  (match parse (Chat.Interactive {control_token = "owner-control"; target = Some (Observed_turn_token "turn-token")}) with
+   | Stream.Interactive {control_token; target = Some (Masc.Keeper_owner_registry.Observed_turn_token token)} ->
+     check string "control token survives" "owner-control" control_token;
+     check string "exact turn survives" "turn-token" token
+   | _ -> fail "interactive intent was lost");
+  (match parse Chat.Queue_only with Stream.Queue_only -> () | _ -> fail "queue-only changed meaning");
+  let malformed = Yojson.Safe.from_string (body (Chat.Interactive {control_token = "owner-control"; target = None})) in
+  let fields = Yojson.Safe.Util.to_assoc malformed in
+  let both = `Assoc (("admission_intent", `Assoc ["kind", `String "interactive"; "control_token", `String "owner-control";
+    "interrupt_token", `String "turn-token"; "operation_id", `String "another-operation"]) :: List.remove_assoc "admission_intent" fields) in
+  (match Stream.parse_keeper_chat_stream_request (Yojson.Safe.to_string both) with
+   | Error _ -> () | Ok _ -> fail "two independent cancellation targets were accepted")
+
 let () =
   run "tui_keeper_chat_projection"
     [ ( "keeper chat"
-      , [ test_case "exact request body and UUIDv7" `Quick
+      , [ test_case "interactive admission serializer matches server authority" `Quick test_interactive_admission_wire_roundtrip
+        ; test_case "exact request body and UUIDv7" `Quick
             test_request_body_and_identity
         ; test_case "a resume position rides beside the request" `Quick
             test_a_resume_position_rides_beside_the_request

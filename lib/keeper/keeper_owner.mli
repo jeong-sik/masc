@@ -48,6 +48,12 @@ type run_next_result =
   | Run_next_paused
   | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
 
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt =
+  { outcome : interactive_outcome; chat_control_token : string
+  ; signalled : bool; resumed : bool; interrupt_error : string option }
+type interactive_intent = { control_token : string; target : interrupt_target option }
+
 type turn_lane =
   | Autonomous
   | Chat_operation
@@ -298,7 +304,9 @@ val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
-val pause_and_interrupt : t -> interrupt_target -> (operation_interrupt_result, error) result
+val pause_and_interrupt : t -> interrupt_target -> (operation_interrupt_result * string, error) result
+val chat_control_token : t -> string
+val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
 (** Validate the exact current execution, persist the operator pause, then signal.
     No queued or autonomous successor can start after this command. *)
 val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->

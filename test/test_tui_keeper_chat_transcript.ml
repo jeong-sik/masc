@@ -1409,7 +1409,7 @@ let test_the_wait_says_why_once_the_server_has_said () =
     (contains ~needle:"waiting for the run to start" (progress_text (fresh ())));
   let queued length =
     let t = fresh () in
-    feed t [ Live.Accepted { admission = Live.Queued; queue_length = length } ];
+    feed t [ Live.Accepted { admission = Live.Queued; queue_length = length; interactive = None } ];
     progress_text t
   in
   check bool "a queued request names the queue it is in" true
@@ -1419,7 +1419,7 @@ let test_the_wait_says_why_once_the_server_has_said () =
   check bool "one message is not one messages" true
     (contains ~needle:"1 message in the keeper's queue" (queued 1));
   let running = fresh () in
-  feed running [ Live.Accepted { admission = Live.Running; queue_length = 0 } ];
+  feed running [ Live.Accepted { admission = Live.Running; queue_length = 0; interactive = None } ];
   check bool "an accepted-and-started request says so" true
     (contains ~needle:"the run is starting" (progress_text running))
 
@@ -1428,7 +1428,7 @@ let test_the_wait_says_why_once_the_server_has_said () =
 let test_the_queue_does_not_outlive_the_wait () =
   let t = fresh () in
   feed t
-    [ Live.Accepted { admission = Live.Queued; queue_length = 3 }
+    [ Live.Accepted { admission = Live.Queued; queue_length = 3; interactive = None }
     ; Live.Run_started
     ];
   check bool "the queue is not still reported once the run started" false

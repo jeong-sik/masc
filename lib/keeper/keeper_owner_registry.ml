@@ -601,7 +601,7 @@ let with_chat_admission_command ~base_path ~keeper_name run =
 let pause_observed_turn ~base_path ~keeper_name ~interrupt_token =
   with_chat_admission_command ~base_path ~keeper_name (fun owner entry ->
     match entry with
-    | None -> Ok (Keeper_owner.Operation_not_current { running_operation_id = None })
+    | None -> Ok (Keeper_owner.Operation_not_current { running_operation_id = None }, Keeper_owner.chat_control_token owner)
     | Some entry -> Keeper_owner.pause_and_interrupt owner
         (Keeper_owner.Observed_turn { current = entry.current_turn_switch; interrupt_token }))
 ;;
@@ -710,6 +710,19 @@ let batch_operations ~base_path ~keeper_name operation_id =
 let exact_operation ~base_path ~keeper_name operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.exact_operation owner operation_id)
+;;
+
+type interactive_target = Observed_turn_token of string | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
+let submit_interactive_operation ~base_path ~keeper_name ~operation_id ~source ~input ~control_token ~target =
+  with_chat_admission_command ~base_path ~keeper_name (fun owner entry ->
+    let target = match target with
+      | None -> None
+      | Some (Direct_operation_id id) -> Some (Keeper_owner.Direct_operation id)
+      | Some (Observed_turn_token interrupt_token) ->
+        Option.map (fun (entry : Keeper_registry_types.registry_entry) ->
+          Keeper_owner.Observed_turn {current = entry.current_turn_switch; interrupt_token}) entry in
+    Keeper_owner.submit_interactive_operation owner ~operation_id ~source ~input
+      ~intent:{Keeper_owner.control_token; target})
 ;;
 
 let submit_operation ~base_path ~keeper_name ~operation_id ~source ~input =

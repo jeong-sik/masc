@@ -21,7 +21,7 @@ let live ?(keeper_name = "alpha") state admission =
   let live = Tui.turn_log_create ~keeper_name ~request_id:"request-1" ~started_at:2. in
   Option.iter (fun admission ->
     Tui.turn_log_add ~now:3. live ~seq:None
-      (Live.Accepted { admission; queue_length = 3 })) admission;
+      (Live.Accepted { admission; queue_length = 3; interactive = None })) admission;
   state.Tui.msg_live <- Some live;
   live
 

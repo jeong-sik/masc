@@ -44,8 +44,12 @@ val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string
 
+type batch_plan = { members : Operation.Operation_id.t list; input : Yojson.Safe.t }
+type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
+
 val submit
-  :  t
+  :  ?priority:batch_selector
+  -> t
   -> now:float
   -> operation_id:Operation.Operation_id.t
   -> source:Yojson.Safe.t
@@ -54,8 +58,6 @@ val submit
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
 val inventory : t -> (inventory, error) result
-type batch_plan = { members : Operation.Operation_id.t list; input : Yojson.Safe.t }
-type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
 (** Pure selector receives only fresh, unbound queued operations. Members must
     include the head, in queue order. The store freezes membership and combined
     input atomically with claim; resumed executions never acquire new members. *)

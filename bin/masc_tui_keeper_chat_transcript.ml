@@ -1479,7 +1479,7 @@ let apply_delta ~now t (delta : Live.delta) =
       else (match t.batch_execution_id with
         | Some existing when existing <> binding.execution_id -> note_unreadable t "batch execution identity changed"
         | Some _ | None -> t.batch_execution_id <- Some binding.execution_id)
-  | Live.Accepted { admission; queue_length } ->
+  | Live.Accepted { admission; queue_length; _ } ->
       (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)

@@ -36,7 +36,14 @@ type acceptance_state =
   | Failed
   | Cancelled
 
+type interactive_target = Observed_turn_token of string | Direct_operation_id of string
+type admission_intent = Queue_only | Interactive of {control_token : string; target : interactive_target option}
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
+  signalled : bool; resumed : bool; interrupt_error : string option}
+
 type acceptance = {
+  interactive : interactive_receipt option;
   state : acceptance_state;
   queued_count : int;
 }
@@ -190,8 +197,16 @@ let image_reference_block_to_yojson = function
    beside the record. On the wire the whole turn is the field's absence
    ([Masc.Keeper_chat_event_log.replay_position_to_wire]), which is what a
    first submit sends too, so a first submit's body is what it always was. *)
-let request_to_yojson ~since_seq request =
-  let base =
+let request_to_yojson ?(admission_intent = Queue_only) ~since_seq request =
+  let intent = match admission_intent with
+    | Queue_only -> []
+    | Interactive {control_token; target} ->
+      let turn, operation = match target with None -> `Null, `Null
+        | Some (Observed_turn_token token) -> `String token, `Null
+        | Some (Direct_operation_id id) -> `Null, `String id in
+      ["admission_intent", `Assoc ["kind", `String "interactive"; "control_token", `String control_token;
+        "interrupt_token", turn; "operation_id", operation]] in
+  let base = intent @
     [ "request_id", `String request.request_id
     ; "name", `String request.keeper_name
     ; "message", `String request.message
@@ -217,8 +232,8 @@ let request_to_yojson ~since_seq request =
     in
     `Assoc (base @ attachment_field @ [ ("user_blocks", `List blocks) ] @ resume)
 
-let request_body ~since_seq request =
-  Yojson.Safe.to_string (request_to_yojson ~since_seq request)
+let request_body ?admission_intent ~since_seq request =
+  Yojson.Safe.to_string (request_to_yojson ?admission_intent ~since_seq request)
 
 let same_request_identity left right =
   String.equal left.request_id right.request_id
@@ -536,11 +551,33 @@ let acceptance_state_of_string = function
   | "Cancelled" -> Ok Cancelled
   | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
 
+let decode_interactive_receipt json =
+  let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value.interactive" in
+  let* fields = exact_object_fields ~surface
+    ~allowed:["outcome"; "chat_control_token"; "signalled"; "resumed"; "interrupt_error"] json in
+  let* raw = required_string ~surface "outcome" fields in
+  let* outcome = match raw with "applied" -> Ok Applied | "stale_control" -> Ok Stale_control
+    | "paused" -> Ok Paused | "replayed" -> Ok Replayed | _ -> Error (surface ^ ": unknown outcome") in
+  let* chat_control_token = required_string ~surface "chat_control_token" fields in
+  let* () = if String.trim chat_control_token = "" then Error (surface ^ ": empty control token") else Ok () in
+  let boolean key = match List.assoc_opt key fields with Some (`Bool value) -> Ok value
+    | None | Some _ -> Error (surface ^ "." ^ key ^ " must be boolean") in
+  let* signalled = boolean "signalled" in
+  let* resumed = boolean "resumed" in
+  let* interrupt_error = match List.assoc_opt "interrupt_error" fields with
+    | Some `Null -> Ok None | Some (`String detail) -> Ok (Some detail)
+    | None | Some _ -> Error (surface ^ ".interrupt_error must be string or null") in
+  let* () = match outcome with
+    | Applied -> Ok ()
+    | Stale_control | Paused | Replayed ->
+      if signalled || resumed || Option.is_some interrupt_error then Error (surface ^ ": inactive admission reports control effects") else Ok () in
+  Ok {outcome;chat_control_token;signalled;resumed;interrupt_error}
+
 let decode_acceptance ?expected_request_id json =
   let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value" in
   let* fields =
     exact_object_fields ~surface
-      ~allowed:[ "operation_id"; "state"; "queued_count" ] json
+      ~allowed:[ "operation_id"; "state"; "queued_count"; "interactive" ] json
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let* operation_id =
@@ -559,10 +596,14 @@ let decode_acceptance ?expected_request_id json =
     required_nonnegative_int ~surface "queued_count" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
+  let* interactive = match List.assoc_opt "interactive" fields with
+    | None -> Ok None
+    | Some json -> decode_interactive_receipt json |> Result.map Option.some
+        |> Result.map_error (fun detail -> Malformed_event detail) in
   match expected_request_id with
   | Some expected when not (String.equal operation_id expected) ->
       Error (Request_id_mismatch { expected; received = operation_id })
-  | None | Some _ -> Ok { state; queued_count }
+  | None | Some _ -> Ok { state; queued_count; interactive }
 
 type batch_binding = { operation_id : string; execution_id : string }
 

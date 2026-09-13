@@ -886,7 +886,7 @@ let test_settle_turn_log_commits_holds_and_clears_live () =
 
 let completed ?(outcome = Masc.Keeper_turn_outcome.Visible_reply) reply
     : Keeper_chat.completed_turn =
-  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0 }
+  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0; interactive = None }
   ; reply
   ; turn_outcome = outcome
   ; turn_ref = "trace-1#1"
@@ -1084,7 +1084,7 @@ let test_the_acceptance_is_read_but_not_logged () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1" ~started_at:1.
   in
-  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2 } in
+  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2; interactive = None } in
   Tui_types.turn_log_add ~now:1. log ~seq:None accepted;
   Tui_types.turn_log_add ~now:2. log ~seq:None accepted;
   check int "no entries" 0 (List.length (Log.entries log.Tui_types.tl_log));

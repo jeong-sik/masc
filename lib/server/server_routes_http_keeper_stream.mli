@@ -88,7 +88,11 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
     MASC request-boundary type, intentionally distinct from dashboard
     rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
+type admission_intent = Queue_only | Interactive of {
+  control_token : string; target : Keeper_owner_registry.interactive_target option }
+
 type keeper_chat_stream_request = {
+  admission_intent : admission_intent;
   request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
@@ -265,6 +269,7 @@ type turn_submission =
       }
 
 val process_single_turn :
+  batch_binding:(Keeper_chat_operation.Operation_id.t * Keeper_chat_operation.Operation_id.t) option ->
   user_row_origin:Keeper_chat_store.user_row_origin ->
   submission:turn_submission ->
   state:Mcp_server.server_state ->

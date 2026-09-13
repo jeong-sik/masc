@@ -925,7 +925,53 @@ let same_admission expected observed =
   && String.equal expected.admission_digest observed.admission_digest
 ;;
 
-let submit store ~now ~operation_id ~source ~input =
+type batch_plan = { members : Id.t list; input : Yojson.Safe.t }
+type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
+
+let prioritize_admission db select (incoming : Operation.t) =
+  let* executions = semantic_rows db ~active_only:false in
+  let* queued = with_statement db ~operation:"read admission queue"
+    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
+    (fun stmt ->
+      let rec read rows =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev rows)
+        else if rc = Sqlite3.Rc.ROW then let* row = decode_operation stmt in read (row :: rows)
+        else Error (Store_unavailable (sqlite_error db "read admission queue" rc)) in
+      read []) in
+  let rec fresh rows = function
+    | [] -> Ok (List.rev rows)
+    | (row : Operation.t) :: rest ->
+      let* binding = batch_execution_with_db db row.operation_id in
+      let scoped = List.exists (fun (execution : Semantic.t) ->
+        Keeper_execution_scope_id.equal execution.id
+          (Keeper_execution_scope_id.direct_operation row.operation_id)) executions in
+      fresh (if Option.is_some binding || scoped then rows else row :: rows) rest in
+  let* candidates = fresh [] queued in
+  let* plan = select incoming candidates |> Result.map_error (fun detail -> Invalid_input detail) in
+  let members = match plan with None -> [incoming.operation_id] | Some plan -> plan.members in
+  let selected = List.filter (fun (row : Operation.t) -> List.exists (Id.equal row.operation_id) members) candidates in
+  let* () = if List.exists (Id.equal incoming.operation_id) members
+      && List.map (fun (row : Operation.t) -> row.operation_id) selected = members
+    then Ok () else Error (Invalid_input "interactive cohort must include the new request in existing queue order") in
+  (* Keep the compatible cohort's accepted order, moving outsiders behind it.
+     Insertion and every queue position commit together; a replay does neither. *)
+  let rec move = function
+    | [] -> Ok ()
+    | (row : Operation.t) :: rest when List.exists (Id.equal row.operation_id) members -> move rest
+    | row :: rest ->
+      let* sequence = next_sequence db in
+      let* () = with_statement db ~operation:"prioritize admitted cohort"
+        "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+        (fun stmt ->
+          let* () = bind_int64 db stmt ~operation:"bind sequence" 1 sequence in
+          let* () = bind_text db stmt ~operation:"bind operation" 2 (Id.to_string row.operation_id) in
+          let* () = expect_done db stmt ~operation:"prioritize admitted cohort" in
+          if Sqlite3.changes db = 1 then Ok () else Error (Not_queued row.operation_id)) in
+      move rest in
+  move queued
+
+let submit ?priority store ~now ~operation_id ~source ~input =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"created_at" now
@@ -967,6 +1013,7 @@ let submit store ~now ~operation_id ~source ~input =
           }
         in
         let* () = insert_queued store.db operation in
+        let* () = match priority with None -> Ok () | Some select -> prioritize_admission store.db select operation in
         inserted := Some operation;
         Ok (Accepted operation))
   in
@@ -1110,8 +1157,6 @@ let next_runtime_retry_wake store ~now =
       None
       executions)
 
-type batch_plan = { members : Id.t list; input : Yojson.Safe.t }
-type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
 
 let freeze_batch_with_db db ~select (head : Operation.t) =
   let* executions = semantic_rows db ~active_only:false in
@@ -1364,9 +1409,10 @@ let move_queued_to_front store ~now ~operation_id =
   let* () = ensure_open store in
   let* () = with_transaction store (fun () ->
     let* target = operation_or_unknown store.db operation_id in
-    let* () = match target.batch_membership with
-      | Some member when not (Id.equal member.execution_id operation_id) -> Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
-      | Some _ | None -> Ok () in
+    let* target = match target.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) -> operation_or_unknown store.db member.execution_id
+      | Some _ | None -> Ok target in
+    let operation_id = target.Operation.operation_id in
     let* () = match target.state with
       | Operation.Queued -> Ok ()
       | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
@@ -1406,7 +1452,8 @@ let move_queued_to_front store ~now ~operation_id =
               if Sqlite3.changes store.db = 1 then Ok () else Error (Not_queued row.operation_id)) in
           move rest in
       move queued) in
-  operation_or_unknown store.db operation_id
+  let* operation = operation_or_unknown store.db operation_id in
+  project_batch_with_db store.db operation
 ;;
 
 type semantic_error =

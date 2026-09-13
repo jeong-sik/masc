@@ -13104,7 +13104,9 @@ let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let header = help_masthead state in
-  ( List.length (Masc_tui_help.sheet ~header ~cols (help_lines state))
+  ( List.length
+      (Masc_tui_help.sheet ~header ~cols
+         (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
   , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
@@ -13325,7 +13327,10 @@ let render_keeper_deletions (state : state) =
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let header = help_masthead state in
-  let rendered_rows = Masc_tui_help.sheet ~header ~cols (help_lines state) in
+  let rendered_rows =
+    Masc_tui_help.sheet ~header ~cols
+      (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"help"
     ~frame:Chrome_overlay
     (* The title says what state the sheet is in; the keys that change it are

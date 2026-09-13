@@ -351,7 +351,9 @@ val runtime_config_status_lines :
 
 val help_masthead : Masc_tui_types.state -> string list
 
-val help_lines : Masc_tui_types.state -> string list
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
 

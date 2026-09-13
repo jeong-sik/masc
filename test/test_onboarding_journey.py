@@ -948,6 +948,20 @@ class LocalVoice(unittest.TestCase):
         self.assertEqual(order, ['voice', 'sandbox'])
 
 
+class PdfToolsProbe(unittest.TestCase):
+    # Journey replaces pdf_tools_status for every case, so the probe itself is
+    # exercised here, without that stand-in.
+    def test_readiness_probe_that_never_answers_is_a_setup_error(self):
+        # The sandbox menu asks before every draw, so an unbounded probe would
+        # hold the setup screen. The bound reaches subprocess.run, and running
+        # out of it is refused rather than read as some readiness.
+        expired = subprocess.TimeoutExpired(['/owned/masc'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+        with patch.object(SETUP.subprocess, 'run', side_effect=expired) as run, \
+                self.assertRaisesRegex(SETUP.SetupError, 'did not answer about PDF tool availability in time'):
+            SETUP.pdf_tools_status('/owned/masc')
+        self.assertEqual(run.call_args.kwargs['timeout'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+
+
 class InvalidWorkspaceDiagnostic(unittest.TestCase):
     """An invalid check is named on screen, and every exit stays open.
 

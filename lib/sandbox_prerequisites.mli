@@ -18,7 +18,15 @@ val catalog :
   ?model_dir:string ->
   host:Sandbox_readiness.host -> distribution:distribution -> dependency -> action list
 val to_json : action list -> Yojson.Safe.t
-val execute : run:(string list -> (unit, string) result) -> action -> outcome
+type run_failure =
+  | Program_not_found  (** argv's program is not on PATH; nothing ran *)
+  | Could_not_start  (** the program exists and could not be started *)
+  | Did_not_finish  (** it ran and did not succeed; its output was on the terminal *)
+(** Why a step did not complete. Carries no text: a receipt's reason is built
+    from this and from argv the catalog wrote, so a child's diagnostics have
+    no path into it. *)
+
+val execute : run:(string list -> (unit, run_failure) result) -> action -> outcome
 (** [run] belongs to the owner-authorized terminal/API edge. It receives argv,
     never a shell string, and must not silently acquire privilege. *)
 

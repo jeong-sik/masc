@@ -71,6 +71,28 @@ there is no port to pick, nothing to start before speaking, and nothing left
 running afterwards. Installing them is still the operator's step, which is what
 `prerequisite-actions` is — it names the commands and asks.
 
+### A fresh mac has no Homebrew
+
+Two of those steps are Homebrew steps, and a machine that has just been
+unboxed does not have Homebrew. Running one with `brew` absent from `PATH`,
+measured 2026-09-13:
+
+| Build | Receipt `reason` |
+|---|---|
+| before | `The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend.` |
+| after | `Homebrew is not installed (brew is not on PATH), so nothing ran. Install it from https://brew.sh, then retry.` |
+
+The first sentence sent the reader to terminal output that did not exist:
+`brew` never started. The same shape for any other program — the model
+download with `curl` absent — now reads `curl is not on PATH, so nothing ran.`
+The install journey prints this reason as it is, so the reader sees it at the
+menu they chose from.
+
+The reason is built from *which way* the step failed and from the argv this
+catalog wrote, never from anything the child printed: a receipt is kept free of
+child diagnostics on purpose, and the failure kind carries no text for them to
+travel in.
+
 Without a `HOME` to build a cache path from, the second step opens the model
 downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an

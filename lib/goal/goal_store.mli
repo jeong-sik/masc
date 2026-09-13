@@ -102,7 +102,10 @@ type source =
       (** goals.json decoded. The mirror was not opened. *)
   | Unavailable of unavailable
 
-and unavailable =
+(** Re-exported from {!Goal_store_unavailable} (masc_types) with a manifest,
+    so the task-creation contract below this library can carry the same
+    value while every constructor stays addressable as [Goal_store.X]. *)
+and unavailable = Goal_store_unavailable.t =
   { file : string  (** {!goals_path}. *)
   ; reason : reason
   ; mirror : mirror_status
@@ -110,7 +113,7 @@ and unavailable =
   ; reset_step : reset_step
   }
 
-and reason =
+and reason = Goal_store_unavailable.reason =
   | Missing_after_init  (** goals.json is absent while the mirror exists. *)
   | Unreadable of Unix.error
       (** open/read failed; EACCES, EISDIR and EIO each survive. *)
@@ -121,14 +124,14 @@ and reason =
           names the document root when the whole document is not an
           object. *)
 
-and mirror_status =
+and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
   | Mirror_decodes of { goal_count : int; updated_at : string }
       (** Evidence of how far the primary drifted from the last commit. *)
   | Mirror_rejected of reason
 
-and reset_step =
+and reset_step = Goal_store_unavailable.reset_step =
   | Repair_field of string  (** Fill or fix this member and it reads again. *)
   | Reset_goal_store  (** Move the store aside (RFC-0444 §2.6, PR-7). *)
   | Restore_permission  (** [Unreadable EACCES]. *)
@@ -146,12 +149,12 @@ type lookup =
 val find_goal : Workspace_utils.config -> goal_id:string -> lookup
 
 val unavailable_to_string : unavailable -> string
-(** One line naming the reason constructor, the field when there is one, the
-    file, the mirror status and the reset step:
-    [goal_store: unavailable reason=… file=… mirror=… reset=…]. For surfaces
-    whose terminus is a string (prompt fragments, WARN lines, string error
-    contracts that RFC-0444 PR-2..5 retype). Render at the very end; never
-    branch on the output. *)
+(** {!Goal_store_unavailable.to_string}: one line naming the reason
+    constructor, the field when there is one, the file, the mirror status and
+    the reset step. For surfaces whose terminus is a string (prompt
+    fragments, WARN lines, the scan contract RFC-0444 PR-5 retypes). Render
+    at the very end; never branch on the output. The typed tool/HTTP envelope
+    is {!Goal_unavailable_envelope}. *)
 
 val list_goals_result :
   Workspace_utils.config -> ?phase:Goal_phase.t -> unit ->

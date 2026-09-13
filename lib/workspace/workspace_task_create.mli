@@ -19,7 +19,10 @@ type add_task_success =
   }
 
 type add_task_error =
-  | Goal_source_unavailable of string
+  | Goal_source_unavailable of Goal_store_unavailable.t
+      (** RFC-0444: the goal store this build cannot read, as its own value. *)
+  | Goal_lock_failed of string
+      (** The goal file lock could not be taken; no goal was read. *)
   | Unknown_goal of string
   | Backlog_read_failed of string
   | Goal_link_write_failed of string
@@ -38,7 +41,8 @@ type batch_add_tasks_success =
   }
 
 type batch_add_tasks_error =
-  | Batch_goal_source_unavailable of string
+  | Batch_goal_source_unavailable of Goal_store_unavailable.t
+  | Batch_goal_lock_failed of string
   | Batch_unknown_goal of string
   | Batch_backlog_read_failed of string
   | Batch_goal_link_write_failed of string

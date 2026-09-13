@@ -114,6 +114,7 @@ let task_create_failure_route : Workspace_task.add_task_error -> task_create_fai
   | Workspace_task.Unknown_predecessor _
   | Workspace_task.Predecessor_not_terminal _ -> Task_create_workflow_rejection
   | Workspace_task.Goal_source_unavailable _
+  | Workspace_task.Goal_lock_failed _
   | Workspace_task.Backlog_read_failed _
   | Workspace_task.Goal_link_write_failed _
   | Workspace_task.Backlog_write_failed _

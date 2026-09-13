@@ -118,6 +118,12 @@ let parse_result ~bytes ~sha256 content =
 let pdf_filter =
   "pdf:impress_pdf_Export:{\"ExportHiddenSlides\":{\"type\":\"boolean\",\"value\":\"true\"},\"ExportNotesPages\":{\"type\":\"boolean\",\"value\":\"false\"}}"
 
+(* Untrusted document decoders have a per-process safety deadline; this does
+   not expire the verification task or its evidence. Three processes run per
+   inspection (the parser, the renderer's version probe and the conversion),
+   so the worst case is a fixed multiple of this, not one per slide. *)
+let decoder_timeout_sec = 120.
+
 let inspect ~base_path ~max_image_bytes ~bytes =
   let* () = if String.length bytes > Verification_pdf_inspection.max_source_bytes then
     Error (Policy_rejected (Printf.sprintf "source exceeds %d byte inspection limit"
@@ -138,12 +144,10 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
       let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
-      (* Untrusted document decoders have a per-process safety deadline; this
-         does not expire the verification task or its evidence. *)
       let run program arguments =
         match Process_eio.run_argv_with_status_split_or_refusal
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-            ~timeout_sec:120. ~cwd:root (program :: arguments) with
+            ~timeout_sec:decoder_timeout_sec ~cwd:root (program :: arguments) with
         | Error (Process_eio.Executable_not_found missing) -> Error (Dependency_unavailable [missing])
         | Error refusal -> Error (Storage_failed (Process_eio.spawn_refusal_to_string refusal))
         | Ok (status,stdout,stderr) ->

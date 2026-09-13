@@ -543,8 +543,13 @@ let presentation_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
       | Pdf_inspection_failed (Verification_pdf_inspection.Dependency_unavailable _) ->
         Tool_result.Dependency_unavailable
       | Invalid_document _ -> Tool_result.Workflow_rejection
-      | Command_failed _ | Invalid_output _
-      | Storage_failed _ | Pdf_inspection_failed _ -> Tool_result.Runtime_failure in
+      | Command_failed _ | Invalid_output _ | Storage_failed _
+      (* Named rather than [Pdf_inspection_failed _]: a new PDF inspection
+         error then has to be placed here by the compiler instead of landing
+         in Runtime_failure because it was not a policy or dependency case. *)
+      | Pdf_inspection_failed
+          ( Verification_pdf_inspection.Command_failed _
+          | Invalid_output _ | Storage_failed _ ) -> Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_presentation_inspection.error_to_string error)
   | Ok inspection ->

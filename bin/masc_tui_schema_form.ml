@@ -46,7 +46,7 @@ let rec complete schema input =
           | None -> None in
         Option.map (fun value -> key,complete child value) value) properties)
   | _ -> input
-let replace form value = {form with fields=List.mapi (fun i field ->
+let replace form value = {form with fields=List.mapi (fun i (field : field) ->
   if i=form.cursor then {field with value} else field) form.fields;draft=None;reviewing=false}
 let commit form = match form.draft,List.nth_opt form.fields form.cursor with
   | None,_ -> Ok form
@@ -58,11 +58,11 @@ let commit form = match form.draft,List.nth_opt form.fields form.cursor with
   | Some _,None -> Error "no selected form field"
 let value form =
   let* form = commit form in
-  let result = List.fold_left (fun root field ->
+  let result = List.fold_left (fun root (field : field) ->
     Option.fold ~none:root ~some:(fun value -> put field.path value root) field.value)
       (`Assoc []) form.fields |> complete form.schema in
   Validation.validate_value ~schema:form.schema ~name:"Lane input" result
-let editable field = match field.value with
+let editable (field : field) = match field.value with
   | None -> "" | Some (`String text) -> text | Some value -> Yojson.Safe.to_string value
 let insert_text ~text form =
   if form.reviewing then form else
@@ -116,11 +116,11 @@ let lines form =
       (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error])
   else ["Tab/Up/Down:field · Left/Right:choice · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
         Printf.sprintf "Field %d/%d · PageUp/PageDown:scroll" (form.cursor+1) (List.length form.fields)] @
-    List.filter_map (fun (index,field) -> if index<>form.cursor then None else Some (
+    List.filter_map (fun (index,(field : field)) -> if index<>form.cursor then None else Some (
       let name = match member "title" field.schema with Some (`String title) -> title
         | _ -> String.concat "." field.path in
       (if index=form.cursor then "> " else "  ") ^ name ^ (if field.required then " *" else "") ^ ": " ^
       (if index=form.cursor && Option.is_some form.draft
        then Yojson.Safe.to_string (`String (Option.get form.draft))
        else Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)))
-      (List.mapi (fun index field -> index,field) form.fields)
+      (List.mapi (fun index (field : field) -> index,field) form.fields)

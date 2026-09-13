@@ -11,6 +11,7 @@ type successful_tool_completion =
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }
@@ -491,7 +492,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -961,6 +962,7 @@ let run_without_lifecycle ~required_native_posture ~official_client_continuation
            Error (internal_error ("Codex host-stop settlement failed: " ^ detail))
          | Ok settled ->
            session_state := settled;
+           on_session_settled settled;
            projected)
       | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
       | Recovery_required _ | Settled _ ->
@@ -1085,6 +1087,7 @@ let run_without_lifecycle ~required_native_posture ~official_client_continuation
          with
          | Ok settled ->
            session_state := settled;
+           on_session_settled settled;
            Ok ()
          | Error detail ->
            Error (internal_error ("Codex session settlement failed: " ^ detail))
@@ -1232,6 +1235,8 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
+  let settled_session = Atomic.make None in
+  let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
@@ -1291,7 +1296,7 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle ~official_client_continuation
+        run_without_lifecycle ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~keeper_name
@@ -1331,6 +1336,7 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
       ())
   in
   { result
+  ; settled_session = Atomic.get settled_session
   ; effect_disposition = Atomic.get effect_disposition
   ; successful_tool_completion = Atomic.get successful_tool_completion
   }

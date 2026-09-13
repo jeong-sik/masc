@@ -368,3 +368,7 @@ val defer_direct_gate_reconciliation : t -> operation_id:Chat_operation.Operatio
 
 val direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.gate_binding option, error) result
+
+val direct_gate_bindings : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_binding) list, error) result
+val reconcile_direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
+  binding:Keeper_semantic_execution.gate_binding -> waiting:Keeper_semantic_execution.gate_wait -> (unit, error) result

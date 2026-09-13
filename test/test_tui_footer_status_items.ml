@@ -285,7 +285,8 @@ let test_ansi_korean_hint_truncates_by_cells () =
       ~hints:"가나다라마바" ()
   in
   check_at_most_cells "four cells hold" 4 hopeless;
-  check_bool "and the cut is explicit" true (contains ~needle:"~" hopeless)
+  check_bool "and the cut is explicit" true
+    (contains ~needle:"\xe2\x80\xa6" hopeless)
 
 (* A workspace disagreement used to replace the whole screen and swallow every
    key but r. The reads it protects are refused where they happen, so the
@@ -493,7 +494,7 @@ let contains ~needle haystack =
 ;;
 
 (* When even the hints do not fit, the footer says where the rest of them
-   are. [~] alone reports a cut and stops; a reader cannot tell whether one
+   are. […] alone reports a cut and stops; a reader cannot tell whether one
    key is hidden or six, and the keys past the cut have no other way of being
    found on that surface.
 

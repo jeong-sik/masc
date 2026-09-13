@@ -809,8 +809,72 @@ def pdf_tools_status(binary):
         raise SetupError('MASC could not inspect PDF tool availability')
 
 
+@dataclass(frozen=True)
+class PresentationToolsReadiness:
+    available: bool
+    checks: tuple
+    pdf: PdfToolsReadiness
+
+
+def decode_presentation_tools_readiness(value, base_path=None):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.presentation_tools_readiness.v1'
+            or value.get('status') not in ('tools_available', 'unavailable')
+            or value.get('presentation_inspection') != 'not_run'
+            or value.get('scope') != 'workspace_host_runtime'
+            or not isinstance(value.get('base_path'), str) or not value['base_path']):
+        raise SetupError('MASC returned unreadable presentation tool readiness')
+    if base_path is not None and Path(value['base_path']).resolve() != Path(base_path).resolve():
+        raise SetupError('MASC checked presentation tools for another workspace')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 2
+            or any(not isinstance(row, dict) or row.get('status') not in ('missing', 'started', 'failed')
+                   or not isinstance(row.get('command'), str) for row in checks)
+            or {row.get('component') for row in checks} != {'python_pptx', 'libreoffice'}):
+        raise SetupError('MASC did not check both presentation dependencies')
+    pdf = decode_pdf_tools_readiness(value.get('pdf_tools'))
+    available = all(row['status'] == 'started' for row in checks) and pdf.available
+    if available != (value['status'] == 'tools_available'):
+        raise SetupError('MASC returned inconsistent presentation readiness')
+    return PresentationToolsReadiness(available=available, checks=tuple(checks), pdf=pdf)
+
+
+def presentation_tools_status(binary, base_path):
+    try:
+        result = subprocess.run([str(binary), 'prerequisite-actions', 'presentation-tools',
+                                 '--base-path', str(base_path)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SetupError('MASC did not answer about presentation tool availability in time')
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
+            raise ValueError('invalid catalog')
+        return decode_presentation_tools_readiness(catalog.get('dependency_readiness'), base_path)
+    except (ValueError, TypeError):
+        raise SetupError('MASC could not inspect presentation tool availability')
+
+
+def show_presentation_readiness(readiness):
+    print('Presentation tools are available on this workspace host; document inspection has not run.'
+          if readiness.available else
+          'Presentation tools are not ready on this workspace host. Install the missing dependencies and refresh detection.',
+          file=sys.stderr)
+    for row in readiness.pdf.checks:
+        print(terminal_text(row.command) + ': ' + terminal_text(row.status), file=sys.stderr)
+    for row in readiness.checks:
+        print(terminal_text(row['component']) + ': ' + terminal_text(row['status'])
+              + ' (' + terminal_text(row['command']) + ')', file=sys.stderr)
+        detail = row.get('detail') or row.get('output')
+        if detail:
+            print(terminal_text(detail), file=sys.stderr)
+
+
 def prerequisite_menu(binary, dependency, base_path=None, port=8945):
-    result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
+    if dependency == 'presentation-tools' and base_path is None:
+        raise SetupError('Presentation setup requires the selected workspace')
+    workspace_args = ['--base-path', str(base_path)] if dependency == 'presentation-tools' else []
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + workspace_args,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         catalog = json.loads(result.stdout)
@@ -831,6 +895,13 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
             return True
         if not actions:
             print('No automatic installation action is available on this host. Install Poppler through your operating system, then refresh detection.', file=sys.stderr)
+    if dependency == 'presentation-tools':
+        presentation = decode_presentation_tools_readiness(catalog.get('dependency_readiness'), base_path)
+        show_presentation_readiness(presentation)
+        if presentation.available:
+            return True
+        if not actions:
+            print('No automatic presentation installation action is available on this host.', file=sys.stderr)
     if dependency == 'docker' and base_path is not None:
         account_actions = docker_account_actions(binary)
         for row in account_actions:
@@ -849,7 +920,7 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
         return docker_account_action(binary, base_path, port, selected['id'])
     # The selected native action owns commands and privilege boundaries. Child
     # password prompts and vendor output keep the terminal, not a hidden pipe.
-    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']],
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']] + workspace_args,
                             stdout=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
@@ -863,18 +934,30 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
                 raise ValueError('inconsistent PDF recheck')
             if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
+        elif dependency == 'presentation-tools':
+            presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
+            if readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE) or (readiness == PDF_TOOLS_AVAILABLE) != presentation.available:
+                raise ValueError('inconsistent presentation recheck')
+            if state == 'commands_completed' and not presentation.available:
+                raise ValueError('presentation installation was not ready')
         elif readiness != 'not_checked':
             raise ValueError('invalid readiness')
         if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != PDF_TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
+    if dependency == 'presentation-tools':
+        show_presentation_readiness(presentation)
     if state == 'failed' or result.returncode:
         reason = receipt.get('reason')
         if isinstance(reason, str) and reason.strip():
             print(terminal_text(reason), file=sys.stderr)
         else:
             print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+    elif dependency == 'presentation-tools' and state == 'commands_completed':
+        print('Both presentation dependencies started successfully. This does not assert a document inspection.', file=sys.stderr)
+    elif dependency == 'presentation-tools' and state == 'commands_completed_recheck_required':
+        print('The selected presentation component is ready. Install the remaining component shown above, then refresh detection.', file=sys.stderr)
     elif dependency == 'pdf-tools' and state == 'commands_completed':
         print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
     elif state == 'external_step_pending':
@@ -1607,9 +1690,15 @@ def select_sandbox(binary, base_path, port=8945):
                          else 'PDF document inspection · install missing tools')
         except SetupError:
             pdf_label = 'PDF document inspection · could not check tools'
+        try:
+            presentation = presentation_tools_status(binary, base_path)
+            presentation_label = ('Presentation tools · available on workspace host' if presentation.available
+                                  else 'Presentation tools · install missing dependencies')
+        except SetupError:
+            presentation_label = 'Presentation tools · could not check dependencies'
         action = pick('4 · Prepare imp’s workspace', labels + [
             'Refresh after installing or starting a service',
-            'Show common choices' if advanced else 'Advanced sandbox choices', pdf_label, 'Finish later'])[0]
+            'Show common choices' if advanced else 'Advanced sandbox choices', pdf_label, presentation_label, 'Finish later'])[0]
         if action == len(rows):
             continue
         if action == len(rows) + 1:
@@ -1619,6 +1708,9 @@ def select_sandbox(binary, base_path, port=8945):
             prerequisite_menu(binary, 'pdf-tools', base_path=base_path, port=port)
             continue
         if action == len(rows) + 3:
+            prerequisite_menu(binary, 'presentation-tools', base_path=base_path, port=port)
+            continue
+        if action == len(rows) + 4:
             return None
         row = rows[action]
         if row['state'] != 'service_ready':

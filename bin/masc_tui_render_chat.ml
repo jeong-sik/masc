@@ -363,7 +363,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           let at = max 0 (min row.gutter_label_at width) in
           let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
-             trailing "~", which here would land in the middle of the gutter.
+             trailing "…", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's
@@ -572,8 +572,14 @@ let keeper_message_identity ~max_cells state keeper_name =
                ~configured_runtime:row.kr_runtime_id
                (Option.map (fun live -> live.tl_transcript) state.msg_live)
            in
+           (* The phase and the runtime are two facts, and the runtime label
+              starts with a word of its own ("configured:", "turn:"). Set side
+              by side with only a space, they read as one phrase -- the header
+              said "paused configured: anthropic.claude-sonnet-4", which names
+              no state a person can act on. The separator the rest of the row
+              uses keeps them apart. *)
            let prefix =
-             Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
+             Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
            let prefix_width = Message_layout.display_width prefix in

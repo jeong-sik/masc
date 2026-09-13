@@ -907,20 +907,22 @@ and no such field. whisper-cli detects the language (`-l auto`) but reports it
 on its own stderr, not on the wire. A caller that names a language is answered
 with that name.
 
-The dashboard microphone is not transcribed on a `whisper_cli`-only
-workspace. `voice-input.ts` posts what the browser's `MediaRecorder` recorded,
-under the recorder's own type (`audio/webm` when it names none), and the route
-answers WebM and M4A bodies before whisper-cli runs:
+The dashboard microphone uploads WAV. `MediaRecorder` records WebM in
+Chromium, which whisper-cli does not read, so `voice-wav.ts` decodes the
+recording with the browser's own decoder at 16 kHz, mixes it to mono and
+uploads 16-bit PCM — the format the TUI records. Measured in headless
+Chromium 149, with a synthesized sentence as the fake microphone and a
+`whisper_cli`-only workspace:
 
-```
-POST /api/v1/voice/transcribe   (raw webm body)
-→ 400 {"error":"all enabled STT endpoints failed: whisper-local: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM"}
-   0.004s wall
-```
+| What was posted | Size | Answer |
+|---|---|---|
+| the recording as `MediaRecorder` made it (`audio/webm;codecs=opus`, 2.5s) | 39,902 bytes | `400 … whisper-cli reads WAV, FLAC or MP3, and this audio is WebM` |
+| the same recording after `recordingToWav`, 22ms in the page | 78,764 bytes | `200 {"status":"transcribed","text":"오늘 음성 설정을 마쳤습니다.", …}` in 2.0s |
+| the source file the fake microphone played | — | the same text |
 
-The dashboard puts that `error` string in an error toast. Speaking into the
-TUI, which records WAV with `rec`, and posting WAV, FLAC or MP3 from a device
-are transcribed.
+A recording the browser cannot decode is not uploaded; the dashboard shows
+`녹음을 WAV 로 바꾸지 못했습니다: …` in an error toast. The upload is 32KB per
+second whatever is said — twice the WebM in the measurement above.
 
 ### What each route refuses, measured
 

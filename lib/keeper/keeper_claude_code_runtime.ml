@@ -8,6 +8,7 @@ module Session_store = Keeper_official_client_session_store
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -429,7 +430,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
   | Ok _ -> ()
 ;;
 
-let run_without_lifecycle ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -906,6 +907,7 @@ let run_without_lifecycle ~required_native_posture ~official_client_continuation
                 ("Claude Code host-stop settlement failed: " ^ detail))
          | Ok settled ->
            session_state := settled;
+           on_session_settled settled;
            projected)
       | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
         Error
@@ -1051,6 +1053,7 @@ let run_without_lifecycle ~required_native_posture ~official_client_continuation
              with
              | Ok settled ->
                session_state := settled;
+           on_session_settled settled;
                Ok ()
              | Error detail ->
                Error
@@ -1145,6 +1148,8 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
+  let settled_session = Atomic.make None in
+  let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
@@ -1213,7 +1218,7 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity_bytes ->
-          run_without_lifecycle ~official_client_continuation
+          run_without_lifecycle ~on_session_settled ~official_client_continuation
           ~required_native_posture
             ~runtime_id
             ~keeper_name
@@ -1253,5 +1258,5 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
             ~config)
         ())
   in
-  { result; effect_disposition = Atomic.get effect_disposition }
+  { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
 ;;

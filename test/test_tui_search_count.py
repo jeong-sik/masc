@@ -128,8 +128,15 @@ def run(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(process, fd, output, b"first deploy", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"/", b"/")
+        # At narrow widths the shared footer splits hint items on runs of
+        # spaces and rejoins them with two. Validate the literal query where
+        # it fits, then check counts/navigation in the compact layout too.
+        h.resize_and_wait(process, fd, output, rows=30, columns=200,
+                          needle=b"first deploy", controls=(h.FULL_REDRAW,))
         h.send_and_wait(process, fd, output, b"  deploy note  ", b"/  deploy note   (2)")
         h.send_and_wait(process, fd, output, b"\r", b"/  deploy note   (2) n/N")
+        h.resize_and_wait(process, fd, output, rows=30, columns=100,
+                          needle=b"(2) n/N", controls=(h.FULL_REDRAW,))
         # Both rows survive the pre-existing Memory filter. The phrase crosses
         # claim/category and has spaces at both ends: n/N must use the same
         # text and normalization as the filter, not just report its count.

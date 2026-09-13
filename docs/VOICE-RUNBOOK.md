@@ -314,9 +314,9 @@ answered `200` in 0.12s.
 `MASC_ADMIN_TOKEN` mints one in memory and writes no file for it:
 
 ```
-masc login --base-path ~/work --client-env MASC_TOKEN
+masc login --base-path <base> --client-env MASC_TOKEN
   role: admin
-  raw_token_file: ~/work/.masc/auth/local-admin.token
+  raw_token_file: <base>/.masc/auth/local-admin.token
 ```
 
 That file's token was accepted by `/voice/transcribe` on a server started
@@ -742,8 +742,9 @@ its answer. Hearing the answer is a third call, and only when the keeper spoke
 — see [Talking to imp, measured](#talking-to-imp-measured).
 
 ```sh
-masc login --base-path ~/work --client-env MASC_TOKEN
-TOKEN=$(cat ~/work/.masc/auth/local-admin.token)
+BASE=~/work
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \

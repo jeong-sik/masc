@@ -294,11 +294,11 @@ let lines ?(height=24) ~width view =
                | Some item -> [""; "Instance details"]
                    @ instance_lines {view with instance_cursor=0} [item])
         | Rows ->
-            ["Evidence target: " ^ (match selected_instance view with
+            window view.row_cursor (fun (row : Row.row) ->
+              (if List.mem row.id view.selected then "[x] " else "[ ] ") ^ row.lane_id ^ " · " ^ row.title) snapshot.output.rows
+            @ ["Evidence target: " ^ (match selected_instance view with
               | None -> "none · select an instance before exporting"
               | Some item -> item.title ^ " · " ^ item.id)]
-            @ window view.row_cursor (fun (row : Row.row) ->
-              (if List.mem row.id view.selected then "[x] " else "[ ] ") ^ row.lane_id ^ " · " ^ row.title) snapshot.output.rows
             @ (match selected_row view with
                | None -> ["No observations. Tab to Instances and press o to observe a selected instance."]
                | Some row ->
@@ -333,7 +333,9 @@ let lines ?(height=24) ~width view =
               "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result))) in
-  header @ error @ draft @ action @ documents @ content @ receipt
+  let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
+    (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
+  compact header @ compact error @ draft @ documents @ content @ action @ error @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))

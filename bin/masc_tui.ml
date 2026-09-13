@@ -16212,7 +16212,7 @@ and is loaded on demand through keeper_skill.
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" when view.focus = Addons.Instances -> selected (fun id -> Addons.Observe id)
                      | "d" when view.focus = Addons.Instances -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with scroll=0; focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "\t" | "tab" -> update { view with scroll=0; document_key=None; focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->
                          let terminal_rows, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -16221,13 +16221,14 @@ and is loaded on demand through keeper_skill.
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
+                         let view = {view with document_key=None;scroll=0} in
                          (match view.snapshot, view.focus with
                           | Some snapshot, Addons.Configurations ->
                               let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
                               update {view with scroll=0; configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with scroll=0; instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with scroll=0; row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | None, _ -> ())
+                          | None, _ -> update view)
                      | " " when view.focus = Addons.Rows ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })

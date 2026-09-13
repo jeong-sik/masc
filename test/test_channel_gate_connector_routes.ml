@@ -189,6 +189,59 @@ let test_slack_default_paths_resolve_under_base_path () =
                       (Sys.file_exists
                          (Filename.concat cwd_dir ".gate/runtime/slack/bindings.json"))))))))
 
+(* F412 — the Slack credential verdict is a closed sum, not an empty-string
+   sentinel. [status_json] used to build the credential message as a string,
+   with "" meaning "no error", and re-parse that "" back to None three lines
+   later before folding it into [error]. This proves the verdict is now typed
+   end to end: [credential_error ()] returns [None] when both tokens are set,
+   [Some Missing_app_token] when SLACK_APP_TOKEN is blank, and the same value
+   is what [status_json] folds into [error] — present in the second case,
+   absent in the first. The helper matches every constructor with no
+   catch-all, so adding or renaming an arm fails to compile here. *)
+let credential_error_label = function
+  | Channel_gate_slack_state.Connector_unavailable _ -> "connector_unavailable"
+  | Channel_gate_slack_state.Missing_app_token -> "missing_app_token"
+  | Channel_gate_slack_state.Missing_bot_token -> "missing_bot_token"
+
+let contains ~needle haystack =
+  let n = String.length needle in
+  let rec scan i =
+    i + n <= String.length haystack
+    && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+  in
+  scan 0
+
+let test_slack_credential_error_is_a_closed_sum () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir (fun () ->
+    let app_token_message =
+      Channel_gate_slack_state.credential_error_message
+        Channel_gate_slack_state.Missing_app_token
+    in
+    with_env "SLACK_APP_TOKEN" (Some "xapp-test") (fun () ->
+      with_env "SLACK_BOT_TOKEN" (Some "xoxb-test") (fun () ->
+        check (option string) "both tokens present => no verdict" None
+          (Option.map credential_error_label
+             (Channel_gate_slack_state.credential_error ()));
+        let error =
+          Channel_gate_slack_state.status_json ()
+          |> U.member "error" |> U.to_string
+        in
+        check bool "error carries no credential message" false
+          (contains ~needle:app_token_message error)));
+    with_env "SLACK_APP_TOKEN" None (fun () ->
+      with_env "SLACK_BOT_TOKEN" (Some "xoxb-test") (fun () ->
+        check (option string) "blank app token => Missing_app_token"
+          (Some "missing_app_token")
+          (Option.map credential_error_label
+             (Channel_gate_slack_state.credential_error ()));
+        let error =
+          Channel_gate_slack_state.status_json ()
+          |> U.member "error" |> U.to_string
+        in
+        check bool "error carries the app token message" true
+          (contains ~needle:app_token_message error))))
+
 let test_telegram_connector_json_reads_runtime_status () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "telegram" dir (fun () ->
@@ -585,5 +638,7 @@ let () =
             test_telegram_status_surfaces_binding_store_failure;
           test_case "slack connector json carries connector_id/display_name" `Quick
             test_slack_connector_json_carries_identity;
+          test_case "slack credential error is a closed sum" `Quick
+            test_slack_credential_error_is_a_closed_sum;
         ] );
     ]

@@ -2614,7 +2614,22 @@ let test_the_config_frame_is_the_shared_contract () =
   check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
   check int "and no row is filled by hand" 0 (in_config "box_empty");
   check int "the source height is the one the cursor reads" 1
-    (in_config "config_content_height")
+    (in_config "config_content_height");
+  (* The panes take their keys from the table. Params, prompts, presets and
+     models spelled their own rows, three of them in Korean on an English
+     screen, and presets offered PgUp/PgDn, which its handler never paged. *)
+  List.iter
+    (fun (binding_name, callee) ->
+      check int (binding_name ^ " takes its keys from the table") 1
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name ~callee))
+    [ "render_config", "Masc_tui_keys.footer_hints_config"
+    ; "render_runtime_params", "Masc_tui_keys.footer_hints_config"
+    ; "render_prompt_registry", "Masc_tui_keys.footer_hints_config"
+    ; "render_presets", "Masc_tui_keys.footer_hints_config"
+    ; "render_themes", "Masc_tui_keys.footer_hints_config"
+    ; "render_config_models", "Masc_tui_keys.footer_hints_config"
+    ]
 ;;
 
 (* Code and Resources open on a title row -- name, clock, connection badge --

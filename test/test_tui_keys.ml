@@ -81,13 +81,14 @@ let test_a_key_is_spelled_one_way_across_every_surface () =
         1 (List.length seen))
     spellings
 
-(* The handler pages the Config body in both panes (masc_tui.ml walks
-   [Config when config_pane = Config_prompts] and [= Config_runtime]), and the
-   footer advertised the keys while the table did not -- so the help sheet,
-   which projects from the table, could not answer what PgUp does here. *)
+(* The handler pages the Config body in three panes (masc_tui.ml walks
+   [Config when config_pane = Config_prompts || = Config_presets] and
+   [= Config_runtime]), and the footer advertised the keys while the table did
+   not -- so the help sheet, which projects from the table, could not answer
+   what PgUp does here. *)
 let test_config_declares_the_page_keys_it_handles () =
   (* [for_surface] takes a surface, not a pane, so the sheet cannot narrow this
-     to the two panes the dispatcher pages. The help text is where the sheet
+     to the three panes the dispatcher pages. The help text is where the sheet
      says so -- without it the key reads as working on all seven. *)
   match
     List.find_opt
@@ -108,7 +109,8 @@ let test_config_declares_the_page_keys_it_handles () =
       in
       Alcotest.(check bool) "and says it pages the runtime.toml pane" true
         (names "runtime.toml");
-      Alcotest.(check bool) "and the prompts pane" true (names "prompts")
+      Alcotest.(check bool) "and the prompts pane" true (names "prompts");
+      Alcotest.(check bool) "and the presets pane" true (names "presets")
 
 let test_chat_help_names_memory_cycle () =
   let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in
@@ -957,8 +959,11 @@ let test_fleet_total_cost () =
    is the only place the Config screen names a surface the ring folds under it,
    and a reader who cannot see it has no way to the surface but the palette. *)
 let test_config_footer_names_child_hops () =
+  (* The five short labels after f are pane-scoped writes and views that were
+     in no list at all -- which pane each belongs to is in the help the ?
+     overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -1010,7 +1015,7 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("pane availability of " ^ key) expected
         (footer_has_key key hints)
     in
-    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts ]);
+    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts; Config_presets ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
@@ -1018,6 +1023,35 @@ let test_config_pane_footer_actions () =
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
     List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
+  (* The prompts pane's read-only assets: the registry's edit keys only answer
+     with a notice there, so the row does not offer them, and [o] goes back. *)
+  let assets = Masc_tui_keys.footer_hints_prompt_assets in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row leaves out " ^ key) false
+        (footer_has_key key assets))
+    [ "a"; "i"; "e"; "x" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row keeps " ^ key) true
+        (footer_has_key key assets))
+    [ "j/k"; "PgUp/PgDn"; "p"; "9"; "Esc"; "q" ];
+  Alcotest.(check bool) "and o names the way back" true
+    (List.exists (String.equal "o:registry") (String.split_on_char ' ' assets));
+  (* A cut row keeps the pane's own keys over the ones every pane shares. *)
+  let at_120 hints = fitted_footer ~cols:120 hints in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
+    [ "n"; "u"; "PgUp/PgDn" ];
+  Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
+    (footer_has_key "o" (at_120 assets));
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
+    [ "Enter"; "E"; "x" ];
   List.iter (fun pane ->
     List.iter (fun cols ->
       let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in

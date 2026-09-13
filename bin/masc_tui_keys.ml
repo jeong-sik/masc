@@ -27,9 +27,9 @@ let config_bindings =
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages the runtime.toml and prompts panes; the other five \
-             panes take the key and do nothing with it",
-      Some [ Config_runtime; Config_prompts ]
+      ~help:"pages runtime.toml, and the detail of prompts and presets; the \
+             other four panes take the key and do nothing with it",
+      Some [ Config_runtime; Config_prompts; Config_presets ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -52,6 +52,28 @@ let config_bindings =
       Some [ Config_params; Config_prompts; Config_themes ]
   ; b Act "f" "filter"
       ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b Act "n" "new"
+      ~help:"on presets, name a preset holding the configuration as it stands",
+      Some [ Config_presets ]
+  ; b Act "u" "restore"
+      ~help:"on presets, put the selected one back; press twice to confirm",
+      Some [ Config_presets ]
+  ; b Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b Act "a" "fragments"
+      ~help:"on prompts, show or hide the internal pieces the main prompts \
+             are built from; not on the runtime assets reading",
+      Some [ Config_prompts ]
+  ; b Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
   ; b Act "Esc" "overview", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None
@@ -628,13 +650,55 @@ let hints_of_bindings bindings =
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
 
+(* A pane's own keys, then the keys all seven panes share. *)
+let config_pane_bindings pane =
+  let own =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with
+        | Some panes when List.mem pane panes -> Some binding
+        | Some _ | None -> None)
+      config_bindings
+  in
+  let shared =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with None -> Some binding | Some _ -> None)
+      config_bindings
+  in
+  (own, shared)
+
+(* The pane's own keys lead the row and the shared ones follow. A cut row
+   gives up its back first, and the shared keys are the ones a reader already
+   met on the pane before -- the reason r, Tab and q close every row. Sorted
+   as one list, the hops to Runtime, Resources and Tools outlived every key a
+   pane answers itself: at 120 columns presets lost n and u, and the runtime
+   assets lost o, their only way back to the registry. *)
+let config_row ~own ~shared =
+  String.concat "  "
+    (List.filter
+       (fun row -> not (String.equal row ""))
+       [ hints_of_bindings own; hints_of_bindings shared ])
+
 let footer_hints_config ~pane =
-  config_bindings
-  |> List.filter_map (fun (binding, panes) ->
-       match panes with
-       | None -> Some binding
-       | Some panes -> if List.mem pane panes then Some binding else None)
-  |> hints_of_bindings
+  let own, shared = config_pane_bindings pane in
+  config_row ~own ~shared
+
+(* The prompts pane's read-only half. [o] swaps the registry for the assets
+   shipped with the binary, and there [a], [i], [e] and [x] answer with a
+   notice rather than acting (masc_tui.ml), so the row leaves them out and
+   names where [o] goes back to. *)
+let footer_hints_prompt_assets =
+  let registry_only = [ "a"; "i"; "e"; "x" ] in
+  let own, shared = config_pane_bindings Config_prompts in
+  let own =
+    own
+    |> List.filter (fun binding -> not (List.mem binding.key registry_only))
+    |> List.map (fun binding ->
+           if String.equal binding.key "o" then { binding with label = "registry" }
+           else binding)
+  in
+  config_row ~own ~shared
 
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the

@@ -112,7 +112,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
   denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
 
 let test_capture_failures_and_corruption () = with_fixture (fun config ->
-  let p = post ~author:"producer" ~visibility:Board.Direct "Private original" in
+  let p = post ~author:"producer" ~visibility:Board.Direct "@recipient Private original" in
   let require_error label = function Error _ -> () | Ok _ -> fail label in
   Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[board_ref p]
     |> require_error "Goal captured private source";

@@ -91,6 +91,16 @@ function LibrarianRuntimeContract({
   `
 }
 
+function mutationStatus(response: Awaited<ReturnType<typeof savePromptOverride>>, fallback: string): string {
+  const message = response.message ?? fallback
+  switch (response.curator_refresh?.status) {
+    case 'queued': return `${message} · workspace curator 재확인 요청됨. 실행 완료는 아직 확인되지 않았습니다.`
+    case 'no_owner': return `${message} · 활성 workspace curator가 없어 재확인을 요청하지 못했습니다.`
+    case 'unavailable': return `${message} · workspace curator 재확인 요청 실패: ${response.curator_refresh.detail}`
+    default: return message
+  }
+}
+
 const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'missing']
 
 function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
@@ -118,7 +128,7 @@ function WorkspaceCuratorRuntimeContract({ prompt, onOpen }: {
       <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
         <p class="my-1"><code>workspace_memory_inventory</code>: <code>sources</code>의 Keeper별 원문과 근거 참조, <code>snapshots</code>의 저장 버전·변경·철회 기록, <code>gaps</code>의 누락·읽기 실패를 함께 전달합니다.</p>
         <p class="my-1">레인을 설정하면 기억 변경·서버 시작 시 입력을 확인하고, 같은 성공 입력은 기존 제안을 재사용합니다.
-          실행 중에는 해당 입력을 유지하며, 저장한 프롬프트는 다음 입력 확인 때 사용합니다.
+          실행 중에는 해당 입력을 유지합니다. 이 화면에서 저장·해제하면 활성 curator에 재확인을 요청하며, 진행 중인 실행 다음에 변경 내용을 사용합니다.
           모델은 <code class="break-all">runtime.exact_output_lanes.workspace_curator_exact.slots</code>에서 지정합니다.</p>
         <p class="my-1">결과는 검증 전 제안(<code>model_proposed</code>)입니다. Keeper에게는 제안 ID를 알려주며, 실제 원문은 <code>keeper_workspace_memory_read</code>로 확인합니다.</p>
         <p class="my-1">실행별 실제 입력과 선택된 실행 대상(slot)은 Internal Agents → Workspace Curator에서 확인합니다.</p>
@@ -419,7 +429,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
       if (!response.ok) {
         throw new Error(response.error ?? 'prompt override 실패')
       }
-      setStatus(response.message ?? 'override 설정됨')
+      setStatus(mutationStatus(response, 'override 설정됨'))
       await loadPrompts(selectedPrompt.key)
     } catch (err) {
       setError(errorToString(err))
@@ -439,7 +449,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
       if (!response.ok) {
         throw new Error(response.error ?? 'prompt override clear failed')
       }
-      setStatus(response.message ?? 'override cleared')
+      setStatus(mutationStatus(response, 'override cleared'))
       await loadPrompts(selectedPrompt.key)
     } catch (err) {
       setError(errorToString(err))

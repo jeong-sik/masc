@@ -146,3 +146,7 @@ in PR #35789 addresses this distinction and was not loaded in this run.
 The complete `fd441e234f58f34e2889d8fde0fc20d3ea2be4d1` integration candidate
 passed native build/qualification in run 34733001958. Its own multi-channel run
 remains separate from this controlled comparison.
+
+[Full native fd441 route and gesture follow-up](full-native-fd441/README.md) retains the successful canonical-path harness and failed startup cohort separately.
+
+[Observed-claims instruction trial](observed-claims-910/README.md) retains the separately sourced Skill override and its actual returned body.

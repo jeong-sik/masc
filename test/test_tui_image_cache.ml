@@ -265,6 +265,46 @@ let test_explicit_retry_recovers_without_background_loop () =
     check int "no extra attempt" 2 !attempts;
     Preview.clear_cache ())
 
+(* A direct image link is never fetched as a page, so nothing computes a mosaic
+   for it and there is no refusal for a retry to claim. The retry used to do
+   nothing: the body its first view cached stayed, and every later view -- and
+   every restart, since it is a file -- reused it. *)
+let test_a_direct_image_retry_drops_the_body_its_first_view_cached () =
+  with_cache (fun cache_dir run ->
+    let module Preview = Masc_tui_link_preview in
+    let url = "https://fixture.invalid/direct.png" in
+    Preview.clear_cache ();
+    serve cache_dir png_header;
+    executable cache_dir "ffmpeg" "exit 1";
+    ignore (unwrap (Cache.download ~run ~cache_dir url));
+    check bool "no mosaic was ever decided for the link" true
+      (Preview.mosaic_lookup url = None);
+    converter_succeeds cache_dir "ffmpeg" "rgbRGB";
+    let attempts = ref 0 in
+    let retry () =
+      incr attempts;
+      Cache.invalidate_download ~cache_dir url;
+      let input = unwrap (Cache.download ~run ~cache_dir url) in
+      let output_path = Filename.concat cache_dir "direct.raw" in
+      let command = Printf.sprintf "ffmpeg -i %s %s"
+        (Filename.quote input) (Filename.quote output_path) in
+      match Cache.run_decoder ~run ~output_path command with
+      | Error failure ->
+        Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
+      | Ok path ->
+        Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))
+    in
+    Preview.retry_mosaic ~retry url;
+    check int "the explicit retry ran" 1 !attempts;
+    check string "and fetched the body again" "xx"
+      (read_file (Filename.concat cache_dir "fetches"));
+    (match Preview.mosaic_lookup url with
+     | Some (Preview.Mosaic (_ :: _)) -> ()
+     | Some (Preview.Mosaic [] | Preview.Refused _) | None -> fail "retry produced no mosaic");
+    Preview.retry_mosaic ~retry url;
+    check int "a picture that rendered is not retried again" 1 !attempts;
+    Preview.clear_cache ())
+
 let test_overlapping_load_and_retry_share_one_claim () =
   let module Preview = Masc_tui_link_preview in
   Preview.clear_cache ();
@@ -427,6 +467,8 @@ let () =
             test_v_missing_converters_retains_input
         ; test_case "explicit retry recovers without background loop" `Quick
             test_explicit_retry_recovers_without_background_loop
+        ; test_case "a direct image retry drops its cached body" `Quick
+            test_a_direct_image_retry_drops_the_body_its_first_view_cached
         ; test_case "overlapping initial load and retry share one claim" `Quick
             test_overlapping_load_and_retry_share_one_claim
         ; test_case "failed computation releases its claim" `Quick

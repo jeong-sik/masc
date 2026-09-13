@@ -15,7 +15,10 @@ val load_persisted_posts : store -> (int, string * exn) result
 (** Load posts from disk into [store].  Returns [Ok loaded_count] on success
     (including when the persistence file is absent: [Ok 0]).  Returns
     [Error (path, cause)] when the file existed but could not be parsed or
-    read.  Caller decides how to surface the failure — earlier behaviour
+    read, or any nonempty line has invalid JSON/current row schema. Valid rows
+    still load for ordinary Board use; [store.posts_load_result] retains the
+    failed outcome for strict evidence readers until a successful reload.
+    Valid expired rows do not count as malformed. Caller decides how to surface the failure — earlier behaviour
     swallowed the exception inside this function, leaving a partially loaded
     store undistinguishable from a clean one.  [Eio.Cancel.Cancelled] is
     propagated unchanged. *)

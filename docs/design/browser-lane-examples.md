@@ -43,7 +43,8 @@ TUI에서는 `:` → `go Browser Lane`, `l` / `a`로 source를 선택한다.
 
 ## 열린 업무 화면에서 근거 찾기
 
-“열어둔 PR에서 실패한 CI 원인을 확인해줘” 같은 요청이면 우선 탭 목록에서
+TUI의 `y` 관측이 주어졌으면 그 clientId·tabId·URL과 선택 영역에서 이어간다.
+관측이 없는 “열어둔 PR에서 실패한 CI 원인을 확인해줘” 같은 요청이면 탭 목록에서
 해당 제목과 URL을 찾는다. 배열 순서로 id를 추측하지 않는다.
 
 ```json
@@ -85,7 +86,8 @@ BrowserRead {"lane":"automation","tabId":<반환된 id>,"maxChars":12000}
 `BrowserRead mode=elements`로 현재 컨트롤의 selector, 상태, 선택 항목의
 실제 value를 관측한다. 그 결과로 `BrowserAct`의 click, fill, press, select를
 호출하고 다시 읽어 결과를 확인한다. scroll, back, forward, reload도 지원한다.
-조작은 automation에서 지원하며, live는 읽기와 캡처를 제공한다.
+이 `BrowserAct` 동작들은 automation용이다. live 조작은 아래의
+`BrowserInteract` 경로를 사용한다.
 
 ```text
 BrowserRead {"lane":"automation","tabId":<id>,"mode":"elements"}
@@ -126,7 +128,10 @@ BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"
 ```
 
 텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
-현재 DOM 컨트롤과 selector를 관측한다. 좌표 기반 클릭은 지원하지 않는다. fill은
+현재 DOM 컨트롤과 selector를 관측하거나 `mode=scene`의 documentId/nodeId를 쓴다.
+좌표 클릭·스크롤은 screenshot의 현재 `viewport`와 정규화된 `point`를 전달하는
+`click_at`·`scroll_at`으로 수행한다. live 클릭은 DOM activation이며 trusted drag는
+automation에서만 지원된다. fill은
 input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 
@@ -143,18 +148,22 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 |---|---|---|
 | 탭 목록·텍스트·컨트롤 관측 | 지원 | 지원 |
 | 명시한 탭의 viewport 캡처 | 지원 | 지원 |
-| 탭 열기·이동·닫기 | 미지원 | 지원 |
+| 세션 관리·직접 URL 이동·탭 열기/닫기 | 미지원 | 지원 |
+| 관측된 같은 탭 링크 따라가기 | 지원 | 지원 |
 | 클릭·입력·스크롤 (`BrowserInteract`) | 지원 | 지원 |
+| screenshot 좌표 클릭·스크롤 | 지원 | 지원 |
+| trusted pointer drag | 미지원 | 지원 |
 | 네이티브 키·선택·히스토리 (`BrowserAct`) | 미지원 | 지원 |
-| 중첩 iframe·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
+| framePath로 중첩 iframe 대상 지정·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
 | 다운로드 완료 관측·artifact 읽기 | 미지원 | 지원 |
-| shadow root 대상 지정 | 미지원 | 미지원 |
+| 전용 shadow-root locator | 미지원 | 미지원 |
 
 텍스트 모드는 URL, 제목, 전체 문자 수(`chars`)와 잘림 여부(`truncated`)를
 반환하며 기본 한도는 50,000 code points다. 컨트롤 관측은 최대 200개이며
 비밀번호와 파일 입력 값은 제외한다. 전체 접근성 트리나 접힌 영역의 내용까지
 포함하지 않는다. 캡처는 전체 페이지를 이어 붙인 이미지가 아니며, 캡처 전후
-URL 변경은 검출하지만 같은 URL에서의 화면 변경까지 보장하지 않는다.
+URL 변경을 검출한다. live에서는 documentId·viewport 크기·스크롤 위치도 비교하지만,
+이 값들이 같은 상태의 모든 픽셀 변경을 검출하는 것은 아니다.
 
 다운로드 링크를 클릭한 뒤 `BrowserRead`에 `lane=automation`, 관측한 `tabId`,
 `mode=downloads`를 전달하면 완료 상태와 artifact 참조를 읽는다. 반환된

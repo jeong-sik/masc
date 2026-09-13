@@ -221,32 +221,6 @@ let document_markdown ~width body =
   markdown_with_closing ~closing:Ansi.reset ~width body
 
 
-(* What a page says when it holds nothing, in one place.
-
-   These were spelled at every surface that draws a page -- nine copies of the
-   failure line and nine of the unread one -- and the unread copies said only
-   that nothing had loaded. [r] is what loads it, and the reader was left to
-   find that out somewhere else. Two surfaces did name the key, which is how a
-   reader on the others learned there was nothing to learn. *)
-let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
-
-let page_failed_note = "  (load failed; nothing here is a reading)"
-
-(* What a title says where its counts would go. A read nobody has asked for and a
-   read that failed both leave the snapshot empty, and the title is the row on
-   top, so it is the answer that gets read: "not loaded" after a failure sends
-   the operator to [r] while the server's reason sits in red two rows below.
-
-   The same distinction the body makes with {!page_unread_note} and
-   {!page_failed_note}, in the words a title has room for. The Memory header was
-   taught it in #35457; every other surface still said "not loaded" for both. *)
-let title_unread = "(not loaded)"
-let title_failed = "(load failed)"
-
-let title_missing_reading ~error =
-  if Option.is_some error then title_failed else title_unread
-
-
 (* A level meter, only while a capture is running.
 
    A dead input device and a quiet room both end the same way — an empty draft
@@ -1068,6 +1042,10 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+(* top + title + divider + bottom + footer: the rows [surface_chrome] draws
+   itself. Everything else is the body's budget. *)
+let surface_chrome_rows = 5
+
 let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1075,10 +1053,7 @@ let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
   box_top buf cols;
   box_line buf cols title;
   box_divider buf cols;
-  (* top + title + divider + bottom + footer: the five rows the contract
-     itself draws. Everything else is the body's budget. *)
-  let contract_rows = 5 in
-  let budget = max 1 (rows - contract_rows) in
+  let budget = max 1 (rows - surface_chrome_rows) in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
      shoves the bottom gap and the footer off screen, which breaks every
@@ -1340,12 +1315,15 @@ let data_unreliable_close = ")"
 
 
 let data_unreliable_row ~cols err =
+  let err = Tui_decode.sanitize_terminal_text err in
   let room =
     max 8
       (framed_inner_width cols
        - Message_layout.display_width data_unreliable_open
        - Message_layout.display_width data_unreliable_close)
   in
+  (* Generic HTTP bodies and diagnostics carry their actionable prefix.
+     Transport failures put the request target before their verbose reason. *)
   (Theme.bad ())
   ^ data_unreliable_open
   ^ fit_width err room
@@ -1854,13 +1832,8 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
       ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
-  let draw stop label =
-    if stop = tab then
-      (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ label ^ Ansi.reset
-  in
-  String.concat "  "
-    (screen_title " MASC Planning" :: List.map2 draw stops labels)
+  screen_title " MASC Planning" ^ "  "
+  ^ tab_strip (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2497,21 +2470,17 @@ let tools_scrolled_for_lines state display_lines =
    no mark on it: it said the key exists and not where pressing it lands, and
    a reader on runtime.toml was told neither. *)
 let config_pane_strip (state : state) =
-  let name pane label =
-    if state.config_pane = pane then
-      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ " " ^ label ^ Ansi.reset
-  in
+  let name pane label = (label, state.config_pane = pane) in
   Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
-  ^ String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Config_runtime "runtime.toml"
-    ; name Config_models "models"
-    ; name Config_params "params"
-    ; name Config_prompts "prompts"
-    ; name Config_presets "presets"
-    ; name Config_themes "themes"
-    ; name Config_voice "voice"
-    ]
+  ^ tab_strip
+      [ name Config_runtime "runtime.toml"
+      ; name Config_models "models"
+      ; name Config_params "params"
+      ; name Config_prompts "prompts"
+      ; name Config_presets "presets"
+      ; name Config_themes "themes"
+      ; name Config_voice "voice"
+      ]
 
 
 let config_metadata_summary (state : state) =
@@ -2542,34 +2511,21 @@ let runtime_config_status_lines state ~cols =
     |> List.map (fun text -> tone, text)) lines
 
 
-(* The sheet's masthead. It carries no keys and no surface name: both scroll
-   away with it, and both are said by rows that do not. The overlay's own title
-   row is fixed chrome -- it draws "hints on/off . [h] toggle . [Esc] close" at
-   every width, above the divider -- and the sheet's first section names the
-   active surface two rows under this. *)
-let help_ascii_banner ~cols (_state : state) =
-  let inner_width = max 1 (framed_inner_width cols) in
-  let bar_char = "\xe2\x94\x80" in
-  let repeat_utf8 str count =
-    let buf = Buffer.create (String.length str * count) in
-    for _ = 1 to count do Buffer.add_string buf str done;
-    Buffer.contents buf
-  in
-  if inner_width >= 72 then
-    [ "  " ^ (Theme.info ()) ^ "\xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97" ^ Ansi.reset
-      ^ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "M A S C" ^ Ansi.reset
-      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent Shared Context" ^ Ansi.reset
-    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
-      ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
-    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
-    ; ""
-    ]
-  else
-    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent Shared Context ]" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
-    ; ""
-    ]
+(* The sheet's masthead: the product's name and a blank row. It carries no keys
+   and no surface name: both scroll away with it, and both are said by rows
+   that do not. The overlay's title row is fixed chrome that says whether hints
+   are on, the footer row under the frame draws h and Esc, and the sheet's
+   first section names the active surface two rows under this.
+
+   It was a three-row box-drawing logo with a tagline and a rule under it, five
+   rows at 72 columns and up. The title row above already says MASC Cheat
+   Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
+   opened to read. *)
+let help_masthead (_state : state) =
+  [ "  " ^ Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ "MASC"
+    ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
+  ; ""
+  ]
 
 
 (* The [?] help screen: every binding, grouped by the surface that answers
@@ -2577,42 +2533,43 @@ let help_ascii_banner ~cols (_state : state) =
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines (state : state) =
-  let format_key key =
-    let trimmed = String.trim key in
-    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
-      trimmed
-    else
-      "[" ^ trimmed ^ "]"
-  in
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
+    (* One heading style, named as the key table names the section. The
+       surface being read wears the filled mark; every other section the hollow
+       one. The current section used to read "ACTIVE: OVERVIEW" in capitals,
+       Global was renamed "GLOBAL NAVIGATION", and the rest were mixed case, so
+       three spellings sat on one sheet and the table's own names appeared on
+       only one of them. *)
     let header_line =
       if is_current then
         let marker_len = String.length Masc_tui_keys.here_marker in
         let base_title = String.sub title 0 (String.length title - marker_len) in
-        (Theme.warn ()) ^ "\xe2\x97\x88 " ^ Ansi.bold ^ (Theme.info ())
-        ^ "ACTIVE: " ^ String.uppercase_ascii base_title ^ Ansi.reset
-      else if String.equal title "Global" then
-        (Theme.info ()) ^ "\xe2\x97\x88 " ^ Ansi.bold
-        ^ "GLOBAL NAVIGATION" ^ Ansi.reset
+        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ base_title ^ Ansi.reset
       else
         Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
     in
+    (* The key as the table spells it, in its own column. Each key used to be
+       wrapped in brackets unless it already started and ended with one, so
+       [/] for find and [ / ] for previous / next -- the bracket keys
+       themselves -- sat on neighbouring rows looking like the same key. The
+       column already sets the key apart, and the footer and the slash
+       commands below draw theirs without brackets. *)
     header_line
     :: List.map
          (fun (key, action) ->
            Printf.sprintf "  %s%-16s%s %s"
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (format_key key)
+             (String.trim key)
              Ansi.reset
              action)
          entries
     @ [ "" ]
   in
   let slash_commands =
-    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
+    (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -3787,6 +3744,7 @@ let answering_lines (state : state) =
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error
+    ~observed_at:state.keeper_turns_observed_at
     ~finishes:state.keeper_turn_finishes
     state.keeper_turns
 

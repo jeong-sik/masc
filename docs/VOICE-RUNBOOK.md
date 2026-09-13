@@ -123,7 +123,7 @@ point the workspace and the model connection are already saved.
 The workspace this walk wrote answered:
 
 ```
-masc voice-verify --audio utterance.wav
+masc voice-verify --base-path <workspace> --audio utterance.wav
   macos-say       macos_say     answered: 85908 bytes of audio in "Yuna"
   whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
 ```
@@ -134,7 +134,21 @@ masc voice-verify --audio utterance.wav
 masc init --base-path ~/work
 masc voice-local-setup --base-path ~/work --list-voices
 masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc voice-verify --base-path ~/work --audio utterance.wav
 ```
+
+Every command names the workspace. The voice loader finds `runtime.toml`
+through the environment, and a directory is not taken as a workspace just
+because the command runs inside it: with no `--base-path`, no `MASC_BASE_PATH`
+and no recorded default, `voice-verify` answers
+
+```
+voice config missing: no workspace is resolved (MASC_BASE_PATH and MASC_CONFIG_DIR are unset), and no <cwd>/.masc/voice_config.json
+```
+
+and names the lookup it did make in the other cases — `no masc configuration
+at <base>/.masc/config` for a directory never initialized, `no [voice] section
+in <base>/.masc/config/runtime.toml` for a workspace without one.
 
 Voice is a section of the configuration `masc init` writes. On a directory
 that was never initialized, `voice-local-setup --voice` answers, exit 1 and
@@ -201,8 +215,8 @@ other keeper speaks in `[voice.tts] default_voice`. Measured on the
 configuration above:
 
 ```
-masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
-masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+masc voice-verify --base-path ~/work --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --base-path ~/work --agent beta   →   85908 bytes of audio in "Yuna"
 ```
 
 A `default_voice` on the **endpoint** outranks both, for every keeper at that
@@ -236,22 +250,22 @@ A name that is not in `say -v '?'` is a mapping that never took.
 
 ### The whole loop, measured
 
-A fresh workspace, no server started, nothing listening on a port:
+A fresh workspace, run from another directory with only `HOME` and `PATH` set,
+no server started, nothing listening on a port:
 
 ```
-masc init --base-path /tmp/fresh                      0.79s   1,504 lines written
-masc voice-local-setup --base-path /tmp/fresh \
-     --list-voices                                    3.05s   184 voices, 9 Korean
-masc voice-local-setup --base-path /tmp/fresh \
-     --voice Yuna                                     0.59s   9 lines added
-masc voice-local-setup --base-path /tmp/fresh \
-     --model ~/models/whisper/ggml-large-v3-turbo.bin 0.37s   7 lines added
+masc init --base-path /tmp/fresh                                    1,504 lines written
+masc voice-local-setup --base-path /tmp/fresh --list-voices         184 voices, 9 Korean
+masc voice-local-setup --base-path /tmp/fresh --voice Yuna
+masc voice-local-setup --base-path /tmp/fresh --model <ggml-large-v3-turbo.bin>
+                                                                    16 lines added in all
 ```
 
-`voice-local-setup` changed none of the 1,504 lines `init` wrote. Then:
+`voice-local-setup` changed none of the 1,504 lines `init` wrote. With `alpha`
+mapped to a Korean voice:
 
 ```
-masc voice-verify --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
+masc voice-verify --base-path /tmp/fresh --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
 
 tts
   macos-say       macos_say     answered: 119044 bytes of audio in "Eddy (한국어(한국))"
@@ -260,10 +274,13 @@ stt  (utterance.wav, 144,276 bytes)
   whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
 ```
 
-| Leg | Wall |
+| Leg | Wall, three runs |
 |---|---|
-| speak only | 0.75s |
-| speak and hear | 3.79s |
+| speak only | 0.72s, 0.57s, 0.58s |
+| speak and hear | 3.42s, 1.99s, 1.89s |
+
+Single runs of the setup commands varied 2–4x between walks — `init` took
+0.79s on one and 1.89s on another — so no figure is given for them.
 
 The sentence came back as spoken, full stop included; masc passed `-l auto`
 and named no language.
@@ -271,7 +288,94 @@ and named no language.
 This is the two halves a voice turn needs — a keeper's words become audio in
 that keeper's voice, and a recording becomes text a keeper can be sent. It is
 not a keeper turn: no model was called and nothing was appended to a chat. The
-turn itself is the two HTTP calls under [External devices](#external-devices).
+turn follows.
+
+### Talking to imp, measured
+
+The same kind of workspace, with a model connection added and the server
+started. The model was `Qwen3.8-27B` (Q4, 35.5GB) on local Ollama, already in
+memory, on an M3 Max whose load average was 25.8 from other work. The wall
+times below are that machine under that load; they say nothing about an M1
+with a cloud model.
+
+**imp does not answer until it has a sandbox.** The journey prepares one at
+step 4. Before that, a message to imp answers
+`Keeper owner not found: imp`, and booting imp with no `docker` on `PATH`
+answers `400`:
+
+```
+docker_preflight_failed: docker info failed while validating sandbox runtime: process_eio_error: Eio.Io Process Executable "docker" not found; keeper sandbox image masc-sandbox:general is not available locally: …
+```
+
+With Docker reachable and the image present, `POST /api/v1/keepers/imp/boot`
+answered `200` in 0.12s.
+
+**The token for HTTP comes from `masc login`.** A server started without
+`MASC_ADMIN_TOKEN` mints one in memory and writes no file for it:
+
+```
+masc login --base-path <base> --client-env MASC_TOKEN
+  role: admin
+  raw_token_file: <base>/.masc/auth/local-admin.token
+```
+
+That file's token was accepted by `/voice/transcribe` on a server started
+afterwards.
+
+**A spoken question gets a written answer.** `question.wav` is `say -v Yuna`
+reading `안녕하세요. 한 문장으로 자기소개를 해 주세요.` (4.8s):
+
+| Step | Wall | What came back |
+|---|---|---|
+| `POST /api/v1/voice/transcribe` | 2.5s | `안녕하세요. 한 문장으로 자기소개를 해주세요.` |
+| `POST /api/v1/keepers/chat/stream`, the transcript | 188s | one sentence of text, no audio |
+
+Of the 188s, 167 went before the first event from the model. masc recorded
+16,863 prompt tokens, none read from a cache, and 4.5 tokens a second decoded.
+
+**imp speaks only when it calls `keeper_voice_speak`.** Nothing turns a reply
+into speech on its own. Asked `방금 한 자기소개를 소리 내어 말해 주세요.`, imp
+made three calls:
+
+| At | Call | Result |
+|---|---|---|
+| 45.7s | `keeper_tool_search` for `keeper_voice_speak` | `now callable: keeper_voice_speak` |
+| 259.6s | `keeper_skill` for a `voice-speak` skill | error — no such skill; the model guessed the name |
+| 290.1s | `keeper_voice_speak` with the sentence | a 14.2s clip in 3.2s |
+| 308.0s | reply | text |
+
+No approval was asked for; the log line is
+`external effect authorized operation=keeper_voice_speak source=local_output`.
+The model's first event came 29s after the question, 200s after the tool
+search, 13s after the skill call and 4.5s after the speak call.
+
+**The clip is made and nobody hears it.** The call wrote a 14.2s WAV and put it
+on the chat line:
+
+```json
+"audio":{"token":"124eb1c9…","mime":"audio/wav","audio_url":"/api/v1/voice/audio/124eb1c9…","duration_sec":14.242993}
+```
+
+`GET` on that URL with no token answered `200 audio/wav`, 632,212 bytes. The
+call's result says
+
+```
+"status":"synthesized","local_playback_status":"skipped","local_playback_reason":"local playback disabled for agent"
+```
+
+because `[voice.local_playback]` is absent and absent means off. `spoken` is
+the status only when this host played the clip. The TUI does not play clips at
+all. The dashboard's chat line for imp showed the clip as a card — a waveform,
+`0:14`, and the sentence — over an `<audio>` element with controls, no
+autoplay, and `paused` still true after the page had loaded. Until someone
+presses play there, the reply is silent.
+
+imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
+`keeper_voice_speak` at 168.9s and replied at 203.6s:
+
+```
+"오늘 음성 설정을 마쳤습니다"라는 음성을 합성해 채팅에 첨부했습니다. 다만 이 호스트에서는 에이전트의 로컬 재생이 꺼져 있어 실제로 소리 내어 재생되지는 않았으니, 첨부된 오디오 파일을 확인해 주세요.
+```
 
 ### What the commands cost
 
@@ -331,6 +435,33 @@ A failure reports the **end** of the command's output: `whisper-cli` prints
 nine lines about which Metal library it loaded before it names the model file
 it could not open.
 
+**whisper-cli does not refuse audio it cannot read.** For a container it does
+not decode it prints `error: failed to read audio file` to stderr and exits 0
+with nothing on stdout — the same answer as a recording of silence. The same
+sentence, encoded eight ways, through whisper-cpp 1.9.2:
+
+| Container | First bytes | whisper-cli |
+|---|---|---|
+| WAV | `RIFF…WAVE` | transcribes |
+| FLAC | `fLaC` | transcribes |
+| MP3, ID3-tagged | `ID3` | transcribes |
+| MP3, from the first frame | `FF F3` | transcribes |
+| WebM | `1A 45 DF A3` | exit 0, empty |
+| Ogg Opus | `OggS` … `OpusHead` | exit 0, empty |
+| AIFF-C | `FORM…AIFC` | exit 0, empty |
+| M4A | `…ftyp` | exit 0, empty |
+
+masc reads the first 36 bytes before running whisper-cli and refuses the four
+it does not read, naming the container:
+
+```
+masc voice-verify --base-path ~/work --audio probe.webm
+  whisper-local   whisper_cli   refused: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM
+```
+
+A container whose first bytes are none of the eight — Ogg Vorbis, AAC — is
+handed to whisper-cli, since none of those was measured.
+
 ## Configuration
 
 One section in `runtime.toml`, read by `Voice_config`:
@@ -358,7 +489,21 @@ A configuring surface can set it, which is the point of it living here:
 ```
 
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
-other voice change goes through.
+other voice change goes through. The TUI reads it when it starts.
+
+It sends from whichever editor holds the draft. Measured with `masc_tui` on the
+workspace from [Talking to imp, measured](#talking-to-imp-measured), `imp`
+booted, the `rec` stand-in speaking `말을 마치면 바로 보내지는지 봅니다.`, keys
+`2`, Enter on `imp`, `m`, `Ctrl-Y`:
+
+| | |
+|---|---|
+| the transcript appears | 10.1s after `Ctrl-Y` |
+| `▶ YOU 말을 마치면 바로 보내지는지 봅니다.` in the chat | the same redraw — nothing pressed |
+| imp's first reply on screen | 41.3s after `Ctrl-Y` |
+
+From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
+same way, and the chat pane comes forward as it does for Enter.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
@@ -587,6 +732,31 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
+(`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
+terminal and gives it back on exit and around Ctrl-Z, the same way it takes
+Ctrl-V and Ctrl-O.
+
+### One sentence into the chat, measured
+
+`masc_tui` on a workspace whose only STT endpoint is `whisper_cli`, in a
+120×40 pty, with `rec` and `play` replaced by scripts. The `rec` stand-in wrote
+0.8s of room noise, then a 2.0s `say -v Yuna` sentence at real-time rate, then
+room noise until stopped, and `play` only recorded its arguments. Keys: `2`,
+Enter on `imp`, `m`, `Ctrl-Y`.
+
+| What happened | When |
+|---|---|
+| `play -qn synth 0.15 sine 880` | as `Ctrl-Y` landed |
+| `rec` started | same second |
+| the prompt's meter | `-63 dB` on room noise, `-26 dB` on the sentence, `^Y send · Esc discard` beside it |
+| `rec` stopped | after 5.1–5.2s of audio: the sentence ended at 2.8s and the trailing-silence wait is 2.0s |
+| `play -qn synth 0.15 sine 440` | as it stopped |
+| `> 마이크로 보낸 새 질문입니다.` in the draft, and `voice: 마이크로 보낸 새 질문입니다.` in the footer | 19.0s, 10.0s and 10.0s after `Ctrl-Y`, three runs |
+
+The sentence came back as spoken. It stays a draft until Enter, unless
+`send_on_stop` is on.
+
 ### Speaking without touching the keyboard
 
 `Ctrl-Y` records one sentence and appends the transcript to the draft. The
@@ -613,11 +783,14 @@ default, and described under Configuration above.
 
 ## External devices
 
-Any device that can make two HTTP calls can speak to a keeper. No MASC change
-is needed; this was verified end to end on 2026-09-04.
+Any device that can make two HTTP calls can send speech to a keeper and read
+its answer. Hearing the answer is a third call, and only when the keeper spoke
+— see [Talking to imp, measured](#talking-to-imp-measured).
 
 ```sh
-TOKEN=$(cat "${MASC_BASE_PATH:?set it to the base path the server runs with}/.masc/auth/admin.token")
+BASE=~/work
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \
@@ -664,6 +837,7 @@ masc voice-verify                          # TTS only
 masc voice-verify --audio utterance.wav    # TTS and STT
 masc voice-verify --json                   # one JSON object instead of the report
 masc voice-verify --message "확인합니다"     # say it in the language you actually use
+masc voice-verify --base-path ~/work       # a workspace that is not MASC_BASE_PATH
 ```
 
 Exit status is 0 when at least one endpoint answered, 1 when none did. A
@@ -728,7 +902,8 @@ every line below copied from the terminal. The token is the workspace's own:
 
 ```sh
 MASC=http://127.0.0.1:8971
-TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 ```
 
 **1 — what is configured now.** A fresh workspace has nothing:
@@ -761,11 +936,7 @@ POST /api/v1/voice/setup
 → {"applied":true,"revision":"436a6857…"}
 ```
 
-No `default_model` anywhere, and the section loads. Against a build without
-that narrowing the same request answered
-`the edit does not load as a voice configuration, so it was not written:
-runtime.toml [voice]: tts.default_model is required` — measured on both, an
-hour apart.
+No `default_model` anywhere, and the section loads.
 
 **4 — make it speak, for real:**
 
@@ -861,6 +1032,38 @@ POST /api/v1/voice/transcribe   (raw wav body)
 and no such field. whisper-cli detects the language (`-l auto`) but reports it
 on its own stderr, not on the wire. A caller that names a language is answered
 with that name.
+
+The dashboard microphone uploads WAV. `MediaRecorder` records WebM in
+Chromium, which whisper-cli does not read, so `voice-wav.ts` decodes the
+recording with the browser's own decoder at 16 kHz, mixes it to mono and
+uploads 16-bit PCM — the format the TUI records. Measured in headless
+Chromium 149, with a synthesized sentence as the fake microphone and a
+`whisper_cli`-only workspace:
+
+| What was posted | Size | Answer |
+|---|---|---|
+| the recording as `MediaRecorder` made it (`audio/webm;codecs=opus`, 2.5s) | 39,902 bytes | `400 … whisper-cli reads WAV, FLAC or MP3, and this audio is WebM` |
+| the same recording after `recordingToWav`, 22ms in the page | 78,764 bytes | `200 {"status":"transcribed","text":"오늘 음성 설정을 마쳤습니다.", …}` in 2.0s |
+| the source file the fake microphone played | — | the same text |
+
+A recording the browser cannot decode is not uploaded; the dashboard shows
+`녹음을 WAV 로 바꾸지 못했습니다: …` in an error toast. The upload is 32KB per
+second whatever is said — twice the WebM in the measurement above.
+
+The same, through the dashboard page itself: headless Chromium 149 opened
+`/dashboard?agent=admin&token=…#keepers?keeper=imp` on that workspace, with
+`question.wav` (4.8s) as the fake microphone.
+
+| Step | What the page did |
+|---|---|
+| the composer's `음성으로 입력` button, 0.6s after load | showed a recording bar with a `완료` button |
+| `완료` after 5.5s | `POST /api/v1/voice/transcribe` with `content-type: audio/wav` → `200 transcribed` |
+| 2.8s after `완료` | a `받아쓰기` card above the composer holding the transcript |
+
+The transcript was `안녕하세요 한 문장으로 자기소개 를 해주세요 안녕하세요 한 문장으로 자기`:
+Chromium loops a fake microphone file, so 5.5s of recording held the 4.8s
+sentence and the start of it again. The card is a draft. Nothing is sent to
+the keeper until `전송`.
 
 ### What each route refuses, measured
 

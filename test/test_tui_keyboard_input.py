@@ -762,7 +762,7 @@ def assert_message_input_frame(
         raise AssertionError(f"message row lost {input_text!r}: {rendered_row!r}")
     # The outer frame is gone (clutter audit); the row boundary is the
     # positioning escape the regex above already found, not a border glyph.
-    if "~" in rendered_row and "~" not in input_text:
+    if "…" in rendered_row and "…" not in input_text:
         raise AssertionError(f"message row truncated fitting input: {rendered_row!r}")
     actual_width = fixture_cell_width(rendered_row)
     if actual_width != columns:
@@ -2609,6 +2609,184 @@ def cli_base_path_overrides_environment_interaction(
     os.write(master_fd, b"q")
 
 
+def ctrl_y_reaches_the_tui_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Ctrl-Y is the speak key, and it has to arrive as a byte.
+
+    On BSD terminals the tty takes it as VDSUSP: read with ISIG on -- which
+    raw mode keeps -- it sends SIGTSTP instead of being delivered. On macOS 26
+    one press ended the TUI with exit 2 on Unix_error(EAGAIN, "read"). Linux
+    has no VDSUSP, so there the check on the key is skipped and the press is
+    the whole test.
+    """
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    if hasattr(termios, "VDSUSP"):
+        cc = termios.tcgetattr(slave_fd)[6][termios.VDSUSP]
+        dsusp = cc if isinstance(cc, int) else cc[0]
+        if dsusp != os.fpathconf(slave_fd, "PC_VDISABLE"):
+            raise AssertionError("raw mode did not reclaim Ctrl-Y from VDSUSP")
+    # Overview has no conversation, so the key's answer there is the link
+    # preview's notice in the events pane -- a sentence the TUI can only draw
+    # if it read the byte. The pane cuts it at 100 columns.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x19",
+        b"No web links found in this conversa",
+    )
+    if process.poll() is not None:
+        raise AssertionError(f"Ctrl-Y ended the TUI with exit {process.returncode}")
+    os.write(master_fd, b"q")
+
+
+SPOKEN_TRANSCRIPT = "a sentence the fake whisper heard"
+
+# A microphone that says one thing: room noise, a second of a 440 Hz tone at
+# real-time rate, then room noise until the capture stops it. The capture
+# watches the growing file, so the rate is what lets its trailing-silence wait
+# see an end. SIGTERM is how the capture stops sox; the header is filled then.
+FAKE_REC = """#!{python}
+import math, random, signal, struct, sys, time
+args = sys.argv[1:]
+out = args[args.index('signed-integer') + 1]
+rate = 16000
+def header(n):
+    return (b'RIFF' + struct.pack('<I', 36 + n) + b'WAVEfmt '
+            + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16) + b'data' + struct.pack('<I', n))
+def noise(frames):
+    return b''.join(struct.pack('<h', random.randint(-40, 40)) for _ in range(frames))
+if 'trim' in args:
+    seconds = float(args[args.index('trim') + 2])
+    data = noise(int(seconds * rate))
+    open(out, 'wb').write(header(len(data)) + data)
+    sys.exit(0)
+tone = b''.join(struct.pack('<h', int(8000 * math.sin(2 * math.pi * 440 * i / rate))) for i in range(rate))
+f = open(out, 'wb')
+f.write(header(0))
+written = 0
+def finish(*_):
+    f.seek(0); f.write(header(written)); f.close(); sys.exit(0)
+signal.signal(signal.SIGTERM, finish)
+start = time.monotonic()
+for block in (noise(rate // 2), tone):
+    for i in range(0, len(block), 3200):
+        piece = block[i:i + 3200]
+        f.write(piece); f.flush(); written += len(piece)
+        time.sleep(max(0, start + written / (rate * 2) - time.monotonic()))
+while True:
+    piece = noise(rate // 10)
+    f.write(piece); f.flush(); written += len(piece)
+    time.sleep(max(0, start + written / (rate * 2) - time.monotonic()))
+"""
+
+
+def seed_send_on_stop_workspace(fake_bin: str) -> WorkspaceSetup:
+    def seed(base_path: str) -> None:
+        config = Path(base_path) / ".masc" / "config"
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "runtime.toml").write_text(
+            "[voice.stt]\n"
+            f'default_model = "{fake_bin}/model.bin"\n'
+            "send_on_stop = true\n"
+            "\n"
+            "[[voice.stt.endpoints]]\n"
+            'id = "whisper-local"\n'
+            'kind = "whisper_cli"\n'
+            "enabled = true\n"
+            f'command = "{fake_bin}/whisper-cli"\n',
+            encoding="utf-8",
+        )
+
+    return seed
+
+
+def wait_for_spoken_send(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    requests: HttpRequests,
+) -> None:
+    # Half a second of room, a second of tone, the two-second trailing wait,
+    # then the fake transcriber: well inside the budget.
+    deadline = time.monotonic() + 20.0
+    while not any(path == "/api/v1/keepers/chat/stream" for path, _ in requests):
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError("TUI exited before the spoken draft was sent")
+        if time.monotonic() > deadline:
+            plain = CSI_RE.sub(b"", bytes(output[-4000:]))
+            raise AssertionError(f"send_on_stop left the transcript in the draft: {plain!r}")
+        select.select([master_fd], [], [], 0.05)
+    body = next(body for path, body in requests if path == "/api/v1/keepers/chat/stream")
+    message = json.loads(body).get("message")
+    if message != SPOKEN_TRANSCRIPT:
+        raise AssertionError(f"the keeper was sent {message!r}, not the transcript")
+
+
+def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> Interaction:
+    """The composer row under every other surface sends a capture the same way."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"i", b"^Y to speak")
+        os.write(master_fd, b"\x19")
+        wait_for_spoken_send(process, master_fd, output, requests)
+        # A sent message brings the chat pane forward, as Enter on the row does.
+        wait_for_output(
+            process, master_fd, output, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+            start=0, timeout=3.0,
+        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Interaction:
+    """[voice.stt].send_on_stop sends what a capture heard from the chat pane.
+
+    The chat pane is where an operator types most, and it has its own editor:
+    the composer row is never focused there. A transcript that was handed to
+    the row's send key from this pane stayed in the draft and nothing was
+    sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        os.write(master_fd, b"\x19")
+        wait_for_spoken_send(process, master_fd, output, requests)
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interaction:
     draft = b"beta-periodic-draft-29453"
     chat_path = "/api/v1/keepers/chat/stream"
@@ -3672,7 +3850,7 @@ def blocked_gate_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"blocked Gate detail omitted {needle!r}: {frame!r}"
                 )
-        if BLOCKED_GATE_REASON_PREFIX + b"~" in plain:
+        if BLOCKED_GATE_REASON_PREFIX + b"\xe2\x80\xa6" in plain:
             raise AssertionError(f"blocked Gate reason was cell-truncated: {frame!r}")
         os.write(master_fd, b"q")
 
@@ -3923,6 +4101,75 @@ def planning_resize_budget_interaction(
         )
     if frame_row_of(empty, b"no goals in this filter") >= terminal_rows - 2:
         raise AssertionError(f"Planning empty note overflowed: {empty!r}")
+    os.write(master_fd, b"q")
+
+
+def clients_row(
+    name: str, agent_type: str, status: str, keeper: str | None, task: str | None
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "agent_type": agent_type,
+        "keeper_name": keeper,
+        "status": status,
+        "current_task": task,
+        "session_bound_at": "2026-09-13T01:00:00Z",
+        "last_seen": "2026-09-13T01:20:00Z",
+        "capabilities": ["chat"],
+    }
+
+
+def clients_http_fixtures(*, extra_clients: int = 0) -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/clients"] = (
+        200,
+        {
+            "schema": "masc.dashboard.clients.v1",
+            "generated_at": "2026-09-13T01:21:00Z",
+            "observation_only": True,
+            "clients": [
+                clients_row("codex-mcp-client", "codex", "active", None, None),
+                clients_row("analyst-agent", "keeper", "busy", "analyst", "task-845"),
+            ] + [
+                clients_row(f"client-{index:02d}", "codex", "active", None, None)
+                for index in range(extra_clients)
+            ],
+        },
+    )
+    return fixtures
+
+
+def clients_footer_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Clients draws the footer row its listing frame counts.
+
+    The key table declares j/k, p, Esc, / and n for Clients, and an armed
+    search shows its query at the front of that row. Clients drew neither: the
+    row stayed blank, and a typed search had nowhere on screen to appear."""
+    # Landing on a row first: a search arms over rows, not over a roster that
+    # has not loaded. Each step below changes the footer row itself, so the
+    # presenter has to draw it again -- an unchanged row can be skipped.
+    palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    # A query being typed ends in the caret search_marker draws, and carries
+    # the count of rows it reaches when the surface can count them.
+    send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  j/k:move")
+    typed_query = re.compile(rb"/analyst(?: \((?:\d+|none)\))?\xe2\x96\x8c  ")
+    send_and_wait(process, master_fd, output, b"analyst", typed_query)
+    # Resizing keeps the armed query on screen even when the roster scrolls.
+    for rows, columns in ((16, 80), (30, 100)):
+        frame = resize_and_wait(
+            process, master_fd, output, rows=rows, columns=columns,
+            needle=typed_query, controls=(FULL_REDRAW,),
+        )
+        if b"j/k:move" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Clients resize lost its key hints: {frame!r}")
+    # Esc drops the query and stays on Clients; the row goes back to the keys.
+    send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
     os.write(master_fd, b"q")
 
 
@@ -4931,7 +5178,10 @@ def image_view_interaction() -> Interaction:
         # The 100-column fixture leaves 92 cells for the draft. Long Dune
         # sandbox paths therefore draw the composer's omission marker and
         # newest tail, while Enter still submits the complete buffer.
-        visible_command = command if len(command) <= 92 else b"~" + command[-91:]
+        # One cell for the marker, 91 for the tail -- three bytes, one cell.
+        visible_command = (
+            command if len(command) <= 92 else b"\xe2\x80\xa6" + command[-91:]
+        )
         send_and_wait(
             process,
             master_fd,
@@ -5324,7 +5574,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"wrapped Keeper error omitted {needle!r}: {frame!r}"
                 )
-        if ERROR_DETAIL_PREFIX + b"~" in plain:
+        if ERROR_DETAIL_PREFIX + b"\xe2\x80\xa6" in plain:
             raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
@@ -6781,7 +7031,7 @@ def memory_journal_timeline_interaction(
             output,
             rows=31,
             columns=12,
-            needle=b"Keeper ch~",
+            needle=b"Keeper ch\xe2\x80\xa6",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -7153,7 +7403,15 @@ def context_inspector_interaction() -> Interaction:
         )
         # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
         # section title it no longer carries.
-        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        cheat_sheet = CSI_RE.sub(
+            b"", send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        )
+        # The keys that close and toggle the sheet are the footer's. The title
+        # used to spell them as well, so the frame said each of them twice.
+        if b"[Esc] close" in cheat_sheet or b"[h] toggle" in cheat_sheet:
+            raise AssertionError(f"Cheat sheet title spells footer keys: {cheat_sheet!r}")
+        if b"Esc:close" not in cheat_sheet:
+            raise AssertionError(f"Cheat sheet footer lost its way out: {cheat_sheet!r}")
         # The /context disclosure this step used to assert is not here any
         # more: the cheat sheet lists keys, and the slash commands announce
         # themselves in the composer's hint line as the word is typed
@@ -7277,6 +7535,7 @@ def chat_visibility_modes_interaction(
         )
         # Same TOOLS-lane token colouring: cross-check needles that span
         # word boundaries must tolerate SGR runs and padding inside them.
+        settled_at = pane_start
         for needle in (
             b"gate:auto_judge",
             "\u25c6".encode(),
@@ -7301,26 +7560,26 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
-        initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        # Each row comes from the frame that drew it. The pane redraws only what
-        # changed, so the frame carrying a new transcript row need not carry the
-        # header above it -- asking one frame for both fails on a screen showing
-        # both. The row addresses are still what the pane decided.
-        title = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
-        title_row = frame_row_of(frame_containing(initial, title), title)
-        identity_row = frame_row_of(
-            frame_containing(initial, b"gate:auto_judge"), b"gate:auto_judge"
+            settled_at = max(settled_at, end_of_needle(output, needle, pane_start))
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=settled_at,
+            timeout=5.0,
         )
-        if identity_row != title_row + 1:
+        initial += bytes(output[pane_start:])
+        # The Skill can arrive before the gate identity. Reconstruct the
+        # accumulated screen at the completed observation barrier instead of
+        # selecting the first frame that happened to contain the Skill name.
+        completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+        observed_rows = screen_rows(completed)
+        title_row = screen_row_of(
+            observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -8400,8 +8659,8 @@ def assert_runtime_row(
 
     The runtime half is the text the chat header draws around the model
     name, not the model name alone: #35458 folded the turn gauge into one
-    line and the header now says "<state> configured: <model>", where it
-    used to say "<state> <model>". The two callers below kept the old
+    line and the header now says "<state> \u00b7 configured: <model>", where
+    it used to say "<state> <model>". The two callers below kept the old
     spelling and stopped matching any row, which reads as "the header lost
     the health" rather than "the header renamed the field".
     """
@@ -8498,7 +8757,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused configured: anthropic.claude-sonnet-4",
+            runtime=b"paused \xc2\xb7 configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -8543,7 +8802,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             alpha_frame,
             health=b"healthy",
-            runtime=b"running configured: anthropic.claude-opus-5",
+            runtime=b"running \xc2\xb7 configured: anthropic.claude-opus-5",
             description="restored alpha chat",
         )
         for expected in (
@@ -9424,30 +9683,6 @@ def lane_runs_path(lane_id: str) -> str:
     return f"/api/v1/dashboard/exact-lane-runs?limit=50&lane={lane_id}"
 
 
-def lane_runs_response(lane_id: str, count: int) -> HttpResponse:
-    """One page of exact-lane runs, in the wire shape the paged decoder
-    accepts: every run carries the lane the caller filters on, and has_more
-    is false so no cursor page follows."""
-    return (
-        200,
-        {
-            "runs": [
-                {
-                    "run_id": f"lr-{index:03d}",
-                    "lane": lane_id,
-                    "actor": "fixture",
-                    "started_at": 1787557000.0 + index,
-                    "status": "succeeded",
-                    "elapsed_s": 1.5,
-                    "selected_slot": "glm-coding.glm-5-turbo",
-                }
-                for index in range(count)
-            ],
-            "has_more": False,
-        },
-    )
-
-
 def verifier_lane_runs_response() -> HttpResponse:
     return (
         200,
@@ -9681,651 +9916,6 @@ def keeper_lane_row(
         "last_outcome": last_outcome,
         "phase_diagnosis": {"determining_condition": diagnosis},
     }
-
-
-def keeper_lanes_interaction(
-    fixtures: HttpFixtures,
-    gate: GatedHttpResponse,
-    history: SequencedHttpResponse,
-    memory: SequencedHttpResponse,
-    file_changes: SequencedHttpResponse,
-) -> Interaction:
-    """One visit covers lane readings, exact chat, and an unmatched Keeper."""
-
-    def interact(
-        process: subprocess.Popen[bytes],
-        master_fd: int,
-        slave_fd: int,
-        output: bytearray,
-        _base_path: str,
-    ) -> None:
-        tab_until(process, master_fd, output, b"MASC Keepers")
-        # tab_until returns as soon as the title is on screen, and the roster is
-        # a live read that lands after that. Pressing j on the (0) list moves
-        # nothing and redraws nothing, so waiting for beta's band times out.
-        # select_keeper_row waits for the row to exist and is indifferent to how
-        # many frames the surface drew getting there.
-        select_keeper_row(process, master_fd, output, b"beta")
-        unread = palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
-        # The body note is "(not loaded yet — press r)": #30945 added the
-        # key hint without updating this needle.
-        if b"(not loaded)" not in unread or b"(not loaded yet" not in unread:
-            raise AssertionError(
-                f"Lanes claimed a reading before one arrived: {unread!r}"
-            )
-        unread_plain = CSI_RE.sub(b"", unread).decode("utf-8")
-        for column in (
-            "KEEPER",
-            "LIFECYCLE",
-            "TURN STEP",
-            "IDLE",
-            "LAST OUTCOME",
-            "DIAGNOSIS",
-        ):
-            if column not in unread_plain:
-                raise AssertionError(
-                    f"Lanes did not draw the {column!r} column: {unread_plain!r}"
-                )
-        if not wait_for_fixture_event(
-            process, master_fd, output, gate.requested, timeout=10.0
-        ):
-            raise AssertionError("Lanes did not request the composite snapshot")
-
-        empty = release_and_wait_for_frame(
-            process,
-            master_fd,
-            output,
-            gate,
-            b"(no keeper lane snapshots)",
-        )
-        if b"MASC Lanes" not in empty or b"(0 keepers)" not in empty:
-            raise AssertionError(f"Lanes did not draw the empty reading: {empty!r}")
-
-        fixtures[KEEPER_LANES_PATH] = (503, {"error": "lane fixture failed"})
-        failed = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"r",
-            b"(load failed; nothing here is a reading)",
-        )
-        if b"keeper lanes load failed" not in failed:
-            raise AssertionError(f"Lanes hid the load error: {failed!r}")
-
-        # Lane order intentionally differs from the canonical roster, whose
-        # cursor still points at beta. Detail navigation must join kl_keeper
-        # to k_name; copying either numeric cursor would open beta for alpha.
-        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "beta",
-                    phase="new_phase",
-                    turn_phase="new_turn",
-                    idle_seconds=3661,
-                    runtime_state=None,
-                    selected_model=None,
-                    diagnosis=None,
-                ),
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="executing",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
-                ),
-            ]
-        )
-        populated = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"r",
-            b"new_phase",
-        )
-        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
-        if banded_beta.search(populated) is None:
-            raise AssertionError(
-                f"Lanes did not band the cursor row: {populated!r}"
-            )
-        # Lifecycle colour is a pointer, not a band over the whole status
-        # word. This is the real refreshed Lanes frame: the green SGR must end
-        # immediately after the running glyph, before the producer-owned word.
-        running_mark_only = re.compile(
-            rb"alpha[^\r\n]*\x1b\[[0-9;]*m"
-            rb"\xe2\x97\x8f\x1b\[0m running"
-        )
-        if running_mark_only.search(populated) is None:
-            raise AssertionError(
-                f"Lanes did not limit lifecycle colour to the glyph: {populated!r}"
-            )
-        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            banded_alpha,
-        )
-        send_and_wait(process, master_fd, output, b"k", banded_beta)
-        # "/" arms the row search on any surface with row texts: the footer
-        # shows the query, typing jumps the cursor live, Enter keeps the
-        # query for n. The list itself never narrows.
-        send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
-        send_and_wait(process, master_fd, output, b"alp", banded_alpha)
-        send_and_wait(process, master_fd, output, b"\rk", banded_beta)
-        send_and_wait(process, master_fd, output, b"n", banded_alpha)
-        # A lane names its keeper, so the row under the cursor is followable.
-        # This surface answered None before, which left Ctrl-] doing nothing on
-        # a screen that had the id in hand.
-        copy_reference(process, master_fd, output, b"masc://keepers/alpha")
-        plain = CSI_RE.sub(b"", populated).decode("utf-8")
-        for needle in (
-            "MASC Lanes (2 keepers)",
-            "alpha",
-            "running",
-            "executing",
-            "1m",
-            "done",
-            "claude-opus-5",
-            "running_fiber_alive",
-            "beta",
-            "new_phase",
-            "new_turn",
-            "1h",
-        ):
-            if needle not in plain:
-                raise AssertionError(f"Lanes did not draw {needle!r}: {plain!r}")
-
-        fixtures[KEEPER_LANES_PATH] = (503, {"error": "lane refresh failed"})
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"r",
-            b"keeper lanes load failed",
-        )
-        # The error row inserts above the Keeper rows, so only the rows at or
-        # below it repaint; the header -- whose timestamp may not have ticked
-        # -- can legitimately be absent from the slice send_and_wait returns
-        # (#31288). A resize forces a full redraw, and the assertion reads
-        # that complete frame instead. The band streams after the error row.
-        stale = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=29,
-            columns=140,
-            needle=banded_alpha,
-            controls=(FULL_REDRAW,),
-        )
-        stale_plain = CSI_RE.sub(b"", stale).decode("utf-8")
-        for needle in (
-            "MASC Lanes (2 keepers)",
-            "alpha",
-            "beta",
-        ):
-            if needle not in stale_plain:
-                raise AssertionError(
-                    f"Lanes did not preserve {needle!r} after refresh failure: "
-                    f"{stale_plain!r}"
-                )
-        if "nothing here is a reading" in stale_plain:
-            raise AssertionError(
-                "Lanes discarded the prior reading after refresh failure: "
-                f"{stale_plain!r}"
-            )
-
-        # A later successful reading can shrink the list. The old numeric
-        # cursor was 1; retaining it would leave no selected row and make the
-        # advertised detail key a no-op. The logical alpha selection survives
-        # at its new index 0.
-        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="executing",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
-                )
-            ]
-        )
-        shrunk = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"r",
-            b"(1 keepers)",
-        )
-        if banded_alpha.search(shrunk) is None:
-            raise AssertionError(
-                "successful lane shrink left no selected Keeper row: "
-                f"{shrunk!r}"
-            )
-        # k from the first Keeper row walks up onto the observation matrix's
-        # last lane. A refresh must leave the band there: landing the Keeper
-        # cursor unconditionally dragged the selection down into the table on
-        # every tick, which made the standalone drill-down unreachable in
-        # practice. The fixture's idle cell changes ("1m" -> "1h") so the
-        # refresh's arrival is observable; an unchanged reading redraws
-        # nothing, and an empty diff would leave the needle wait hanging.
-        banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
-        send_and_wait(process, master_fd, output, b"k", banded_verifier)
-        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="executing",
-                    idle_seconds=3661,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
-                )
-            ]
-        )
-        send_and_wait(process, master_fd, output, b"r", b"1h")
-        drain_until_quiet(process, master_fd, output)
-        standalone_refresh = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=140,
-            needle=b"Verifier",
-            controls=(FULL_REDRAW,),
-        )
-        if banded_verifier.search(standalone_refresh) is None:
-            raise AssertionError(
-                "refresh dragged the standalone selection into the Keeper "
-                f"table: {standalone_refresh!r}"
-            )
-        # Verifier is a real drill-down now: task/Goal review registries are
-        # joined server-side before pagination, so the list carries the
-        # subject and verdict and detail carries durable tool evidence.
-        fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
-        fixtures[
-            "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
-        ] = verifier_lane_run_detail_response()
-        verifier_runs = send_and_wait(
-            process, master_fd, output, b"\r", b"rejected"
-        )
-        verifier_runs_plain = CSI_RE.sub(b"", verifier_runs)
-        if b"task task-9" not in verifier_runs_plain:
-            raise AssertionError(
-                f"Verifier run list did not name its task subject: {verifier_runs!r}"
-            )
-        verifier_detail = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\r",
-            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
-        )
-        verifier_detail_plain = CSI_RE.sub(b"", verifier_detail)
-        for evidence in (
-            b"DECISION  REJECTED",
-            b"INPUT \xc2\xb7 VERIFICATION REQUEST",
-        ):
-            if evidence not in verifier_detail_plain:
-                raise AssertionError(
-                    "Verifier detail omitted its split decision/tool summary "
-                    f"{evidence!r}: {verifier_detail!r}"
-                )
-        assert_verifier_tool_color_summary(verifier_detail)
-        split_heading = next(
-            (
-                line
-                for line in verifier_detail_plain.splitlines()
-                if b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
-                and b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE" in line
-            ),
-            None,
-        )
-        if split_heading is None or b"\xe2\x94\x82" not in split_heading:
-            raise AssertionError(
-                "Verifier detail did not draw Input and Output on one split row: "
-                f"{verifier_detail!r}"
-            )
-        scrolled_detail = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            b"INPUT \xc2\xb7 VERIFICATION REQUEST  2-",
-        )
-        scrolled_detail_plain = CSI_RE.sub(b"", scrolled_detail)
-        scrolled_heading = next(
-            (
-                line
-                for line in scrolled_detail_plain.splitlines()
-                if b"INPUT \xc2\xb7 VERIFICATION REQUEST  2-" in line
-            ),
-            None,
-        )
-        if (
-            scrolled_heading is None
-            or b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)  2-"
-            not in scrolled_heading
-        ):
-            raise AssertionError(
-                "Lane detail did not scroll both evidence panes together: "
-                f"{scrolled_detail!r}"
-            )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"k",
-            b"INPUT \xc2\xb7 VERIFICATION REQUEST  1-",
-        )
-        stacked_detail = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=100,
-            needle=b"INPUT \xc2\xb7 VERIFICATION REQUEST",
-            controls=(FULL_REDRAW,),
-        )
-        stacked_detail_plain = CSI_RE.sub(b"", stacked_detail)
-        if not any(
-            b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
-            for line in stacked_detail_plain.splitlines()
-        ) or any(
-            b"INPUT \xc2\xb7 VERIFICATION REQUEST" in line
-            and b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE" in line
-            for line in stacked_detail_plain.splitlines()
-        ):
-            raise AssertionError(
-                "Narrow Lane detail did not fold the comparison into one column: "
-                f"{stacked_detail!r}"
-            )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b[6~",
-            b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
-        )
-        resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=140,
-            needle=b"OUTPUT \xc2\xb7 VERDICT + TOOL EVIDENCE (2 CALLS)",
-            controls=(FULL_REDRAW,),
-        )
-        send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
-        send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # Two k walk the band from Verifier to Librarian, whose run list is
-        # the exact-output summary. Workspace Curator sits between them, as
-        # the projection orders the lanes; waiting for it on the way pins that
-        # the row is drawn where the server puts it.
-        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
-        banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
-        send_and_wait(process, master_fd, output, b"k", banded_curator)
-        send_and_wait(process, master_fd, output, b"k", banded_librarian)
-        # PgDn moves the run cursor by a page and the window must follow
-        # (#31290): before the follow, the selected row walked off the frame
-        # while the footer kept claiming scroll 0. The fetch caps the list at
-        # 50 (lane_run_list_limit), and 50 rows are taller than one window,
-        # so the scroll note renders and names the window's offset.
-        fixtures[lane_runs_path("librarian_exact")] = lane_runs_response(
-            "librarian_exact", 50
-        )
-        run_list = send_and_wait(
-            process, master_fd, output, b"\r", b"[50 runs, scroll 0]"
-        )
-        if re.search(rb"\x1b\[7m[^\x1b\n]*lr-000", run_list) is None:
-            raise AssertionError(
-                f"run list did not band its first row: {run_list!r}"
-            )
-        paged = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b[6~",
-            re.compile(rb"\[50 runs, scroll [1-9]"),
-        )
-        if re.search(rb"\x1b\[7m[^\x1b\n]*lr-\d\d\d", paged) is None:
-            raise AssertionError(
-                f"PgDn left the selected run off the frame: {paged!r}"
-            )
-        send_and_wait(process, master_fd, output, b"\x1b", banded_librarian)
-        # Back on the last standalone row, so the j below still lands on the
-        # first Keeper row.
-        send_and_wait(process, master_fd, output, b"j", banded_curator)
-        send_and_wait(process, master_fd, output, b"j", banded_verifier)
-        # j past the last standalone row lands back on the first Keeper row.
-        send_and_wait(process, master_fd, output, b"j", banded_alpha)
-        resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=140,
-            needle=b"(1 keepers)",
-        )
-        chat_get_counts = history.served, memory.served, file_changes.served
-        lane_chat = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"c",
-            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
-        )
-        lane_chat_plain = CSI_RE.sub(b"", lane_chat)
-        if b"Esc:Lanes" not in lane_chat_plain:
-            raise AssertionError(
-                f"chat opened from Lanes did not name its return: {lane_chat!r}"
-            )
-        wait_for_fixture_served(
-            process,
-            master_fd,
-            output,
-            history,
-            after=chat_get_counts[0],
-            description="alpha chat history GET",
-        )
-        wait_for_fixture_served(
-            process,
-            master_fd,
-            output,
-            memory,
-            after=chat_get_counts[1],
-            description="alpha memory journal GET",
-        )
-        wait_for_fixture_served(
-            process,
-            master_fd,
-            output,
-            file_changes,
-            after=chat_get_counts[2],
-            description="alpha chat file changes GET",
-        )
-        lanes_return = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b",
-            b"(1 keepers)",
-        )
-        if banded_alpha.search(lanes_return) is None:
-            raise AssertionError(
-                "Esc from lane chat did not preserve the selected lane: "
-                f"{lanes_return!r}"
-            )
-        right_detail = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x1b[C",
-            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
-        )
-        # The detail pane pads labels to 22 columns ("  %-22s"), so the plain
-        # text is "Name:" + 18 spaces + "alpha" -- a literal "Name: alpha"
-        # needle can never match. (This suite is not wired into CI, so the
-        # drift went unnoticed since #30915.)
-        if re.search(rb"Name:\s+alpha", CSI_RE.sub(b"", right_detail)) is None:
-            raise AssertionError(
-                "Right did not open the selected lane's existing Keeper detail: "
-                f"{right_detail!r}"
-            )
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
-        enter_detail = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\r",
-            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
-        )
-        if re.search(rb"Name:\s+alpha", CSI_RE.sub(b"", enter_detail)) is None:
-            raise AssertionError(
-                "Enter did not preserve the lane-to-Keeper selection: "
-                f"{enter_detail!r}"
-            )
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
-        orphan_count = 24
-        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    f"orphan-{index:02d}",
-                    phase="running",
-                    turn_phase="idle",
-                    idle_seconds=0,
-                    runtime_state=None,
-                    selected_model=None,
-                    diagnosis=None,
-                )
-                for index in range(orphan_count)
-            ]
-        )
-        orphan = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"r",
-            b"orphan-00",
-        )
-        os.write(master_fd, b"j" * (orphan_count - 1))
-        wait_for_terminal_input_consumed(slave_fd)
-        drain_until_quiet(process, master_fd, output)
-        orphan_name = f"orphan-{orphan_count - 1:02d}".encode()
-        orphan = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=32,
-            columns=140,
-            needle=orphan_name,
-            controls=(FULL_REDRAW,),
-        )
-        banded_orphan = re.compile(rb"\x1b\[7m[^\x1b\n]*" + re.escape(orphan_name))
-        if banded_orphan.search(orphan) is None:
-            raise AssertionError(f"orphan lane was not selected: {orphan!r}")
-        chat_get_counts = history.served, memory.served, file_changes.served
-        os.write(master_fd, b"c")
-        wait_for_terminal_input_consumed(slave_fd)
-        drain_until_quiet(process, master_fd, output)
-        # NOTE: the repaint is driven by SIGWINCH, and XNU only signals when
-        # the size actually changes -- a same-size TIOCSWINSZ produces no
-        # redraw and this wait would hang. The row counts below step 32/29/30/31
-        # so each resize is a real change.
-        # The error line renders above the Keeper rows, so waiting on it
-        # returns mid-frame; wait on the scroll note instead (it streams
-        # after) and check the error text in the accumulated frame. The band
-        # cannot be the needle here: the 32 -> 29 shrink leaves the scroll at
-        # 11 while only ~10 Keeper rows fit, so the selected orphan-23 row is
-        # legitimately below the window -- the table re-follows the cursor on
-        # the next move, not on resize.
-        orphan_after_c = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=29,
-            columns=140,
-            needle=b"keepers, scroll",
-            controls=(FULL_REDRAW,),
-        )
-        if (
-            b"Cannot open chat: Keeper orphan-23 is not registered"
-            not in CSI_RE.sub(b"", orphan_after_c)
-        ):
-            raise AssertionError(
-                f"unmatched lane c did not surface its error: {orphan_after_c!r}"
-            )
-        # A refresh must not wipe an unread action error: Lanes_loaded's Ok
-        # arm cleared lanes_action_error on every tick, so the notice vanished
-        # before the operator could read it. The fixture's idle cell changes
-        # ("0s" -> "1h") so the refresh's arrival is observable, and the
-        # resize then forces a full redraw of the post-refresh state -- the
-        # error line is only proven present if it is in that frame.
-        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    f"orphan-{index:02d}",
-                    phase="running",
-                    turn_phase="idle",
-                    idle_seconds=3661,
-                    runtime_state=None,
-                    selected_model=None,
-                    diagnosis=None,
-                )
-                for index in range(orphan_count)
-            ]
-        )
-        send_and_wait(process, master_fd, output, b"r", b"1h")
-        refreshed_with_error = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=30,
-            columns=140,
-            needle=b"keepers, scroll",
-            controls=(FULL_REDRAW,),
-        )
-        if (
-            b"Cannot open chat: Keeper orphan-23 is not registered"
-            not in CSI_RE.sub(b"", refreshed_with_error)
-        ):
-            raise AssertionError(
-                f"refresh wiped the unread action error: {refreshed_with_error!r}"
-            )
-        if chat_get_counts != (
-            history.served,
-            memory.served,
-            file_changes.served,
-        ):
-            raise AssertionError("unmatched lane c loaded another Keeper's chat data")
-        os.write(master_fd, b"k")
-        wait_for_terminal_input_consumed(slave_fd)
-        drain_until_quiet(process, master_fd, output)
-        moved_from_error = resize_and_wait(
-            process,
-            master_fd,
-            output,
-            rows=31,
-            columns=140,
-            needle=b"orphan-22",
-            controls=(FULL_REDRAW,),
-        )
-        if b"Cannot open chat" in CSI_RE.sub(b"", moved_from_error):
-            raise AssertionError("moving the lane cursor kept a stale action error")
-        if re.search(rb"\x1b\[7m[^\x1b\n]*orphan-22", moved_from_error) is None:
-            raise AssertionError(
-                f"moving after the action error lost its selected row: {moved_from_error!r}"
-            )
-        os.write(master_fd, b"q")
-
-    return interact
 
 
 def keeper_lanes_ia_interaction(
@@ -10929,10 +10519,10 @@ def enter_outside_changes_interaction(
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
-    send_and_wait(process, master_fd, output, b"l", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"1", b"[1 Events* | 2 Logs]")
-    send_and_wait(process, master_fd, output, b"2", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"\x1b", b"[1 Events* | 2 Logs]")
+    send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
@@ -11200,15 +10790,14 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter closes the prompt and keeps the query for n/N. The footer keeps
-    # saying so -- the query, how many rows it matched and the keys that walk
-    # them -- ahead of the surface's own hints (#35410); before, the query left
-    # the footer while n/N went on hunting it. The diff renderer resends only
-    # the rows that changed, so the redrawn footer row is the needle.
-    send_and_wait(
-        process, master_fd, output, b"\r",
-        b"\x1b[2m  /hi (1) n/N  j/k:scroll  h/l:pan",
+    # Enter retains the query for n/N and removes its editing cursor.
+    # The settled footer still starts with the retained search, not the
+    # generic hints that were drawn before search began.
+    settled = send_and_wait(
+        process, master_fd, output, b"\r", b"/hi (1) n/N",
     )
+    if "▌".encode() in screen_text(settled):
+        raise AssertionError(f"Enter left the search prompt editing: {settled!r}")
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
     # The added row now arrives lexed, so the wait needle is the keyword
@@ -12105,7 +11694,7 @@ def fusion_run(
 
 
 # The Registry list fits a run id into a 14-cell column, so what it draws is
-# the truncated head with the pane's "~" marker after it. The full id is what
+# the truncated head with the pane's "…" marker after it. The full id is what
 # the detail pane and the copy links carry, and those assertions keep it.
 FUSION_TARGET_LISTED = b"fusion-target"
 
@@ -12375,20 +11964,17 @@ def fusion_list_detail_interaction(
         )
         verdict_start = len(output)
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
-        # The pane opens on "HTTP [loading...]" and the linked goal lands in a
-        # later frame, so the frame that first carries the heading need not
-        # carry the goal. Wait for the slowest piece, then read every needle
-        # from this verdict's own frames rather than from the one that opened
-        # it.
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"masc://planning/goal-ssim-501",
-            start=verdict_start,
-            timeout=10.0,
-        )
-        verdict_plain = CSI_RE.sub(b"", bytes(output[verdict_start:]))
+        # The heading precedes asynchronous task/goal enrichment. Inspect one
+        # completed screen after both the linked goal and footer are present.
+        observed = (b"masc://planning/goal-ssim-501", b"Left/Esc:list")
+        for needle in observed:
+            wait_for_output(process, master_fd, output, needle,
+                            start=verdict_start, timeout=10.0)
+        settled_at = max(end_of_needle(output, needle, verdict_start)
+                         for needle in observed)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=settled_at, timeout=10.0)
+        verdict_plain = screen_text(bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)]))
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them
         # met on a screen, so a verdict said "approve" without saying what it
@@ -13027,6 +12613,12 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         ):
             if needle not in acting:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
+        # The count belongs to the open reading, not to the Logs tab it
+        # follows: a dot stands between the strip and the count.
+        if "Logs  \u00b7  (1 of 1 held, turns)".encode() not in CSI_RE.sub(b"", acting):
+            raise AssertionError(
+                f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
+            )
         # One f lands on the flat actions log, where the call is its own row
         # and carries the task.
         flat = send_and_wait(
@@ -13807,6 +13399,18 @@ def run_keyboard_regression(executable: str) -> None:
         interact=planning_missing_detail_interaction(planning_missing_fixtures),
         http_fixtures=planning_missing_fixtures,
     )
+    run_terminal_scenario(
+        executable,
+        description="Clients draws its footer and an armed search",
+        interact=clients_footer_interaction,
+        http_fixtures=clients_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Clients keeps its footer while a crowded roster resizes",
+        interact=clients_footer_interaction,
+        http_fixtures=clients_http_fixtures(extra_clients=40),
+    )
     board_reference_fixtures = board_reference_http_fixtures()
     keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
     keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
@@ -13948,6 +13552,51 @@ def run_cli_base_path_regression(executable: str) -> None:
         interact=cli_base_path_overrides_environment_interaction,
         http_fixtures=overview_event_http_fixtures(),
         conflicting_env_base_path=True,
+    )
+
+
+def run_send_on_stop_regression(executable: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="masc-tui-voice-bin-") as fake_bin:
+        scripts = {
+            "rec": FAKE_REC.format(python=sys.executable),
+            "play": "#!/bin/sh\nexit 0\n",
+            "whisper-cli": f"#!/bin/sh\necho '{SPOKEN_TRANSCRIPT}'\n",
+        }
+        for name, body in scripts.items():
+            path = Path(fake_bin) / name
+            path.write_text(body, encoding="utf-8")
+            path.chmod(0o755)
+        for description, interaction in (
+            ("send_on_stop sends a capture from the chat pane",
+             send_on_stop_from_the_chat_pane_interaction),
+            ("send_on_stop sends a capture from the composer row",
+             send_on_stop_from_the_composer_row_interaction),
+        ):
+            requests: HttpRequests = []
+            run_terminal_scenario(
+                executable,
+                description=description,
+                interact=interaction(requests),
+                http_fixtures={
+                    "/api/v1/keepers/chat/stream": (
+                        503,
+                        {"error": "stop after the spoken request capture"},
+                    )
+                },
+                http_requests=requests,
+                prepare_workspace=seed_send_on_stop_workspace(fake_bin),
+                # Only the stand-ins: a real sox on this machine would open the
+                # microphone and the speakers.
+                extra_env={"PATH": f"{fake_bin}:/usr/bin:/bin"},
+            )
+
+
+def run_ctrl_y_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-Y reaches the TUI instead of the tty's delayed suspend",
+        interact=ctrl_y_reaches_the_tui_interaction,
+        http_fixtures=overview_event_http_fixtures(),
     )
 
 
@@ -14423,7 +14072,116 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
+def run_browser_viewport_cadence_regression(executable: str, *, follow_navigation: bool = False) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    url = "https://example.org/"
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    observed_url = url + "next" if follow_navigation else url
+    observed_viewport = dict(viewport, documentId="next-document") if follow_navigation else viewport
+    captures, actions, png = [], [], [""]
+    stale_started, stale_release = threading.Event(), threading.Event()
+    closing_started, closing_release = threading.Event(), threading.Event()
+    resumed_read = threading.Event()
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        current_url = observed_url if len(captures) >= 2 else url
+        text = "cadence fixture"
+        if closing_release.is_set():
+            # Ordinary cadence is blocked by refresh_pending until the delayed
+            # screenshot completion is consumed by the UI mailbox.
+            resumed_read.set()
+            text = "CADENCE RESUMED AFTER DISMISSAL"
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":current_url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":current_url,"text":text,"chars":len(text),"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2}
+        captures.append(request)
+        number = len(captures)
+        title = {1:"INITIAL FRAME",2:"AUTOMATIC FRAME",3:"STALE FRAME",4:"DRAG FRAME"}.get(number,"CLOSED FRAME")
+        if number == 3:
+            stale_started.set()
+            if not stale_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"stale fixture was not released"}
+        elif number >= 5:
+            closing_started.set()
+            if not closing_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"closing fixture was not released"}
+        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url if number == 1 else observed_url,
+            "mimeType":"image/png","data":png[0],"viewport":viewport if number == 1 else observed_viewport,"elapsed_ms":0}}
+
+    def act(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2,"expectedUrl":observed_url,"action":"drag",
+            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":observed_viewport}
+        actions.append(request)
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        def image_after(start, title):
+            wait_for_output(process, master, output, title, start=start, timeout=5)
+            wait_for_output(process, master, output, b"j/k:center", start=end_of_needle(output,title,start), timeout=3)
+
+        palette_go(process, master, output, b"go Browser Lane", b"cadence fixture")
+        send_and_wait(process, master, output, b"a", b"cadence fixture")
+        start = len(output)
+        os.write(master,b"\x0f")
+        image_after(start,b"INITIAL FRAME")
+        # No refresh key: cadence follows a same-tab navigation by another actor
+        # as well as an image change. The drag must use the displayed new URL
+        # and document, while its pending predecessor cannot replace the frame.
+        image_after(start,b"AUTOMATIC FRAME")
+        assert wait_for_fixture_event(process,master,output,stale_started,timeout=5)
+        start = len(output)
+        os.write(master,b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        image_after(start,b"DRAG FRAME")
+        assert len(actions)==1, "background observation blocked or replayed the gesture"
+        # The old request settles after the effect-owned image. It must neither
+        # replace that frame nor close the overlay, and must release single-flight.
+        stale_release.set()
+        assert wait_for_fixture_event(process,master,output,closing_started,timeout=5)
+        assert b"STALE FRAME" not in output[start:]
+        send_and_wait(process,master,output,b"\x1b",b"cadence fixture")
+        start = len(output)
+        closing_release.set()
+        assert wait_for_fixture_event(process,master,output,resumed_read,timeout=5), \
+            "ordinary cadence did not resume after consuming the delayed screenshot"
+        wait_for_output(process,master,output,b"CADENCE RESUMED AFTER DISMISSAL",start=start,timeout=5)
+        wait_for_output(process,master,output,FRAME_END,
+            start=end_of_needle(output,b"CADENCE RESUMED AFTER DISMISSAL",start),timeout=3)
+        # Stay on Browser Lane until the post-completion read is rendered:
+        # leaving the surface would independently suppress a stale overlay.
+        assert b"CLOSED FRAME" not in output[start:], "late cadence reopened the overlay"
+        assert len(actions)==1 and len(captures)==5
+        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
+        os.write(master,b"q")
+
+    try:
+        run_terminal_scenario(executable,description=("Browser viewport follows same-tab navigation" if follow_navigation
+                else "Open browser viewport cadence yields to drag and dismissal"),
+            interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,refresh=0.5,
+            preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        stale_release.set()
+        closing_release.set()
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_viewport_cadence_regression(executable)
+    run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)
@@ -14833,6 +14591,58 @@ def run_schedule_source_status_regression(executable: str) -> None:
 # The Board draft is written in the default keyboard lane, which stops at an
 # earlier scenario's exit step (#34125). This lane runs the one thing: the
 # footer's offer and what the key it offered actually does.
+def run_board_list_footer_regression(executable: str) -> None:
+    """Measure completed native frames, including the bottom of a long list.
+
+    Titles fit the Board column even when the acting pane opens at 140 columns.
+    A truncated title is valid rendering, so it cannot be a full-string barrier.
+    """
+    for state in ("populated", "empty", "unread", "failed"):
+        fixtures = overview_event_http_fixtures()
+        posts = [board_selection_post(str(i), f"board-{i:02d}",
+                                      f"footer-body-{i:02d}") for i in range(70)]
+        response: HttpResponse = (200, {"posts": posts if state == "populated" else []})
+        gate = GatedHttpResponse(response, hold_seconds=60.0)
+        fixtures["/api/v1/board?sort_by=hot"] = (
+            gate if state == "unread" else
+            (503, {"error": "board-down"}) if state == "failed" else response
+        )
+        fixtures["/api/v1/board/post-69?format=flat"] = (
+            200, {"post": posts[-1], "comments": []})
+        marker = {"populated": b"board-00", "empty": b"(no board posts)",
+                  "unread": b"not loaded yet", "failed": b"board-down"}[state]
+
+        def interact(process: subprocess.Popen[bytes], master_fd: int,
+                     _slave_fd: int, output: bytearray, _base_path: str) -> None:
+            try:
+                palette_go(process, master_fd, output, b"go board", b"MASC Board")
+                wait_for_output(process, master_fd, output, marker, start=0, timeout=10.0)
+                for height in (30, 44, 60):
+                    resize_and_wait(process, master_fd, output, rows=height, columns=140,
+                                    needle=marker, final_cursor=b"\x1b[?25l")
+                    drain_until_quiet(process, master_fd, output)
+                    completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+                    rows = screen_rows(completed)
+                    footer = screen_row_of(rows, b"j/k:move")
+                    composer = screen_row_of(rows, "›".encode())
+                    if footer < 1 or composer != footer + 1:
+                        raise AssertionError(
+                            f"Board {state} at {height}: footer={footer}, composer={composer}: {rows!r}")
+                    if screen_row_of(rows, marker) < 1:
+                        raise AssertionError(f"Board {state} lost its current state: {rows!r}")
+                    if state == "populated":
+                        send_and_wait(process, master_fd, output, b"j" * 69, b"board-69")
+                        send_and_wait(process, master_fd, output, b"\r", b"footer-body-69")
+                        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+                        send_and_wait(process, master_fd, output, b"k" * 69, b"board-00")
+                os.write(master_fd, b"q")
+            finally:
+                gate.release.set()
+
+        run_terminal_scenario(executable, description=f"Board list footer: {state}",
+                              interact=interact, http_fixtures=fixtures)
+
+
 def run_board_compose_footer_regression(executable: str) -> None:
     def interact(
         process: subprocess.Popen[bytes],
@@ -15254,7 +15064,7 @@ def run_theme_scheme_regression(executable: str) -> None:
         before = len(output)
         # The cursor opens on the first row, which the picker sorts to be a
         # native-pass scheme -- the case that used to send nothing.
-        send_and_wait(process, master_fd, output, b"\r", b"Enter picks another")
+        send_and_wait(process, master_fd, output, b"\r", b"Enter:pick another")
         sent = bytes(output[before:])
 
         if b"\x1b]4;" not in sent:
@@ -15963,6 +15773,14 @@ def main() -> None:
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "send-on-stop":
+        run_send_on_stop_regression(os.path.abspath(sys.argv[1]))
+        print("tui send_on_stop regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "ctrl-y":
+        run_ctrl_y_regression(os.path.abspath(sys.argv[1]))
+        print("tui Ctrl-Y regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "planning-review":
         run_planning_review_regression(os.path.abspath(sys.argv[1]))
         print("tui Planning Task Review regression: PASS")
@@ -16017,6 +15835,7 @@ def main() -> None:
         print("tui MSX size regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
+        run_board_list_footer_regression(os.path.abspath(sys.argv[1]))
         run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
         print("tui board compose footer regression: PASS")
         return

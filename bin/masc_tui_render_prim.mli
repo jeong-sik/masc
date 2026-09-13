@@ -101,10 +101,6 @@ val markdown_with_closing :
 
 val document_markdown : width:int -> string -> string list
 
-val page_unread_note : string
-
-val page_failed_note : string
-
 val search_marker : Masc_tui_types.state -> string option
 (** The "/" query on screen and how many rows it reaches, or [None] when no
     query is on screen. One spelling for the three places that draw it: the
@@ -120,11 +116,6 @@ val search_marker_styled : Masc_tui_types.state -> string
 (** {!search_marker} in the colour the two headings share -- accented while
     the query is being typed, dim once settled -- or [""] when there is no
     query. *)
-
-val title_missing_reading : error:'a option -> string
-(** What a title says where its counts would go: whether the read was never
-    asked for or was asked for and failed. The title is the row on top, so
-    saying "not loaded" after a failure is the answer that gets read. *)
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
@@ -169,6 +160,11 @@ type chrome_body = {
   push_divider : unit -> unit;
   push_empty : unit -> unit;
 }
+
+val surface_chrome_rows : int
+(** The rows {!surface_chrome} draws around its body: the top border, the
+    title and its rule, the bottom border and the footer. A key handler that
+    bounds a body's scroll subtracts this, the same number the frame does. *)
 
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
@@ -341,7 +337,7 @@ val runtime_config_status_lines :
   Masc_tui_types.state ->
   cols:int -> (Masc_tui_runtime_config_view.tone * string) list
 
-val help_ascii_banner : cols:int -> Masc_tui_types.state -> string list
+val help_masthead : Masc_tui_types.state -> string list
 
 val help_lines : Masc_tui_types.state -> string list
 

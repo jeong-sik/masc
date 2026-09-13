@@ -63,6 +63,10 @@ val footer_hints : Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order. *)
 
+val footer_hints_config : pane:Masc_tui_types.config_pane -> string
+(** Config bindings available on the active pane. The surface-wide help keeps
+    the union, with pane restrictions explained by each binding. *)
+
 val footer_hints_overview : task_focus:bool -> string
 (** The Overview footer. Separate from {!footer_hints} because Overview owns
     one runtime fact the static table cannot: whether j/k currently drives
@@ -122,6 +126,11 @@ val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
 (** The compact strip beside the tab row, [key:label] joined by two spaces,
     led by the tab switch. Projects {!keeper_detail_tab_bindings} so the
     strip and the help sheet cannot name different keys. *)
+
+val sheet_bindings : Masc_tui_types.surface -> binding list
+(** {!for_surface} as the help sheet lists it: without the refresh / next /
+    quit tail the Global section already names. A surface that labels one of
+    those keys its own way keeps it. *)
 
 val here_marker : string
 (** Marker appended to the current surface section title in {!help_sections}. *)

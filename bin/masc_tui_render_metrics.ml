@@ -125,19 +125,19 @@ let pulse_line ~cols (state : state) kpis =
 
 let overview_pulse_line ~cols state = pulse_line ~cols state (calculate_kpis state)
 
+(* The three sections as a tab strip, drawn the way the surface strip above
+   every screen is: a mark on the one being read, the names beside it. It was
+   "Sections [1-3 / s]: [1 ● Engine & Scheduler] [2 ○ Work & Outcomes] ...",
+   which spelled the keys the footer already draws (1-3:section, s:cycle),
+   wrote each name a second time beside [metrics_section_label], and was cut
+   before the third name at 150 columns beside the Activity pane. The order is
+   the order 1, 2 and 3 select. *)
 let section_pills_line ~cols ~(active : metrics_section) : string =
   let inner_width = max 10 (framed_inner_width cols) in
-  let pill sec num name =
-    let is_active = active = sec in
-    let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
-    let style = if is_active then Ansi.bold ^ Theme.info () else Theme.recede () in
-    Printf.sprintf "%s[%d %s %s]%s" style num marker name Ansi.reset
-  in
-  let p1 = pill Section_fleet 1 "Engine & Scheduler" in
-  let p2 = pill Section_resources 2 "Work & Outcomes" in
-  let p3 = pill Section_tools 3 "Memory & Gate Safety" in
-  let line = Printf.sprintf "  %sSections [1-3 / s]:%s  %s  %s  %s"
-    Ansi.bold Ansi.reset p1 p2 p3
+  let tab section = (metrics_section_label section, active = section) in
+  let line =
+    "  "
+    ^ tab_strip (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
   if Layout.display_width line > inner_width then
     Layout.take_cells line inner_width ^ Ansi.reset

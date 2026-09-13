@@ -57,8 +57,9 @@ def run(executable: str) -> None:
         h.resize_and_wait(process, master, output, rows=30, columns=150,
                           needle=b"MASC Overview")
         h.palette_go(process, master, output, b"go lanes", b"Verifier")
-        h.send_and_wait(process, master, output, b"jjj",
+        h.send_and_wait(process, master, output, b"/Verifier",
                         re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))
+        h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
         h.send_and_wait(process, master, output, b"\r", b"50 loaded / 51 retained")
         h.send_and_wait(process, master, output, b"]", b"older history temporarily unavailable")
         screen = h.screen_text(bytes(output))

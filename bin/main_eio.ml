@@ -1788,7 +1788,21 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio agent as_json =
+let voice_verify_cmd_exit requested_base_path message audio agent as_json =
+  (* The workspace whose configuration is probed, when one is named. The voice
+     loader finds runtime.toml through the environment, so a workspace set up
+     with `voice-local-setup --base-path` and never recorded as the default had
+     no way to be checked from this command: measured 2026-09-13 with only
+     HOME and PATH set, run inside that workspace, it answered "voice config
+     missing" while the section was there. Exported the way the server boot
+     exports it, and the resolver's cache is cleared because the tool registry
+     has already resolved once by the time a subcommand runs. *)
+  Option.iter
+    (fun raw ->
+      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
+      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Config_dir_resolver.reset ())
+    requested_base_path;
   (* The keeper whose voice is being checked, when one is named. A voice is
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
@@ -1894,7 +1908,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
+    Term.(const voice_verify_cmd_exit $ run_base_path $ message $ audio $ agent $ as_json)
 (* Turning voice on without a server running.
 
    The setup journey runs before there is anything to talk to over HTTP, and
@@ -3418,8 +3432,16 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, or pdf-tools.")
-    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, or presentation-tools.")
+    (* Resolved on demand: only presentation-tools is scoped to a workspace, and
+       an operator installing Codex or Docker has not made one yet. Taking the
+       resolving [base_path] term here refused every dependency with "MASC_BASE_PATH
+       is not set" -- advice that does not install anything. *)
+    Term.(const (fun base_path dependency action ->
+      Masc_cli_prerequisites.run
+        ~base_path:(fun () -> match base_path with Some raw -> raw | None -> default_base_path ())
+        ~dependency ~action)
+      $ run_base_path $ dependency $ action)
 
 let cmd =
   let doc =

@@ -29,7 +29,10 @@ type artifact_payload =
 
 type artifact_read_result = (artifact_payload, evidence_read_failure) result
 
+type collaboration_kind = Board_source | Fusion_source
+
 type submitted_evidence_item =
+  | Evidence_collaboration of { reference : string; content : string; sha256 : string }
   | Evidence_note of string
   | Evidence_artifact of
       { reference : string
@@ -111,7 +114,25 @@ let evidence_read_failure_of_yojson = function
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
+let collaboration_reference reference =
+  let parse prefix kind =
+    if String.starts_with ~prefix reference then
+      let id = String.sub reference (String.length prefix) (String.length reference - String.length prefix) in
+      if id <> "" && String.trim id = id then Some (kind, id) else None
+    else None in
+  match parse "board:" Board_source with
+  | Some _ as value -> value
+  | None -> parse "fusion:" Fusion_source
+
+let collaboration_metadata ~reference ~content ~sha256 =
+  `Assoc ["kind", `String "collaboration"; "reference", `String reference;
+    "sha256", `String sha256; "bytes", `Int (String.length content);
+    "content_omitted", `Bool true]
+
 let submitted_evidence_item_to_yojson = function
+  | Evidence_collaboration {reference; content; sha256} ->
+    `Assoc ["kind", `String "collaboration"; "reference", `String reference;
+      "content", `String content; "sha256", `String sha256]
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
   | Evidence_artifact { reference; content; bytes; truncated } ->
@@ -221,6 +242,8 @@ let submitted_evidence_access_to_yojson = function
    stays in the store; the judge receives the size, the fact, and how to read
    the real file. *)
 let submitted_evidence_item_transport_to_yojson = function
+  | Evidence_collaboration {reference; content; sha256} ->
+    collaboration_metadata ~reference ~content ~sha256
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
   | Evidence_artifact { reference; content; bytes; truncated } ->
@@ -311,7 +334,8 @@ let submitted_evidence_item_withheld_to_yojson = function
                evidence_transport_max_bytes) )
       ]
   | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _
-    | Evidence_artifact_binary _) as item ->
+    | Evidence_artifact_binary _
+    | Evidence_collaboration _) as item ->
     (* Only a full-content artifact can be withheld for the aggregate budget;
        the rest carry no content to withhold. A binary item is already
        payload-free on the wire -- its bytes live in the evidence body. *)
@@ -347,7 +371,8 @@ let carried_artifact_indices items =
              | Evidence_artifact _
              | Evidence_invalid_reference
              | Evidence_artifact_unreadable _
-             | Evidence_artifact_binary _ ) ) -> None)
+             | Evidence_artifact_binary _
+             | Evidence_collaboration _ ) ) -> None)
   in
   let sorted =
     List.stable_sort
@@ -382,7 +407,8 @@ let submitted_evidence_items_transport_to_yojson items =
       | Evidence_artifact _
       | Evidence_invalid_reference
       | Evidence_artifact_unreadable _
-      | Evidence_artifact_binary _ -> submitted_evidence_item_transport_to_yojson item)
+      | Evidence_artifact_binary _
+      | Evidence_collaboration _ -> submitted_evidence_item_transport_to_yojson item)
     items
 ;;
 
@@ -402,6 +428,8 @@ let submitted_evidence_access_transport_to_yojson = function
 ;;
 
 let submitted_evidence_item_metadata_to_yojson = function
+  | Evidence_collaboration {reference; content; sha256} ->
+    collaboration_metadata ~reference ~content ~sha256
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "bytes", `Int (String.length note) ]
   | Evidence_artifact { reference; bytes; truncated; _ } ->
@@ -472,6 +500,20 @@ let submitted_evidence_item_of_yojson = function
              key)
     in
     (match List.assoc_opt "kind" fields with
+     | Some (`String "collaboration") ->
+       let* () = Json_util.reject_unknown_fields ~surface:"submitted collaboration"
+         ~allowed:["kind";"reference";"content";"sha256"] fields in
+       let* reference = string_field "reference" in
+       let* content = string_field "content" in
+       let* sha256 = string_field "sha256" in
+       let* () = match collaboration_reference reference with
+         | Some _ -> Ok () | None -> Error "invalid collaboration reference" in
+       if not (String.equal sha256 Digestif.SHA256.(digest_string content |> to_hex)) then
+         Error "submitted collaboration digest mismatch"
+       else (match Yojson.Safe.from_string content with
+         | `Assoc _ -> Ok (Evidence_collaboration {reference; content; sha256})
+         | _ -> Error "submitted collaboration content must be an object"
+         | exception Yojson.Json_error detail -> Error detail)
      | Some (`String "note") ->
        let open Result.Syntax in
        let* () =
@@ -804,19 +846,19 @@ let strip_prefix ~prefix value =
          (String.length value - String.length prefix))
   else None
 
-(* The shape this store can read, decided without touching the filesystem.
-   [snapshot_submitted_evidence_item] below is the only producer of evidence
-   snapshots and answers [Evidence_invalid_reference] for anything else, so the
-   submit boundaries ask this instead of restating the prefixes: a reference
-   form added here reaches every caller, and one cannot be accepted at submit
-   and then be unreadable at review. *)
+(* The shared reference grammar. Artifact/note capture lives here;
+   collaboration capture lives above Workspace so Board/Fusion dependencies
+   do not form a cycle. Both persist the same closed evidence-item type. *)
 type reference_form =
   | Artifact_reference of string
   | Note_reference of string
+  | Collaboration_reference of collaboration_kind * string
   | Unresolvable_reference
 
 let classify_evidence_reference reference =
-  match strip_prefix ~prefix:artifact_reference_prefix reference with
+  match collaboration_reference reference with
+  | Some (kind, id) -> Collaboration_reference (kind, id)
+  | None -> match strip_prefix ~prefix:artifact_reference_prefix reference with
   | Some relative_path -> Artifact_reference relative_path
   | None ->
     (match strip_prefix ~prefix:note_reference_prefix reference with
@@ -830,7 +872,7 @@ let artifact_reference_form =
 ;;
 
 let note_reference_form = note_reference_prefix ^ "<text>"
-let resolvable_reference_forms = [ artifact_reference_form; note_reference_form ]
+let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>" ]
 
 let valid_producer_relative_path path =
   Filename.is_relative path
@@ -921,6 +963,7 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
             relative reference reason))
   | Evidence_artifact_binary { reference; body = None; _ } ->
     Error (Printf.sprintf "binary evidence %s filed no body" reference)
+  | Evidence_collaboration _ -> Error "not a binary artifact"
   | Evidence_note _ -> Error "not a binary artifact"
   | Evidence_artifact _ -> Error "not a binary artifact"
   | Evidence_invalid_reference -> Error "not a binary artifact"
@@ -1000,7 +1043,7 @@ let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_pat
       ~reference
       relative_path
   | Note_reference note -> Evidence_note note
-  | Unresolvable_reference -> Evidence_invalid_reference
+  | Collaboration_reference _ | Unresolvable_reference -> Evidence_invalid_reference
 
 let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~worker
     references =
@@ -1028,6 +1071,7 @@ let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~work
 let submitted_evidence_identity_line (item : Yojson.Safe.t) =
   match submitted_evidence_item_of_yojson item with
   | Error detail -> Error detail
+  | Ok (Evidence_collaboration {reference; _}) -> Ok reference
   | Ok (Evidence_note note) -> Ok (note_reference_prefix ^ note)
   | Ok (Evidence_artifact { reference; _ }) -> Ok reference
   | Ok Evidence_invalid_reference ->
@@ -1074,6 +1118,7 @@ let truncated_snapshot_items (json : Yojson.Safe.t) : (string * int) list =
          | Ok (Evidence_artifact { reference; bytes; truncated = true; _ }) ->
            Some (reference, bytes)
          | Ok (Evidence_artifact { truncated = false; _ }) -> None
+         | Ok (Evidence_collaboration _) -> None
          | Ok (Evidence_note _) -> None
          | Ok Evidence_invalid_reference -> None
          | Ok (Evidence_artifact_unreadable _) -> None

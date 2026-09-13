@@ -781,6 +781,7 @@ let run_turn
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_runtime_attempt_failed
+      ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
@@ -798,6 +799,12 @@ let run_turn
   =
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let deferred_runtime_lane_ref = ref None in
+  let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
+    Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
+  let record_runtime_lane_terminal_error (error : Keeper_turn_driver.lane_terminal_error) =
+    Option.iter (record_produced_checkpoint ~runtime_id:error.origin_runtime_id ~attempt:error.origin_attempt)
+      error.checkpoint_after;
+    Option.iter (fun callback -> callback error) on_runtime_lane_terminal_error in
   let record_runtime_retry_deferred hint =
     deferred_runtime_lane_ref := Some hint;
     Option.iter (fun callback -> callback hint) on_runtime_retry_deferred
@@ -1449,7 +1456,7 @@ let run_turn
                              manifest)
                       ?deferred_runtime_lane
                       ~on_runtime_retry_deferred:record_runtime_retry_deferred
-                      ?on_runtime_lane_terminal_error
+                      ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ?stream_idle_timeout_s
                       ?body_timeout_s:
@@ -1634,6 +1641,8 @@ let run_turn
                  Error e
                | Ok selected_run ->
                  let result = selected_run.Keeper_turn_driver.run_result in
+                 Option.iter (record_produced_checkpoint ~runtime_id:selected_run.selected_runtime_id
+                   ~attempt:selected_run.lane_attempt_index) result.checkpoint;
                  let selected_runtime_id = selected_run.selected_runtime_id in
                  let selected_max_context = selected_run.selected_max_context in
                  let checkpoint_owner = selected_run.checkpoint_owner in
@@ -1790,6 +1799,7 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
+                             ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
                              ~receipt_response_text_present_ref

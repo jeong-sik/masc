@@ -171,6 +171,42 @@ let test_a_reply_from_the_scope_just_left_is_dropped () =
      | Some _ | None -> false)
 ;;
 
+(* The listing is keyed the same way. It was three cells -- rows, an error,
+   and one in-flight bit shared by every directory -- so moving into a
+   directory before the last listing answered asked for nothing, and the late
+   answer for the directory just left was dropped without the new one ever
+   being requested: "(loading…)" until [r]. The same cells drew a directory
+   that answered with no entries as "(loading…)" too. *)
+let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
+  let equal = code_scope_path_equal in
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let view_is name expected =
+    Alcotest.(check string) name expected
+      (match code_listing_view state with
+       | Fetched.Absent -> "absent"
+       | Fetched.Loading -> "loading"
+       | Fetched.Ready [] -> "empty"
+       | Fetched.Ready (_ :: _) -> "rows"
+       | Fetched.Failed _ -> "failed")
+  in
+  view_is "a listing nobody asked for is absent" "absent";
+  let listing, from_root =
+    start_read ~equal state.code_listing (Code_scope_project, "")
+  in
+  state.code_listing <- listing;
+  state.code_dir <- "lib";
+  let listing, from_lib =
+    start_read ~equal state.code_listing (Code_scope_project, "lib")
+  in
+  state.code_listing <- listing;
+  view_is "lib is asked for while the root is still in flight" "loading";
+  state.code_listing <- Fetched.complete ~equal state.code_listing from_root (Ok []);
+  view_is "the root's late answer does not settle lib" "loading";
+  state.code_listing <- Fetched.complete ~equal state.code_listing from_lib (Ok []);
+  view_is "a directory with no entries is an answer, not a wait" "empty";
+  Alcotest.(check int) "and it holds no rows" 0 (List.length (code_entries state))
+;;
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -189,6 +225,8 @@ let () =
             test_a_shared_path_is_not_a_shared_request
         ; Alcotest.test_case "a reply from the scope just left is dropped" `Quick
             test_a_reply_from_the_scope_just_left_is_dropped
+        ; Alcotest.test_case "moving before the listing answers asks for the new directory" `Quick
+            test_moving_before_the_listing_answers_asks_for_the_new_directory
         ] )
     ]
 ;;

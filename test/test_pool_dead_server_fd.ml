@@ -50,6 +50,8 @@ let test_dead_server_fd_flat () =
   in
   Alcotest.(check bool) "the warm-up request is refused like the rest" true
     (Astring.String.is_prefix ~affix:"TCP connect failed:" warm_up);
+  Alcotest.(check bool) "and the refusal reads as one line" false
+    (String.contains warm_up '\n');
   let fd_before = (Fd_accountant.fd_snapshot ()).fd_open in
   for _ = 1 to 50 do
     let msg = error_message
@@ -190,6 +192,21 @@ let test_establishment_errors () =
     ("DNS resolution failed: " ^ Printexc.to_string dns_error)
     (error_message (establish ~resolve:(fun () -> raise dns_error)
       ~connect:no_connect ~create:no_create));
+  (* Eio's printer breaks an [Io] error's context onto its own line; the
+     message it goes into is one line. *)
+  let with_context =
+    Eio.Exn.add_context (Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout))
+      "connecting to %s" "tcp:127.0.0.1:8935"
+  in
+  let refused_with_context =
+    error_message (establish ~resolve:(fun () -> [()])
+      ~connect:(fun () -> raise with_context) ~create:no_create)
+  in
+  Alcotest.(check bool) "an Eio error's context stays on the message's line" false
+    (String.contains refused_with_context '\n');
+  Alcotest.(check bool) "and is still there" true
+    (Astring.String.is_suffix ~affix:", connecting to tcp:127.0.0.1:8935"
+       refused_with_context);
   let resource_error = Unix.Unix_error (Unix.EMFILE, "socket", "") in
   Alcotest.(check string) "resource exhaustion is not reported as refusal"
     ("TCP connect failed: " ^ Printexc.to_string resource_error)

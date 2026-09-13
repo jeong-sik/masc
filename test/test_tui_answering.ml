@@ -22,7 +22,7 @@ let texts lines =
 let test_running_rows_lead_with_the_chat_target () =
   let lines =
     Masc_tui_answering.overlay ~now:1000.
-      ~chat_target:(Some "analyst") ~error:None ~finishes:[]
+      ~chat_target:(Some "analyst") ~error:None ~observed_at:(Some 988.) ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
       ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:990.
@@ -49,6 +49,7 @@ let test_running_rows_lead_with_the_chat_target () =
 let test_quiet_fleet_says_so () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes:[]
       [ row "echo" Tui_decode.Keeper_turn_idle
       ; row "analyst" Tui_decode.Keeper_turn_idle
@@ -65,23 +66,48 @@ let test_quiet_fleet_says_so () =
 let test_error_keeps_the_last_rows_and_says_why () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "connection refused") ~finishes:[]
+      ~error:(Some "connection refused") ~observed_at:(Some 988.) ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_maintenance ~started:999. "polisher" ]
   in
   match texts lines with
   | [ failed; kept; runner ] ->
       Alcotest.(check bool) "the poll failure is named" true
         (Astring.String.is_infix ~affix:"connection refused" failed);
-      Alcotest.(check bool) "and marked as stale, not fresh" true
-        (Astring.String.is_infix ~affix:"last rows" kept);
+      Alcotest.(check bool) "and marked as stale, with its age" true
+        (Astring.String.is_infix ~affix:"rows read 12s ago" kept);
       Alcotest.(check bool) "the last known runner still shows" true
         (Astring.String.is_infix ~affix:"polisher" runner)
   | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
 ;;
 
+(* Before any poll has answered there are no rows, and "nobody is answering
+   right now" was said about them anyway -- with the server down, next to a
+   poll failure, together with "showing the last rows that arrived". *)
+let test_a_list_no_poll_brought_back_is_not_quiet () =
+  let unread =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:None ~finishes:[] []
+  in
+  Alcotest.(check (list string)) "nothing polled yet says so" [ "not loaded yet" ]
+    (texts unread);
+  let failed =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
+      ~error:(Some "connection refused") ~observed_at:None ~finishes:[] []
+  in
+  match texts failed with
+  | [ only ] ->
+      Alcotest.(check bool) "a first poll that failed names the failure" true
+        (Astring.String.is_infix ~affix:"connection refused" only)
+  | other ->
+      Alcotest.failf
+        "a failed first poll has no rows to keep or call quiet; got %d lines"
+        (List.length other)
+;;
+
 let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes:[]
       [ row "delta" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
   in
@@ -102,6 +128,7 @@ let test_finished_turns_glow_then_expire () =
   let finishes = [ ("echo", 990.) ] in
   let fresh =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
@@ -124,7 +151,7 @@ let test_finished_turns_glow_then_expire () =
   let expired =
     Masc_tui_answering.overlay
       ~now:(990. +. Masc_tui_answering.finish_glow_ttl_seconds +. 1.)
-      ~chat_target:None ~error:None ~finishes
+      ~chat_target:None ~error:None ~observed_at:(Some 988.) ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
   match texts expired with
@@ -172,7 +199,7 @@ let test_advance_finishes_tracks_the_transition () =
 let test_target_indexes_skip_prose () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "boom") ~finishes:[ ("analyst", 995.) ]
+      ~error:(Some "boom") ~observed_at:(Some 988.) ~finishes:[ ("analyst", 995.) ]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
       ]
@@ -241,6 +268,7 @@ let test_the_overlay_wears_the_same_mark () =
   List.iter (fun frame ->
   let lines =
     Masc_tui_answering.overlay ~frame ~now:100. ~chat_target:None ~error:None
+      ~observed_at:(Some 90.)
       ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "echo" ]
   in
@@ -463,6 +491,8 @@ let () =
             test_quiet_fleet_says_so
         ; Alcotest.test_case "an error keeps the last rows and says why"
             `Quick test_error_keeps_the_last_rows_and_says_why
+        ; Alcotest.test_case "a list no poll brought back is not quiet"
+            `Quick test_a_list_no_poll_brought_back_is_not_quiet
         ; Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
             test_unavailable_reads_as_unknown_not_idle
         ; Alcotest.test_case "finished turns glow then expire" `Quick

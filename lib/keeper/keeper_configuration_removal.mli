@@ -24,3 +24,13 @@ val retry : config:Workspace.config -> keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   cleanup:(string -> (unit, string) result) -> (receipt, error) result
 val list : config:Workspace.config -> (inventory, error) result
+
+(** Fold the lifecycle reservation release that closed a removal transaction
+    into the transaction's result. [Release_not_owner] and [Release_missing]
+    are both lost ownership evidence and turn the result into [Conflict];
+    [Released], or no recorded release, keeps the body result. *)
+val settle_reservation_release :
+  keeper_name:string ->
+  Keeper_lifecycle_reservation.release_outcome option ->
+  (receipt, error) result ->
+  (receipt, error) result

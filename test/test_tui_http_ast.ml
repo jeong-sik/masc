@@ -2578,7 +2578,11 @@ let test_the_pane_surfaces_open_on_a_title_row () =
         (calls binding_name "pane_surface_title"))
     [ "render_code"; "render_resources" ];
   check bool "Code's list reads the shared pane height" true
-    (calls "render_code" "code_pane_content_height" >= 1)
+    (calls "render_code" "code_pane_content_height" >= 1);
+  check bool "Code's pane height gives up the title row" true
+    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+  check bool "Resources gives up the same title row" true
+    (calls "render_resources" "pane_surface_content_height" >= 1)
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines

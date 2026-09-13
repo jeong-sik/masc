@@ -10779,9 +10779,6 @@ let render_runtime_pick (state : state) =
    lexed once at load (masc_tui_code_lexer) and drawn as styled spans.
    fit_width measures cells past the SGR bytes and closes a cut style, so a
    long row truncates without bleeding colour into the margin. *)
-(* The file pane's usable rows: top gap, title, divider, bottom gap, and
-   the footer. One owner — the dispatch keeps the cursor visible against the
-   same number the renderer draws with. *)
 (* The two-pane surfaces -- Code and Resources -- opened on their list pane's
    header ("▸ /", "▸ Resources") with no row above it. Every other surface
    opens on its name, the clock and the connection badge, and the badge is the
@@ -10796,10 +10793,16 @@ let pane_surface_title (state : state) ~name =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
     (connection_badge state)
 
+let pane_surface_content_height ~rows =
+  max 1 (framed_content_height ~rows - pane_surface_title_rows)
+
+(* The file pane's usable rows: the surface title, then the pane's top gap,
+   title, divider, bottom gap, and the footer. One owner — the dispatch keeps
+   the cursor visible against the same number the renderer draws with. *)
 let code_pane_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  max 1 (framed_content_height ~rows - pane_surface_title_rows)
+  pane_surface_content_height ~rows
 
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -11554,7 +11557,7 @@ let render_resources (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_line buf cols (pane_surface_title state ~name:"Config / Resources");
-  let pane_rows = max 1 (framed_content_height ~rows - pane_surface_title_rows) in
+  let pane_rows = pane_surface_content_height ~rows in
   let split = cols >= keeper_split_threshold_cols in
   let list_rows_budget = pane_rows in
   let rows_list =

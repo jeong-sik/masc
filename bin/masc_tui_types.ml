@@ -3691,6 +3691,27 @@ module Browser_lane_view = struct
           ordered in
         { t with scene_cursor = Option.value ~default:first next }
 
+  (** Move between exact [article] regions in an observed region scene. *)
+  let move_scene_article ~backwards t =
+    let articles = match t.scene with
+      | Some scene when scene.content.view = Browser_lane.Regions ->
+          scene_targets t |> List.mapi (fun index node -> index, node)
+      | Some _ | None -> [] in
+    let articles = articles
+      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+        match node.kind with
+        | Region Masc.Browser_scene.Article -> Some index
+        | Region _ | Text | Raster | Control _ -> None) in
+    match articles with
+    | [] -> t
+    | first :: _ ->
+        let ordered = if backwards then List.rev articles else articles in
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        let fallback = if backwards then List.hd (List.rev articles) else first in
+        { t with scene_cursor = Option.value ~default:fallback next }
+
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->

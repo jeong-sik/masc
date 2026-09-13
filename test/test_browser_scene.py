@@ -132,6 +132,11 @@ try:
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ js("document.body.innerHTML='<main aria-label=Timeline><article aria-label=\"Post A\">Post A</article><article aria-label=\"Post B\">Post B</article></main>';" )
+ social_regions=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ article_nodes=[n for n in social_regions['nodes'] if n['kind']=='region' and n['role']=='article']
+ check('social feed outline exposes typed article regions',len(article_nodes)==2 and [n['text'] for n in article_nodes]==['Post A','Post B'])
+ check('social article regions retain one document identity',all(n['nodeId'] and social_regions['documentId']==regions['documentId'] for n in article_nodes))
  # Landmark-free chat layout: only actual visible overflow panes are scopes.
  js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\">No overflow</div>';")
  fallback=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])

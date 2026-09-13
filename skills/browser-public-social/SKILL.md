@@ -31,7 +31,9 @@ guarded primary-region shortcut. On a feed with several `article` regions,
 use `n`/`p` or `Tab`/`Shift-Tab` to choose the observed article, then `Enter`
 to read that region. `Enter` on an observed same-tab HTTP(S) link follows the
 link and refreshes the destination scene; it never reuses the old article
-scope. Use `J`/`K` to scroll the top-level page by the observed viewport
+scope. Once the region list is visible, `N`/`P` cycle only exact observed
+`article` regions, skipping non-article regions. Use `J`/`K`
+to scroll the top-level page by the observed viewport
 height, then verify the refreshed document and post identities. Use `Ctrl-O`
 when the painted layout or a nested scroll container is needed; `j`/`k` in
 the text scene only move the terminal reader.

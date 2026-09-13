@@ -18043,7 +18043,7 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K"
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
@@ -18154,6 +18154,10 @@ and is loaded on demand through keeper_skill.
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "N" | "P" when (match view.scene with
+                     | Some scene -> scene.content.view = Browser_lane.Regions
+                     | None -> false) && not (busy view) ->
+                     reveal_selection (move_scene_article ~backwards:(key = "P") view)
                  | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
                      reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->

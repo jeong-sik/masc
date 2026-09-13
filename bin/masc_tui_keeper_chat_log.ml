@@ -101,6 +101,9 @@ let protocol_error_detail (error : E.stream_protocol_error) =
 
 let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   match event with
+  | E.Batch_bound {operation_id; execution_id} -> Some (Live.Batch_bound
+      {operation_id = Keeper_chat_operation.Operation_id.to_string operation_id;
+       execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
   | E.Text_delta text -> Some (Live.Text text)

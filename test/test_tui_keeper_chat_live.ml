@@ -8,6 +8,7 @@ module Live = Masc_tui_keeper_chat_live
    byte-at-a-time feed, and the invariance test below pins the general case. *)
 
 let delta_to_string : Live.delta -> string = function
+  | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       Printf.sprintf "runtime_attempt_started(%s,%s)"

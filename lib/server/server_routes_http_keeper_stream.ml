@@ -2733,6 +2733,31 @@ let operation_execution_of_outcome ~operation_state ~pending_continuation ~outco
   | Ok (Keeper_chat_operation.Succeeded _ | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _) ->
     failed Keeper_chat_operation.Turn_invariant "claimed operation was already terminal"
 
+let persist_batch_user_rows ~base_dir ~keeper_name members =
+  let ( let* ) = Result.bind in
+  match members with
+  | [] | [_] -> Ok ()
+  | _ -> List.fold_left (fun result (operation : Keeper_chat_operation.t) ->
+      let* () = result in
+      let* input = match operation.input with Some input -> Ok input
+        | None -> Error "active batch member has no original input" in
+      let* decoded = operation_payload_of_json ~keeper_name ~operation_id:operation.operation_id
+        ~source:operation.source ~input in
+      let source = decoded.source in
+      match source.user_row_origin with
+      | Keeper_chat_store.Already_persisted _ | Already_persisted_upstream -> Ok ()
+      | Needs_append ->
+        let* request_id = Keeper_chat_delivery_identity.Request_id.of_string
+          (Keeper_chat_operation.Operation_id.to_string operation.operation_id) in
+        Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+          ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+          ~content:decoded.payload.message ~attachments:decoded.payload.attachments
+          ~surface:source.surface ~speaker:(chat_speaker_of_request decoded.payload)
+          ?conversation_id:source.conversation_id ?external_message_id:source.external_message_id
+          ?workspace_id:source.workspace_id ~extra_mentions:source.extra_mentions ()
+        |> Result.map (fun _ -> ())) (Ok ()) members
+;;
+
 let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   fun ~sw ~keeper_name ~claim ->
   let failed ?outcome_ref kind detail =
@@ -2752,6 +2777,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
        | Error error -> failed Keeper_chat_operation.Store_unavailable
            (Keeper_owner_registry.command_error_to_string error)
        | Ok batch_members ->
+      (match persist_batch_user_rows ~base_dir:(Mcp_server.workspace_config state).base_path ~keeper_name batch_members with
+       | Error detail -> failed Keeper_chat_operation.Delivery_failed detail
+       | Ok () ->
       let member_ids = List.map (fun (member : Keeper_chat_operation.t) -> member.operation_id) batch_members in
       let pending_continuation () =
         Keeper_direct_gate_continuation.pending
@@ -2936,12 +2964,14 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                fork_adapter (fun () ->
                  let commit terminal =
                    settle_delivery
-                     (Keeper_delegate_completion_wake.deliver
-                        ~base_path:(Mcp_server.workspace_config state).base_path
-                        ~asked_by
-                        ~operation_id
-                        ~delegate:keeper_name
-                        ~terminal)
+                     (List.fold_left (fun prior member_id ->
+                       let delivered = Keeper_delegate_completion_wake.deliver
+                         ~base_path:(Mcp_server.workspace_config state).base_path ~asked_by
+                         ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id)
+                         ~delegate:keeper_name ~terminal in
+                       match prior, delivered with
+                       | Error _, _ -> prior
+                       | Ok (), result -> result) (Ok ()) member_ids)
                  in
                  let rec loop reply =
                    match Keeper_chat_events.subscribe events with
@@ -2985,7 +3015,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             in
             let outcome =
               process_single_turn
-                ~user_row_origin:operation_payload.source.user_row_origin
+                ~user_row_origin:(match batch_members with
+                  | [] | [_] -> operation_payload.source.user_row_origin
+                  | _ -> Keeper_chat_store.Already_persisted_upstream)
                 ~submission:
                   (Owner_operation
                      { operation_id = operation.operation_id
@@ -3019,7 +3051,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               |> Result.map_error Keeper_owner_registry.command_error_to_string
               |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
                 | None -> Error "claimed operation disappeared before settlement") in
-            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery)))
+            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery))))
 
   in
   match
@@ -3351,6 +3383,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new

@@ -800,10 +800,10 @@ require_lane_slots
        write_file runtime_path
          (runtime_toml replacement_target
           ^ Printf.sprintf
-              "\n[providers.first_cli]\nprotocol = %S\ncommand = %S\nis-non-interactive = true\n[first_cli.replacement]\n"
+              "\n[providers.first_cli]\nprotocol = %S\ncommand = %S\nis-non-interactive = true\n[models.verifier]\napi-name = \"verifier-fixture\"\nmax-context = 400000\ntools-support = true\n[first_cli.verifier]\n"
               protocol command);
        create_server_state ();
-       let runtime_id = "first_cli.replacement" in
+       let runtime_id = "first_cli.verifier" in
        (match Runtime.set_first_run_runtime ~runtime_config_path:runtime_path
                 ~runtime_id () with
         | Ok _ -> ()
@@ -820,10 +820,14 @@ require_lane_slots
             | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
                 (Registry.lane_resolution_error_to_string error))
          [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ];
-       (match Runtime.verifier_exact_lane_slot_ids () with
-        | Error detail -> Alcotest.fail detail
-        | Ok slots -> Alcotest.(check (list string))
-            "CLI bootstrap configures the completion authority" [runtime_id] slots))
+       (match protocol, Runtime.verifier_exact_lane_slot_ids () with
+        | "codex-app-server", Error detail ->
+          Alcotest.(check string) "Codex still requires native-tool suppression"
+            (runtime_id ^ ": completion verifier requires native-tool suppression, which this client does not support") detail
+        | "codex-app-server", Ok _ -> Alcotest.fail "unsafe Codex verifier was admitted"
+        | _, Error detail -> Alcotest.fail detail
+        | _, Ok slots -> Alcotest.(check (list string))
+            "configured Claude direct binding supplies completion authority" [runtime_id] slots))
     [ "codex-app-server", "codex"; "claude-code", "claude" ]
 ;;
 

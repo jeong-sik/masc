@@ -553,8 +553,9 @@ val verifier_runtime_admission : t -> (unit, string) result
     Agent Core and Claude Code meet this boundary; other official clients do not. *)
 
 val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
-(** Admit a direct official-client runtime with required tool support. Lane IDs,
-    Agent Core runtimes, and clients without native-tool suppression are refused. *)
+(** Admit the exact official-client binding with required tool support, without
+    expanding any same-named Keeper lane. Lane-only IDs, Agent Core runtimes,
+    and clients without native-tool suppression are refused. *)
 
 val verifier_exact_lane_slot_ids : unit -> (string list, string) result
 (** Admitted API slot ids followed by declared official-client slot ids from the

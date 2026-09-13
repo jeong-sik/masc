@@ -6738,7 +6738,11 @@ let agenda (state : state) : Masc_tui_agenda.t =
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
-    | None, Some _ -> Masc_tui_agenda.Read_failed
+        (match snapshot.scs_read_error with
+         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | None -> "schedule store unreadable")
+    | None, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -6758,7 +6762,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
   in
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
-    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read

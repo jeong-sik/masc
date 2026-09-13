@@ -52,6 +52,10 @@ use explicit installer arguments so its shell environment is unnecessary.
 The installer requires a custom `--token-file` to exist already. It must
 match the canonical server token; if the canonical file does not exist yet,
 the installer initializes it from that provisioned token.
+An isolated Firefox profile may pass `--host-name` with a unique lowercase
+name. The installer writes that exact name to both the manifest filename and
+the manifest name; the matching extension must use the same host name.
+Remove only that exact manifest after the owned profile and native host stop.
 The host accepts only HTTP origins at `127.0.0.1`, `localhost`, or `::1`.
 Remote destinations and URL credentials, paths, queries, and fragments are
 rejected before the token is read or sent.

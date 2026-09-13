@@ -105,8 +105,38 @@ let read ~config ~run_id = protect (fun () ->
                 | Error detail -> raise (Yojson.Json_error detail)))) (Sys.readdir directory)) (Sys.readdir root);
   Ok (List.sort (fun a b -> compare (Json_util.get_string a "ts") (Json_util.get_string b "ts")) !rows))
 
+(* The Task a decision on this run may name: the one the request was captured
+   for, read from the evidence post's source_context. Checking only that the
+   named Task exists and is assigned to the caller let a decision on an
+   unscoped or Goal-only run -- or a run requested for another Task -- bind its
+   evidence hash to whatever Task the Keeper held. A decision lives in a Task's
+   history; a run with no Task has none to write into. *)
+let run_task ~run_id (post : Board.post) =
+  let context = match post.meta_json with
+    | Some (`Assoc fields) -> List.assoc_opt "source_context" fields
+    | Some _ | None -> None in
+  match context with
+  | None | Some `Null -> Ok None
+  | Some json ->
+    (match Fusion_request_context.of_yojson json with
+     | Ok context -> Ok (Fusion_request_context.task_id context)
+     | Error detail ->
+       Error (Storage_failure (Printf.sprintf
+         "Fusion run %s evidence carries an unreadable source_context: %s" run_id detail)))
+
 let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
   let* post = source ~keeper ~run_id:proposal.run_id in
+  let* () = match run_task ~run_id:proposal.run_id post with
+    | Error _ as error -> error
+    | Ok None ->
+      Error (Rejected (Printf.sprintf
+        "Fusion run %s was not requested for a Task, so there is no Task decision to record"
+        proposal.run_id))
+    | Ok (Some task_id) when String.equal task_id proposal.task_id -> Ok ()
+    | Ok (Some task_id) ->
+      Error (Rejected (Printf.sprintf
+        "decision task %s is not the Task Fusion run %s was requested for (%s)"
+        proposal.task_id proposal.run_id task_id)) in
   Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
   let* backlog = Workspace_backlog.read_backlog_r config |> Result.map_error (fun detail -> Storage_failure detail) in
   let* task = match List.find_opt (fun (task : Masc_domain.task) -> task.id = proposal.task_id) backlog.tasks with

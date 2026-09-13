@@ -79,15 +79,15 @@ let direct_turn_dynamic_context
       ~(turn_instructions_text : string)
   : string
   =
-  [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
-  ; Option.value ~default:""
-      (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
-  ; approval_authority_text
+  ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
+   @ Option.to_list
+       (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+   @ [ approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
   ; turn_instructions_text
-  ]
+  ])
   |> List.filter (fun text -> String.trim text <> "")
   |> String.concat "\n\n"
 

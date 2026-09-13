@@ -124,6 +124,45 @@ let confirm_retention ~session_dir snapshot =
   | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
   | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed"
 
+let capture_preparation ?official_client ~config ~keeper_name ~operation_id ~session_dir ~session_id () =
+  let* session_scope = session_scope ~config ~session_dir ~session_id in
+  let* checkpoint, snapshot = match official_client with
+    | Some (runtime_id, frame) ->
+      capture_native ~base_path:config.Workspace.base_path ~keeper_name ~operation_id ~runtime_id ~frame
+      |> Result.map (fun checkpoint -> Semantic.Official_client checkpoint, None)
+    | None ->
+      let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+        |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
+      let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
+      let* frame = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
+      let* () = match Snapshot.active frame with
+        | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
+        | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
+      Ok (Semantic.Agent_core (Checkpoint.exact_snapshot_reference snapshot), Some snapshot) in
+  Ok ({Semantic.session_scope;checkpoint}, snapshot)
+
+let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
+  let base_path = config.Workspace.base_path in
+  let session_scope = binding.preparation.session_scope in
+  let* obligations = List.fold_left (fun result approval_id ->
+    let* obligations = result in
+    let* obligation = bind ~base_path ~keeper_name approval_id in
+    if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation]))
+    (Ok binding.obligations) binding.approval_ids in
+  match binding.preparation.checkpoint with
+  | Semantic.Official_client checkpoint ->
+    let* () = match binding.runtime_suffix with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
+    let* waiting = Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations in
+    Ok waiting
+  | Semantic.Agent_core reference ->
+    let* waiting = match binding.runtime_suffix with
+      | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
+      | Some (lane : Semantic.runtime_suffix) ->
+        let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
+          ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
+        Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
+    Ok waiting
+
 let suspend ?official_client ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
   let base_path = config.Workspace.base_path in
   let* existing = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
@@ -137,35 +176,8 @@ let suspend ?official_client ?runtime_lane ~config ~keeper_name ~operation_id ~s
       | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
         Semantic.runtime_suffix ~assignment_id:lane.assignment_id ~failed_runtime_id:lane.failed_runtime_id
           ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids |> Result.map Option.some in
-    let* binding = Semantic.gate_binding ~approval_ids ~obligations:existing ~runtime_suffix in
-    let prepare () =
-      let* obligations = List.fold_left (fun result approval_id ->
-        let* obligations = result in
-        let* obligation = bind ~base_path ~keeper_name approval_id in
-        if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation])) (Ok existing) approval_ids in
-      let* session_scope = session_scope ~config ~session_dir ~session_id in
-      match official_client with
-      | Some (runtime_id, frame) ->
-        let* () = match runtime_lane with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
-        let* checkpoint = capture_native ~base_path ~keeper_name ~operation_id ~runtime_id ~frame in
-        let* waiting = Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations in
-        Ok (waiting, None)
-      | None ->
-        let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
-          |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
-        let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
-        let* frame = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
-        let* () = match Snapshot.active frame with
-          | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
-          | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
-        let reference = Checkpoint.exact_snapshot_reference snapshot in
-        let* waiting = match runtime_lane with
-          | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
-          | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
-            let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
-              ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
-            Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
-        Ok (waiting, Some snapshot) in
+    let* preparation, snapshot = capture_preparation ?official_client ~config ~keeper_name ~operation_id ~session_dir ~session_id () in
+    let* binding = Semantic.gate_binding ~preparation ~approval_ids ~obligations:existing ~runtime_suffix in
     let retain_for_reconciliation binding diagnostic =
       let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
       match operation with
@@ -175,9 +187,9 @@ let suspend ?official_client ?runtime_lane ~config ~keeper_name ~operation_id ~s
           ~execution_digest:operation.execution_digest ~binding ~diagnostic |> owner in
         Log.Keeper.warn "Gate operation retained for checkpoint reconciliation: %s" diagnostic;
         Ok true in
-    match prepare () with
+    match prepare_binding ~config ~keeper_name binding with
     | Error diagnostic -> retain_for_reconciliation binding diagnostic
-    | Ok (waiting, snapshot) ->
+    | Ok waiting ->
       let* binding = Semantic.gate_binding_with_wait ~binding ~waiting in
       let commit () =
         let* () = match snapshot with None -> Ok () | Some snapshot -> confirm_retention ~session_dir snapshot in
@@ -197,9 +209,12 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   let* bindings = Owner.direct_gate_bindings ~base_path ~keeper_name |> owner in
   let* () = List.fold_left (fun result (operation_id, binding) ->
     let* () = result in
-    match binding.Semantic.unconfirmed_wait with
-    | None -> Ok ()
-    | Some waiting ->
+    let prepared = match binding.Semantic.unconfirmed_wait with
+      | Some waiting -> Ok waiting
+      | None -> prepare_binding ~config ~keeper_name binding in
+    match prepared with
+    | Error detail -> Log.Keeper.warn "Gate preparation remains pending: %s" detail; Ok ()
+    | Ok waiting ->
       let confirm () =
         let* () = match waiting.Semantic.checkpoint with
           | Semantic.Official_client checkpoint -> validate_native ~base_path ~keeper_name checkpoint

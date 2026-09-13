@@ -7991,7 +7991,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -8100,11 +8100,42 @@ let test_direct_gate_current_history_resume ?(recover_retention=false) ?(one_sho
            = Some Gate.Checkpoint_reconciliation);
         Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
           ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "resolved despite retention failure" |> ignore;
-        Gate.reconcile ~config ~meta |> require "do not invent checkpoint";
+        (if binding_failure then
+           Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path
+             (fun () -> Gate.reconcile ~config ~meta)
+         else Gate.reconcile ~config ~meta) |> require "do not invent checkpoint";
         check bool "approval cannot authorize missing checkpoint replay" true
           ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None);
         if recover_retention then Unix.unlink (Filename.concat session_dir "accepted-checkpoints"));
-      if (not checkpoint_failure && not binding_failure) || recover_retention then (
+      if advance_native then (
+        let module Native = Masc.Keeper_official_client_session_store in
+        let binding = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "original exact binding" |> Option.get in
+        let original_source = binding.preparation.checkpoint in
+        let expected = Native.load ~base_path ~keeper_name |> require "original native owner" |> Option.get in
+        let claimed = Native.claim ~base_path ~keeper_name ~expected:(Some expected)
+          ~client_kind:expected.client_kind ~runtime_id:expected.runtime_id
+          ~owner_epoch:(Native.process_epoch ()) ~tool_surface_sha256:expected.tool_surface_sha256
+          ~updated_at:100. |> require "independent native claim" in
+        let active = Native.mark_active ~base_path ~keeper_name ~expected:claimed
+          ~session_id:"independent-native-session" ~updated_at:101. |> require "independent native session" in
+        let starting = Native.mark_turn_starting ~base_path ~keeper_name ~expected:active
+          ~session_id:"independent-native-session" ~updated_at:101.5 |> require "independent native admission" in
+        let started = Native.mark_turn_started ~base_path ~keeper_name ~expected:starting
+          ~session_id:"independent-native-session" ~turn_id:"independent-native-turn"
+          ~turn_count:(expected.turn_count + 1) ~updated_at:102. |> require "independent native turn" in
+        Native.settle ~base_path ~keeper_name ~expected:started ~session_id:"independent-native-session"
+          ~turn_id:"independent-native-turn" ~updated_at:103. |> require "independent native settlement" |> ignore;
+        Gate.reconcile ~config ~meta |> require "reject substituted native source";
+        check bool "later native turn cannot make original request claimable" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no substituted retry") = None);
+        let retained = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "retained original source" |> Option.get in
+        check bool "failed reconciliation preserves exact original native session and turn" true
+          (retained.preparation.checkpoint = original_source));
+      if recover_binding then (
+        Gate.reconcile ~config ~meta |> require "recover original preparation after authority repair";
+        check bool "repaired preparation leaves unresolved binding state" true
+          ((Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "repaired binding") = None));
+      if (not checkpoint_failure && not binding_failure) || recover_retention || recover_binding then (
       (* A different completed turn appends history while the original waits. *)
       let newer_context = if recover_retention then (
         let independent = Keeper_chat_operation.Operation_id.of_string "independent-during-retention-failure" |> require "independent operation" in
@@ -8117,12 +8148,12 @@ let test_direct_gate_current_history_resume ?(recover_retention=false) ?(one_sho
         context=newer_context; created_at=original.created_at +. 1.} in
       Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" |> ignore;
       Gate.reconcile ~config ~meta |> require "pending reconciliation";
-      if not recover_retention then (
+      if not recover_retention && not recover_binding then (
         check bool "no resolution invented" true
           ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
         Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
           ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore)
-      else (
+      else if recover_retention then (
         check bool "confirmed recovery leaves unresolved binding state" true
           ((Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "reconciled binding") = None);
         let state = Registry.direct_gate_state ~base_path ~keeper_name ~operation_id |> require "confirmed exact wait" |> Option.get in
@@ -8607,6 +8638,14 @@ let () =
         (test_direct_gate_current_history_resume ~native:true (Keeper_approval_queue_rules_types.Decision.Reject "declined by authority"));
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared channel Gate recovers original input after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared Gate recovers frozen runtime suffix after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared native Gate rejects a later independent native session" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~advance_native:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared native Gate recovers original runtime and session after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unretained checkpoint keeps frozen runtime suffix without replay" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "channel-scoped Gate resumes original input with current channel history" `Quick

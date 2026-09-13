@@ -143,13 +143,13 @@ type _ command =
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
   | Direct_checkpoint : Operation_id.t ->
-      (Keeper_checkpoint_ref.t option, error) result command
+      (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
-        checkpoint : Keeper_checkpoint_ref.t } ->
+        checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
       (Chat_operation.t, error) result command
   | Resume_direct_checkpoint :
-      { operation_id : Operation_id.t; observed : Keeper_checkpoint_ref.t } ->
+      { operation_id : Operation_id.t; observed : Keeper_semantic_execution.gate_checkpoint } ->
       (unit, error) result command
   | Direct_runtime_retry : Operation_id.t ->
       (Keeper_semantic_execution.runtime_retry option, error) result command

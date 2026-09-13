@@ -108,11 +108,11 @@ val fail_running
   -> (Operation.t, error) result
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
-val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_checkpoint_ref.t option, error) result
+val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
-  checkpoint:Keeper_checkpoint_ref.t -> (Operation.t, error) result
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
-  observed:Keeper_checkpoint_ref.t -> (unit, error) result
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
 
 val direct_runtime_retry :
   t -> operation_id:Operation.Operation_id.t ->

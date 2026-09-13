@@ -408,7 +408,8 @@ type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_clie
 let pending ~base_path ~keeper_name ~operation_id =
   let* cooperative = Owner.direct_checkpoint ~base_path ~keeper_name ~operation_id |> owner in
   match cooperative with
-  | Some checkpoint -> Ok (Some (Bound_checkpoint checkpoint))
+  | Some (Semantic.Agent_core checkpoint) -> Ok (Some (Bound_checkpoint checkpoint))
+  | Some (Semantic.Official_client checkpoint) -> Ok (Some (Bound_official_client checkpoint))
   | None ->
   let* retry = Owner.direct_runtime_retry ~base_path ~keeper_name ~operation_id |> owner in
   match retry with

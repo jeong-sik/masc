@@ -215,7 +215,7 @@ let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
     | _ -> fail "follower was not settled by resumed execution"))
 
 let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = with_path (fun path ->
-  let saved = checkpoint "cooperative tool results" in
+  let saved = Semantic.Agent_core (checkpoint "cooperative tool results") in
   with_open path (fun store ->
     let first = admitted store in
     let steering = Operation.Operation_id.of_string "new-user-steering" |> string_ok in
@@ -232,7 +232,7 @@ let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = w
   with_open path (fun store ->
     check int "claim crash retains unconsumed checkpoint" 0 (Store.settle_running_after_restart store ~now:16. |> ok);
     ignore (Store.claim_next store ~now:17. |> ok);
-    rejected (Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:(checkpoint "wrong"));
+    rejected (Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:(Semantic.Agent_core (checkpoint "wrong")));
     Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:saved |> ok;
     ignore (Store.succeed_running store ~now:19. ~operation_id ~outcome_ref:"actual-answer" |> ok);
     check bool "actual answer settles semantic execution" true (Semantic.is_terminal (execution store));
@@ -241,7 +241,7 @@ let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = w
 let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path ->
   with_open path (fun store ->
     let first = admitted store in
-    let saved = checkpoint "saved" in
+    let saved = Semantic.Agent_core (checkpoint "saved") in
     Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
     rejected (Store.defer_direct_checkpoint store ~now:12. ~operation_id
       ~execution_digest:first.execution_digest ~checkpoint:saved);
@@ -254,7 +254,41 @@ let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path
     check bool "cancel settles checkpoint authority" true (Semantic.is_terminal (execution store));
     check bool "cancel does not authorize resume" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 
+let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with_path (fun path ->
+  let official = ref None in
+  with_open path (fun store ->
+    let first = admitted store in
+    let seed = match Semantic.create ~id:(Scope.direct_operation operation_id) ~input ~sources:[] ~now:10. with
+      | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
+    let checkpoint : Semantic.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = "codex.test"; session_id = "original-thread";
+        turn_id = "yielded-turn"; tool_surface_sha256 = String.make 64 'a'; frame = seed.frame } in
+    official := Some checkpoint;
+    let authority = Semantic.Official_client checkpoint in
+    ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:authority |> ok);
+    check bool "original multimodal input remains durable" true ((current store).input = first.input);
+    check bool "official yield is pending, not a fake provider retry" true
+      ((current store).state = Operation.Queued && Store.direct_runtime_retry store ~operation_id |> ok = None));
+  with_open path (fun store ->
+    let saved = Option.get !official in
+    let authority = Semantic.Official_client saved in
+    check bool "reopen preserves the official authority" true
+      (match Store.direct_checkpoint store ~operation_id |> ok with
+       | Some observed -> Semantic.equal_gate_checkpoint authority observed | None -> false);
+    ignore (Store.claim_next store ~now:13. |> ok);
+    rejected (Store.resume_direct_checkpoint store ~now:14. ~operation_id
+      ~observed:(Semantic.Official_client {saved with session_id="unrelated-thread"}));
+    Store.resume_direct_checkpoint store ~now:14. ~operation_id ~observed:authority |> ok;
+    let advanced = Semantic.Official_client {saved with turn_id="next-yield"} in
+    ignore (Store.defer_direct_checkpoint store ~now:15. ~operation_id
+      ~execution_digest:(current store).execution_digest ~checkpoint:advanced |> ok);
+    ignore (Store.cancel_queued store ~now:16. ~operation_id |> ok);
+    check bool "cancel terminalizes official continuation" true (Semantic.is_terminal (execution store));
+    check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
+
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
   test_case "cooperative checkpoint commit fault and cancel" `Quick test_cooperative_checkpoint_commit_fault_and_cancel;
   test_case "batch retry freezes members and excludes new arrivals" `Quick test_batch_runtime_retry_keeps_frozen_members;

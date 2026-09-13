@@ -515,8 +515,12 @@ let run_keeper_invocation_turn_admitted_inner
          strips it from a text-only runtime's dispatch view while the
          reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
+      let official_checkpoint_resume = Option.bind direct_resume (function
+        | Keeper_agent_run.Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.official_client admission
+        | Keeper_agent_run.Runtime_continuation _ | Keeper_agent_run.Gate_continuation _ -> None) in
       let user_blocks =
-        if Option.is_some direct_resume then user_blocks else
+        if Option.is_some official_checkpoint_resume then None
+        else if Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~base_path:ctx.config.base_path
@@ -545,7 +549,9 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
+      let selected_runtime = match official_checkpoint_resume with
+        | Some checkpoint -> Ok checkpoint.Keeper_semantic_execution.runtime_id
+        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
       match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
@@ -858,7 +864,9 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~base_dir
 		                                ~max_context
 		                                ~build_turn_prompt
-		                                ~user_message:message
+		                                ~user_message:(match official_checkpoint_resume with
+                                      | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
+                                      | None -> message)
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot
@@ -991,7 +999,15 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                       ~session_dir ~session_id ~checkpoint
-                  | None -> Error "cooperative turn has no agent-core checkpoint; official-client continuation requires its own retained authority"
+                  | None ->
+                    (match result.official_client_settlement with
+                     | None -> Error "cooperative turn omitted its producer-owned continuation authority"
+                     | Some settled_session ->
+                       (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
+                        | Error error -> Error (Keeper_repetition_snapshot.error_to_string error)
+                        | Ok frame -> Keeper_direct_checkpoint_continuation.defer_official
+                            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                            ~settled_session ~frame))
                 else Ok () in
               (match retained with
                | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail

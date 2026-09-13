@@ -153,11 +153,11 @@ val exact_operation
   -> (Keeper_chat_operation.t option, command_error) result
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
-val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_checkpoint_ref.t option, command_error) result
+val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
 val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
-  checkpoint:Keeper_checkpoint_ref.t -> (Keeper_owner.Chat_operation.t, command_error) result
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
 val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
-  observed:Keeper_checkpoint_ref.t -> (unit, command_error) result
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
 
 val direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->

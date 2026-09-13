@@ -17,7 +17,7 @@ type direct_continuation =
   | Gate_continuation of Keeper_direct_gate_continuation.admission
 
 let direct_checkpoint = function
-  | Checkpoint_continuation admission -> Some (Keeper_direct_checkpoint_continuation.checkpoint admission)
+  | Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.checkpoint admission
   | Runtime_continuation admission -> Some (Keeper_direct_runtime_continuation.checkpoint admission)
   | Gate_continuation admission -> Keeper_direct_gate_continuation.checkpoint admission
 
@@ -971,7 +971,8 @@ let run_turn
   in
     let official_client_continuation = match direct_resume with
       | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
-      | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> None in
+      | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client admission
+      | Some (Runtime_continuation _) | None -> None in
     let native_scope = match official_client_continuation, repetition_execution with
       | Some checkpoint, Some execution -> Keeper_repetition_scope.Execution.resume execution checkpoint.frame
         |> Result.map_error Keeper_repetition_snapshot.error_to_string

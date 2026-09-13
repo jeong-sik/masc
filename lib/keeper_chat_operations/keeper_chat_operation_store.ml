@@ -1021,7 +1021,7 @@ let gate_state = function
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_wait state; _}; _} -> Some state
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running
       | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Checkpointed _
+      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _); _}); _}
   | None -> None
 
@@ -1041,7 +1041,7 @@ let blocked_queued_scopes db ~now =
           when not_before > now -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-        | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
+        | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
   Ok blocked
 ;;
@@ -1090,7 +1090,7 @@ let next_runtime_retry_wake store ~now =
                  | Some _ | None -> Some not_before)
               | Some _ | None -> earliest)
            | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
-           | Semantic.Checkpointed _ | Semantic.Interrupted_execution
+           | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution
            | Semantic.Gate_wait _ | Semantic.Gate_binding _ -> earliest)
         | Semantic.Preparing | Semantic.Ready | Semantic.Running
         | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
@@ -1548,14 +1548,15 @@ let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation
   | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
       | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _ }
   | None -> None
 ;;
 
 let pending_checkpoint = function
   | Some { Semantic.phase = Semantic.Suspended checkpoint; _ }
-  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some checkpoint
+  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some (Semantic.Agent_core checkpoint)
+  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Official_checkpointed checkpoint; _ }; _ } -> Some (Semantic.Official_client checkpoint)
   | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
       | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Settled _
       | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
@@ -1675,7 +1676,7 @@ let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoi
     let* execution = direct_execution_with_db store.db operation in
     match operation.state, pending_checkpoint execution with
     | Operation.Queued, Some existing when String.equal operation.execution_digest execution_digest
-        && Keeper_checkpoint_ref.equal existing checkpoint -> Ok operation
+        && Semantic.equal_gate_checkpoint existing checkpoint -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
        | Operation.Failed _ | Operation.Cancelled _), (Some _ | None) ->
       Error (Integrity_error "direct continuation commit is not confirmed") in
@@ -1699,7 +1700,10 @@ let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoi
                |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
              let* ready = semantic_transition ~now Semantic.Confirm_sources created in
              semantic_transition ~now Semantic.Begin_execution ready) in
-      let* suspended = semantic_transition ~now (Semantic.Suspend checkpoint) execution in
+      let action = match checkpoint with
+        | Semantic.Agent_core checkpoint -> Semantic.Suspend checkpoint
+        | Semantic.Official_client checkpoint -> Semantic.Suspend_official_checkpoint checkpoint in
+      let* suspended = semantic_transition ~now action execution in
       let* () = match current with
         | None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
@@ -1733,7 +1737,10 @@ let resume_direct_checkpoint store ~now ~operation_id ~observed =
       match execution with
       | None -> Error (Integrity_error "direct operation has no durable continuation")
       | Some expected ->
-        let* next = semantic_transition ~now (Semantic.Resume_checkpoint observed) expected in
+        let action = match observed with
+          | Semantic.Agent_core checkpoint -> Semantic.Resume_checkpoint checkpoint
+          | Semantic.Official_client checkpoint -> Semantic.Resume_official_checkpoint checkpoint in
+        let* next = semantic_transition ~now action expected in
         let* outstanding = semantic_rows store.db ~active_only:true in
         if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
@@ -1784,7 +1791,7 @@ let direct_gate_bindings store =
         let* _ = direct_execution_with_db store.db operation in
         Ok ((operation_id, binding) :: rows)
       | Semantic.Recovering {origin=(Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
-          | Semantic.Checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _); _}
+          | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _); _}
       | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ -> Ok rows) (Ok []) executions |> Result.map List.rev
 
@@ -1802,7 +1809,7 @@ let direct_gate_binding store ~operation_id =
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_binding binding; _}; _} -> Ok (Some binding)
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
+      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _}
   | None -> Ok None
 
@@ -1983,7 +1990,7 @@ let settle_direct_semantic_with_db db current command =
       | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _} -> Ok ()
   | Some ({Semantic.phase = (Semantic.Running | Semantic.Suspended _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
-      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
     let* now, terminal = match command with
       | Reducer.Cancel_queued {completed_at} -> Ok (completed_at, Semantic.Cancelled)
       | Reducer.Succeed_running {completed_at; _} -> Ok (completed_at, Semantic.Completed)

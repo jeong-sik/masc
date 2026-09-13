@@ -2107,7 +2107,9 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
          Option.map (fun turn -> Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~absolute_turn:turn)
            (context ()).Keeper_gate.turn_id) in
-       (match Fusion_request_context.capture ~config ~keeper:meta.name ~turn_ref ~args with
+       let current_task () =
+         Keeper_current_task_reconcile.owned_active_task_id_result_for_meta ~config ~meta in
+       (match Fusion_request_context.capture ~current_task:(Some current_task) ~config ~keeper:meta.name ~turn_ref ~args with
         | Error error -> Keeper_tool_execution.failure ~class_:(Fusion_request_context.failure_class error)
             (Fusion_request_context.error_to_string error)
         | Ok source_context ->

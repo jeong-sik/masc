@@ -979,9 +979,14 @@ let test_tool_handle_async_success_projects_running_then_completed ?(with_contex
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
         ~title:"Compare paths" ~priority:2 ~description:"Keep the original request bound" |> Result.get_ok in
       Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id () |> Result.get_ok |> ignore;
-      Some (Fusion_request_context.capture ~config ~keeper
+      let meta = Masc_test_deps.meta_of_json_fixture
+        (`Assoc ["name", `String keeper; "trace_id", `String "originating-fusion-turn"])
+        |> Result.get_ok in
+      let current_task () =
+        Keeper_current_task_reconcile.owned_active_task_id_result_for_meta ~config ~meta in
+      Some (Fusion_request_context.capture ~current_task:(Some current_task) ~config ~keeper
         ~turn_ref:(Some (Ids.Turn_ref.make ~trace_id:"originating-fusion-turn" ~absolute_turn:19))
-        ~args:(`Assoc ["prompt", `String question; "task_id", `String task.task_id;
+        ~args:(`Assoc ["prompt", `String question;
           "decision_context", `String "Candidate B preserves restart evidence; compare against A"])
         |> Result.get_ok)) in
     let actual_prompt = match source_context with None -> question | Some context -> Fusion_request_context.render context in

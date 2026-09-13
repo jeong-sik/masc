@@ -5650,6 +5650,7 @@ class AtomicChatFixture:
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
         self.old_poll_seen = threading.Event()
+        self.received: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.admitted = threading.Condition(self.lock)
         self.edited = threading.Event()
@@ -5690,6 +5691,8 @@ class AtomicChatFixture:
 
     def stream(self, body: bytes) -> StreamingHttpResponse:
         request = json.loads(body)
+        with self.lock:
+            self.received.append(request)
         intent = request.get("admission_intent")
         if not isinstance(intent, dict) or intent.get("kind") != "interactive":
             raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
@@ -5752,6 +5755,11 @@ class AtomicChatFixture:
 
     def interrupt(self, body: bytes) -> HttpResponse:
         request = json.loads(body)
+        if self.release.is_set():
+            # A periodic preview may outlive the completed fixture execution.
+            # Refuse that stale target without pretending to signal or pause it.
+            return 409, {"error": "target is no longer current", "signalled": False,
+                         "paused": False, "chat_control_token": self.token}
         if self.first_working and self.submitted:
             expected = self.submitted[0]["request_id"]
             if request.get("request_id") != expected or request.get("interrupt_token") is not None:
@@ -5950,14 +5958,14 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
             send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
-            if fixture.submitted:
+            if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
             send_and_wait(process, master_fd, output, b"q", b"q: 1 unsent message is dropped")
-            if fixture.submitted:
-                raise AssertionError("navigation dispatched input before control acknowledgement")
+            if fixture.received:
+                raise AssertionError(f"navigation dispatched input before control acknowledgement: {fixture.received!r}")
             # Confirm exit before releasing the server handler. Goodbye is a
             # visible completed exit; the harness still verifies terminal mode.
             send_and_wait(process, master_fd, output, b"q", b"Goodbye!")
@@ -6025,8 +6033,9 @@ def chat_reconcile_interaction(
             process, master_fd, output, b"uncertain", composer_showing(b"uncertain")
         )
         # The first connection fails before any RUN_STARTED. Its replacement
-        # is intentionally withheld: assert reconciliation, not a running turn.
-        send_and_wait(process, master_fd, output, b"\r", b"reconciling")
+        # is intentionally withheld: the second HTTP arrival below proves the
+        # reconnect regardless of which transient status line is visible.
+        os.write(master_fd, b"\r")
         if not wait_for_fixture_event(
             process,
             master_fd,

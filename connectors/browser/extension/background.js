@@ -250,6 +250,100 @@ function browserDocument() {
 const HOST_NAME = "masc_browser_host";
 const READ_CAP = 50000;
 
+// A follow receipt records the effect immediately. Only its next scene read
+// waits for the browser to commit a document; executeScript(document_end)
+// already owns the DOM-ready boundary. No error text or full-load heuristic
+// is evidence that the destination is ready.
+function createNavigationReadiness() {
+  const records = new Map();
+  function forget(tabId, record) {
+    if (records.get(tabId) === record) records.delete(tabId);
+  }
+  async function begin(args, deadlineMs) {
+    const source = await browser.webNavigation.getFrame({tabId:args.tabId,frameId:0});
+    if (!source || typeof source.documentId !== 'string' || !source.documentId)
+      throw new Error('navigation_document_identity_unavailable');
+    if (source.url !== args.expectedUrl) throw new Error('page_url_changed');
+    records.get(args.tabId)?.cancel('navigation_observation_superseded');
+    let resolve, receipt = null, candidate = null, settled = false;
+    const ready = new Promise(done => { resolve = done; });
+    const owned = event => event.tabId === args.tabId && event.frameId === 0;
+    const cleanup = () => {
+      clearTimeout(timer);
+      browser.webNavigation.onCommitted.removeListener(committed);
+      browser.webNavigation.onReferenceFragmentUpdated.removeListener(fragment);
+      browser.tabs.onRemoved.removeListener(removed);
+    };
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      forget(args.tabId, record);
+      resolve(value);
+    };
+    const accept = () => {
+      if (!receipt || !candidate) return;
+      if (candidate.kind === 'committed' ||
+          (candidate.kind === 'fragment' && candidate.event.url === receipt.destinationUrl))
+        finish({kind:'observed',documentId:candidate.event.documentId});
+    };
+    const committed = event => {
+      if (!owned(event) || typeof event.documentId !== 'string' || !event.documentId ||
+          event.documentId === source.documentId) return;
+      candidate = {kind:'committed',event};
+      accept();
+    };
+    const fragment = event => {
+      if (!owned(event) || event.documentId !== source.documentId || candidate?.kind === 'committed') return;
+      candidate = {kind:'fragment',event};
+      accept();
+    };
+    const removed = tabId => {
+      if (tabId === args.tabId) record.cancel('navigation_tab_closed');
+    };
+    const record = {
+      ready,
+      followed(value) { receipt = value; accept(); },
+      cancel(error) {
+        finish({kind:'unavailable',error});
+        forget(args.tabId, record);
+      },
+    };
+    // The native host supplies its already-running transport deadline. This
+    // observation also expires if no read follows; it owns no browser action.
+    const timer = setTimeout(() => record.cancel('navigation_observation_expired'),
+      Math.max(0, deadlineMs - Date.now()));
+    browser.webNavigation.onCommitted.addListener(committed);
+    browser.webNavigation.onReferenceFragmentUpdated.addListener(fragment);
+    browser.tabs.onRemoved.addListener(removed);
+    records.set(args.tabId, record);
+    return record;
+  }
+  async function beforeRead(tabId, signal) {
+    const record = records.get(tabId);
+    if (!record) return;
+    let abort;
+    const cancelled = new Promise(resolve => {
+      abort = () => resolve({kind:'unavailable',error:'browser_command_cancelled'});
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, {once:true});
+    });
+    try {
+      const result = await Promise.race([record.ready, cancelled]);
+      if (result.kind === 'unavailable') throw new Error(result.error);
+    } finally {
+      signal.removeEventListener('abort', abort);
+      record.cancel('navigation_observation_consumed');
+    }
+  }
+  return {begin, beforeRead, clear() {
+    for (const record of records.values()) record.cancel('browser_client_disconnected');
+  }};
+}
+const navigationReadiness = createNavigationReadiness();
+const commandControllers = new Set();
+
+
 let port = null;
 let reconnectTimer = null;
 
@@ -263,6 +357,9 @@ function connect() {
   connection.onDisconnect.addListener(() => {
     if (port !== connection) return;
     port = null;
+    navigationReadiness.clear();
+    for (const controller of commandControllers.values()) controller.abort();
+    commandControllers.clear();
     // The host is launched by the browser per connection; a quiet retry keeps
     // the lane alive across host restarts without spamming launches.
     clearTimeout(reconnectTimer);
@@ -361,8 +458,10 @@ return {url:location.href,title:document.title,total:visible.length,truncated:vi
   return {tabId,...page};
 }
 
-async function pageScene(args) {
+async function pageScene(args, signal) {
   if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error('tab_id_required');
+  await navigationReadiness.beforeRead(args.tabId, signal);
+  if (signal?.aborted) throw new Error('browser_command_cancelled');
   const [scene] = await browser.tabs.executeScript(args.tabId, {
     runAt: "document_end",
     code: '(' + browserScene.toString() + ')(' + JSON.stringify({mode:'read',maxChars:args.maxChars,view:args.view,scope:args.scope}) + ')',
@@ -574,7 +673,7 @@ function interactInPage(args) {
 }
 
 
-async function pageInteract(args) {
+async function pageInteract(args, deadlineMs) {
   if (args?.action === 'activate_tab') {
     let effectStarted = false;
     try {
@@ -594,6 +693,7 @@ async function pageInteract(args) {
       throw error;
     }
   }
+  let navigation = null;
   // Only this read-only preflight can establish that injection never began.
   // A later executeScript rejection can lose a result after a page effect.
   try {
@@ -601,28 +701,46 @@ async function pageInteract(args) {
     if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
+    if (args.action === 'follow_link') navigation = await navigationReadiness.begin(args, deadlineMs);
   } catch (cause) {
     const error = new Error(String(cause?.message ?? cause));
     error.effectStarted = false;
     throw error;
   }
-  // JSON encoding keeps selectors and text out of executable source syntax.
-  const [result] = await browser.tabs.executeScript(args.tabId, {
-    runAt: "document_end",
-    code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
-  });
-  if (!result) throw new Error("page_unavailable");
-  if (result.interactionFailure) {
-    const error = new Error(result.interactionFailure.message);
-    error.effectStarted = result.interactionFailure.effectStarted;
+  try {
+    // JSON encoding keeps selectors and text out of executable source syntax.
+    const [result] = await browser.tabs.executeScript(args.tabId, {
+      runAt: "document_end",
+      code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
+    });
+    if (!result) throw new Error("page_unavailable");
+    if (result.interactionFailure) {
+      const error = new Error(result.interactionFailure.message);
+      error.effectStarted = result.interactionFailure.effectStarted;
+      throw error;
+    }
+    navigation?.followed(result);
+    return {tabId: args.tabId, ...result};
+  } catch (error) {
+    navigation?.cancel('follow_observation_unavailable');
     throw error;
   }
-  return {tabId: args.tabId, ...result};
 }
 
 async function onHostMessage(msg, connection = port) {
   const reply = { id: msg?.id, ok: false };
+  const controller = new AbortController();
+  let timer;
+  let dispatched = false;
   try {
+    if (!Number.isSafeInteger(msg?.deadlineMs)) throw new Error('command_deadline_required');
+    const remaining = msg.deadlineMs - Date.now();
+    if (remaining <= 0) throw new Error('browser_command_expired');
+    if (remaining > 2147483647) throw new Error('command_deadline_out_of_timer_range');
+    commandControllers.add(controller);
+    timer = setTimeout(() => controller.abort(), remaining);
+    controller.signal.addEventListener('abort', () => clearTimeout(timer), {once:true});
+    dispatched = true;
     switch (msg?.verb) {
       case "browser.info":
         reply.data = await browser.runtime.getBrowserInfo();
@@ -633,7 +751,7 @@ async function onHostMessage(msg, connection = port) {
         reply.ok = true;
         break;
       case "page.scene":
-        reply.data = await pageScene(msg.args);
+        reply.data = await pageScene(msg.args, controller.signal);
         reply.ok = true;
         break;
       case "page.elements":
@@ -645,7 +763,7 @@ async function onHostMessage(msg, connection = port) {
         reply.ok = true;
         break;
       case "page.interact":
-        reply.data = await pageInteract(msg.args);
+        reply.data = await pageInteract(msg.args, msg.deadlineMs);
         reply.ok = true;
         break;
       case "page.capture":
@@ -657,8 +775,11 @@ async function onHostMessage(msg, connection = port) {
     }
   } catch (e) {
     reply.error = String(e?.message ?? e);
-    if (msg?.verb === 'page.interact' && e?.effectStarted === false)
+    if (msg?.verb === 'page.interact' && (!dispatched || e?.effectStarted === false))
       reply.effectPhase = 'not_started';
+  } finally {
+    clearTimeout(timer);
+    commandControllers.delete(controller);
   }
   try {
     // Match the native host's bounded incoming frames, including JSON/UTF-8.

@@ -3198,6 +3198,14 @@ module Browser_lane_view = struct
     | Scene_read of int
     | Scene_regions of int
     | Scene_refresh of { tab_id : int; scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+    | Scene_scroll of {
+        tab_id : int;
+        document_id : string;
+        expected_url : string;
+        scene_view : Browser_lane.scene_view;
+        scope : Browser_lane.node_ref option;
+        delta_y : int;
+      }
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Scene_follow of { tab_id : int; document_id : string; node_id : string; expected_url : string }
@@ -3275,7 +3283,7 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)), _ -> Reading
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)), _ -> Reading
     | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
@@ -3331,6 +3339,7 @@ module Browser_lane_view = struct
     | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view
     | Scene_read _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
     | Scene_regions _ -> Scene_view {scene_view = Browser_lane.Regions; scope = None}
+    | Scene_scroll {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
     | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
     | Scene_follow _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
@@ -3599,9 +3608,10 @@ module Browser_lane_view = struct
              publish_scene scene t
          | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
          | Error detail -> {t with scene = None; load = Failed detail})
-    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_scroll {tab_id;_} | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_scroll {scene_view;scope;_} -> scene_view, scope
           | Scene_focus {target;_} -> Browser_lane.Content, Some target
           | Scene_click {scope;_} -> Browser_lane.Content, scope
           | Scene_follow _ -> Browser_lane.Content, None
@@ -3610,7 +3620,10 @@ module Browser_lane_view = struct
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
                          && scene.tab_id = tab_id && t.selected_tab = Some tab_id
-                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope
+                         && (match operation with
+                             | Scene_scroll {document_id;_} -> scene.content.document_id = document_id
+                             | _ -> true) ->
              publish_scene scene t
          | Ok _ ->
              let scene_guard = match operation with

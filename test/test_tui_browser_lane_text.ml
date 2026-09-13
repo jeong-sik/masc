@@ -142,6 +142,13 @@ let () =
   assert ((Lane.accept_scene ~generation:42 (Ok scene) focused).scene=None);
   let scoped_scene = {scene with content={content with scope=Some target}} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) focused).scene=Some scoped_scene);
+  let scrolled = {focused with load=Loading (42,Scene_scroll {
+      tab_id=1;document_id=content.document_id;expected_url=content.url;scene_view=Browser_lane.Content;
+      scope=None;delta_y=600})} in
+  let scrolled_scene = {scene with content={content with scroll_y=600.}} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scrolled_scene) scrolled).scene=Some scrolled_scene);
+  let replaced_scene = {scrolled_scene with content={scrolled_scene.content with document_id="new-document"}} in
+  assert ((Lane.accept_scene ~generation:42 (Ok replaced_scene) scrolled).scene=None);
   let clicked = {focused with load=Loading (42,Scene_click {tab_id=1;
     document_id=content.document_id;node_id=node.node_id;expected_url=content.url;scope=Some target})} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) clicked).scene=Some scoped_scene);

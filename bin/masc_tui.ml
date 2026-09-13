@@ -4656,7 +4656,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4678,7 +4678,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4708,6 +4708,13 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Result.bind
+              (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
+                 ~expected_url ~delta_y)
+              (fun () -> Masc_tui_http.fetch_browser_scene
+                 ?scope ~expected_url ~scene_view
+                 ~host ~port ~view ~tab_id ())))
         | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
               ~host ~port ~view ~tab_id ~scene_view ~scope))
@@ -17980,7 +17987,7 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
@@ -18077,6 +18084,16 @@ and is loaded on demand through keeper_skill.
                             | None, Browser_lane.Content -> Scene_read tab_id in
                           launch_browser_lane state ~mailbox:async_messages operation
                       | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
+                 | "J" | "K" when Option.is_some view.scene && not (busy view) ->
+                     (match view.scene, view.selected_tab with
+                      | Some scene, Some tab_id ->
+                          let distance = int_of_float scene.content.height in
+                          let delta_y = if key = "J" then distance else -distance in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_scroll {tab_id;document_id=scene.content.document_id;
+                              expected_url=scene.content.url;
+                              scene_view=scene.content.view;scope=scene.content.scope;delta_y})
+                      | _ -> ())
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =

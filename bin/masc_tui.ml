@@ -2623,7 +2623,7 @@ let launch_voice_config_load state ~mailbox =
         | json -> Ok json
         | exception _ -> Error "voice config did not parse as JSON")
       | Ok (code, body) ->
-        Error (Printf.sprintf "voice config HTTP %d: %s" code (String.trim body))
+        Error (Masc_tui_http.named_refusal "voice config" ~status:code ~body)
       | Error message -> Error message
     in
     let device =

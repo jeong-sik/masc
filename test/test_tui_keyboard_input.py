@@ -10216,13 +10216,13 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             b"r",
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
         )
         compact_narrow_refresh_error_plain = CSI_RE.sub(
             b"", compact_narrow_refresh_error
         )
         stale_evidence = (
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
             b"JUDGMENT  ADVISORY APPROVE",
             b"Left / Esc",
         )

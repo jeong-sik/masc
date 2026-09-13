@@ -140,8 +140,18 @@ def audit_recovered_live():
         assert scene['url']==nav['destinationUrl']
     observations=load(root / 'retained-observations-audit.json')['observations']
     assert len(observations)==4
+    clipboard=(root/'clipboard-osc52.bin').read_bytes()
+    assert clipboard in (root/'tui-initial.pty').read_bytes()
+    encoded,=re.findall(rb'\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)',clipboard)
+    context=base64.b64decode(encoded,validate=True)
+    assert context==(root/'tui-context.json').read_bytes()
+    assert load(root/'08-user-message.json')['message'].endswith(context.decode())
     for observed in observations:
         ref=observed['reference'];data=(root/'retained-scenes'/(ref['sha256']+'.json')).read_bytes()
+        row=rows[observed['execution_id']]
+        scene_refs=[r['_blob'] for r in row['artifact_refs']
+                    if r.get('_blob',{}).get('mime')=='application/vnd.masc.browser-scene+json']
+        assert scene_refs==[ref] and row['tool_use_id']==observed['tool_use_id']
         assert sha(data)==ref['sha256'] and len(data)==ref['bytes']
         call,=[c for c in calls if c['execution_id']==observed['execution_id']]
         assert data==call['output'].encode()

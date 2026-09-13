@@ -318,7 +318,7 @@ val runtime_config_status_lines :
   Masc_tui_types.state ->
   cols:int -> (Masc_tui_runtime_config_view.tone * string) list
 
-val help_ascii_banner : cols:int -> Masc_tui_types.state -> string list
+val help_masthead : Masc_tui_types.state -> string list
 
 val help_lines : Masc_tui_types.state -> string list
 

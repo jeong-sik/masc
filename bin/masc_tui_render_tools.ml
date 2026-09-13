@@ -313,19 +313,20 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source 
 ;;
 ;;
 
+(* Through [tab_strip], the one drawing every in-screen strip shares. This one
+   was left out when the others moved: a bar between names, a space before the
+   unmarked ones and the mark without the information colour, so the Tools
+   row read "▸호출 범위 | 비동기 작업" under strips spelled two cells apart. *)
 let tools_pane_strip (state : state) =
-  let name pane label =
-    if state.tools_pane = pane then
-      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ " " ^ label ^ Ansi.reset
-  in
-  String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Masc_tui_types.Tools_surface "호출 범위"
-    ; name Masc_tui_types.Tools_async "비동기 작업"
-    ; name Masc_tui_types.Tools_activations "Skill 기록"
-    ; name Masc_tui_types.Tools_usage "Skill 사용 집계"
-    ; name Masc_tui_types.Tools_catalog "전체 도구"
-    ]
+  tab_strip
+    (List.map
+       (fun (pane, label) -> (label, state.tools_pane = pane))
+       [ (Masc_tui_types.Tools_surface, "호출 범위")
+       ; (Masc_tui_types.Tools_async, "비동기 작업")
+       ; (Masc_tui_types.Tools_activations, "Skill 기록")
+       ; (Masc_tui_types.Tools_usage, "Skill 사용 집계")
+       ; (Masc_tui_types.Tools_catalog, "전체 도구")
+       ])
 ;;
 
 let tools_display_lines (state : state) =

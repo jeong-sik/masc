@@ -166,8 +166,13 @@ val surface_chrome_rows : int
     title and its rule, the bottom border and the footer. A key handler that
     bounds a body's scroll subtracts this, the same number the frame does. *)
 
+type chrome_frame = Chrome_screen | Chrome_overlay
+(** [Chrome_screen] draws rules without a box, for a surface that is the whole
+    screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
+
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
+  ?frame:chrome_frame ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->

@@ -148,7 +148,12 @@ let selected_credential_env key =
     | None -> false)
 ;;
 
-let effective_credential_reference
+type credential_requirement =
+  | Reference of Runtime_schema.credential
+  | Not_required
+  | Unknown_provider
+
+let credential_requirement
     ~(provider_id : string)
     (credential : Runtime_schema.credential option) =
   let select_env key =
@@ -157,14 +162,26 @@ let effective_credential_reference
     | None -> Runtime_schema.Env key
   in
   match credential with
-  | Some (Runtime_schema.Env key) -> Some (select_env key)
-  | Some (Runtime_schema.File _ | Runtime_schema.Inline _) as explicit -> explicit
+  | Some (Runtime_schema.Env key) -> Reference (select_env key)
+  | Some ((Runtime_schema.File _ | Runtime_schema.Inline _) as explicit) -> Reference explicit
   | None ->
     (match find_registry_entry provider_id with
      | Some entry ->
        let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-       if String.trim env = "" then None else Some (select_env env)
-     | None -> None)
+       (* An empty [api_key_env] is how the catalog declares a provider that
+          takes no key; the schema requires the field and allows it to be
+          empty. Two of the shipped rows use it. *)
+       if String.trim env = "" then Not_required else Reference (select_env env)
+     | None -> Unknown_provider)
+;;
+
+(* The reference view of the same answer, for callers that ask which credential
+   names an identity rather than whether one is needed. Both absences answer
+   [None] here because neither names a credential. *)
+let effective_credential_reference ~provider_id credential =
+  match credential_requirement ~provider_id credential with
+  | Reference reference -> Some reference
+  | Not_required | Unknown_provider -> None
 ;;
 
 let api_key_from_env key =
@@ -222,12 +239,20 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 (* --- Provider kind resolution --- *)
 
 let resolve_api_key ~provider_id ~credential =
-  let effective = effective_credential_reference ~provider_id credential in
-  match api_key_of_credential effective with
-  | Error _ as error -> error
-  | Ok value when Option.is_some effective && String.trim value = "" ->
-    Error "Required provider credential is unavailable"
-  | Ok value -> Ok (Llm_provider.Secret.of_string value)
+  match credential_requirement ~provider_id credential with
+  | Unknown_provider ->
+    (* The runtime row names no credential and the catalog has no row for this
+       provider, so nothing says whether a key is needed. An empty secret here
+       is a guess, and it used to be a silent one: discovery resolved [Ok ""]
+       and reported success without a credential. *)
+    Error "No provider credential is configured and the provider has no catalog entry"
+  | Not_required -> Ok (Llm_provider.Secret.of_string "")
+  | Reference reference ->
+    (match api_key_of_credential (Some reference) with
+     | Error _ as error -> error
+     | Ok value when String.trim value = "" ->
+       Error "Required provider credential is unavailable"
+     | Ok value -> Ok (Llm_provider.Secret.of_string value))
 ;;
 
 (* CLI subprocess provider kinds were removed in the agent_core pin bump

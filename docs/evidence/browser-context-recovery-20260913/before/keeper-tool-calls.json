@@ -1,0 +1,662 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "browser-handoff-proof-95380000",
+    "count": 6,
+    "source": "tool_call_io",
+    "producer": "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
+    "durable_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/tool_calls",
+    "dashboard_surface": "/api/v1/keepers/:name/tool-calls",
+    "freshness_slo_s": 300.0,
+    "latest_ts_unix": 1789240329.763705,
+    "latest_ts_iso": "2026-09-12T19:12:09Z",
+    "latest_age_s": 11.759244918823242,
+    "health": "ok",
+    "stale_reason": null,
+    "coverage_gaps": [],
+    "entries": [
+      {
+        "ts": 1789240325.806687,
+        "record_kind": "tool_call",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "BrowserInteract",
+        "input": {
+          "lane": "live",
+          "action": "follow_link",
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "tabId": 1,
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "nodeId": "n1",
+          "expectedUrl": "http://127.0.0.1:53476/index.html"
+        },
+        "output": "scene_link_not_observed",
+        "success": false,
+        "duration_ms": 16.888856887817383,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "BrowserInteract",
+          "action_key": "follow_link",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 16.888856887817383,
+          "error": "scene_link_not_observed"
+        },
+        "route_evidence": {
+          "descriptor_id": "agent.browser_interact",
+          "capability_id": "masc_browser_interact",
+          "keeper_model_projection": "preferred_public_name",
+          "public_name": "BrowserInteract",
+          "canonical_name": "masc_browser_interact",
+          "description": "Interact with an explicit Firefox/Zen tab; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. drag uses trusted automation pointers. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence. activate_tab is live-only (extension >=0.6.0): verifies active=true without window focus or navigation.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_browser_interact",
+          "execution": "serial",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "json",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "urlBefore": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "destinationUrl": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "navigationSource": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "documentId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "tabId",
+                "url",
+                "urlBefore",
+                "action"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "receipt_labels": {
+            "descriptor_id": "agent.browser_interact",
+            "capability_id": "masc_browser_interact",
+            "keeper_model_projection": "preferred_public_name",
+            "public_name": "BrowserInteract",
+            "canonical_name": "masc_browser_interact",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_browser_interact",
+            "execution": "serial",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": false,
+          "cwd_scope": null,
+          "polling_read": false,
+          "tool_name": "BrowserInteract"
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "execution_id": "exec-1789240325782-0001",
+        "tool_use_id": "composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "disposition": "failed",
+        "failure_class": "workflow_rejection",
+        "composition_tool": "keeper_compose_browser-live-click-content",
+        "composition_run_id": "01a09708-b695-7000-916c-69adf0dd9418",
+        "composition_node_id": "click",
+        "parent_tool_use_id": "exec-22ee9eea-4b47-4030-b836-da4a33d3ce50",
+        "composition_execution": "inline",
+        "composition_tool_kind": "composition",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 23
+      },
+      {
+        "ts": 1789240325.813698,
+        "record_kind": "composition_run",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "keeper_composition_run_summary",
+        "input": {
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "expectedUrl": "http://127.0.0.1:53476/index.html",
+          "nodeId": "n1",
+          "tabId": 1
+        },
+        "output": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}",
+        "success": false,
+        "duration_ms": 32.01889991760254,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "keeper_composition_run_summary",
+          "action_key": "keeper_composition_run_summary",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 32.01889991760254,
+          "error": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}"
+        },
+        "route_evidence": {
+          "tool_kind": "composition",
+          "tool_name": "keeper_composition_run_summary"
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "tool_use_id": "exec-22ee9eea-4b47-4030-b836-da4a33d3ce50",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "disposition": "failed",
+        "failure_class": "workflow_rejection",
+        "composition_tool": "keeper_compose_browser-live-click-content",
+        "composition_run_id": "01a09708-b695-7000-916c-69adf0dd9418",
+        "parent_tool_use_id": "exec-22ee9eea-4b47-4030-b836-da4a33d3ce50",
+        "skill_reference": {
+          "identity": {
+            "source_id": "project-masc",
+            "package_id": "browser-live-click-content",
+            "name": "browser-live-click-content"
+          },
+          "content_revision": "0cf89f39aacefc25a3bc9d8532f29987f9f29a8c4c5d1e3073837ae0977bd9ff"
+        },
+        "composition_execution": "inline",
+        "composition_tool_kind": "composition",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 1903
+      },
+      {
+        "ts": 1789240325.814908,
+        "record_kind": "tool_call",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "keeper_compose_browser-live-click-content",
+        "input": {
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "expectedUrl": "http://127.0.0.1:53476/index.html",
+          "nodeId": "n1",
+          "tabId": 1
+        },
+        "output": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+        "success": false,
+        "duration_ms": 35.56108474731445,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "keeper_compose_browser-live-click-content",
+          "action_key": "keeper_compose_browser-live-click-content",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 35.56108474731445,
+          "error": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "execution_id": "exec-1789240325814-0002",
+        "tool_use_id": "exec-22ee9eea-4b47-4030-b836-da4a33d3ce50",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 2105,
+        "definition_source": "skills/browser-live-click-content/SKILL.md"
+      },
+      {
+        "ts": 1789240329.762756,
+        "record_kind": "tool_call",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "BrowserInteract",
+        "input": {
+          "lane": "live",
+          "action": "follow_link",
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "tabId": 1,
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "nodeId": "n1",
+          "expectedUrl": "http://127.0.0.1:53476/index.html"
+        },
+        "output": "scene_link_not_observed",
+        "success": false,
+        "duration_ms": 7.457971572875977,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "BrowserInteract",
+          "action_key": "follow_link",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 7.457971572875977,
+          "error": "scene_link_not_observed"
+        },
+        "route_evidence": {
+          "descriptor_id": "agent.browser_interact",
+          "capability_id": "masc_browser_interact",
+          "keeper_model_projection": "preferred_public_name",
+          "public_name": "BrowserInteract",
+          "canonical_name": "masc_browser_interact",
+          "description": "Interact with an explicit Firefox/Zen tab; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. drag uses trusted automation pointers. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence. activate_tab is live-only (extension >=0.6.0): verifies active=true without window focus or navigation.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_browser_interact",
+          "execution": "serial",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "json",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "integer"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "urlBefore": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "destinationUrl": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "navigationSource": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "documentId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "documentId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "tabId",
+                "url",
+                "urlBefore",
+                "action"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "receipt_labels": {
+            "descriptor_id": "agent.browser_interact",
+            "capability_id": "masc_browser_interact",
+            "keeper_model_projection": "preferred_public_name",
+            "public_name": "BrowserInteract",
+            "canonical_name": "masc_browser_interact",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_browser_interact",
+            "execution": "serial",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": false,
+          "cwd_scope": null,
+          "polling_read": false,
+          "tool_name": "BrowserInteract"
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "execution_id": "exec-1789240329754-0003",
+        "tool_use_id": "composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "disposition": "failed",
+        "failure_class": "workflow_rejection",
+        "composition_tool": "keeper_compose_browser-live-click-content",
+        "composition_run_id": "01a09708-c61a-7000-99f5-96a33177b891",
+        "composition_node_id": "click",
+        "parent_tool_use_id": "exec-c65599e7-93dd-4d73-8129-2ccd7f898129",
+        "composition_execution": "inline",
+        "composition_tool_kind": "composition",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 23
+      },
+      {
+        "ts": 1789240329.763238,
+        "record_kind": "composition_run",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "keeper_composition_run_summary",
+        "input": {
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "expectedUrl": "http://127.0.0.1:53476/index.html",
+          "nodeId": "n1",
+          "tabId": 1
+        },
+        "output": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}",
+        "success": false,
+        "duration_ms": 10.164976119995117,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "keeper_composition_run_summary",
+          "action_key": "keeper_composition_run_summary",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 10.164976119995117,
+          "error": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}"
+        },
+        "route_evidence": {
+          "tool_kind": "composition",
+          "tool_name": "keeper_composition_run_summary"
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "tool_use_id": "exec-c65599e7-93dd-4d73-8129-2ccd7f898129",
+        "planned_index": 1,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "disposition": "failed",
+        "failure_class": "workflow_rejection",
+        "composition_tool": "keeper_compose_browser-live-click-content",
+        "composition_run_id": "01a09708-c61a-7000-99f5-96a33177b891",
+        "parent_tool_use_id": "exec-c65599e7-93dd-4d73-8129-2ccd7f898129",
+        "skill_reference": {
+          "identity": {
+            "source_id": "project-masc",
+            "package_id": "browser-live-click-content",
+            "name": "browser-live-click-content"
+          },
+          "content_revision": "0cf89f39aacefc25a3bc9d8532f29987f9f29a8c4c5d1e3073837ae0977bd9ff"
+        },
+        "composition_execution": "inline",
+        "composition_tool_kind": "composition",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 1901
+      },
+      {
+        "ts": 1789240329.763705,
+        "record_kind": "tool_call",
+        "keeper": "browser-handoff-proof-95380000",
+        "tool": "keeper_compose_browser-live-click-content",
+        "input": {
+          "clientId": "6b280dd5-cee2-4cdb-ac13-32263ff418c3",
+          "documentId": "f9888aafb576a0fbfd44a6dbc4698e87",
+          "expectedUrl": "http://127.0.0.1:53476/index.html",
+          "nodeId": "n1",
+          "tabId": 1
+        },
+        "output": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+        "success": false,
+        "duration_ms": 10.69498062133789,
+        "runtime_contract": {
+          "keeper_name": "browser-handoff-proof-95380000",
+          "trace_id": "trace-1789240308267-00000",
+          "session_id": "trace-1789240308267-00000",
+          "generation": null,
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "docker",
+          "sandbox_root": "/home/keeper/playground/browser-handoff-proof-95380000",
+          "sandbox_roots": [
+            ".masc/playground/docker/browser-handoff-proof-95380000/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "codex_subscription.gpt-5.6-luna"
+        },
+        "action_radius": {
+          "tool_name": "keeper_compose_browser-live-click-content",
+          "action_key": "keeper_compose_browser-live-click-content",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "docker",
+          "observed_paths": [],
+          "success": false,
+          "duration_ms": 10.69498062133789,
+          "error": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+        },
+        "agent_name": "browser-handoff-proof-95380000",
+        "model": "runtime",
+        "runtime_profile": "codex_subscription.gpt-5.6-luna",
+        "turn_kind": "direct",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "0e6a366170d2b6d1eea60b6ad15409ffa801ed7debd83c984d605d14a5464644",
+        "execution_id": "exec-1789240329763-0004",
+        "tool_use_id": "exec-c65599e7-93dd-4d73-8129-2ccd7f898129",
+        "planned_index": 1,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "trace_id": "trace-1789240308267-00000",
+        "session_id": "trace-1789240308267-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "docker",
+        "network_mode": "none",
+        "result_bytes": 2103,
+        "definition_source": "skills/browser-live-click-content/SKILL.md"
+      }
+    ]
+  }
+}

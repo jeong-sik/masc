@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
 import type { BoardPost } from '../../types/core'
@@ -33,6 +33,7 @@ import {
   routeRefsFromText,
   type IdeContextRouteLink,
 } from './ide-context-lens'
+import { registerIdeConversationRefresh, type IdeConversationSource } from '../../sse-store'
 import { IDE_INLINE_BADGE_BASE } from './context-badge-style'
 
 function postAuthorId(post: BoardPost): string {
@@ -71,21 +72,63 @@ type ReplayRailItem =
   | { readonly source: 'thread'; readonly timestamp_ms: number; readonly post: BoardPost }
   | { readonly source: 'decision'; readonly id: string; readonly timestamp_ms: number; readonly decision: KeeperDecision }
 
-async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
-  try {
-    const { posts } = await fetchBoard(undefined, { excludeSystem: true, excludeAutomation: true })
-    return posts
-  } catch {
-    return EMPTY_POSTS
-  }
+async function fetchBoardPosts(signal: AbortSignal): Promise<ReadonlyArray<BoardPost>> {
+  return (await fetchBoard(undefined, { excludeSystem: true, excludeAutomation: true, signal })).posts
 }
 
-async function fetchKeeperDecisionEvents(): Promise<ReadonlyArray<KeeperDecision>> {
-  try {
-    return (await fetchKeeperDecisions(200)).events
-  } catch {
-    return EMPTY_DECISIONS
-  }
+async function fetchKeeperDecisionEvents(signal: AbortSignal): Promise<ReadonlyArray<KeeperDecision>> {
+  return (await fetchKeeperDecisions(200, { signal })).events
+}
+
+type SourceSnapshot<T> = { readonly items: ReadonlyArray<T>; readonly at: number }
+type SourceState<T> =
+  | { readonly kind: 'loading'; readonly snapshot: SourceSnapshot<T> | null }
+  | { readonly kind: 'ready'; readonly snapshot: SourceSnapshot<T> }
+  | { readonly kind: 'error'; readonly snapshot: SourceSnapshot<T> | null; readonly error: string }
+
+function useConversationSource<T>(source: IdeConversationSource, fetchItems: (signal: AbortSignal) => Promise<ReadonlyArray<T>>) {
+  const [state, setState] = useState<SourceState<T>>({ kind: 'loading', snapshot: null })
+  const [revision, setRevision] = useState(0)
+  const refresh = useCallback(() => setRevision(value => value + 1), [])
+  useEffect(() => registerIdeConversationRefresh(changed => {
+    if (changed === source) refresh()
+  }), [source, refresh])
+  useEffect(() => {
+    const controller = new AbortController()
+    setState(previous => ({ kind: 'loading', snapshot: previous.snapshot }))
+    void fetchItems(controller.signal).then(items => {
+      if (!controller.signal.aborted) setState({ kind: 'ready', snapshot: { items, at: Date.now() } })
+    }, error => {
+      if (!controller.signal.aborted) setState(previous => ({
+        kind: 'error', snapshot: previous.snapshot,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+    })
+    return () => controller.abort()
+  }, [revision, fetchItems])
+  return { state, refresh }
+}
+
+function ConversationSourceStatus<T>({ label, state, refresh }: {
+  label: string; state: SourceState<T>; refresh: () => void
+}) {
+  const snapshot = state.snapshot
+  const detail = state.kind === 'loading'
+    ? snapshot ? 'Refreshing; showing last successful data' : 'Loading'
+    : state.kind === 'error'
+      ? snapshot ? 'Refresh failed; showing last successful data' : 'Unavailable; no successful data'
+      : `${snapshot!.items.length} loaded`
+  return html`<div class="ide-rail-scope v2-ide-row" data-conversation-source=${label} data-load-state=${state.kind}
+    style=${{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 'var(--sp-2)', overflowWrap: 'anywhere' }}>
+    <div role=${state.kind === 'error' ? 'alert' : 'status'}>
+      <strong>${label}</strong> · ${detail}
+      ${snapshot ? html`<small> · Last success <time datetime=${new Date(snapshot.at).toISOString()}>${new Date(snapshot.at).toLocaleTimeString()}</time></small>` : null}
+      ${state.kind === 'error' ? html`<div>${state.error}</div>` : null}
+    </div>
+    <button type="button" class="v2-ide-action" aria-label=${`${state.kind === 'error' ? 'Retry' : 'Refresh'} ${label}`} onClick=${refresh}>
+      ${state.kind === 'error' ? 'Retry' : 'Refresh'}
+    </button>
+  </div>`
 }
 
 function parseIsoToMs(iso: string): number {
@@ -113,8 +156,10 @@ export function boardKindFromPost(post: BoardPost): ThreadKind {
 
 export function IdeConversationRail() {
   const threadStore = useMemo(() => createAnchoredThreadRailStore(activeIdeFile.value), [])
-  const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
-  const [decisions, setDecisions] = useState<ReadonlyArray<KeeperDecision>>(EMPTY_DECISIONS)
+  const boardSource = useConversationSource('board', fetchBoardPosts)
+  const decisionSource = useConversationSource('decisions', fetchKeeperDecisionEvents)
+  const posts = boardSource.state.snapshot?.items ?? EMPTY_POSTS
+  const decisions = decisionSource.state.snapshot?.items ?? EMPTY_DECISIONS
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
@@ -126,18 +171,6 @@ export function IdeConversationRail() {
     return () => unsub()
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all([
-      fetchBoardPosts(),
-      fetchKeeperDecisionEvents(),
-    ]).then(([nextPosts, nextDecisions]) => {
-      if (cancelled) return
-      setPosts(nextPosts)
-      setDecisions(nextDecisions)
-    })
-    return () => { cancelled = true }
-  }, [])
   useEffect(() => {
     const unsub = activeIdeFile.subscribe(file => setActiveFile(file))
     return () => unsub()
@@ -211,6 +244,8 @@ export function IdeConversationRail() {
           ${visibleCounts.decision}/${decisions.length} decisions
         </span>
       </div>
+      <${ConversationSourceStatus} label="Board" state=${boardSource.state} refresh=${boardSource.refresh} />
+      <${ConversationSourceStatus} label="Decisions" state=${decisionSource.state} refresh=${decisionSource.refresh} />
       <div class="ide-rail-scope v2-ide-row" aria-label="Keeper workspace scope">
         <span>${keeperName ? `@${keeperName}` : 'all keepers'}</span>
         <span title=${activeFile}>${activeFile}</span>
@@ -228,7 +263,11 @@ export function IdeConversationRail() {
         class="ide-rail-list"
       >
         ${visibleItems.length === 0
-          ? html`<li class="ide-rail-empty v2-ide-row">no conversation activity</li>`
+          ? html`<li class="ide-rail-empty v2-ide-row">${
+              boardSource.state.kind === 'ready' && decisionSource.state.kind === 'ready'
+                ? replayUntilMs === null ? 'no conversation activity in the loaded window' : 'no conversation activity in this replay window'
+                : 'Conversation sources are incomplete; see their status above'
+            }</li>`
           : visibleItems.map(item => ReplayRailCard(
               item,
               focusedId,

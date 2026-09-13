@@ -1010,6 +1010,13 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  let tool_requirement = match output_contract with
+    | Tool_verdict -> Keeper_required_tools.Required
+    | Provider_default -> tool_requirement in
+  if output_contract = Tool_verdict && Option.is_some (Runtime.get_lane_by_id runtime_id) then
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      { field = "verifier.runtime"; detail = "A verifier slot must name a direct runtime, not a lane" }))
+  else
   if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
@@ -1156,7 +1163,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
-    modality_reroute_candidates
+    match output_contract with
+    | Tool_verdict -> [] (* A verdict must stay with its explicitly admitted slot. *)
+    | Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
@@ -1318,10 +1327,22 @@ let run_named
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      (match Result.bind source_reader_ready (fun () ->
+      let verifier_ready = match output_contract with
+        | Provider_default -> Ok ()
+        | Tool_verdict ->
+          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
+            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+              current_goal_blocks with
+            | Runtime_agent.No_reroute_needed -> Ok ()
+            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
+          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
+      (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
-          |> Result.map_error Keeper_required_tools.to_core_error) with
+          |> Result.map_error Keeper_required_tools.to_core_error)) with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,

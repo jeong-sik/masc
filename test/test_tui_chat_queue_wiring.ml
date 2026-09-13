@@ -2424,11 +2424,40 @@ let test_checkpoint_watcher_allows_new_input () =
     (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends)
 ;;
 
+let test_batch_watchers_render_one_shared_settled_turn () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let make request_id execution_id =
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
+    List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+      [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
+       Live.Text "shared answer";
+       Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
+       Live.Run_finished];
+    log in
+  let leader = make "batch-owner" "batch-owner" in
+  let follower = make "batch-follower" "batch-owner" in
+  let independent = make "different-request" "different-request" in
+  state.msg_settled_logs <- [follower; independent; leader];
+  let visible = Tui_types.settled_logs_for_keeper state "alpha" in
+  check (list string) "shared execution draws once; independent identical text is retained"
+    ["batch-owner"; "different-request"] (List.map Tui_types.turn_log_request_id visible);
+  check bool "follower watcher retains its own request lookup" true
+    (Option.is_some (Tui_types.settled_log_for_request state ~keeper_name:"alpha" "batch-follower"));
+  check string "held transcript suppresses only the canonical owner's persisted reply"
+    "batch-owner" (Tui_types.held_turn_of_log follower).ht_request_id;
+  let invalid = make "unrelated-request" "unrelated-request" in
+  Tui_types.turn_log_add ~now:3. invalid ~seq:None
+    (Live.Batch_bound {operation_id="other-request"; execution_id="batch-owner"});
+  check string "mismatched binding cannot hide another request"
+    "unrelated-request" (Tui_types.turn_log_execution_id invalid)
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
       , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
+        ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity

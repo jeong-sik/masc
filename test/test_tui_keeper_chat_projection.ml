@@ -983,11 +983,14 @@ let operation_json state fields =
     | Ok digest -> digest
     | Error detail -> fail detail
   in
+  let admission_digest = match Keeper_chat_operation.admission_digest ~source:(`Assoc []) ~input with
+    | Ok digest -> digest | Error detail -> fail detail in
   `Assoc
     ([ "schema", `String "masc.keeper_chat_operation.v1"
      ; "operation_id", `String request.request_id
      ; "sequence", `String "7"
      ; "created_at", `Float 1.0
+     ; "admission_digest", `String admission_digest
      ; "execution_digest", `String execution_digest
      ; "source", `Assoc []
      ; "input", input
@@ -1046,7 +1049,7 @@ let test_batch_preserves_original_user_history_once () =
   Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
     let continuation_channel = Keeper_continuation_channel.dashboard ~thread_id:"keeper:batch-history" |> ok in
     let source = Payload.source_to_json ~submitted_by:"operator" ~thread_id:"keeper:batch-history"
-      ~continuation_channel ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
       ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
       ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
       ~user_row_origin:History.Needs_append |> ok in
@@ -1083,8 +1086,11 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
   let module Projection = Server_keeper_chat_agui_projection in
   let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
     | Ok id -> id | Error detail -> fail detail in
+  let owner_id = match Keeper_chat_operation.Operation_id.of_string "batch-owner" with
+    | Ok id -> id | Error detail -> fail detail in
   let events =
     [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
+    ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
     ; Events.Text_delta "hello"
     ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
@@ -1117,7 +1123,7 @@ let test_batch_reconciliation_preserves_original_input_binding () =
    | Error error -> fail (Chat.stream_error_to_string error));
   check bool "batch does not bypass original input identity" true
     (Result.is_error (Chat.decode_operation_reconciliation ~request
-      (replace "batch_input_digest" (`String combined_digest) batch)));
+      (replace "admission_digest" (`String combined_digest) batch)));
   check bool "batch still validates stored aggregate" true
     (Result.is_error (Chat.decode_operation_reconciliation ~request
       (replace "input" (`Assoc ["wrong", `String "input"]) batch)))
@@ -1146,6 +1152,22 @@ let test_stale_completion_identity () =
     (Chat.same_request_identity current stale);
   check bool "wrong keeper rejected" false
     (Chat.same_request_identity current wrong_keeper)
+
+let test_edited_operation_reconnect_keeps_original_admission () =
+  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
+  let original = operation_json "Running" ["started_at", `Float 2.] in
+  let edited_input = Masc.Keeper_chat_operation_payload.input_to_json ~message:"corrected instruction"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let edited_digest = match Keeper_chat_operation.execution_digest edited_input with Ok digest -> digest | Error detail -> fail detail in
+  let edited = original |> replace "input" edited_input |> replace "execution_digest" (`String edited_digest) in
+  (match Chat.decode_operation_reconciliation ~request edited with
+   | Ok (Chat.Operation_pending Chat.Running) -> ()
+   | Ok _ -> fail "wrong edited operation state"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  let altered_request = {request with message="corrected instruction"} in
+  check bool "reposting edited content cannot impersonate original admission" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request:altered_request edited))
+;;
 
 let test_operation_reconciliation_binds_original_input () =
   let valid = operation_json "Running" [ "started_at", `Float 2.0 ] in
@@ -1177,7 +1199,7 @@ let test_operation_reconciliation_binds_original_input () =
      Chat.decode_operation_reconciliation ~request
        (replace "execution_digest" (`String "wrong-digest") valid)
    with
-   | Error (Chat.Event_identity_mismatch { field = "execution_digest"; _ }) -> ()
+   | Error (Chat.Malformed_event _) -> ()
    | Error error -> fail (Chat.stream_error_to_string error)
    | Ok _ -> fail "wrong durable execution digest matched the original request");
   match
@@ -1445,6 +1467,8 @@ let () =
             test_batch_reconciliation_preserves_original_input_binding
         ; test_case "operation reconciliation uses server-canonical message" `Quick
             test_operation_reconciliation_uses_server_canonical_message
+        ; test_case "edited operation reconnect retains immutable admission" `Quick
+            test_edited_operation_reconnect_keeps_original_admission
         ; test_case "operation reconciliation binds original input" `Quick
             test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick

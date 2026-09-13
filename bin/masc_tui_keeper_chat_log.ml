@@ -55,7 +55,7 @@ let add t ~seq (delta : Live.delta) =
   else begin
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
-     | Live.Run_started | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint

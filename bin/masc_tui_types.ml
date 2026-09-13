@@ -2431,6 +2431,7 @@ let turn_log_add_journaled turn_log
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
+let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
 (* Which loaded turns a refresh fetches journals for: every operation the
@@ -5161,9 +5162,15 @@ let settled_log_for_request state ~keeper_name request_id =
 ;;
 
 let settled_logs_for_keeper state keeper_name =
-  List.filter
-    (fun turn_log -> String.equal (turn_log_keeper_name turn_log) keeper_name)
-    state.msg_settled_logs
+  state.msg_settled_logs
+  |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
+  |> List.fold_left (fun selected log ->
+    let execution_id = turn_log_execution_id log in
+    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
+    | None -> selected @ [log]
+    | Some _ when turn_log_request_id log = execution_id ->
+      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
+    | Some _ -> selected) []
 ;;
 
 (* A settled log takes its place among the others by when its turn started,
@@ -5268,7 +5275,7 @@ type held_turn =
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_request_id turn_log
+  { ht_request_id = turn_log_execution_id turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -5312,7 +5319,7 @@ let rows_the_logs_do_not_draw ~held rows =
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_request_id turn_log in
+      let request_id = turn_log_execution_id turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with

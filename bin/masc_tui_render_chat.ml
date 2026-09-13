@@ -2217,6 +2217,11 @@ let render_keeper_message (state : state) =
        corners onto rows that never close. *)
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
+      |> List.filter (fun settled -> match state.msg_live with
+        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name
+            && Option.is_none promoted ->
+          Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
+        | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
       |> List.map settled_projection
       |> List.filter (fun block -> block.lb_entries <> [])
@@ -2498,7 +2503,7 @@ let render_keeper_message (state : state) =
       | Some live
         when state.msg_target_keeper_name
              = Some (Masc_tui_types.turn_log_keeper_name live) ->
-        Some (Masc_tui_types.turn_log_request_id live)
+        Some (Masc_tui_types.turn_log_execution_id live)
       | Some _ | None -> None
     in
     (match
@@ -2512,7 +2517,7 @@ let render_keeper_message (state : state) =
              if
                not
                  (Option.equal String.equal live_request_id
-                    (Some entry.sent_request.request_id))
+                    (Some (Masc_tui_types.turn_log_execution_id entry.log)))
              then
              let activity =
                match entry.phase with

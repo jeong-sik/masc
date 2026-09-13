@@ -424,6 +424,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         continue ~acc_text:"" ()
     | Text_message_start _ -> continue ()
     | Reply_details _
+    | Batch_bound _
     | Continuation_checkpoint _
     | Agent_core_stream_connected
     | Agent_core_stream_message_start _

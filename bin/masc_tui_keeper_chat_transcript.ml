@@ -176,6 +176,7 @@ type reply =
 type t =
   { keeper_name : string
   ; request_id : string
+  ; mutable batch_execution_id : string option
   ; started_at : float
         (* When the request left, not when the run started. The wait before
            RUN_STARTED is the part that hid a 63-minute hang (masc #29229), so
@@ -237,6 +238,7 @@ type t =
 let create ~keeper_name ~request_id ~started_at =
   { keeper_name
   ; request_id
+  ; batch_execution_id = None
   ; started_at
   ; text_buffer = Buffer.create 1024
   ; thinking_buffer = Buffer.create 256
@@ -297,6 +299,7 @@ let trail_text t text =
 
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
+let execution_id t = Option.value ~default:t.request_id t.batch_execution_id
 let started_at t = t.started_at
 let settled_at t = t.settled_at
 let attempt t = t.attempt
@@ -1487,6 +1490,11 @@ let apply_delta ~now t (delta : Live.delta) =
          Duplicate_run_start. Nothing to draw differently for it here, and
          moving a finished turn back to Working would be wrong. *)
       | Working | Stream_ended | Stream_failed _ -> ())
+  | Live.Batch_bound binding ->
+      if binding.operation_id <> t.request_id then note_unreadable t "batch binding names a different request"
+      else (match t.batch_execution_id with
+        | Some existing when existing <> binding.execution_id -> note_unreadable t "batch execution identity changed"
+        | Some _ | None -> t.batch_execution_id <- Some binding.execution_id)
   | Live.Accepted { admission; queue_length } ->
       (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
          only answers "why has it not started yet". *)

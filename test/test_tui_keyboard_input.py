@@ -11774,7 +11774,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
             b"masc://keepers/alpha",
             b"Dispatch",
-            b"Operator Proof (human_operator)",
+            # The kind is a word beside the name, not the wire token.
+            b"Operator Proof (human)",
             b"keeper_wake",
             b"digest-proof-701",
             b"PgUp/PgDn:page",

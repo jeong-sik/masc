@@ -580,14 +580,28 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
 
+(* The kind beside the name is a word, not the wire token: the row read
+   "Operator Proof (human_operator)" and "keeper-701 (automated_actor)". The
+   token is parsed through the schedule contract, so a kind this build does
+   not know fails the read the way every other unknown wire value here does
+   rather than reaching the screen as spelled. *)
+let schedule_actor_kind_word = function
+  | Schedule_contract_values.Human_operator -> "human"
+  | Schedule_contract_values.Automated_actor -> "automated"
+  | Schedule_contract_values.System -> "system"
+
 let decode_schedule_actor json field =
   match Yojson.Safe.Util.member field json with
   | `Assoc _ as actor ->
       let* id = required_string_field actor "id" in
       let* kind = required_string_field actor "kind" in
+      let* kind =
+        Schedule_contract_values.actor_kind_of_string kind
+        |> Result.map_error Schedule_contract_values.decode_error_to_string
+      in
       let* display_name = optional_string_field actor "display_name" in
       let name = Option.value ~default:id display_name in
-      Ok (Printf.sprintf "%s (%s)" name kind)
+      Ok (Printf.sprintf "%s (%s)" name (schedule_actor_kind_word kind))
   | value ->
       Error
         (Printf.sprintf "schedule %s must be an object: %s" field

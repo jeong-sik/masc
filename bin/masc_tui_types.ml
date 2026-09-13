@@ -4000,7 +4000,7 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       | [] -> None
       | first :: rest ->
           let top, bottom = List.fold_left
-            (fun (top, bottom) rect ->
+            (fun (top, bottom) (rect : Masc.Browser_scene.rect) ->
                (min top rect.y, max bottom (rect.y +. rect.height)))
             (first.y, first.y +. first.height) rest in
           Some (top, bottom) in

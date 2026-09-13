@@ -110,9 +110,10 @@ describe('Keeper operation stream projection', () => {
 
   // An attempt failure is not the end of the turn. The bubble keeps streaming
   // through it and the next attempt's answer renders in the same bubble; the
-  // protocol line stays in the entry's error until the terminal event clears it.
+  // protocol line stays in the entry's error until the operation's terminal
+  // event, carrying the operation's provenance, clears it.
   it('keeps the bubble streaming through a stream timeout and renders the next attempt', () => {
-    assistantEntry()
+    assistantEntry('kmsg-operation-1')
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-timed-out' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-timed-out', delta: 'half an' })
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -134,11 +135,17 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-answer' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-answer', delta: 'the answer' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END', messageId: 'm-answer' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+    applyKeeperStreamEvent(
+      'sangsu',
+      'reply-1',
+      { type: 'RUN_FINISHED' },
+      { kind: 'operation', operationId: 'kmsg-operation-1' },
+    )
 
     const answered = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(answered?.text).toBe('the answer')
-    expect(answered?.delivery).not.toBe('error')
+    expect(answered?.delivery).toBe('delivered')
+    expect(answered?.error).toBeNull()
   })
 
   const streamMessageOnce = (): void => {

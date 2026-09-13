@@ -1307,7 +1307,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = 0.
+  ; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }

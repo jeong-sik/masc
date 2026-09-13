@@ -797,7 +797,7 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_table))
+ (libraries masc_tui_message_layout masc_tui_table))
 
 (library
  (name masc_tui_frame_timing)

@@ -2059,7 +2059,7 @@ let render_board_list (state : state) =
               ; brow_author = Terminal_text.single_line p.bp_author
               ; brow_title = Terminal_text.single_line p.bp_title
               ; brow_age =
-                  Message_layout.span_text (now_unix -. p.bp_updated_at)
+                  Render_schedule.board_age_text ~now:now_unix p.bp_updated_at
               ; brow_score = score_text
               ; brow_replies = replies_text
               }

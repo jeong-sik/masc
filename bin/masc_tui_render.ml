@@ -2398,7 +2398,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -7622,7 +7622,7 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh  %s"
+            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -9826,7 +9826,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Left/Esc:list  r:refresh  Tab:next");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Left / Esc:list  r:refresh  Tab:next");
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 

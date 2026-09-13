@@ -190,7 +190,14 @@ let selected_document view = Option.bind view.document_key (fun key ->
 let put_document view (document : Document.session) =
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name}
-let selected_instance view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.instances view.instance_cursor)
+let ordered_instances instances =
+  let group (instance : instance) = match instance.phase with
+    | Row.Attached | Row.Observing -> 0
+    | Row.Detaching | Row.Failed _ -> 1
+    | Row.Detached -> 2 in
+  List.stable_sort (fun left right -> Int.compare (group left) (group right)) instances
+let selected_instance view = Option.bind view.snapshot (fun snapshot ->
+  List.nth_opt (ordered_instances snapshot.instances) view.instance_cursor)
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
     Option.bind snapshot.configuration (fun config ->
@@ -356,10 +363,27 @@ let action_target view =
             List.find_opt (fun instance -> String.equal instance.id id) snapshot.instances)))
   | Rows -> None
 
+let can_observe (instance : instance) = match instance.phase with
+  | Row.Attached | Row.Observing -> true
+  | Row.Detaching | Row.Detached | Row.Failed _ -> false
+
+let instance_controls (instance : instance) = match instance.phase with
+  | Row.Attached | Row.Observing ->
+      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:remove"
+  | Row.Detaching -> "removal pending"
+  | Row.Detached -> "retained history · D:details"
+  | Row.Failed _ -> "D:failure details  d:cleanup"
+
+let overview_hints view =
+  "i:install  j/k:select  Tab:focus  " ^
+  (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
+  "f:flow  D:details  J/K:scroll  Esc:back"
+
 let open_actions ~request_id view =
   let* instance = match action_target view with
     | Some instance -> Ok instance
     | None -> Error "Select an installed Add-on first (Tab:instances)." in
+  let* () = if can_observe instance then Ok () else Error "This instance is unavailable for actions; D shows its state and retained evidence." in
   let* schema = match instance.action_schema with
     | Some schema -> Ok schema
     | None -> Error "This Add-on provides observations only. Press o to observe." in
@@ -468,12 +492,25 @@ let compact_lines ~width view =
               @ List.concat_map (fun (declaration : declaration) ->
                   List.map (fun issue -> declaration.source_path ^ ": " ^ issue) declaration.issues)
                   configuration.declarations in
+        let identity (instance : instance) =
+          let installation = Option.bind snapshot.configuration (fun config ->
+            List.find_map (fun (declaration : declaration) ->
+              if declaration.instance_id=Some instance.id then declaration.installation_id else None)
+              config.declarations) in
+          Option.fold ~none:"" ~some:(fun id -> id ^ " · ") installation
+          ^ "run " ^ instance.run_id ^ " · instance " ^ instance.id in
+        let render_instance (index,(instance : instance)) =
+          [(if view.instance_cursor=index && view.focus=Instances then "> " else "  ")
+           ^ instance.title ^ " · " ^ phase_label instance.phase ^ " · " ^ instance_controls instance;
+           "    " ^ identity instance] in
+        let indexed = List.mapi (fun index instance -> index,instance) snapshot.instances in
+        let group title predicate = match List.filter (fun (_,instance) -> predicate instance) indexed with
+          | [] -> [] | items -> [title] @ List.concat_map render_instance items in
         let instances = if snapshot.instances=[] then
-          ["No Add-ons installed. n creates an installation TOML; D shows configuration details."]
-          else ["Installed Add-ons"] @ List.mapi (fun index instance ->
-            (if view.instance_cursor=index && view.focus=Instances then "> " else "  ")
-            ^ instance.title ^ " · " ^ phase_label instance.phase
-            ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
+          ["No Add-ons installed. Press i to inspect a package and connect its inputs."]
+          else group "Active workers" can_observe
+            @ group "Needs attention" (fun instance -> match instance.phase with Row.Detaching | Row.Failed _ -> true | _ -> false)
+            @ group "Retained history" (fun instance -> instance.phase=Row.Detached) in
         let configurations = if view.focus<>Configurations then [] else
           ["Installations (E:edit)"] @ (match snapshot.configuration with None -> [] | Some config ->
             List.mapi (fun index (declaration : declaration) ->
@@ -482,11 +519,12 @@ let compact_lines ~width view =
               ^ (match declaration.applied,declaration.desired with
                  | Some applied,Some desired when String.equal applied desired -> " · applied"
                  | _ -> " · not applied")) config.declarations) in
-        let observations = ["Latest observations"] @
-          (if snapshot.output.rows=[] then ["  No observations yet. Select an instance and press o."]
+        let observations = ["Latest worker observations"] @
+          (if snapshot.output.rows=[] then ["  No observations available. Select an active worker to observe."]
            else List.concat (List.mapi (fun index (row : Row.row) ->
              [(if index=view.row_cursor && view.focus=Rows then "> " else "  ")
               ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
+              "    Source lane: " ^ row.lane_id;
               ] @ List.map (fun value -> "    " ^ value) (displayed_readings snapshot.instances row)) snapshot.output.rows)) in
         let gaps = List.filter_map (fun (coverage : Row.coverage) ->
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
@@ -494,7 +532,7 @@ let compact_lines ~width view =
         installations @ instances @ configurations @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "i:install  j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
+   overview_hints view]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
@@ -550,6 +588,8 @@ let flow_lines view =
      "f:back to observations  D:technical details  J/K:scroll"]
 
 let lines ~width view =
+  let view = {view with snapshot=Option.map (fun snapshot ->
+    {snapshot with instances=ordered_instances snapshot.instances}) view.snapshot} in
   match view.installer with
   | Some installer ->
       ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])

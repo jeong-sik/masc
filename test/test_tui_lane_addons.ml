@@ -202,6 +202,25 @@ let guided_actions () =
     skills_directory=None;action_schema=Some schema;binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
+  let detached = {instance with id="retained-worker";phase=UI.Row.Detached} in
+  let overview = {UI.initial with snapshot=Some {snapshot with instances=[instance;detached]};instance_cursor=1} in
+  let interleaved = {overview with snapshot=Some {snapshot with instances=[detached;instance;
+    {instance with id="failed-worker";phase=UI.Row.Failed "offline"};
+    {instance with id="second-worker"}]}} in
+  let selected = List.init 4 (fun instance_cursor ->
+    match UI.selected_instance {interleaved with instance_cursor} with
+    | Some instance -> instance.id | None -> fail "missing selection") in
+  check (list string) "navigation follows the same active, attention, retained order as rendering"
+    ["worker";"second-worker";"failed-worker";"retained-worker"] selected;
+  let lines = UI.lines ~width:240 overview in
+  check bool "active workers and retained history are distinct" true
+    (List.mem "Active workers" lines && List.mem "Retained history" lines);
+  check bool "retained worker carries its exact identity" true
+    (List.mem "    run run · instance retained-worker" lines);
+  check bool "detached selection offers no observe or action controls" true
+    (UI.overview_hints overview="i:install  j/k:select  Tab:focus  retained history · D:details  f:flow  D:details  J/K:scroll  Esc:back");
+  check bool "detached schema cannot open actions" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" overview));
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in
   let first = UI.submit_action view |> ok in
   check string "current worker supplies identity" "worker" first.instance_id;

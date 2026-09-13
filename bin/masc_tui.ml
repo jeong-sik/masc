@@ -16629,7 +16629,10 @@ and is loaded on demand through keeper_skill.
                      | "t" ->
                          (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
-                     | "o" -> selected (fun id -> Addons.Observe id)
+                     | "o" ->
+                         (match Addons.selected_instance view with
+                          | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
+                          | Some _ | None -> update {view with error=Some "Select an active worker to observe; D shows retained state."})
                      | "d" -> selected (fun id -> Addons.Detach id)
                      | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->

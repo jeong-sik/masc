@@ -58,3 +58,6 @@ val submit_action : t -> (action_request, string) result
 val paste_action : text:string -> t -> t
 val edit_action : key:string -> t -> (t * action_request option, string) result
 val pending_action : t -> action_request option
+
+val can_observe : instance -> bool
+val overview_hints : t -> string

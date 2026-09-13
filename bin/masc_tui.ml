@@ -6848,18 +6848,8 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
         | Interrupt_sending | Interrupt_signalled -> true) state.keeper_observed_interrupts;
   match working_chat_for_keeper state keeper_name with
   | Some entry ->
-    let held_input = List.exists (fun (name, _, _, _) -> name = keeper_name)
-      state.keeper_interactive_waiting in
-    let newer_input = held_input
-      || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
-         | Some latest -> latest.sent_request.request_id <> entry.sent_request.request_id
-         | None -> false in
-    let action =
-      if List.mem keeper_name state.keeper_chat_control_pending && not held_input
-      then Masc_tui_esc_interrupt.Swallow
-      else if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
-      else Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
-        (Keeper_chat_transcript.interrupt entry.log.tl_transcript) in
+    let action = working_chat_interrupt_action ~explicit
+      ~now_ns:(Mtime_clock.elapsed_ns ()) state keeper_name entry in
     (match action with
      | Launch_interrupt -> launch_keeper_interrupt state ~mailbox entry.sent_request; Some true
      | Swallow -> Some true
@@ -7391,7 +7381,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
               clear_current_message_draft state;
               (match List.assoc_opt target state.keeper_chat_control_tokens with
                | Some _ -> launch_waiting_interactive state ~mailbox ~keeper_name:target
-               | None when List.mem target state.keeper_chat_control_pending ->
+               | None when List.mem_assoc target state.keeper_chat_control_pending ->
                  add_event state "info" "Input retained; waiting for the stop or resume acknowledgement";
                  launch_keeper_turns_load state ~mailbox
                | None ->
@@ -13246,7 +13236,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let current row =
              Option.value ~default:0 (List.assoc_opt row.Tui_decode.ktr_keeper_name generation)
              = keeper_chat_control_generation state row.Tui_decode.ktr_keeper_name
-             && not (List.mem row.Tui_decode.ktr_keeper_name state.keeper_chat_control_pending) in
+             && not (List.mem_assoc row.Tui_decode.ktr_keeper_name state.keeper_chat_control_pending) in
            let fresh, stale = List.partition current rows in
            List.iter (fun row ->
              state.keeper_chat_control_tokens <- List.remove_assoc row.Tui_decode.ktr_keeper_name
@@ -13257,7 +13247,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let rows = fresh @ List.filter (fun previous -> List.exists (fun row ->
              String.equal row.Tui_decode.ktr_keeper_name previous.Tui_decode.ktr_keeper_name) stale)
              state.keeper_turns in
-           if List.exists (fun row -> not (List.mem row.Tui_decode.ktr_keeper_name
+           if List.exists (fun row -> not (List.mem_assoc row.Tui_decode.ktr_keeper_name
              state.keeper_chat_control_pending)) stale then launch_keeper_turns_load state ~mailbox;
            let observed_at = Unix.gettimeofday () in
            (* Two consecutive polls are what "just finished" is made of:

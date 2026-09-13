@@ -6635,8 +6635,8 @@ value = {surface="dashboard", content="must not run"}
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
-          ~content_transport:Runtime_official_client_tool.Codex ~tool_approval:None
-          ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
+          ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
+          ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
           ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))

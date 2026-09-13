@@ -3945,6 +3945,15 @@
  (libraries alcotest masc.masc_goal masc_tui_types))
 
 (rule
+ (alias runtest-test_tui_keeper_row_selection)
+ (deps test_tui_keeper_row_selection.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_keeper_row_selection.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_row_selection)))
+
+(rule
  (alias runtest-test_tui_keyboard_input)
  (deps
   test_tui_keyboard_input.py
@@ -4897,6 +4906,7 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
+(include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)

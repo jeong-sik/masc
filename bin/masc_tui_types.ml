@@ -2391,7 +2391,6 @@ let runtime_listing_chrome ~error ~action_error ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
-let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -6106,6 +6105,33 @@ let visible_system_log_entries (state : state) =
    stable producer order; each turn is Input -> Progress -> Tool -> Output.
    Pending requests are withheld for the separate NEXT lane. Wall clocks never
    decide conversation order. *)
+(* What a page says when it holds nothing, in one place: the words for
+   {!empty_page}'s [Page_unread] and [Page_failed]. They sit beside the type so
+   a module below the renderer -- Memory's body is one -- draws the same words.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+
+let page_failed_note = "  (load failed; nothing here is a reading)"
+
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -6993,17 +7019,29 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
             (match state.system_logs with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
-        ; sc_overflow_takes_row = false
+        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        listing ~error:state.verification_error
-          (match state.verification with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.vs_requests)
+        (* Under the list sit the armed approval and the server's last
+           refusal, one row each while they stand, and the scroll row while the
+           queue overflows. They are frame rows too; a count without them puts
+           the footer past the frame's last row. *)
+        Some
+          { sc_count =
+              (match state.verification with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.vs_requests)
+          ; sc_chrome =
+              listing_chrome ~error:state.verification_error
+              + (if Option.is_some state.verification_verdict_armed then 1 else 0)
+              + (if Option.is_some state.verification_verdict_error then 1 else 0)
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
@@ -7043,7 +7081,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = false
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()

@@ -945,6 +945,11 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Keepers header words and the Mode S letters. They were two
+             rows above every roster: an empty roster spent them on columns
+             it had nothing in, a narrow one on columns it did not draw, and
+             beside the Activity pane both rows were cut. *)
+          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)

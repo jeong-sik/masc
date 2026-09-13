@@ -38,8 +38,9 @@ def run(binary, transition, old_fails):
     def interact(process, master, _slave, output, _base):
         try:
             h.palette_go(process, master, output, b"go lanes", b"Verifier")
-            h.send_and_wait(process, master, output, b"jjj",
+            h.send_and_wait(process, master, output, b"/Verifier",
                            re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))
+            h.send_and_wait(process, master, output, b"\x1b", b"j/k:move")
             h.send_and_wait(process, master, output, b"\r", b"2 loaded / 2 retained")
             h.send_and_wait(process, master, output, b"\r", b"MASC Lane Run")
             assert h.wait_for_fixture_event(process, master, output, old.requested, timeout=5.0)

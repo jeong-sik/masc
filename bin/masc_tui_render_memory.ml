@@ -27,7 +27,7 @@ let facts_keeper_label = function
    Typed so the two spellings cannot drift into each other's shape. The unread
    word arrives rendered, like [screen] and [badge]: whether a read is still in
    flight or came back failed is the caller's reading, and
-   [Masc_tui_render_prim.title_missing_reading] is the one place that words it. *)
+   [Masc_tui_types.title_missing_reading] is the one place that words it. *)
 type facts_reading =
   | Facts_unread of { reading : string }
   | Facts_loaded of
@@ -481,16 +481,18 @@ let render_memory_body ~cols ~budget (state : state)
     |> Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
   in
   if shown = 0 then
+    (* A failed read and an unread one say what every page says. Memory had its
+       own words for both, and "server error" named a connection nobody made. *)
     let note =
-      if Option.is_some state.memory_health_error then
-        "  (server error \xe2\x80\x94 waiting for retry)"
-      else if query <> "" then
+      match
+        empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
+      with
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
+      | Page_empty when query <> "" ->
         Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
           state.search_last
-      else
-        match state.memory_health with
-        | None -> "  (waiting for the server)"
-        | Some _ -> "  (no keepers with a memory config or snapshot)"
+      | Page_empty -> "  (no keepers with a memory config or snapshot)"
     in
     push_styled ~style:(Theme.recede ()) note
   else begin
@@ -670,16 +672,20 @@ let render_memory_facts_body ~cols ~budget (state : state)
   let scroll = max 0 (min state.memory_facts_scroll max_scroll) in
   if total = 0 then
     (let empty =
-       match state.memory_facts, state.memory_facts_category with
-       | None, _ -> "  (waiting for the server)"
-       | Some _, Category_all ->
+       match
+         empty_page_of ~snapshot:state.memory_facts ~error:state.memory_facts_error,
+         state.memory_facts_category
+       with
+       | Page_failed, _ -> page_failed_note
+       | Page_unread, _ -> page_unread_note
+       | Page_empty, Category_all ->
            if state.search_last <> "" then
              Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
                state.search_last
            else if is_fleet then
              "  (no facts across any keeper in the fleet)"
            else "  (no facts in either store)"
-       | Some _, filt ->
+       | Page_empty, filt ->
            Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
              (memory_category_filter_label filt)
      in

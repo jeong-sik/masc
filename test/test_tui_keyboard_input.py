@@ -10674,6 +10674,10 @@ def open_changes(
     could not arrive however many presses they were given.
     """
     tab_until(process, master_fd, output, b"MASC Keepers")
+    # The heading arrives before the roster; opening files without a selected
+    # Keeper otherwise leaves this child surface permanently unbound.
+    wait_for_output(process, master_fd, output, keeper_row_selected(b"alpha"),
+                    start=0, timeout=3.0)
     return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
 
 

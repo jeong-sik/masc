@@ -10,8 +10,7 @@ let test_original_presentation () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs env#fs;
   Masc_test_deps.init_eio_clock ~sw env;
-  let temporary = match Sys.getenv_opt "RUNNER_TEMP" with
-    | Some path -> path | None -> Filename.get_temp_dir_name () in
+  let temporary = Filename.get_temp_dir_name () in
   let base = Filename.concat temporary "masc-presentation-verifier" in
   (* #9921 refuses a test workspace under $HOME so a run cannot write into a
      developer's real one. On a GitHub runner RUNNER_TEMP is

@@ -1,0 +1,13 @@
+{
+  "base": "7bd85f6bd6924a0619d7113f3347f0d0b19346d3",
+  "moved_result_functions": "byte-identical except replacing t.config.base_path with explicit base_path parameter",
+  "underlying_inspector_sources_unchanged": 8,
+  "ocaml_parse_checks": 6,
+  "python_syntax": "pass",
+  "native_cli_tests": "not_run",
+  "installed_cli_acceptance": "not_run",
+  "task_goal_mutations": "not_requested",
+  "fixture_repair_source": "04bdb26e8f",
+  "fixture_repair_cherry_pick": "375dc5d82fca5469a4289788ba9afc46b30ac8ce",
+  "presentation_fixture_root": "tempfile.gettempdir()/masc-presentation-verifier"
+}

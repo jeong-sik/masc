@@ -1,0 +1,104 @@
+{
+  "scope": "Production source Activity component in Chromium with synthetic API data. Not installed MASC or real persisted history acceptance.",
+  "passed": true,
+  "snapshots": [
+    {
+      "name": "desktop",
+      "history": "Workspace history: 50 of 1972 loaded · older events are not loaded",
+      "displayed_rows": 51,
+      "viewport": {
+        "width": 1160,
+        "height": 1000
+      },
+      "geometry": {
+        "width": 1160,
+        "scrollWidth": 1160
+      }
+    },
+    {
+      "name": "desktop-compact",
+      "history": "Workspace history: 50 of 1972 loaded · older events are not loaded",
+      "displayed_rows": 51,
+      "viewport": {
+        "width": 1160,
+        "height": 1000
+      },
+      "geometry": {
+        "width": 1160,
+        "scrollWidth": 1160
+      }
+    },
+    {
+      "name": "mobile-compact",
+      "history": "Workspace history: 50 of 1972 loaded · older events are not loaded",
+      "displayed_rows": 51,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "geometry": {
+        "width": 390,
+        "scrollWidth": 390
+      }
+    },
+    {
+      "name": "mobile-total-unavailable",
+      "history": "Workspace history: 50 loaded · total unavailable",
+      "displayed_rows": 51,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "geometry": {
+        "width": 390,
+        "scrollWidth": 390
+      }
+    },
+    {
+      "name": "mobile-empty",
+      "history": "Workspace history: 0 of 0 loaded",
+      "displayed_rows": 0,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "geometry": {
+        "width": 390,
+        "scrollWidth": 390
+      }
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/activity/events",
+      "scenario": "known",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "scenario": "known",
+      "codebase": "github.com_owner_history"
+    },
+    {
+      "path": "/api/v1/activity/events",
+      "scenario": "unknown",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "scenario": "unknown",
+      "codebase": "github.com_owner_history"
+    },
+    {
+      "path": "/api/v1/activity/events",
+      "scenario": "empty",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "scenario": "empty",
+      "codebase": "github.com_owner_history"
+    }
+  ],
+  "errors": []
+}

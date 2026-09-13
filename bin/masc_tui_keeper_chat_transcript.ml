@@ -299,6 +299,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let admission t = t.admission
 let interrupt t = t.interrupt
 let note_interrupt t interrupt =
   t.interrupt <- interrupt;

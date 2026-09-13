@@ -3246,6 +3246,20 @@ module Browser_lane_view = struct
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
+        let target_kind = match node.kind with
+          | Region _ -> "region" | Control _ -> "control" | Text -> "text" | Raster -> "raster" in
+        let pinned = ["lane",`String (source_name scene.source);"tabId",`Int scene.tab_id;
+          "expectedUrl",`String scene.content.url] @
+          (match scene.client_id with None -> [] | Some id -> ["clientId",`String id]) in
+        let target = ["documentId",`String scene.content.document_id;"nodeId",`String node.node_id] in
+        (* The same typed action decides Enter in the TUI. A selected region
+           is a scoped read, even when it contains navigational links. *)
+        let default_action = match scene_target_action node with
+          | None -> `Null
+          | Some Read_region -> `Assoc ["kind",`String "read_region";"tool",`String "BrowserRead";
+              "input",`Assoc (pinned @ ["mode",`String "scene";"scope",`Assoc target])]
+          | Some Click_control -> `Assoc ["kind",`String "click_control";"tool",`String "BrowserInteract";
+              "input",`Assoc (pinned @ ["action",`String "click"] @ target)] in
         let source = match node.source_context with
           | Masc.Browser_source_context.Unmapped -> `Null
           | Invalid detail -> `Assoc ["error", `String detail]
@@ -3253,7 +3267,11 @@ module Browser_lane_view = struct
               "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
               "sha256",`String source.digest] in
         Some (Yojson.Safe.pretty_to_string (`Assoc [
-          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "context",`String ("Browser observation of the selected " ^ target_kind
+            ^ ". defaultAction describes its Enter action in the TUI."
+            ^ (match node.source_context with Masc.Browser_source_context.Unmapped -> ""
+               | Invalid _ | Located _ -> " The source hint is page-provided; verify the chosen checkout and file SHA-256 before editing."));
+          "targetKind",`String target_kind;"defaultAction",default_action;
           "lane",`String (source_name scene.source);
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
@@ -3497,6 +3515,37 @@ type msx_frame = {
   msx_disk : string option;
   msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
+
+(* A container-log read that has been asked for and not answered. The keeper and
+   the generation identify it; the stamp says when it was asked, in monotonic
+   nanoseconds. *)
+type sandbox_logs_request = {
+  slr_keeper: string;
+  slr_generation: int;
+  slr_started_ns: int64;
+}
+
+(* Each read has a generation; overlapping reads retain the pending interval's
+   start, but only the newest response may clear it or populate the view. *)
+type detail_read_request = {
+  drr_tab: keeper_detail_tab;
+  drr_keeper: string;
+  drr_generation: int;
+  drr_started_ns: int64;
+}
+
+type observed_interrupt_status =
+  | Interrupt_sending
+  | Interrupt_signalled
+  | Interrupt_declined of string
+  | Interrupt_failed of string
+
+type observed_interrupt =
+  { oi_keeper : string
+  ; oi_token : string
+  ; oi_started_at : float
+  ; oi_sent_ns : int64
+  ; oi_status : observed_interrupt_status }
 
 type state = {
   mutable metrics_scroll: int;
@@ -3764,12 +3813,19 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable keeper_run_cursor: int;
+  mutable detail_reads: detail_read_request list;
+  mutable detail_read_generation: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
-  mutable keeper_sandbox_logs_inflight: (string * int) option;
+  (* The container-log read, which is its own read: the operator opens the
+     Sandbox tab, waits for its status, and presses o/l later. Its start lives
+     with the request rather than beside it, so an in-flight log read cannot
+     exist without the stamp that times it, and status and logs pending at once
+     are timed apart. *)
+  mutable keeper_sandbox_logs_inflight: sandbox_logs_request option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -3956,6 +4012,8 @@ type state = {
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_observed_interrupts: observed_interrupt list;
+  mutable keeper_run_next_inflight: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -4158,6 +4216,7 @@ type state = {
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
@@ -5016,6 +5075,87 @@ let selected_acting_entry state =
   | Masc_tui_acting.Turns -> None
   | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
 
+(* What a pending read says while it is pending.
+
+   The seconds appear only after a couple of them. A read that answers at once
+   would otherwise flash a number nobody asked for, and the number exists for
+   the reads that do not answer at once: against a live server the Sandbox
+   tab's status took between five and sixteen seconds (measured 2026-09-12),
+   which is long enough to be read as a stall and keyed at. The footer's
+   answering badge spends its elapsed seconds for the same reason. *)
+let pending_seconds_floor = 2
+
+let loading_notice ?elapsed_s what =
+  match elapsed_s with
+  | Some seconds when seconds >= pending_seconds_floor ->
+      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
+  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+
+let nanoseconds_per_second = 1_000_000_000L
+
+(* How long a read has been pending, in whole seconds. [now_ns] is an argument
+   so the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's status
+   and its container logs are two reads and can be pending at once.
+
+   No clamp, because a monotonic reading cannot go backwards. A wall clock can,
+   and the clamp that used to be here turned that into a silent zero. *)
+let pending_elapsed_s ~now_ns started_ns =
+  Option.map
+    (fun since ->
+      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    started_ns
+
+let pending_detail_read (state : state) ~tab ~keeper =
+  List.find_opt
+    (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
+    state.detail_reads
+
+let detail_read_started state ~tab ~keeper =
+  Option.map (fun request -> request.drr_started_ns)
+    (pending_detail_read state ~tab ~keeper)
+
+(* A refresh supersedes the response, not the elapsed interval. Periodic OAuth
+   polling waits for an in-flight read; explicit refreshes and service switches
+   may still supersede it so a pre-mutation response cannot win. *)
+let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
+  let started_ns =
+    match pending_detail_read state ~tab ~keeper with
+    | Some request -> request.drr_started_ns
+    | None -> now_ns
+  in
+  state.detail_read_generation <- state.detail_read_generation + 1;
+  let request =
+    { drr_tab = tab; drr_keeper = keeper;
+      drr_generation = state.detail_read_generation; drr_started_ns = started_ns }
+  in
+  state.detail_reads <- request :: List.filter
+      (fun pending -> pending.drr_tab <> tab || not (String.equal pending.drr_keeper keeper))
+      state.detail_reads;
+  request
+
+(* A current terminal answer retires its wait, even off screen or on error.
+   Superseded responses cannot retire or populate a newer read. The caller
+   still checks selection before putting an accepted answer on screen. *)
+let finish_detail_read (state : state) request =
+  let current =
+    match pending_detail_read state ~tab:request.drr_tab ~keeper:request.drr_keeper with
+    | Some pending -> pending.drr_generation = request.drr_generation
+    | None -> false
+  in
+  if current then
+    state.detail_reads <-
+      List.filter (fun pending -> pending.drr_generation <> request.drr_generation)
+        state.detail_reads;
+  current
+
+let detail_read_waiting state ~tab ~keeper =
+  Option.is_some (pending_detail_read state ~tab ~keeper)
+  || (tab = Detail_sandbox
+      && match state.keeper_sandbox_logs_inflight with
+         | Some request -> String.equal request.slr_keeper keeper
+         | None -> false)
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
@@ -5341,6 +5481,8 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_run_cursor = 0;
+  detail_reads = [];
+  detail_read_generation = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
@@ -5428,6 +5570,8 @@ let create_state
   keeper_turns = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_observed_interrupts = [];
+  keeper_run_next_inflight = None;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -5540,6 +5684,7 @@ let create_state
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
+  lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
   browser_lane = None;
   browser_history = None;
@@ -7289,6 +7434,142 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
+let keeper_observed_turn (state : state) keeper_name =
+  if Option.is_some state.keeper_turns_error then None
+  else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if row.ktr_keeper_name <> keeper_name then None
+    else match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token = Some token; _ } ->
+        Some (started_at_unix, token)
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_observed_interrupt (state : state) keeper_name started_at =
+  List.find_opt (fun item -> item.oi_keeper = keeper_name && item.oi_started_at = started_at)
+    state.keeper_observed_interrupts
+;;
+
+let keeper_observed_interrupt_action (state : state) keeper_name =
+  let current_token = Option.map snd (keeper_observed_turn state keeper_name) in
+  let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
+    state.keeper_observed_interrupts
+    |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
+      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+  Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
+;;
+
+let keeper_observed_interrupt_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> keeper_name then None else
+      match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
+        (match keeper_observed_interrupt state keeper_name started_at_unix with
+         | Some item -> Some (match item.oi_status with
+           | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
+           | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
+           | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
+           | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
+         | None when Option.is_some interrupt_token ->
+           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+         | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7297,6 +7578,8 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   List.length state.msg_inflight
+  + List.length (keeper_message_activity_rows state)
+  + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0
@@ -7464,7 +7747,12 @@ let palette_entries (state : state) =
          Palette_gate_mode (lane, mode)))
         [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
       [Workspace_gate; External_gate]
+  (* Both halves, because they are one reading split in two: Task Review lists
+     what waits for a ruling and Task Verdicts what was ruled. They sit one [v]
+     apart under Planning, so offering a jump to one and not the other makes the
+     nearer half look like the only one there is. *)
   @ [ "go Task Review", Palette_goto Verification ]
+  @ [ "go Task Verdicts", Palette_goto Harness ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]

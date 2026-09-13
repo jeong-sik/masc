@@ -1,0 +1,37 @@
+{
+  "context": "Browser observation of the selected region. defaultAction describes its Enter action in the TUI.",
+  "targetKind": "region",
+  "defaultAction": {
+    "kind": "read_region",
+    "tool": "BrowserRead",
+    "input": {
+      "lane": "live",
+      "tabId": 1,
+      "expectedUrl": "http://127.0.0.1:54474/index.html",
+      "clientId": "2e868255-adc7-4b37-8b3f-897f7437206d",
+      "mode": "scene",
+      "scope": {
+        "documentId": "f9436dfb7059f400d54fe6e3832faf04",
+        "nodeId": "n1"
+      }
+    }
+  },
+  "lane": "live",
+  "clientId": "2e868255-adc7-4b37-8b3f-897f7437206d",
+  "tabId": 1,
+  "url": "http://127.0.0.1:54474/index.html",
+  "documentId": "f9436dfb7059f400d54fe6e3832faf04",
+  "nodeId": "n1",
+  "view": "regions",
+  "scope": null,
+  "viewport": {
+    "width": 1366.0,
+    "height": 683.0,
+    "scrollX": 0.0,
+    "scrollY": 0.0
+  },
+  "truncated": false,
+  "tag": "nav",
+  "text": "Channels",
+  "source": null
+}

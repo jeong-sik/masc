@@ -124,8 +124,9 @@ let test_a_body_without_a_transcript_is_not_silence () =
 
    Counted rather than exercised: [transcribe_audio] loads the workspace's
    voice configuration and reaches real endpoints, so what a test can hold
-   here is that the routing is read at all. What it routes to is
-   {!transcriber_of_kind}, which the cases above pin. *)
+   here is that the routing is read at all. It asks {!transcriber_of_endpoint},
+   which reads the endpoint's declared kind -- an id alias no longer decides the
+   transport -- and routes it the way {!transcriber_of_kind}, pinned above, does. *)
 let voice_bridge_path = "lib/voice/voice_bridge.ml"
 
 let test_the_runtime_loop_routes_by_kind () =
@@ -134,7 +135,7 @@ let test_the_runtime_loop_routes_by_kind () =
        ~name:"transcribe_audio");
   Alcotest.(check int) "and it asks which transport this endpoint is" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
-       ~binding_name:"transcribe_audio" ~callee:"transcriber_of_kind")
+       ~binding_name:"transcribe_audio" ~callee:"transcriber_of_endpoint")
 
 let test_the_runtime_loop_can_reach_the_command_transport () =
   Alcotest.(check int) "a command kind is run, not addressed" 1

@@ -236,7 +236,7 @@ let step_prompt = function
   | Credential ->
     "Which environment variable holds its key? Leave blank for a local server that \
      does not want one."
-  | Model -> "Which model should every endpoint in this section be asked for?"
+  | Model -> "Which model should this endpoint be asked for?"
   | Voice -> "Which voice should speech out use by default?"
   | Review -> "Here is what will change."
 ;;

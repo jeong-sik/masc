@@ -115,6 +115,20 @@ let configuration_and_ports () =
   }|} in
   let snapshot = UI.decode json |> ok in
   let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
+  check int "partial inventory cannot fabricate subscription choices" 0
+    (List.length (UI.subscription_targets view));
+  let complete_config = {(Option.get snapshot.configuration) with complete=true} in
+  let complete = {snapshot with configuration=Some complete_config} in
+  let choices = UI.subscription_targets {view with snapshot=Some complete} in
+  check int "declared instance supplies its two actual named outputs" 2 (List.length choices);
+  List.iter (fun (target:Masc_tui_lane_subscriptions.target) ->
+    check string "subscription uses declared installation identity" "custom" target.installation_id;
+    check string "subscription uses actual observed run" "world" target.run_id;
+    check string "subscription remembers observed worker" "actual-1" target.instance_id) choices;
+  let manual = {complete with instances=List.map (fun (instance:UI.instance) ->
+    {instance with source_path=None}) complete.instances} in
+  check int "manual instances cannot masquerade as declared producers" 0
+    (List.length (UI.subscription_targets {view with snapshot=Some manual}));
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
   check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")

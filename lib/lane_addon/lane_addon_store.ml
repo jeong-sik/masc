@@ -239,6 +239,12 @@ let retained_read_limit max_bytes =
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2
   then Error "invalid retained record byte envelope"
   else Ok (2 * max_bytes + envelope_bytes)
+let read_observation ~instance_id ~seq ~max_bytes t =
+  if seq <= 0 then Error "observation sequence must be positive" else
+  let* max_record_bytes = retained_read_limit max_bytes in
+  let* bytes = bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq) in
+  let* _,output = decode_record bytes in
+  Ok output
 let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~lane_id =
   let* max_record_bytes = retained_read_limit max_bytes in
   let* found = highwater t instance_id in

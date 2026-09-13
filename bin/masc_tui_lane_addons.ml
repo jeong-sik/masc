@@ -19,6 +19,7 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+  | Subscriptions of Yojson.Safe.t
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
@@ -28,6 +29,7 @@ type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
   installer : Masc_tui_lane_installer.t option;
+  subscription_panel : Masc_tui_lane_subscriptions.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -35,7 +37,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { installer=None; subscription_panel=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -162,6 +164,8 @@ let parse_request input =
     | None -> input, ""
     | Some i -> String.sub input 0 i, String.trim (String.sub input (i + 1) (String.length input - i - 1)) in
   match command, arg with
+  | "subscriptions", "" -> Ok (Subscriptions (`Assoc ["operation",`String "inspect"]))
+  | "subscriptions", arg -> let* json=json_object arg in Ok (Subscriptions json)
   | ("" | "inspect"), "" -> Ok Inspect
   | "observe", id when id <> "" -> Ok (Observe id)
   | "detach", id when id <> "" -> Ok (Detach id)
@@ -210,6 +214,21 @@ let selected_source_path view =
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let selected_row view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.output.rows view.row_cursor)
+let subscription_targets view =
+  match view.snapshot with
+  | Some {configuration=Some config;instances;_} when config.complete ->
+      List.concat_map (fun (declaration:declaration) ->
+        match declaration.installation_id,declaration.instance_id with
+        | Some installation_id,Some id when declaration.issues=[] ->
+            (match List.find_opt (fun (instance:instance) -> instance.id=id
+                && instance.source_path=Some declaration.source_path
+                && (match instance.phase with Row.Attached | Row.Observing -> true | _ -> false)) instances with
+             | None -> []
+             | Some instance -> List.map (fun (output_id,_) ->
+                 ({installation_id;run_id=instance.run_id;output_id;instance_id=instance.id;title=instance.title}
+                  : Masc_tui_lane_subscriptions.target)) instance.outputs)
+        | _ -> []) config.declarations
+  | _ -> []
 let phase_label = function
   | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
   | Row.Detached -> "detached" | Row.Failed detail -> "failed: " ^ detail
@@ -376,7 +395,7 @@ let instance_controls (instance : instance) = match instance.phase with
       (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
 
 let overview_hints view =
-  "i:install  j/k:select  Tab:focus  " ^
+  "i:install  S:subscriptions  j/k:select  Tab:focus  " ^
   (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
   "f:flow  D:details  J/K:scroll  Esc:back"
 
@@ -598,8 +617,13 @@ let lines ~width view =
        @ Masc_tui_lane_installer.lines installer)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
         (Masc.Tui_decode.sanitize_terminal_text line))
-  | None -> match view.action_menu with
-  | Some menu ->
+  | None -> match view.subscription_panel,view.action_menu with
+  | Some panel,_ ->
+      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
+       :: Masc_tui_lane_subscriptions.lines panel)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+           (Masc.Tui_decode.sanitize_terminal_text line))
+  | None,Some menu ->
       (["Run action on " ^ menu.target_title]
        @ Option.to_list (Option.map (fun error -> "Input error: " ^ error) view.error)
        @ (match menu.form with
@@ -614,7 +638,7 @@ let lines ~width view =
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
-  | None ->
+  | None,None ->
       if view.presentation=Technical || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~width view
       else (match view.presentation with Flow -> flow_lines view | Summary | Technical -> compact_lines ~width view)

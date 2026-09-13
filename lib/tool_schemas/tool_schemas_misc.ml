@@ -79,7 +79,8 @@ let browser_lane_schemas =
    config/tools/masc_*.toml. Operator control and web runtime schemas use the
    dedicated projections above. *)
 let lane_addon_schemas : tool_schema list =
-  [ Tool_schemas_misc_toml.lane_attach
+  [ Tool_schemas_misc_toml.lane_updates
+  ; Tool_schemas_misc_toml.lane_attach
   ; Tool_schemas_misc_toml.lane_declaration_read
   ; Tool_schemas_misc_toml.lane_declaration_save
   ; Tool_schemas_misc_toml.lane_inspect
@@ -146,6 +147,7 @@ let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations
 type misc_operation =
   | Misc_lane_declaration_read
   | Misc_lane_declaration_save
+  | Misc_lane_updates
   | Misc_lane_attach
   | Misc_lane_inspect
   | Misc_lane_observe
@@ -195,6 +197,7 @@ let misc_operations = all_of_misc_operation
 let misc_tool_name = function
   | Misc_lane_declaration_read -> "masc_lane_declaration_read"
   | Misc_lane_declaration_save -> "masc_lane_declaration_save"
+  | Misc_lane_updates -> "masc_lane_updates"
   | Misc_lane_attach -> "masc_lane_attach"
   | Misc_lane_inspect -> "masc_lane_inspect"
   | Misc_lane_observe -> "masc_lane_observe"
@@ -259,6 +262,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact -> None
   | Misc_lane_declaration_read
   | Misc_lane_declaration_save
+  | Misc_lane_updates
   | Misc_lane_attach
   | Misc_lane_inspect
   | Misc_lane_observe

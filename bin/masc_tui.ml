@@ -1792,6 +1792,7 @@ let invalidate_msx_poll () = msx_poll_view := ref ()
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
+  | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
@@ -4580,6 +4581,28 @@ let launch_lane_declaration state ~mailbox ~edit request =
           | exn -> Error (Printexc.to_string exn) in
         enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
 
+let launch_lane_subscriptions state ~mailbox request =
+  let module Subs = Masc_tui_lane_subscriptions in
+  match state.lane_addons with
+  | None -> ()
+  | Some view when view.loading -> ()
+  | Some view ->
+      state.lane_addons_generation <- state.lane_addons_generation + 1;
+      let generation=state.lane_addons_generation in
+      state.lane_addons <- Some {view with generation;loading=true;error=None};
+      let host=server_peer_host and port=state.port in
+      let run () =
+        let result = try
+          Result.bind (Masc_tui_http.post_json ~host ~port
+            ~path:"/api/v1/lane-addons/subscriptions"
+            ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn) in
+        enqueue_async mailbox (Lane_subscriptions_loaded (generation,result)) in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+       | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
+
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
@@ -4592,7 +4615,8 @@ let launch_lane_addons state ~mailbox request =
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt };
+  let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt;presentation };
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
@@ -4601,6 +4625,10 @@ let launch_lane_addons state ~mailbox request =
       Addons.decode json in
     match request with
     | Addons.Inspect -> let* snapshot = inspect () in Ok (Some snapshot, None, None)
+    | Addons.Subscriptions args ->
+        let* json=Masc_tui_http.post_json ~host ~port ~path:"/api/v1/lane-addons/subscriptions"
+          ~body:(Yojson.Safe.to_string args) in
+        Ok (view.snapshot,Some json,None)
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
         let* json = Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/slice?" ^ query) in
@@ -4621,7 +4649,7 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Observe id -> "observe", `Assoc ["instance_id", `String id]
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
-          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ -> assert false in
+          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
         let* receipt = Masc_tui_http.post_json ~host ~port ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         (match inspect () with
@@ -11485,6 +11513,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match response with
         | None -> view
         | Some (installer,error) -> {view with loading=false;installer=Some installer;error;scroll=0})
+  | Lane_subscriptions_loaded (generation,result) ->
+      map_lane_addons state (fun view ->
+        if view.generation<>generation then view else
+        {view with loading=false;subscription_panel=Option.map
+          (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -11498,7 +11531,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
-              && Option.is_none view.action_menu && Option.is_none view.installer ->
+              && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -16538,8 +16571,29 @@ and is loaded on demand through keeper_skill.
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
                            then update {view with error=Some "A draft with this installation name is already open; choose another name or edit the existing draft."}
                            else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
-                 | None -> match view.action_menu, view.draft with
-                 | Some {form=Some _;_}, _ ->
+                 | None -> match view.subscription_panel,view.action_menu,view.draft with
+                 | Some panel,_,_ ->
+                     let module Subs = Masc_tui_lane_subscriptions in
+                     let set panel = update {view with subscription_panel=Some panel;scroll=0} in
+                     (match key with
+                      | "esc" | "q" -> update {view with subscription_panel=Subs.back panel;scroll=0}
+                      | "J" | "K" ->
+                          let _,cols=get_terminal_size () in
+                          let last=List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
+                          update {view with scroll=max 0 (min last (view.scroll + if key="J" then 1 else -1))}
+                      | _ when view.loading -> ()
+                      | "j" | "down" -> set (Subs.move panel 1)
+                      | "k" | "up" -> set (Subs.move panel (-1))
+                      | "a" -> set (Subs.add panel)
+                      | "d" -> set (Subs.remove panel)
+                      | "r" -> launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
+                      | "\r" | "\n" | "enter" ->
+                          let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                          let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
+                          set panel;
+                          Option.iter (launch_lane_subscriptions state ~mailbox:async_messages) request
+                      | _ -> ())
+                 | None,Some {form=Some _;_}, _ ->
                      if key="pageup" || key="pagedown" then (
                        let _, cols = get_terminal_size () in
                        let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
@@ -16548,7 +16602,7 @@ and is loaded on demand through keeper_skill.
                       | Ok (next,None) -> update next
                       | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                       | Error detail -> update {view with error=Some detail})
-                 | Some _, _ ->
+                 | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
                       | "j" | "down" -> update (Addons.move_action view 1)
@@ -16562,7 +16616,7 @@ and is loaded on demand through keeper_skill.
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Some detail})
                       | _ -> ())
-                 | None, Some draft ->
+                 | None,None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
@@ -16581,7 +16635,7 @@ and is loaded on demand through keeper_skill.
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
-                 | None, None ->
+                 | None,None, None ->
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -16618,6 +16672,13 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "S" ->
+                         if not view.loading then (
+                           let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                           let panel=Masc_tui_lane_subscriptions.initial ~keepers
+                             ~targets:(Addons.subscription_targets view) in
+                           update {view with subscription_panel=Some panel;document_key=None;scroll=0};
+                           launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
                      | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
@@ -22454,7 +22515,7 @@ and is loaded on demand through keeper_skill.
         (match state.lane_addons with
          | Some view when not view.loading && Option.is_none view.draft
               && Option.is_none view.document_key && Option.is_none view.action_menu
-              && Option.is_none view.installer ->
+              && Option.is_none view.installer && Option.is_none view.subscription_panel ->
              let request = match Masc_tui_lane_addons.pending_action view with
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in

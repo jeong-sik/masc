@@ -1164,12 +1164,13 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
-  bp_updated_at: float;
+  bp_updated_at: float option;
       (** Unix seconds of the last move on the post or its comments. The server
           has always sent it; the list drew neither timestamp, so the one
           question a board answers -- what is still alive -- had no column, and
           two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. *)
+          reader could not see. [None] when the post carried neither this nor a
+          numeric [created_at]: there is no time to measure an age from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with

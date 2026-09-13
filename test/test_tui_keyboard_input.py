@@ -2784,6 +2784,9 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     the composer row is never focused there. A transcript that was handed to
     the row's send key from this pane stayed in the draft and nothing was
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
+
+    The empty draft names the key first, as the composer row does: this pane
+    bound ^Y and ^A and nothing on it said so.
     """
 
     def interact(
@@ -2798,8 +2801,14 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
+        read_available(master_fd, output)
+        chat_opened_at = len(output)
         send_and_wait(
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        wait_for_output(
+            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
@@ -10207,13 +10216,13 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             b"r",
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
         )
         compact_narrow_refresh_error_plain = CSI_RE.sub(
             b"", compact_narrow_refresh_error
         )
         stale_evidence = (
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
             b"JUDGMENT  ADVISORY APPROVE",
             b"Left / Esc",
         )
@@ -11722,7 +11731,7 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25T09:30:20",
+            b"2026-08-25 09:30:20",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -12011,6 +12020,14 @@ def fusion_list_detail_interaction(
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
+        #
+        # The wait ends on the verdict row, not on a column header. The
+        # headers are drawn before the harness snapshot arrives, under
+        # "(not loaded)", and the copy below reads the selected row: pressed
+        # between the two, Y had no row to copy. Measured on this scenario
+        # alone, 3 of 43 runs pressed Y about 20 ms before the snapshot and
+        # timed out; a second Y in the same session copied. glm-coding is the
+        # row's evaluator cell and nothing else on this screen draws it.
         harness_plain = CSI_RE.sub(
             b"",
             resize_and_wait(
@@ -12019,7 +12036,7 @@ def fusion_list_detail_interaction(
                 output,
                 rows=30,
                 columns=220,
-                needle=b"EVALUATOR",
+                needle=b"glm-coding",
                 controls=(FULL_REDRAW,),
             ),
         )
@@ -12687,7 +12704,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # its in-flight call.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
-            (b"(1 of 1 held, turns)", "the held and shown counts"),
+            ("(1 row \u00b7 1 event held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
             (b"turn 7", "the turn"),
             (b"read_file", "the in-flight tool"),
@@ -12696,14 +12713,15 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
         # The count belongs to the open reading, not to the Logs tab it
         # follows: a dot stands between the strip and the count.
-        if "Logs  \u00b7  (1 of 1 held, turns)".encode() not in CSI_RE.sub(b"", acting):
+        if "Logs  \u00b7  (1 row \u00b7 1 event held)".encode() not in CSI_RE.sub(b"", acting):
             raise AssertionError(
                 f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
             )
         # One f lands on the flat actions log, where the call is its own row
-        # and carries the task.
+        # and carries the task. The title counts the same here; the scope row
+        # under the feed says which log is open.
         flat = send_and_wait(
-            process, master_fd, output, b"f", b"(1 of 1 held, actions)"
+            process, master_fd, output, b"f", b"scope actions"
         )
         for needle, what in (
             ("\u25b6 call".encode(), "the call glyph and label"),
@@ -13316,6 +13334,9 @@ def run_keyboard_regression(executable: str) -> None:
         description="Schedule operational detail and page navigation",
         interact=schedule_detail_interaction(),
         http_fixtures=schedule_fixtures,
+        # The recorded times are drawn in the terminal's zone; UTC keeps the
+        # expected "2026-08-25 09:30:20" the same on every machine.
+        extra_env={"TZ": "UTC"},
     )
     run_terminal_scenario(
         executable,

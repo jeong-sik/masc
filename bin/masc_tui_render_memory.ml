@@ -405,11 +405,12 @@ let render_memory_body ~cols ~budget (state : state)
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let sort_label = memory_overview_sort_label state.memory_overview_sort in
+  (* The sort it is in, and the filter key the footer gives up first. The row
+     also named [a / A] in bold, a key with no value beside it that the footer
+     carries at every width, so it said the footer's word again louder. *)
   let info_bar =
-    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[a / A]:%s Fleet Memory Search  %s·%s  %s[/]:%s Filter"
+    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[/]:%s Filter"
       (Theme.recede ()) Ansi.reset sort_label
-      (Theme.recede ()) Ansi.reset
-      Ansi.bold Ansi.reset
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in

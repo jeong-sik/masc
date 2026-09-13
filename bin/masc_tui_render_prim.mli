@@ -186,6 +186,11 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+val coordinator_status_row :
+  Masc_tui_types.state -> style:string -> string -> string
+(** The coordinator's {!connection_badge} and then [status] in [style]. The
+    style covers [status] alone; the badge keeps its own colour. *)
+
 val count_frame_lines : Buffer.t -> int
 
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
@@ -264,6 +269,15 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
+val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
+(** The goal count; with any goals, also the completed share and a counter per
+    phase. *)
+
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
 
@@ -273,20 +287,13 @@ val keeper_control_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The Keeper keys alone. A surface whose footer carries the armed or running
-    action as a status item ({!keeper_action_status}) asks for this, so the
-    fitter keeps that sentence whole instead of treating it as a droppable key. *)
+(** The Keeper keys alone. The footer carries the armed or running action as a
+    status item ({!keeper_action_status}), so the fitter keeps that sentence
+    whole instead of treating it as a droppable key. *)
 
 val keeper_action_status :
   Masc_tui_types.state -> Masc_tui_footer.status_item list
 (** The armed or running Keeper action, if there is one. *)
-
-val keeper_action_hints :
-  ?offers_chat:bool ->
-  ?offers_back:bool ->
-  Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The armed or running sentence when there is one, otherwise
-    {!keeper_control_hints}. For the footers that do not pass status items. *)
 
 val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 
@@ -349,7 +356,9 @@ val runtime_config_status_lines :
 
 val help_masthead : Masc_tui_types.state -> string list
 
-val help_lines : Masc_tui_types.state -> string list
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
 
@@ -359,6 +368,11 @@ val context_inspector_content_lines :
 val context_split_pane_height : content_height:int -> common_len:int -> int
 
 val keeper_deletions_lines : Masc_tui_types.state -> cols:int -> string list
+
+val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
+(** The deletion overlay's key row: [j/k] only with two or more records, the
+    record scroll only when [scrollable], and [t] only when the selected
+    record can be retried. *)
 
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 

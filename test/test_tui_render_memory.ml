@@ -221,7 +221,9 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "a failed page says the shared failure note" true
     (contains Types.page_failed_note failed_body);
   check bool "and not its own server-error words" false
-    (contains "server error" failed_body)
+    (contains "server error" failed_body);
+  check bool "the body leaves the fleet key to the footer" false
+    (contains "Fleet Memory Search" (lines unread))
 ;;
 
 let test_render_memory_body_with_keepers () =

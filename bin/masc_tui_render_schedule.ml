@@ -1202,6 +1202,12 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
       ~width:board_replies_width values.brow_replies
   ]
 
+(* How long ago the post last moved, or a dash when the post carried no time to
+   measure from. *)
+let board_age_text ~now = function
+  | Some updated_at -> Masc_tui_message_layout.span_text (now -. updated_at)
+  | None -> "\xe2\x80\x94"
+
 let board_title_width ~inner_width =
   let named = Table.used_width (board_cells ~title_width:0 board_no_values) in
   max board_minimum_title_width (inner_width - named)

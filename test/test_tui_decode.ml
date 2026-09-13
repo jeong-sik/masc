@@ -482,7 +482,17 @@ let test_timestamp_slices_are_sanitized_after_selection () =
     (Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.gmtime
        "2026-08-22T13:05:06.250+09:00");
   Alcotest.(check string) "empty short timestamp" "(never)"
-    (Tui_decode.short_timestamp_for_terminal "");
+    (Tui_decode.short_timestamp_for_terminal ~localtime:Unix.gmtime "");
+  Alcotest.(check string) "a short timestamp is the date and clock in the given zone"
+    "2026-08-22 13:05:06"
+    (Tui_decode.short_timestamp_for_terminal
+       ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
+       "2026-08-22T04:05:06Z");
+  Alcotest.(check string) "and crosses midnight with the zone"
+    "2026-08-23 06:00:00"
+    (Tui_decode.short_timestamp_for_terminal
+       ~localtime:(fun seconds -> Unix.gmtime (seconds +. 32400.))
+       "2026-08-22T21:00:00Z");
   Alcotest.(check string)
     "clock slice cannot expose a UTF-8 continuation as raw C1"
     "\\x9B31mOWNE"
@@ -491,7 +501,7 @@ let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string)
     "short timestamp cannot leave a split UTF-8 lead byte"
     "123456789012345678\\xE2"
-    (Tui_decode.short_timestamp_for_terminal
+    (Tui_decode.short_timestamp_for_terminal ~localtime:Unix.gmtime
        "123456789012345678€");
   Alcotest.(check string)
     "clock slice escapes selected terminal controls"

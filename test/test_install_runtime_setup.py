@@ -1122,13 +1122,45 @@ base_url = "https://voice.fixture.invalid/v1"
             runtime.write_text(runtime.read_text() + voice)
             yield base, runtime
 
+    # voice-local-setup looks --voice up in the list say prints before it
+    # writes. The host running this may have no say at all -- the release job
+    # is Linux -- or a different list, so these run against a say that lists
+    # Yuna and nothing else, which is the host they describe.
+    FAKE_SAY = ("#!/bin/sh\n"
+                "if [ \"$1\" = -v ] && [ \"$2\" = '?' ]; then\n"
+                "  printf 'Yuna                ko_KR    # hello\\n'; exit 0\n"
+                "fi\n"
+                "exit 1\n")
+
     def configure(self, base, *arguments):
         assert BINARY is not None
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('MASC_', 'AGENT_CORE_'))}
-        return subprocess.run(
-            [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
-            capture_output=True, text=True, env=env, check=False)
+        with tempfile.TemporaryDirectory(prefix='voice-fake-say-') as bin_dir:
+            say = Path(bin_dir) / 'say'
+            say.write_text(self.FAKE_SAY)
+            say.chmod(0o755)
+            env['PATH'] = bin_dir + os.pathsep + env.get('PATH', '')
+            return subprocess.run(
+                [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
+                capture_output=True, text=True, env=env, check=False)
+
+    def test_a_voice_say_does_not_list_is_refused_and_nothing_is_written(self):
+        # say does not fail on a name it does not have: measured 2026-09-13,
+        # say -v NoSuchVoice exited 0 with the same bytes as -v Yuna, and
+        # before this check the command wrote default_voice = "NoSuchVoice".
+        for name in ('NoSuchVoice', 'Yu'):
+            with self.subTest(name=name), self.workspace() as (base, runtime):
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', name)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f'say has no voice named "{name}"', result.stderr)
+                self.assertIn('Nothing was written.', result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+        # say matches names without regard to case, so the check does too.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     @contextlib.contextmanager
     def voice_mcp_server(self, status=200):

@@ -2217,6 +2217,11 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+
+(test
+ (name test_verification_presentation)
+ (modules test_verification_presentation)
+ (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
@@ -3579,7 +3584,14 @@
 (test
  (name test_tui_help_banner)
  (modules test_tui_help_banner)
- (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
+ (libraries
+  alcotest
+  masc_tui_command
+  masc_tui_keys
+  masc_tui_message_layout
+  masc_tui_render_prim
+  masc_tui_theme
+  masc_tui_types))
 
 (test
  (name test_tui_agenda)
@@ -4966,12 +4978,15 @@
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_burn_hud.inc)
+(include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
+(include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_mermaid.inc)
+(include stanzas/test_tui_keeper_deletions_hints.inc)
 
 (include stanzas/test_ide_memo.inc)
 

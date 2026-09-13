@@ -527,7 +527,7 @@ let composer_line state ~cols =
       when state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
-        "  (^Y to speak, ^A to keep listening)"
+        "  " ^ Composer.voice_keys_hint
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key
@@ -1151,6 +1151,14 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
+
+(* The coordinator's badge beside a reading of the surface's own. The badge
+   brings its colour and its reset, so a style laid over the whole row painted
+   only the words in front of it -- "coordinator HTTP" went red beside a green
+   [connected] when a browser read failed -- and the reset left the failure
+   itself uncoloured. Each part wears its colour where it stands. *)
+let coordinator_status_row (state : state) ~style status =
+  "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
 
 
 let count_frame_lines buf =
@@ -1842,6 +1850,61 @@ let planning_phase_color = function
 
 ;;
 
+(* The goal count, the completed share and one counter per phase. With no goals
+   the row read the count, a sentence saying the count, and five zero counters
+   over a list that says "(no goals)" itself. The count is the whole reading
+   there.
+
+   Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
+   marks the Backlog row under them wears for running, done and cancelled.
+   Verifying and awaiting confirmation are stages only a Goal has, so their
+   diamonds are theirs. *)
+let planning_rollup_row ~cols (rollup : planning_rollup) =
+  let total_goals =
+    (* Every phase counts, or the denominator drops the goals waiting on a
+       human and reports a completion share higher than the truth. *)
+    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+    + rollup.pr_done + rollup.pr_dropped
+  in
+  let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
+  if total_goals = 0 then count
+  else
+    let bar_width = if cols < 90 then 8 else 12 in
+    let progress_bar =
+      Printf.sprintf "[%s] %2d%% (%d/%d)"
+        (Masc_tui_context_bars.ratio_bar ~width:bar_width
+           ~numerator:rollup.pr_done ~denominator:total_goals)
+        (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
+    in
+    let counter phase glyph name value =
+      Printf.sprintf "%s%s %s: %d%s" (planning_phase_color phase) glyph name value
+        Ansi.reset
+    in
+    Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
+      (String.concat "  "
+         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
+             "Exec" rollup.pr_active
+         ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
+         ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
+             rollup.pr_awaiting_confirmation
+         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
+             "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
+             "Drop" rollup.pr_dropped
+         ])
+
+(* The Backlog counts, each with the mark its Task rows wear. Claimed had no
+   mark here while a claimed Task row draws the half circle, so the one count a
+   reader could match to a row was the one left bare. *)
+let planning_backlog_counts (backlog : planning_backlog) =
+  let open Masc_tui_theme.Glyph in
+  [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
+  ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
+  ; ("running", backlog.pb_running, progress_active ^ " running")
+  ; ("done", backlog.pb_done, progress_done ^ " done")
+  ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
+  ]
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title
@@ -2003,24 +2066,6 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
 (* One colour per level so an operator scanning the column sees severity before
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
-
-(* What the footer says about the Keeper actions: the armed or running sentence
-   when there is one, otherwise the keys. The sentence's words come from
-   {!Masc_tui_footer}, which is also where the Keepers list reads them as a
-   status item, so the two footers cannot word the same state differently. *)
-let keeper_action_state_text (state : state) =
-  match keeper_action_status state with
-  | item :: _ ->
-    Option.map
-      (fun (projected : Masc_tui_footer.projected_status) ->
-        Ansi.bold ^ (Theme.warn ()) ^ projected.text ^ Ansi.reset)
-      (Masc_tui_footer.status_item_projection item)
-  | [] -> None
-
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
-  match keeper_action_state_text state with
-  | Some text -> text
-  | None -> keeper_control_hints ~offers_chat ~offers_back state reading
 
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
@@ -2571,11 +2616,41 @@ let help_masthead (_state : state) =
   ]
 
 
+(* The rows one help entry takes in [width] cells: [lead] (its key or usage,
+   [lead_cells] wide) with the start of [text], and the rest of [text] on rows
+   that start at [column], where every entry's text starts.
+
+   The sheet cut each entry to its column. Two columns at 120 cells are 57
+   each, and 23 of the 29 slash-command rows and 16 of the 20 Config rows ran
+   past that, so a summary ended in an ellipsis where it said what the key
+   does. A usage too long to leave [help_text_minimum_cells] beside it puts the
+   text on the rows under it, rather than one word to a row. *)
+let help_text_minimum_cells = 20
+
+(* The key column: two cells of indent, the key padded to this, and a space. *)
+let help_key_cells = 16
+
+let help_entry_rows ~width ~lead ~lead_cells ~column text =
+  let indent = String.make column ' ' in
+  let under words =
+    List.map
+      (fun piece -> indent ^ piece)
+      (Message_layout.wrap_words ~max_cells:(max 1 (width - column)) words)
+  in
+  let beside = width - lead_cells in
+  if lead_cells > column && beside < help_text_minimum_cells then
+    lead :: under text
+  else
+    match Message_layout.wrap_words ~max_cells:(max 1 beside) text with
+    | [] -> [ lead ]
+    | [ first ] -> [ lead ^ first ]
+    | first :: rest -> (lead ^ first) :: under (String.concat " " rest)
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_lines (state : state) =
+let help_lines ~width (state : state) =
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2601,29 +2676,31 @@ let help_lines (state : state) =
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
     header_line
-    :: List.map
+    :: List.concat_map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-16s%s %s"
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (String.trim key)
-             Ansi.reset
-             action)
+           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           help_entry_rows ~width
+             ~lead:
+               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  key_cell Ansi.reset)
+             ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
+             ~column:(2 + help_key_cells + 1) action)
          entries
     @ [ "" ]
   in
   let slash_commands =
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
-    :: List.map
+    :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           Printf.sprintf "  %s%s%s%s%s"
-             (Theme.warn ())
-             text
-             Ansi.reset
-             (Masc_tui_command.help_summary_padding text)
+           let padding = Masc_tui_command.help_summary_padding text in
+           help_entry_rows ~width
+             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
+             ~column:(2 + Masc_tui_command.help_summary_column)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]
@@ -3738,7 +3815,7 @@ let context_split_pane_height ~content_height ~common_len =
 let keeper_deletions_lines (state : state) ~cols =
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
     | Some (Ok inventory) ->
       let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
@@ -3764,15 +3841,37 @@ let keeper_deletions_lines (state : state) ~cols =
               | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status;
-           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
-           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row) status]
+          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
+          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
       (Terminal_text.single_line line)) lines
+
+(* The deletion overlay's keys for what it shows. [j/k] steps between records
+   and [t] retries the selected record only when it can be retried
+   (masc_tui.ml); the row named both on a failed read and on a single record,
+   where neither does anything. The body said [r] and [t] a second time under
+   the record, so those lines are gone and the row is the one place. *)
+let keeper_deletions_hints (state : state) ~scrollable =
+  let operations, can_retry =
+    match state.keeper_deletions with
+    | Some (Ok inventory) ->
+      ( List.length inventory.operations
+      , match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+        | Some row -> row.Keeper_control.can_retry
+        | None -> false )
+    | Some (Error _) | None -> (0, false)
+  in
+  String.concat "  "
+    ((if operations > 1 then [ "j/k:작업" ] else [])
+     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
+     @ [ "r:조회" ]
+     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ [ "Esc:닫기" ])
 
 ;;
 

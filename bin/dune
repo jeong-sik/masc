@@ -797,7 +797,7 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_table))
+ (libraries masc_tui_message_layout masc_tui_table))
 
 (library
  (name masc_tui_frame_timing)
@@ -814,7 +814,7 @@
  (name masc_tui_help)
  (wrapped false)
  (modules masc_tui_help)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_frame masc_tui_message_layout))
 
 (library
  (name masc_tui_roster_pane)
@@ -1303,6 +1303,7 @@
  (modules masc_tui_render_chat)
  (libraries
   masc_tui_render_prim
+  masc_tui_composer
   masc_tui_ansi
   masc_tui_markdown_render_cache
   masc_tui_message_layout

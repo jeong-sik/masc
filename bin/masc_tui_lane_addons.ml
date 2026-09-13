@@ -421,7 +421,9 @@ let visual_lines ~height ~width view =
               | Error _ -> "invalid binding"
               | Ok sources -> String.concat ", " (List.map (function
                   | Masc.Lane_addon_sources.Lane_output {installation_id;output_id;_} -> installation_id ^ "/" ^ Option.value ~default:"*" output_id
-                  | Snapshot_file {id;_} | Msx_capture {id} | Browser_document {id;_} -> id) sources) in
+                  | Masc.Lane_addon_sources.Snapshot_file {id;_}
+                  | Masc.Lane_addon_sources.Msx_capture {id}
+                  | Masc.Lane_addon_sources.Browser_document {id;_} -> id) sources) in
             let columns ~active a b c =
               let column = max 1 ((width-6)/3) in
               {active;cells=[Dim,fit column a;Accent," → ";Normal,fit column b;Accent," → ";Dim,fit (width-6-2*column) c]} in

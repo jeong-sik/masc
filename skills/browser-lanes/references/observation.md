@@ -80,6 +80,12 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 ## 이미지와 큰 응답
 
+`click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
+live 클릭은 DOM activation이며 trusted 포인터 입력을 보장하지 않는다. `drag`의
+trusted 입력은 automation에서만 지원된다. live에서 거절됐다고 로그인된 탭을 다른
+세션으로 바꾸거나 같은 drag를 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의
+관측된 컨트롤이 있으면 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
+
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의
 배치를 봤다고 하지 않는다. 큰 BrowserRead 응답이 artifact로 분리됐다면 그 응답이
@@ -88,4 +94,3 @@ Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만
 삼지 않는다. 특정 대상을 찾았다는 것과 페이지 전체를 확인했다는 것은 다르다.
 `maxChars`는 elements JSON 전체 크기를 제한한다고 가정하지 않는다. 현재 live
 elements는 긴 selector를 포함하므로 작은 maxChars로도 큰 artifact가 나올 수 있다.
-

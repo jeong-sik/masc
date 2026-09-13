@@ -1,0 +1,187 @@
+{
+  "ok": true,
+  "data": {
+    "tabId": 1,
+    "chars": 211,
+    "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+    "documentId": "f14753a8b8be089c52eacf77d714b62b",
+    "nodes": [
+      {
+        "clickable": true,
+        "color": "rgb(0, 0, 238)",
+        "controlType": "a",
+        "disabled": false,
+        "editable": false,
+        "fontSize": 22,
+        "fontWeight": "400",
+        "href": "http://127.0.0.1:52663/index.html#details",
+        "kind": "control",
+        "nodeId": "n1",
+        "rects": [
+          {
+            "height": 68.30000305175781,
+            "width": 1092.800048828125,
+            "x": 136.60000610351562,
+            "y": 6.8166656494140625
+          }
+        ],
+        "sourceContext": null,
+        "tag": "a",
+        "text": "Details opened by link click",
+        "whiteSpace": "normal"
+      },
+      {
+        "clickable": true,
+        "color": "rgb(19, 36, 56)",
+        "controlType": "div",
+        "disabled": false,
+        "editable": false,
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "control",
+        "nodeId": "n2",
+        "rects": [
+          {
+            "height": 156.25,
+            "width": 306.51666259765625,
+            "x": 177.56666564941406,
+            "y": 102.4499969482422
+          }
+        ],
+        "sourceContext": null,
+        "tag": "div",
+        "text": "Drag card",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n3",
+        "rects": [
+          {
+            "height": 27,
+            "width": 95.90000915527344,
+            "x": 993.2000122070312,
+            "y": 167.06666564941406
+          }
+        ],
+        "sourceContext": null,
+        "tag": "div",
+        "text": "Drop zone",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 18,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n4",
+        "rects": [
+          {
+            "height": 23,
+            "width": 372.25,
+            "x": 136.60000610351562,
+            "y": 259.5333251953125
+          }
+        ],
+        "sourceContext": null,
+        "tag": "p",
+        "text": "Card moved; down trusted=true; up trusted=true",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n5",
+        "rects": [
+          {
+            "height": 27,
+            "width": 303.2833251953125,
+            "x": 148.60000610351562,
+            "y": 319.3500061035156
+          }
+        ],
+        "sourceContext": null,
+        "tag": "p",
+        "text": "Message row 0 — visible context",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n6",
+        "rects": [
+          {
+            "height": 27,
+            "width": 297.26666259765625,
+            "x": 148.60000610351562,
+            "y": 419.3500061035156
+          }
+        ],
+        "sourceContext": null,
+        "tag": "p",
+        "text": "Message row 1 — visible context",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n7",
+        "rects": [
+          {
+            "height": 27,
+            "width": 301.1499938964844,
+            "x": 148.60000610351562,
+            "y": 519.3499755859375
+          }
+        ],
+        "sourceContext": null,
+        "tag": "p",
+        "text": "Message row 2 — visible context",
+        "whiteSpace": "normal"
+      },
+      {
+        "color": "rgb(19, 36, 56)",
+        "fontSize": 22,
+        "fontWeight": "400",
+        "kind": "text",
+        "nodeId": "n8",
+        "rects": [
+          {
+            "height": 27,
+            "width": 248,
+            "x": 136.60000610351562,
+            "y": 614.7000122070312
+          }
+        ],
+        "sourceContext": null,
+        "tag": "p",
+        "text": "Gesture Lab; Pane scroll=0",
+        "whiteSpace": "normal"
+      }
+    ],
+    "schema": "masc.browser.scene.v1",
+    "scope": null,
+    "title": "Gesture Lab",
+    "truncated": false,
+    "url": "http://127.0.0.1:52663/index.html#details",
+    "view": "content",
+    "viewport": {
+      "height": 683,
+      "scrollX": 0,
+      "scrollY": 0,
+      "width": 1366
+    },
+    "source": "automation",
+    "clientId": null,
+    "elapsed_ms": 4.428166
+  }
+}

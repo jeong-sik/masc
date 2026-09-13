@@ -32,8 +32,7 @@ let renderer_probe () =
   if not (Executable_path.command_available "soffice") then Missing "soffice"
   else
     let directory = Filename.temp_dir ~perms:0o700 "masc-impress-probe-" "" in
-    Eio.Switch.run (fun sw ->
-      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
       let source = Filename.concat directory "probe.fodp" in
       Out_channel.with_open_bin source (fun out -> output_string out
         {|<?xml version="1.0" encoding="UTF-8"?>

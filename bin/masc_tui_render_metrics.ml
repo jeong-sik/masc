@@ -114,8 +114,10 @@ let pulse_line ~cols (state : state) kpis =
         count.running count.idle count.unavailable
   in
   let roster =
-    if state.last_refresh = 0. || Option.is_some state.keepers_error then "roster unavailable"
-    else Printf.sprintf "%d configured · %d unpaused" kpis.total_keepers kpis.unpaused_keepers
+    match state.local_workspace, state.keepers_error with
+    | Local_workspace_unread, _ | Local_workspace_read, Some _ -> "roster unavailable"
+    | Local_workspace_read, None ->
+      Printf.sprintf "%d configured · %d unpaused" kpis.total_keepers kpis.unpaused_keepers
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in

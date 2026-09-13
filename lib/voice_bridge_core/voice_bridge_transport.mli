@@ -2,6 +2,12 @@
 
 val safe_agent_id : string -> string
 
+val command_refusal_reason : command:string -> Process_eio.spawn_refusal -> string
+(** Why a voice command never started. Only a program that is not there is
+    called not installed; a permission denied or a working directory that
+    would not open keeps the runner's own sentence, because naming an install
+    for those sends the operator to fetch what they already have. *)
+
 val command_failure_reason : string -> string
 (** A failed command's output, trimmed to the end. The reason a command
     failed is its last line, not its first: whisper-cli prints nine lines of
@@ -47,7 +53,11 @@ val speak_via_command_to_file
   -> (int, string) result
 
 (** Transcribe one file by running a command. The transcript is the command's
-    own output, so this answers text where the HTTP path answers JSON. *)
+    own output, so this answers text where the HTTP path answers JSON.
+
+    A file whose first bytes name a container whisper-cli does not read
+    (WebM, Ogg Opus, AIFF, MP4) is refused before the command runs, with the
+    container named; so is a file that cannot be read. *)
 val transcribe_via_command
   :  Voice_config.endpoint
   -> audio_file:string

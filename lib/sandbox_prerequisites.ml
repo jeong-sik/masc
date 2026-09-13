@@ -5,7 +5,8 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
 type action = { id : string; label : string; detail : string;
-  source_url : string; requires_admin : bool; action_effect : action_effect }
+  source_url : string; requires_admin : bool; action_effect : action_effect;
+  writes : string option }
 type outcome = External_step_pending | Commands_completed_recheck_required
   | Failed of { step : int; reason : string }
 
@@ -25,6 +26,11 @@ let docker_mac_source = "https://docs.docker.com/desktop/setup/install/mac-insta
 let docker_linux_source = "https://docs.docker.com/engine/install/"
 let codex_source = "https://developers.openai.com/codex/cli/"
 let claude_source = "https://code.claude.com/docs/en/setup"
+(* The program every Homebrew step runs, and where Homebrew itself comes from.
+   One name so that a step that could not find it can be told apart by the
+   value this catalog put in argv, not by reading anything a child printed. *)
+let homebrew = "brew"
+let homebrew_source = "https://brew.sh"
 let whisper_source = "https://github.com/ggml-org/whisper.cpp"
 let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
@@ -46,15 +52,15 @@ let open_action ~host ~id ~label ~detail ~source_url url =
     | Linux _ -> ["xdg-open"; url]
     | Unsupported -> [] in
   {id; label; detail; source_url; requires_admin=false;
-   action_effect=Open_official_installer {url; argv}}
-let commands ~id ~label ~detail ~source_url ~requires_admin argv =
-  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv}
+   action_effect=Open_official_installer {url; argv}; writes=None}
+let commands ?writes ~id ~label ~detail ~source_url ~requires_admin argv =
+  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv; writes}
 let install_cli client =
   let name = Runtime_official_cli_install.name client in
   {id=name ^ "_native_install"; label="Install " ^ name ^ " using its official installer";
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
-   action_effect=Install_official_cli client}
+   action_effect=Install_official_cli client; writes=None}
 let rec catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
@@ -73,7 +79,11 @@ let rec catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_models_source whisper_models_source
     | Some dir ->
       let final = Filename.concat dir whisper_model_file in
-      commands ~id:"whisper_model_download"
+      (* [writes] is the final path, stated as data. A reader that needs to
+         know where the model landed used to take the curl [-o] argument, and
+         when the fetch moved to a [.part] beside the path that argument became
+         a file that never exists after a successful download. *)
+      commands ~writes:final ~id:"whisper_model_download"
         ~label:"Download the whisper model masc asks for"
         ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
         ~source_url:whisper_models_source ~requires_admin:false
@@ -99,7 +109,7 @@ let rec catalog ?model_dir ~host ~distribution dependency =
         ~label:"Install whisper.cpp with Homebrew"
         ~detail:"Installs the whisper-cpp formula, an 8.9MB bottle whose whisper-cli transcribes an audio file. Requires Homebrew; nothing is started and no service is registered."
         ~source_url:whisper_formula_source ~requires_admin:false
-        [["brew";"install";"whisper-cpp"]]
+        [[homebrew;"install";"whisper-cpp"]]
     in
     (* Transcribing is not the whole of hearing: masc's own capture records
        with sox's [rec] and marks the start and end of a recording with sox's
@@ -113,7 +123,7 @@ let rec catalog ?model_dir ~host ~distribution dependency =
         ~label:"Install sox, which masc records with"
         ~detail:"Installs the sox formula (2.4MB on this machine, version 14.4.2). It provides rec, which masc records a capture with, and play, which sounds the start and end tones. Without it masc can transcribe a file but cannot make one."
         ~source_url:sox_formula_source ~requires_admin:false
-        [["brew";"install";"sox"]]
+        [[homebrew;"install";"sox"]]
     in
     [ install; whisper_model_step (); recorder ]
   (* Homebrew is the only route this catalog can name a command for. Elsewhere
@@ -179,7 +189,7 @@ let rec catalog ?model_dir ~host ~distribution dependency =
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."
        ~source_url:"https://formulae.brew.sh/formula/poppler" ~requires_admin:false
-       [["brew";"install";"poppler"]]]
+       [[homebrew;"install";"poppler"]]]
   | Pdf_tools, Linux _ ->
     (match distribution with
      | Debian | Ubuntu ->
@@ -245,16 +255,44 @@ let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
     "source_url",`String action.source_url; "requires_admin",`Bool action.requires_admin;
-    "effect",effect_json action.action_effect; "completion",`String "recheck_required"]) actions)]
+    "effect",effect_json action.action_effect; "completion",`String "recheck_required";
+    "writes",(match action.writes with Some path -> `String path | None -> `Null)]) actions)]
+(* Why a step did not complete, as far as the terminal edge can tell without
+   repeating anything the child printed. The reason in a receipt is built from
+   these and from argv, which this catalog wrote; child diagnostics stay on the
+   terminal and have no field here to reach a receipt through. *)
+type run_failure =
+  | Program_not_found
+  | Could_not_start
+  | Did_not_finish
+
+let not_found_reason program =
+  (* A fresh mac has no Homebrew, and two of the hearing steps are Homebrew
+     steps. Measured 2026-09-13 with brew absent from PATH: the receipt said
+     "did not finish. Check its terminal output", and there was no output --
+     brew never ran. *)
+  if String.equal program homebrew then
+    Printf.sprintf
+      "Homebrew is not installed (%s is not on PATH), so nothing ran. Install it from %s, then retry."
+      homebrew homebrew_source
+  else Printf.sprintf "%s is not on PATH, so nothing ran. Install it, then retry." program
+
 let execute ~run action =
   let rec commands completed index = function
     | [] -> completed
     | [] :: _ -> Failed {step=index; reason="This host cannot launch the installation page; open its source URL manually"}
-    | argv :: rest -> (match run argv with
+    | (program :: _ as argv) :: rest -> (match run argv with
       | Ok () -> commands completed (index+1) rest
-      | Error _ -> Failed {step=index; reason="The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend."}) in
+      | Error Program_not_found -> Failed {step=index; reason=not_found_reason program}
+      | Error Could_not_start ->
+        Failed {step=index; reason=Printf.sprintf "%s could not be started, so nothing ran." program}
+      | Error Did_not_finish -> Failed {step=index; reason="The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend."}) in
   match action.action_effect with
   | Install_official_cli client ->
+    (* The vendor installer takes a text-carrying runner and already keeps
+       that text out of its reason (the official-client tests pin it), so the
+       failure kind is not needed there and no text is invented for it. *)
+    let run argv = Result.map_error (fun (_ : run_failure) -> "") (run argv) in
     (match Runtime_official_cli_install.install ~run client with
      | Ok () -> Commands_completed_recheck_required
      | Error reason -> Failed {step=1; reason})

@@ -5,7 +5,9 @@ val start : sw:Eio.Switch.t -> base_path:string -> unit
 
 (** Wake an existing owner, including after an explicit lane configuration
     change. This performs no storage or provider work in the caller. *)
-val request : base_path:string -> unit
+type refresh = Queued | No_owner | Unavailable of string
+
+val request : base_path:string -> refresh
 
 val lane_id : string
 val output_schema : Yojson.Safe.t

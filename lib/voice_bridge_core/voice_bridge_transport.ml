@@ -86,6 +86,43 @@ let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
     argv
 ;;
 
+(* A voice command run with a refusal kept apart from an exit.
+
+   The tuple runner above answers a program that never started with exit 127,
+   and it answers every other failure before the process -- a permission
+   denied, a working directory that would not open -- with the same 127.
+   Reading 127 as "not installed" gave those the wrong cause. Measured
+   2026-09-13: a whisper command pointed at a file with no execute bit was
+   reported as "... is not installed", which reinstalling does not change.
+
+   [Ok] carries the output exactly as the tuple runner renders it, so a
+   transcript read from stdout on success is the same bytes as before. *)
+let run_voice_command ~timeout_sec argv =
+  match Process_eio.run_argv_with_status_split_or_refusal ~timeout_sec argv with
+  | Ok (status, stdout, stderr) ->
+    Ok (status, Process_eio_stderr.output_for_status ~status ~stdout ~stderr)
+  | Error refusal -> Error refusal
+;;
+
+let command_name = function
+  | command :: _ -> command
+  | [] -> "the command"
+;;
+
+(* Only a program that is not there is called not installed. Every other
+   refusal keeps the runner's own sentence: naming an install for a
+   permission error sends the operator to fetch what they already have. *)
+let command_refusal_reason ~command (refusal : Process_eio.spawn_refusal) =
+  match refusal with
+  | Process_eio.Executable_not_found _ -> Printf.sprintf "%s is not installed" command
+  | ( Process_eio.Empty_argv
+    | Process_eio.Spawn_failed _
+    | Process_eio.Child_setup_failed _
+    | Process_eio.Cwd_unavailable _ ) as refusal ->
+    Printf.sprintf "%s could not start: %s" command
+      (Process_eio.spawn_refusal_to_string refusal)
+;;
+
 let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
   let body_file = Filename.temp_file "masc_voice_request" ".json" in
   Eio_guard.protect
@@ -182,11 +219,14 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
 let smallest_believable_audio_bytes = 100
 
 let run_audio_command_to_file (req : Voice_runtime_overlay.command_request) ~output_file =
-  let status, output =
-    run_voice_status
+  let command = command_name req.Voice_runtime_overlay.argv in
+  match
+    run_voice_command
       ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
       req.Voice_runtime_overlay.argv
-  in
+  with
+  | Error refusal -> Error (command_refusal_reason ~command refusal)
+  | Ok (status, output) ->
   match status with
   | Unix.WEXITED 0 ->
     let file_size =
@@ -197,19 +237,7 @@ let run_audio_command_to_file (req : Voice_runtime_overlay.command_request) ~out
     then Ok file_size
     else
       Error
-        (Printf.sprintf
-           "%s exited cleanly and wrote %d bytes of audio"
-           (match req.Voice_runtime_overlay.argv with
-            | command :: _ -> command
-            | [] -> "the command")
-           file_size)
-  | Unix.WEXITED 127 ->
-    Error
-      (Printf.sprintf
-         "%s is not installed"
-         (match req.Voice_runtime_overlay.argv with
-          | command :: _ -> command
-          | [] -> "the command"))
+        (Printf.sprintf "%s exited cleanly and wrote %d bytes of audio" command file_size)
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "voice command exit %d: %s" code
@@ -229,26 +257,70 @@ let speak_via_command_to_file endpoint ~message ~voice ~output_file =
   run_audio_command_to_file request ~output_file
 ;;
 
+(* Up to [count] bytes from the start of a file; fewer when the file is
+   shorter. *)
+let leading_bytes ~count path =
+  let read channel =
+    let buffer = Bytes.create count in
+    let rec fill filled =
+      if filled = count
+      then filled
+      else (
+        match input channel buffer filled (count - filled) with
+        | 0 -> filled
+        | read -> fill (filled + read))
+    in
+    Bytes.sub_string buffer 0 (fill 0)
+  in
+  match open_in_bin path with
+  | exception Sys_error message -> Error message
+  | channel ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr channel)
+      (fun () ->
+        match read channel with
+        | bytes -> Ok bytes
+        | exception Sys_error message -> Error message)
+;;
+
 (* Transcribing by running a command. The transcript is the command's own
    output, so what comes back is text rather than the JSON an HTTP endpoint
-   answers with; the caller shapes it. *)
+   answers with; the caller shapes it.
+
+   The audio's container is checked before the command runs, because the
+   command cannot be asked afterwards: whisper-cli answers a container it does
+   not decode with exit 0 and an empty transcript, the same answer silence
+   gets. See {!Voice_runtime_overlay.whisper_cli_input}. *)
 let transcribe_via_command endpoint ~audio_file ~model =
   let* request =
     Voice_runtime_overlay.stt_command_for_endpoint endpoint ~audio_file ~model
   in
-  let status, output =
-    run_voice_status
+  let command = command_name request.Voice_runtime_overlay.argv in
+  let* () =
+    match
+      leading_bytes ~count:Voice_runtime_overlay.audio_container_probe_bytes audio_file
+    with
+    | Error message -> Error (Printf.sprintf "the audio could not be read: %s" message)
+    | Ok bytes ->
+      let container = Voice_runtime_overlay.audio_container_of_leading_bytes bytes in
+      (match Voice_runtime_overlay.whisper_cli_input container with
+       | Voice_runtime_overlay.Reads | Voice_runtime_overlay.Not_measured -> Ok ()
+       | Voice_runtime_overlay.Does_not_read ->
+         Error
+           (Printf.sprintf
+              "%s reads WAV, FLAC or MP3, and this audio is %s"
+              command
+              (Voice_runtime_overlay.audio_container_name container)))
+  in
+  match
+    run_voice_command
       ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
       request.Voice_runtime_overlay.argv
-  in
-  let command =
-    match request.Voice_runtime_overlay.argv with
-    | command :: _ -> command
-    | [] -> "the command"
-  in
+  with
+  | Error refusal -> Error (command_refusal_reason ~command refusal)
+  | Ok (status, output) ->
   match status with
   | Unix.WEXITED 0 -> Ok (String.trim output)
-  | Unix.WEXITED 127 -> Error (Printf.sprintf "%s is not installed" command)
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "%s exit %d: %s" command code
@@ -263,19 +335,16 @@ let transcribe_via_command endpoint ~audio_file ~model =
    comes back is text; parsing it belongs to the caller. *)
 let list_voices_via_command endpoint =
   let* request = Voice_runtime_overlay.voice_listing_command_for_endpoint endpoint in
-  let command =
-    match request.Voice_runtime_overlay.argv with
-    | command :: _ -> command
-    | [] -> "the command"
-  in
-  let status, output =
-    run_voice_status
+  let command = command_name request.Voice_runtime_overlay.argv in
+  match
+    run_voice_command
       ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
       request.Voice_runtime_overlay.argv
-  in
+  with
+  | Error refusal -> Error (command_refusal_reason ~command refusal)
+  | Ok (status, output) ->
   match status with
   | Unix.WEXITED 0 -> Ok output
-  | Unix.WEXITED 127 -> Error (Printf.sprintf "%s is not installed" command)
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "%s exit %d: %s" command code

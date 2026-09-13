@@ -63,6 +63,26 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+(* The keeper, task and log lists start empty and are read only once the server
+   vouches for this workspace, so before that an empty list is not an empty
+   workspace (#35747). *)
+let test_local_rows_are_unread_until_the_workspace_is_read () =
+  let state =
+    Masc_tui_types.create_state ~workspace:"local"
+      ~local_base_path:"/workspace/local" ~port:0 ~refresh_interval:0. ()
+  in
+  let page error =
+    match Masc_tui_types.local_rows_page state ~error with
+    | Masc_tui_types.Page_unread -> "unread"
+    | Masc_tui_types.Page_failed -> "failed"
+    | Masc_tui_types.Page_empty -> "empty"
+  in
+  Alcotest.(check string) "a fresh state has read nothing" "unread" (page None);
+  state.Masc_tui_types.local_workspace <- Masc_tui_types.Local_workspace_read;
+  Alcotest.(check string) "a read with no rows is empty" "empty" (page None);
+  Alcotest.(check string) "a read with an error failed" "failed"
+    (page (Some "keeper metadata unavailable"))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -74,5 +94,7 @@ let () =
             test_workspace_identity_matches_canonical_paths
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
+        ; Alcotest.test_case "local rows are unread until read" `Quick
+            test_local_rows_are_unread_until_the_workspace_is_read
         ] )
     ]

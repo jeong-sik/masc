@@ -2,7 +2,12 @@
     through the real source adapter. Only external worker processes are fake. *)
 open Alcotest
 open Masc
-module Runtime = Lane_addon_runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
 let unwrap = function Ok value -> value | Error message -> fail message
@@ -390,7 +395,96 @@ let test_named_output_flows_to_statistics_and_mapping_revision () =
       (instance config replacement |> member "package" |> member "outputs" |> member "frames"
         |> list "lanes" |> List.hd |> Yojson.Safe.Util.to_string))
 
+(* The native capture enters the actual shipped observer over MCP stdio. Only
+   container ownership is the fixture backend; no Docker isolation is claimed. *)
+let msx_observer ~binding ~sources =
+  let tests = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root "addons/tests"
+    | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons/tests" in
+  let script = {|import json, sys
+sys.path.insert(0, sys.argv[1])
+from test_packages import ProtocolCase
+print(json.dumps(ProtocolCase().call("msx-observer", json.loads(sys.argv[2]), json.loads(sys.argv[3]))))
+|} in
+  Eio_unix.run_in_systhread (fun () ->
+    let channel = Unix.open_process_args_in "python3"
+      [|"python3"; "-c"; script; tests; Yojson.Safe.to_string binding; Yojson.Safe.to_string sources|] in
+    let bytes = match In_channel.input_all channel with
+      | bytes -> bytes
+      | exception exn -> ignore (Unix.close_process_in channel); raise exn in
+    match Unix.close_process_in channel with
+    | Unix.WEXITED 0 -> unwrap (Types.output_of_json (Yojson.Safe.from_string bytes))
+    | _ -> fail "MSX observer stdio process failed")
+
+let test_native_msx_history_crosses_worker_freeze_and_detach () =
+  with_fixture ~produce:msx_observer (fun clock config root _directory _received _stopped ->
+    let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+    let ledger_dir = Filename.concat root "native-machine" in
+    ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:None));
+    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+      let press who name =
+        let key = unwrap (Msx_lane.key_of_string name) in
+        ignore (msx (Msx_lane.press ~who ~keys:[key] ~hold_frames:1 ~step_frames:2 ~sequence:false)) in
+      press "keeper-A" "space";
+      let before = msx (Msx_lane.capture_with_identity ()) in
+      let expected = List.rev before.input_ledger
+        |> List.map (fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n")
+        |> String.concat "" in
+      let id = dispatch config Runtime.Attach ["manifest_path", `String (manifest root);
+        "run_id", `String "native-history"; "binding", `Assoc ["machine_id", `String "workspace-msx";
+          "sources", `List [`Assoc ["kind", `String "msx_capture"; "source_id", `String "native"]]]]
+        |> text "instance_id" in
+      await clock (fun () -> member "observation_seq" (instance config id) = `Int 1);
+      let row = inspect config |> list "rows" |> List.hd in
+      let reference = unwrap (Types.evidence_of_json (row |> member "fields" |> member "input_ledger" |> member "evidence")) in
+      check string "worker preserves exact machine incarnation" before.incarnation
+        (row |> member "fields" |> text "machine_incarnation");
+      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+      check string "native input records survive the worker" expected (unwrap (Store.read_jsonl store reference));
+      let selected = text "id" row in
+      let args = ["instance_id", `String id; "row_ids", `List [`String selected]] in
+      let frozen = dispatch config Runtime.Evidence args in
+      press "keeper-B" "up";
+      ignore (dispatch config Runtime.Observe ["instance_id", `String id]);
+      await clock (fun () -> member "observation_seq" (instance config id) = `Int 2);
+      ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
+      await clock (fun () -> text "kind" (member "phase" (instance config id)) = "detached");
+      Runtime.For_testing.reset ();
+      ignore (dispatch config Runtime.Evidence args);
+      let published = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
+      let artifact = match Tool_output.normalized_artifact_ref_of_json (member "keeper_artifact" published) with
+        | Tool_output.Decoded_normalized_artifact_ref artifact -> artifact
+        | _ -> fail "missing Keeper-readable artifact" in
+      let read sha =
+        let _, page = Keeper_artifact_read.handle_with_page ~base_path:root
+          ~args:(`Assoc ["sha256", `String sha]) in
+        match page with Some page when page.eof -> page.content
+        | _ -> fail "published sequence node is not readable by the Keeper" in
+      let artifacts = match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string (read artifact.sha256)) with
+        | Tool_output.Decoded_artifact_manifest {structured_content; _} -> list "artifacts" structured_content
+        | _ -> fail "invalid artifact manifest" in
+      (* Remove the Lane store: publication must have carried every node, not
+         just the captured root whose predecessor still lived in that store. *)
+      remove (Store.root store);
+      let rec reconstruct count reference records =
+        let artifact = List.find (fun item -> text "lane_uri" item = reference.Types.uri) artifacts
+          |> member "artifact" in
+        let artifact = match Tool_output.normalized_artifact_ref_of_json artifact with
+          | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+          | Tool_output.Not_normalized_artifact_ref
+          | Tool_output.Invalid_normalized_artifact_ref _ ->
+              fail "sequence publication has an invalid artifact reference" in
+        let node = Yojson.Safe.from_string (read artifact.sha256) in
+        check int "published sequence count" count (member "entry_count" node |> Yojson.Safe.Util.to_int);
+        if count = 0 then String.concat "" records
+        else reconstruct (count - 1) (unwrap (Types.evidence_of_json (member "previous" node)))
+            (text "record" node :: records) in
+      check string "full original history remains readable after Detach and Lane-store removal"
+        expected (reconstruct before.input_count reference [])))
+
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "native input history crosses worker and survives Detach" `Quick
+    test_native_msx_history_crosses_worker_freeze_and_detach;
   test_case "named output feeds statistics and preserves mapping revisions" `Quick
     test_named_output_flows_to_statistics_and_mapping_revision;
   test_case "invalid edited cycle preserves existing owners and progress" `Quick

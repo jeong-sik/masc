@@ -1970,14 +1970,20 @@ let voice_local_setup_exit base_path speak_voice hear_model =
         match speak_voice with
         | None -> []
         | Some voice ->
+          (* Where the choice is written decides whether per-keeper voices
+             still reach this endpoint. {!Voice_setup.voice_placement} carries
+             the reason and the measurement. *)
+          let endpoint_voice, section =
+            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            | Voice_setup.On_the_endpoint -> Some voice, []
+            | Voice_setup.On_the_section ->
+              None, [ Voice_setup.Set_tts_default_voice voice ]
+          in
           let endpoint =
             { (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
-              with default_voice = Some voice }
+              with default_voice = endpoint_voice }
           in
-          [ Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) ]
-          @ (match tts with
-             | Some _ -> []
-             | None -> [ Voice_setup.Set_tts_default_voice voice ])
+          (Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) :: section)
       in
       let hearing =
         match hear_model with

@@ -1676,6 +1676,26 @@ let capture_outcome_of_json json =
        Discarded_recording { message = message ~fallback:"recording discarded" })
 ;;
 
+(* What a capture says when its recorder never started. A fresh mac has no
+   sox, and sox is what carries rec, so the common case is named with what to
+   run; every other refusal keeps the runner's own sentence, because guessing a
+   cause for a permission or cwd failure would send the operator to install
+   something they already have. *)
+let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
+  match refusal with
+  | Process_eio.Executable_not_found program ->
+    Printf.sprintf
+      "%s is not installed; it comes with sox. `masc prerequisite-actions \
+       whisper` names the install."
+      program
+  | (Process_eio.Empty_argv
+    | Process_eio.Spawn_failed _
+    | Process_eio.Child_setup_failed _
+    | Process_eio.Cwd_unavailable _) as refusal ->
+    Printf.sprintf "the recorder could not start: %s"
+      (Process_eio.spawn_refusal_to_string refusal)
+;;
+
 let record_and_transcribe
       ~agent_id
       ?(timeout_sec = default_capture_timeout_seconds)
@@ -1739,18 +1759,28 @@ let record_and_transcribe
       let outcome =
         Eio.Fiber.first
           (fun () ->
+             (* The typed runner, so a recorder that never started is told
+                apart from one that ran and failed. The tuple runner folds
+                every failure before the process -- not found, not
+                permitted, a cwd that would not open -- into exit 127, and
+                reading 127 as "not installed" would give some of them the
+                wrong reason. Both runners spawn through the same drain, so
+                the cancel grace that keeps the WAV tail is unchanged. *)
              match
-               run_voice_status ~timeout_sec:(timeout_sec +. recorder_arm_grace_seconds) rec_argv
+               Process_eio.run_argv_with_status_split_or_refusal
+                 ~timeout_sec:(timeout_sec +. recorder_arm_grace_seconds)
+                 rec_argv
              with
              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
              | exception exn ->
                Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
+             | Error refusal -> Error (recorder_refusal_message refusal)
              (* The recorder has no end of its own, so reaching one means it
                 stopped on its own arm without the watcher having decided
                 anything. No floor was settled. *)
-             | Unix.WEXITED 0, _ -> Ok (Ended_without_speech None)
-             | Unix.WEXITED code, _ -> Error (Printf.sprintf "rec exit %d" code)
-             | _ -> Error "rec process failed")
+             | Ok (Unix.WEXITED 0, _, _) -> Ok (Ended_without_speech None)
+             | Ok (Unix.WEXITED code, _, _) -> Error (Printf.sprintf "rec exit %d" code)
+             | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) -> Error "rec process failed")
           (fun () ->
              Ok
                (watch_capture_level

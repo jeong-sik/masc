@@ -4423,7 +4423,7 @@ let launch_browser_lane state ~mailbox operation =
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
-        clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
+        clients = (match operation with Discover Choose_client -> None | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to
@@ -17459,9 +17459,9 @@ and is loaded on demand through keeper_skill.
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
-                       (max 0 (min (List.length view.clients - 1) (cursor + delta))) }
+                       (max 0 (min (List.length (listed_clients view) - 1) (cursor + delta))) }
                  | "\r" | "\n" | "enter" when not (busy view) ->
-                     (match List.nth_opt view.clients cursor with
+                     (match List.nth_opt (listed_clients view) cursor with
                       | None -> ()
                       | Some client ->
                           state.browser_lane <- Some (choose_client client view);

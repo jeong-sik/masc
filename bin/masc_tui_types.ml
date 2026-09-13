@@ -2910,8 +2910,11 @@ module Browser_lane_view = struct
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* [clients] is what the last discovery answered, and [None] until one has:
+     a discovery that failed leaves no list rather than an empty one, so the
+     picker cannot tell an operator there is no browser when it could not ask. *)
   type t = {
-    clients : client list; selected_client : client option; client_picker : int option;
+    clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
@@ -2938,7 +2941,7 @@ module Browser_lane_view = struct
       Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
     | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
-    { clients = []; selected_client = None; client_picker = None;
+    { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
@@ -2986,6 +2989,7 @@ module Browser_lane_view = struct
     | Read_failed -> "HTTP failed"
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
+  let listed_clients t = Option.value t.clients ~default:[]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -2993,7 +2997,7 @@ module Browser_lane_view = struct
   let selected_client_available t = match t.source, t.selected_client with
     | Automation, _ -> true
     | Live, None -> false
-    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
     if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
@@ -3027,10 +3031,10 @@ module Browser_lane_view = struct
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = []; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
-             let next = { t with clients; load = Idle } in
+             let next = { t with clients = Some clients; load = Idle } in
              match t.selected_client, clients, purpose with
              | None, [client], Read_after_discovery -> choose_client client next, true
              | Some _, _, _ when selected_client_available next ->
@@ -5963,6 +5967,20 @@ let visible_system_log_entries (state : state) =
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
 let page_failed_note = "  (load failed; nothing here is a reading)"
+
+(* The row the Browser Lane picker draws when it has no connection to offer,
+   and [None] when it has one. A discovery that failed used to leave an empty
+   list, so the picker answered "No active native browser connections" under
+   the red failure: the operator was told the browser was gone when the list
+   had not been read. Only a discovery that answered can say there are none. *)
+let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
+  let open Browser_lane_view in
+  match view.clients, view.load with
+  | Some (_ :: _), _ -> None
+  | (None | Some []), Loading _ -> Some "  Waiting for active connections\xe2\x80\xa6"
+  | Some [], (Idle | No_browser | Failed _) -> Some "  No active native browser connections"
+  | None, Failed _ -> Some page_failed_note
+  | None, (Idle | No_browser) -> Some page_unread_note
 
 (* What a title says where its counts would go. A read nobody has asked for and a
    read that failed both leave the snapshot empty, and the title is the row on

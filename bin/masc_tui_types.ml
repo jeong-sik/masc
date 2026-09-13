@@ -6808,10 +6808,22 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        listing ~error:state.verification_error
-          (match state.verification with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.vs_requests)
+        (* Under the list sit the armed approval and the server's last
+           refusal, one row each while they stand, and the scroll row while the
+           queue overflows. They are frame rows too; a count without them puts
+           the footer past the frame's last row. *)
+        Some
+          { sc_count =
+              (match state.verification with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.vs_requests)
+          ; sc_chrome =
+              listing_chrome ~error:state.verification_error
+              + (if Option.is_some state.verification_verdict_armed then 1 else 0)
+              + (if Option.is_some state.verification_verdict_error then 1 else 0)
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None

@@ -6798,11 +6798,16 @@ let render_verification_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* The same frame the other listings draw, and the same two rows for a load
-     error -- written out here as its own 9-or-7 rather than asked for. A
-     surface that re-types the count does not move when the frame does. *)
-  let chrome_rows = listing_chrome ~error:state.verification_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The height the keypress bounds its step with, asked of the same layout:
+     it counts the rows drawn under the list as well as the frame. *)
+  let content_height =
+    match scrolled_surface state Verification with
+    | Some layout ->
+        Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+          ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
+          ~overflow_takes_row:layout.sc_overflow_takes_row
+    | None -> max 1 (rows - listing_chrome ~error:state.verification_error)
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.verification_scroll max_scroll) in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in

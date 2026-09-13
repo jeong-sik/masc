@@ -54,7 +54,14 @@ val submit
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
 val inventory : t -> (inventory, error) result
-val claim_next : t -> now:float -> (Operation.t option, error) result
+type batch_plan = { members : Operation.Operation_id.t list; input : Yojson.Safe.t }
+type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
+(** Pure selector receives only fresh, unbound queued operations. Members must
+    include the head, in queue order. The store freezes membership and combined
+    input atomically with claim; resumed executions never acquire new members. *)
+val claim_next : ?batch:batch_selector -> t -> now:float -> (Operation.t option, error) result
+val batch_operations : t -> operation_id:Operation.Operation_id.t -> (Operation.t list, error) result
+(** Ordered members, including the execution owner. A singleton returns itself. *)
 
 val list_queued
   :  t

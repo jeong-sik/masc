@@ -42,6 +42,7 @@ type state =
 
 type t =
   { operation_id : Operation_id.t
+  ; batch_execution_id : Operation_id.t option
   ; admission_digest : string
   ; execution_digest : string
   ; sequence : int64

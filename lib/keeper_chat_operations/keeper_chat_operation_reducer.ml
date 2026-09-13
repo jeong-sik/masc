@@ -60,7 +60,13 @@ let validate_terminal_time completed_at =
 ;;
 
 let apply (operation : Operation.t) command =
-  match command, operation.state with
+  let is_member = match operation.batch_execution_id with
+    | Some execution_id -> not (Operation.Operation_id.equal execution_id operation.operation_id)
+    | None -> false in
+  if is_member then Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
+  else if Option.is_some operation.batch_execution_id && (match command with Edit_queued _ -> true | _ -> false)
+  then Error (Invalid_input "shared execution input is already frozen")
+  else match command, operation.state with
   | Start { started_at }, Queued ->
     (match Operation.validate_timestamp ~field:"started_at" started_at with
      | Error detail -> Error (Invalid_input detail)

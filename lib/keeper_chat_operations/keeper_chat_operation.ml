@@ -66,6 +66,7 @@ type state =
 
 type t =
   { operation_id : Operation_id.t
+  ; batch_execution_id : Operation_id.t option
   ; admission_digest : string
   ; execution_digest : string
   ; sequence : int64
@@ -115,6 +116,8 @@ let to_json operation =
   `Assoc
     ([ "schema", `String "masc.keeper_chat_operation.v1"
      ; "operation_id", `String (Operation_id.to_string operation.operation_id)
+     ; ("batch_execution_id", match operation.batch_execution_id with
+        | None -> `Null | Some id -> `String (Operation_id.to_string id))
      ; "sequence", `String (Int64.to_string operation.sequence)
      ; "created_at", `Float operation.created_at
      ; "execution_digest", `String operation.execution_digest

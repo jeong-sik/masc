@@ -62,3 +62,44 @@ Run the offline evidence audit with `python3 docs/evidence/browser-navigation-20
 
 Primary references: [Mozilla's document-replacement injection issue](https://bugzilla.mozilla.org/show_bug.cgi?id=2047009),
 [Firefox webNavigation events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/webNavigation).
+
+
+## Pending navigation cancellation
+
+Two further isolated Firefox trials run the same pinned `b40259fc…` extension
+through its actual dispatcher with test-owned command deadlines. The read-deadline
+case uses 100 ms; other manual commands use 10 seconds, while the native transport
+deadline is 20 seconds. The original measured `proof.scope` retains its generic
+10-second description; it does not describe the read-deadline override. The fixture
+withholds destination response headers so a successful follow has no committed
+destination yet.
+
+`cancel-after-observed-commit` confirms that closing the owned tab rejects the
+pending scene read as `navigation_tab_closed`. A separate read expires as
+`browser_command_cancelled`. After the harness releases headers and externally
+observes the new document commit, the old read still has exactly one response;
+a fresh read returns the correct `/pending` heading. That external commit wait
+is post-cancellation verification, not automatic product re-waiting.
+
+`cancel-immediate-read-failure` preserves the earlier partial run: tab closure
+and deadline rejection worked, but an immediate fresh read after headers were
+released still raced document replacement and failed. It is not counted as a
+successful recovery trial. Both trials completed all five cleanup stages.
+
+`compare_runs.py` prepares a before/after comparison by joining typed turn IDs,
+durable tool records, and raw replies. It checks fixture/request/package identity
+and reports prompt drift, actual calls, failures, bytes, and observed elapsed
+time. No after-run measurement is claimed until a compiled native candidate
+produces its own retained records.
+
+
+## Native host protocol CI
+
+[Run 34732183649](https://github.com/jeong-sik/masc/actions/runs/34732183649)
+passed 15 native-host tests on `c082d495b1edc03588142b310177712718c36b49`.
+The downloaded artifact's source identity and both executable checksums were
+verified locally. The retained test log covers real HTTP/native-message pipes,
+including the propagated command deadline. The executable artifact is identified
+by ID `10310365824`; the binaries are not copied into this documentation archive.
+This host-only result does not substitute for the complete server/TUI candidate
+and its multi-channel Keeper composition run.

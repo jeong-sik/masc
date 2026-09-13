@@ -36,7 +36,7 @@ let reference_index_ready ~question ~language ~project_root =
      | Lsp_reference_index.Missing { build_command; searched } ->
        (* The command first. This sentence reaches an operator on a line
           that truncates from the right -- measured at 200 columns, where it
-          arrived as "Run: dun~" -- so the half they can act on has to
+          arrived as "Run: dun…" -- so the half they can act on has to
           survive the cut, and the explanation is what should be lost. *)
        Error
          (Printf.sprintf

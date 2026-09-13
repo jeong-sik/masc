@@ -257,14 +257,61 @@ let speak_via_command_to_file endpoint ~message ~voice ~output_file =
   run_audio_command_to_file request ~output_file
 ;;
 
+(* Up to [count] bytes from the start of a file; fewer when the file is
+   shorter. *)
+let leading_bytes ~count path =
+  let read channel =
+    let buffer = Bytes.create count in
+    let rec fill filled =
+      if filled = count
+      then filled
+      else (
+        match input channel buffer filled (count - filled) with
+        | 0 -> filled
+        | read -> fill (filled + read))
+    in
+    Bytes.sub_string buffer 0 (fill 0)
+  in
+  match open_in_bin path with
+  | exception Sys_error message -> Error message
+  | channel ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr channel)
+      (fun () ->
+        match read channel with
+        | bytes -> Ok bytes
+        | exception Sys_error message -> Error message)
+;;
+
 (* Transcribing by running a command. The transcript is the command's own
    output, so what comes back is text rather than the JSON an HTTP endpoint
-   answers with; the caller shapes it. *)
+   answers with; the caller shapes it.
+
+   The audio's container is checked before the command runs, because the
+   command cannot be asked afterwards: whisper-cli answers a container it does
+   not decode with exit 0 and an empty transcript, the same answer silence
+   gets. See {!Voice_runtime_overlay.whisper_cli_input}. *)
 let transcribe_via_command endpoint ~audio_file ~model =
   let* request =
     Voice_runtime_overlay.stt_command_for_endpoint endpoint ~audio_file ~model
   in
   let command = command_name request.Voice_runtime_overlay.argv in
+  let* () =
+    match
+      leading_bytes ~count:Voice_runtime_overlay.audio_container_probe_bytes audio_file
+    with
+    | Error message -> Error (Printf.sprintf "the audio could not be read: %s" message)
+    | Ok bytes ->
+      let container = Voice_runtime_overlay.audio_container_of_leading_bytes bytes in
+      (match Voice_runtime_overlay.whisper_cli_input container with
+       | Voice_runtime_overlay.Reads | Voice_runtime_overlay.Not_measured -> Ok ()
+       | Voice_runtime_overlay.Does_not_read ->
+         Error
+           (Printf.sprintf
+              "%s reads WAV, FLAC or MP3, and this audio is %s"
+              command
+              (Voice_runtime_overlay.audio_container_name container)))
+  in
   match
     run_voice_command
       ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec

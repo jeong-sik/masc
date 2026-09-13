@@ -1374,8 +1374,8 @@ def success_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "02-chat-long-tail.png",
-                                     "> ~", "❤️❤️❤️-TAIL", expected_cursor=(97, composer_row),
-                                     input_row_markers=("> ~", "❤️❤️❤️-TAIL"),
+                                     "> …", "❤️❤️❤️-TAIL", expected_cursor=(97, composer_row),
+                                     input_row_markers=("> …", "❤️❤️❤️-TAIL"),
                                      input_row_absent=("prefix-",)))
                 # fmt: on
                 press(page, "Backspace")
@@ -1386,8 +1386,8 @@ def success_scenario(
                 )
                 # fmt: off
                 shots.append(capture(page, output, prefix + "03-chat-long-tail-backspace.png",
-                                     "> ~", "❤️❤️❤️-TAI", expected_cursor=(97, composer_row),
-                                     input_row_markers=("> ~", "❤️❤️❤️-TAI"),
+                                     "> …", "❤️❤️❤️-TAI", expected_cursor=(97, composer_row),
+                                     input_row_markers=("> …", "❤️❤️❤️-TAI"),
                                      input_row_absent=("prefix-", "❤️❤️❤️-TAIL")))
                 # fmt: on
                 press(page, "Control+U")

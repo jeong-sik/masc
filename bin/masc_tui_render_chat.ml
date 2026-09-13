@@ -363,7 +363,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           let at = max 0 (min row.gutter_label_at width) in
           let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
-             trailing "~", which here would land in the middle of the gutter.
+             trailing "…", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's

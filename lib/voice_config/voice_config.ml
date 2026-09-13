@@ -140,6 +140,21 @@ let require_string ~ctx ~field json =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s.%s is required" ctx field)
 
+(* A declared timeout is spent as a real deadline by the command and HTTP
+   paths. Zero or a negative number gives the endpoint no time at all, and nan
+   or infinity gives it no bound: every comparison against nan is false, so a
+   deadline built from one never fires and the call waits forever. Refused
+   where it is read rather than repaired where it is used, so the operator is
+   told which endpoint carries the value instead of quietly getting a
+   different one. *)
+let optional_positive_seconds ~ctx ~field json =
+  match Json_util.get_float json field with
+  | None -> Ok None
+  | Some value when Float.is_finite value && value > 0. -> Ok (Some value)
+  | Some value ->
+    Error
+      (Printf.sprintf "%s.%s must be a positive number of seconds, not %g" ctx field value)
+
 let require_list ~ctx ~field json =
   match Json_util.get_array json field with
   | Some (`List items) -> Ok items
@@ -261,7 +276,7 @@ let parse_endpoint ~ctx json =
   let enabled =
     Option.value ~default:true (Json_util.get_bool json "enabled")
   in
-  let timeout_seconds = Json_util.get_float json "timeout_seconds" in
+  let* timeout_seconds = optional_positive_seconds ~ctx ~field:"timeout_seconds" json in
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in

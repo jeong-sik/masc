@@ -195,6 +195,30 @@ let test_unknown_endpoint_field_is_rejected () =
          ~needle:"session.endpoints[0].max_retries is not a supported field"
          message)
 
+(* A deadline that is zero or negative is not a shorter wait, it is no wait at
+   all; nan and infinity are the opposite, no bound, because every comparison
+   against nan is false and a deadline built from one never fires. JSON cannot
+   spell those two, so the guard covers them through Float.is_finite and the
+   cases here are the two an operator can actually write. *)
+let test_an_unusable_endpoint_timeout_is_rejected () =
+  List.iter
+    (fun declared ->
+      let endpoints =
+        Printf.sprintf
+          {|[{"id":"session","kind":"voice_mcp","mcp_url":"http://localhost/mcp","timeout_seconds":%s}]|}
+          declared
+      in
+      match parse (minimal_config_json ~session_endpoints:endpoints) with
+      | Ok _ -> fail ("expected timeout_seconds " ^ declared ^ " to be rejected")
+      | Error message ->
+        check bool ("the refused value is named: " ^ declared) true
+          (String_util.string_contains_substring
+             ~needle:
+               ("session.endpoints[0].timeout_seconds must be a positive number of \
+                 seconds, not " ^ declared)
+             message))
+    [ "0"; "-1" ]
+
 let test_session_with_endpoint_ok () =
   let session_ep =
     {|[{ "id": "voice-mcp", "kind": "voice_mcp",
@@ -946,6 +970,8 @@ let () =
             `Quick test_session_empty_endpoints_ok;
           test_case "unknown endpoint field is rejected"
             `Quick test_unknown_endpoint_field_is_rejected;
+          test_case "an unusable endpoint timeout is rejected"
+            `Quick test_an_unusable_endpoint_timeout_is_rejected;
           test_case "session with endpoint parses ok"
             `Quick test_session_with_endpoint_ok;
           test_case "tts reachable when session empty"

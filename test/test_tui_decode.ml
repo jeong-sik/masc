@@ -1538,6 +1538,38 @@ let test_decode_json_response_body_rejects_error_status () =
          the server already wrote the sentence. *)
       Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
 
+(* A non-JSON error body is cut here for length, and the row that draws it cuts
+   again for the column budget while keeping both ends. So the tail this cut
+   leaves is the tail the operator reads. A bare "..." made that tail the byte
+   the 240-byte boundary happened to land on -- an arbitrary character the row
+   then preserved as if it were the end of the message. *)
+let test_decode_json_response_body_bounded_body_names_its_size () =
+  let body = String.make 900 'x' in
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:502
+      ~body
+  with
+  | Ok _ -> Alcotest.fail "expected HTTP 502 to fail"
+  | Error err ->
+      Alcotest.(check string)
+        "the tail names the size, not the byte the cut landed on"
+        ("HTTP 502: " ^ String.make 240 'x' ^ "... (900 bytes, not JSON)")
+        err
+
+(* The bound applies to the raw body only. A server that wrote the sentence
+   itself is quoted whole, however long it is: nothing was cut, so nothing
+   should claim it was. *)
+let test_decode_json_response_body_keeps_a_long_json_sentence_whole () =
+  let sentence = String.make 400 'y' in
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:503
+      ~body:(Yojson.Safe.to_string (`Assoc [ ("error", `String sentence) ]))
+  with
+  | Ok _ -> Alcotest.fail "expected HTTP 503 to fail"
+  | Error err ->
+      Alcotest.(check string) "sentence kept whole"
+        ("HTTP 503: " ^ sentence) err
+
 let test_decode_json_response_body_allows_empty_success () =
   match
     Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:204
@@ -9035,6 +9067,10 @@ let () =
           test_decode_json_response_body_rejects_error_status;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
+        Alcotest.test_case "bounded body names its size" `Quick
+          test_decode_json_response_body_bounded_body_names_its_size;
+        Alcotest.test_case "long json sentence is kept whole" `Quick
+          test_decode_json_response_body_keeps_a_long_json_sentence_whole;
         Alcotest.test_case "tool envelope ok carries the message" `Quick
           test_tool_envelope_outcome_ok_carries_message;
         Alcotest.test_case "tool envelope ok without message defaults" `Quick

@@ -1396,6 +1396,11 @@ let json_error_sentence body =
   | exception Yojson.Json_error _ -> None
 ;;
 
+(* An error body is whatever the far end wrote: an HTML page, a proxy notice,
+   a stack trace. It reaches the event log and every row that draws the
+   failure, so only the head travels. *)
+let raw_error_body_head_bytes = 240
+
 let http_status_error ~status_code ~body =
   let body = String.trim body in
   let detail =
@@ -1403,7 +1408,17 @@ let http_status_error ~status_code ~body =
     | Some sentence -> sentence
     | None ->
       if body = "" then "empty response body"
-      else if String.length body > 240 then String.sub body 0 240 ^ "..."
+      else if String.length body > raw_error_body_head_bytes then
+        (* The row that draws this keeps both ends of the sentence, so the tail
+           has to say something. A bare "..." put the byte the cut happened to
+           land on where the reader looks for the end of the message, and the
+           row then preserved that byte as if it were the point. Naming the
+           size instead makes both ends carry: the head is what the server
+           started with, the tail is how much of it there was and why it was
+           not read as JSON. *)
+        Printf.sprintf "%s... (%d bytes, not JSON)"
+          (String.sub body 0 raw_error_body_head_bytes)
+          (String.length body)
       else body
   in
   Printf.sprintf "HTTP %d: %s" status_code detail

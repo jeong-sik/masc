@@ -31,12 +31,23 @@ guarded primary-region shortcut. On a feed with several `article` regions,
 use `n`/`p` or `Tab`/`Shift-Tab` to choose the observed article, then `Enter`
 to read that region. `Enter` on an observed same-tab HTTP(S) link follows the
 link and refreshes the destination scene; it never reuses the old article
-scope. Once the region list is visible, `N`/`P` cycle only exact observed
-`article` regions, skipping non-article regions. Use `J`/`K`
+scope. `N`/`P` cycle exact observed `article` regions, or article ancestors
+when the content scene already exposes them, skipping non-article regions. Use
+`J`/`K`
 to scroll the top-level page by the observed viewport
 height, then verify the refreshed document and post identities. Use `Ctrl-O`
 when the painted layout or a nested scroll container is needed; `j`/`k` in
 the text scene only move the terminal reader.
+After a same-document refresh or `J`/`K`, the scene status may show a compact
+observed delta (`new`, `out`, `same`, `changed`) for unique node IDs. Treat
+`out` as outside this observation, not as a deleted post; it is a viewport
+progress hint and never feed-completeness evidence.
+In a content scene, `N`/`P` selects the first observed node for each article;
+`Enter` still follows or clicks that node's observed action. Use `v` and
+`Enter` when a scoped article read is required.
+When several article ancestors are visible, the TUI boundary includes their
+observed ordinal such as `[article 2/5]`; treat that count as viewport coverage,
+not feed completeness.
 The scene status composition (`articles`, `links`, `controls`, and `images`)
 is a typed observation hint for choosing a route; it does not prove that a
 feed is complete or that every reply is loaded.
@@ -57,6 +68,12 @@ observed landmark. The TUI prints a compact boundary when that context changes,
 and scoped article reads avoid repeating their own scope label. Preserve this
 observed region with copied context instead of reconstructing a post or channel
 from text or a CSS class.
+Inline text fragments inside one observed block are shown as one reading row
+when the observed block identity repeats; that verified group closes at the
+repeat and unproven ancestry stays separate. Controls, headings, block
+boundaries, and region changes remain separate. The underlying observed node
+identities and selection order are retained for context copying and action
+routing.
 
 After an article is scoped, keep the displayed role and label with the body
 when reporting it. The copied context must retain that observed scope label

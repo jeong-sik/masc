@@ -477,6 +477,21 @@ let test_fusion_footer_pins_the_shared_list_projection () =
     "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
+(* K and B answer in the detail as on the list; the detail footer named
+   neither, and a body row named them in its own notation. Both footers now
+   read the same two bindings. *)
+let test_fusion_detail_footer_names_the_caller_and_board_keys () =
+  let detail = Masc_tui_keys.footer_hints_fusion_detail ~position:"1-40/47" in
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  Alcotest.(check bool) "the detail names the calling Keeper" true (holds "K:calling Keeper" detail);
+  Alcotest.(check bool) "the detail names the Board evidence" true (holds "B:Board evidence" detail);
+  Alcotest.(check bool) "spelled as the list spells them" true
+    (holds "K:calling Keeper  B:Board evidence" (Masc_tui_keys.footer_hints Fusion))
+
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let response = `Assoc
@@ -2108,6 +2123,8 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "fusion detail footer names the caller and board keys" `Quick
+            test_fusion_detail_footer_names_the_caller_and_board_keys
         ; Alcotest.test_case "Fusion history is selectable without a retained run" `Quick
             test_fusion_historical_evidence_is_a_selectable_board_reference
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick

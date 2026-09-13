@@ -1524,7 +1524,14 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
-    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    (* Diagnostics only, so a daemon: the switch cancels it once the body
+       returns. A grandchild the CLI leaves behind (an MCP server orphaned
+       when the CLI is reaped) inherits this pipe's write end, so EOF may
+       never come, and a joined fiber would hold the switch open after the
+       turn was served. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      drain_stderr stderr_r stderr_tail;
+      `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let wall_clock =
       Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
@@ -1587,10 +1594,11 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
       | Eio.Time.Timeout as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
-    (* Cleanup must run before [Switch.run] waits for the stderr drainer. The
-       child can be waiting for more stdin on typed early returns, so a switch
-       release hook alone deadlocks. [Eio.Cancel.protect] inside the finalizer
-       preserves cleanup across fiber cancellation. *)
+    (* Terminate inside the body: the child can be waiting for more stdin on
+       typed early returns, and only here does it get SIGTERM and a bounded
+       reap before the switch's release hook kills whatever is left.
+       [Eio.Cancel.protect] inside the finalizer preserves cleanup across
+       fiber cancellation. *)
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->

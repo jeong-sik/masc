@@ -228,6 +228,9 @@ type model_spec =
     (** [turn-timeout-s] — per-model liveness window for one official-client
         turn, in seconds. Codex, Claude, and Antigravity reset it on every
         protocol message, so progressing turns have no wall-clock limit.
+        Antigravity also leaves it unarmed while the CLI's last reported step
+        is a running tool step, because the CLI writes nothing until that step
+        ends; [wall-clock-ceiling-s] below is the only bound there.
         [None] keeps the provider value where one exists and the adapter default
         otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →

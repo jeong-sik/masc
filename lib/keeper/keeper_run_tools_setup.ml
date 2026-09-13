@@ -440,33 +440,26 @@ let prepare_agent_setup
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
-  (* A deny entry that named nothing is a typo the operator cannot otherwise
-     see: the surface silently denies nothing, exactly the failure shape the
-     [tools.attached_allow] unnamed warning below exists for. Skipped when the
-     profile denies nothing -- the model-visible walk revalidates every
-     descriptor's schema shape and is not free. *)
-  (match profile_defaults.Keeper_types_profile.tool_deny with
-   | [] -> ()
-   | tool_deny ->
-     let model_visible_tool_names =
-       Keeper_tool_descriptor.model_visible_descriptors ()
-       |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-     in
-     List.iter
-       (fun name ->
-         if not (List.mem name model_visible_tool_names)
-         then
-           Log.Keeper.emit
-             Log.Warn
-             ~keeper_name:meta.name
-             ~category:Log.Tool
-             ~details:
-               (`Assoc
-                 [ "error_kind", `String "keeper_tool_deny_unnamed"
-                 ; "tool", `String name
-                 ])
-             "The profile denies a built-in tool no descriptor offers the model")
-       tool_deny);
+  (* A deny entry that names nothing is refused where the profile is loaded
+     ([Keeper_types_profile.unknown_deny_tools], kind [Unknown_deny_tool]), so
+     a profile that reaches setup cannot carry one. This is an assertion on
+     that contract, not a second classifier: it used to be a WARN row while
+     the surface silently denied nothing (audit F087). *)
+  let* () =
+    match
+      Keeper_types_profile.unknown_deny_tools
+        profile_defaults.Keeper_types_profile.tool_deny
+    with
+    | [] -> Ok ()
+    | unknown ->
+      Error
+        (Agent_core.Error.Internal
+           (Printf.sprintf
+              "keeper %s reached turn setup with keeper.tools.deny entries the \
+               profile load must have refused: %s"
+              meta.name
+              (String.concat ", " unknown)))
+  in
   let turn_skill_projection =
     Keeper_capability_surface.skill_projection capability_surface
   in

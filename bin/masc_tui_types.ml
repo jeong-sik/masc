@@ -7926,10 +7926,6 @@ let palette_entries (state : state) =
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
-  @ [ "metrics", Palette_goto Metrics ]
-  @ [ "telemetry", Palette_goto Metrics ]
-  @ [ "charts", Palette_goto Metrics ]
-  @ [ "stats", Palette_goto Metrics ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
@@ -7975,6 +7971,24 @@ let palette_subsequence ~needle haystack =
   in
   walk 0 0
 
+(* Other words an entry answers to, kept off its row. Metrics used to be five
+   rows -- "go Metrics", "metrics", "telemetry", "charts", "stats" -- each the
+   same jump, so an empty query listed one destination five times. The slash
+   commands fold their aliases into one entry the same way
+   (Masc_tui_command.spelled_catalog). *)
+let palette_action_words = function
+  | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+  | Palette_goto
+      ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Planning | Schedules | Verification | Harness | Fusion
+      | Repositories | Code | Changes | Connectors | Runtime | Config
+      | Resources | Tools | System_logs )
+  | Palette_browser_lane | Palette_hide_browser_lane | Palette_msx
+  | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
+  | Palette_chat _ | Palette_task _ | Palette_board_hearth _
+  | Palette_board_post _ | Palette_lsp _ ->
+      []
+
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
@@ -7989,10 +8003,11 @@ let palette_matches (state : state) =
      query, then one that contains it, then one that only has its characters
      in order. A K/D pre-fill of "def " therefore lists the cursor line's
      names before a post that merely mentions "deferred". *)
-  let rank (label, _) =
-    if palette_starts_with ~needle label then Some 0
-    else if palette_contains ~needle label then Some 1
-    else if palette_subsequence ~needle label then Some 2
+  let rank (label, action) =
+    let texts = label :: palette_action_words action in
+    if List.exists (palette_starts_with ~needle) texts then Some 0
+    else if List.exists (palette_contains ~needle) texts then Some 1
+    else if List.exists (palette_subsequence ~needle) texts then Some 2
     else None
   in
   entries

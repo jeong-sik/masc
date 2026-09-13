@@ -779,6 +779,7 @@ let run_turn
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
       ?direct_resume
+      ?official_task_reference
       ?on_gate_evidence_admitted
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
@@ -1485,6 +1486,7 @@ let run_turn
                       ?cooperative_yield_probe
                       ?official_client_continuation
                       ?official_client_original_turn
+                      ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus

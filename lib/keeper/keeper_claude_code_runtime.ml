@@ -430,7 +430,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
   | Ok _ -> ()
 ;;
 
-let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -523,6 +523,13 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
       | Some { session_id; _ } -> Runtime_claude_code.Resume { session_id }
     in
     let turn_count = claim_plan.turn_count in
+    let* historical_task_message = match official_task_reference with
+      | None -> Ok None
+      | Some reference -> Keeper_official_task_reference.message
+          ~current:official_client_continuation reference
+        |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    let initial_messages = Option.to_list historical_task_message @ initial_messages in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -536,6 +543,9 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
         ~model_input_projection
         ~hooks:(Some hooks)
     in
+    let* () = Keeper_official_task_reference.require_preserved
+      ~reference:historical_task_message prepared.messages
+      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
     let* system_messages, history = project_messages prepared.messages in
     let* goal, images =
       match goal_blocks with
@@ -1161,7 +1171,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                   recovery_detail))))
 ;;
 
-let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1241,7 +1251,7 @@ let run ~accepts_image_input ?required_native_posture ?official_client_continuat
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity_bytes ->
-          run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+          run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
             ~runtime_id
             ~keeper_name

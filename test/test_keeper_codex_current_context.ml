@@ -84,7 +84,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -92,10 +92,10 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation ?official_client_original_turn
+      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
-      ~model_input_projection:None ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
+      ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
       ~event_bus:None ~raw_trace:None ~on_event:None ~config ()
   in
@@ -161,7 +161,8 @@ let test_rejected_context_never_submits_turn () =
 
 let test_cooperative_resume_sends_only_remaining_work_instruction () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
-  let initial = run ~instructions:"Keeper instructions" ~world:"Original work" () in
+  let original_task = "Create the requested artifact and report its path." in
+  let initial = run ~goal:original_task ~instructions:"Keeper instructions" ~world:"Original work" () in
   successful initial;
   let settled = Option.get initial.Keeper_codex_runtime.settled_session in
   let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
@@ -170,7 +171,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let operation_id = Keeper_chat_operation.Operation_id.of_string "cooperative-original" |> require in
   let seed = match Keeper_semantic_execution.create
       ~id:(Keeper_execution_scope_id.direct_operation operation_id)
-      ~input:(`String "original user input") ~sources:[] ~now:1. with
+      ~input:(`String original_task) ~sources:[] ~now:1. with
     | Ok value -> value | Error error -> fail (Keeper_semantic_execution.error_to_string error) in
   let observed : Keeper_semantic_execution.official_client_checkpoint =
     { client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
@@ -180,9 +181,24 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let checkpoint = Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
     ~observed ~expected:steering.Keeper_codex_runtime.settled_session |> require in
   check bool "steering advances admission turn" true (not (String.equal observed.turn_id checkpoint.turn_id));
+  let official_task_reference = Keeper_official_task_reference.create
+    ~operation_id ~message:original_task ~original_turn:observed in
   let before = List.length (read_requests capture) in
   let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
-  successful (run ~official_client_continuation:checkpoint ~official_client_original_turn:observed ~goal
+  let rejected = run ~official_task_reference ~official_client_continuation:checkpoint
+    ~official_client_original_turn:observed ~goal
+    ~model_input_projection:(fun messages -> Ok (List.filter
+      (fun (message : Agent_core.Types.message) -> message.role <> System) messages))
+    ~instructions:"Keeper instructions" ~world:"Newer steering" () in
+  (match rejected.Keeper_codex_runtime.result with
+   | Error (Agent_core.Error.Config (InvalidConfig {field;_})) ->
+     check string "required task mapping cannot be projected away"
+       "official_client_session.task_reference" field
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "a continuation with no historical task mapping was admitted");
+  check int "rejected mapping never submits a model request" before
+    (List.length (read_requests capture));
+  successful (run ~official_task_reference ~official_client_continuation:checkpoint ~official_client_original_turn:observed ~goal
     ~instructions:"Keeper instructions" ~world:"Newer steering" ());
   let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
   check bool "cooperative continuation resumes the original vendor thread" true
@@ -201,6 +217,24 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   check bool "original operation identity accompanies saved turn" true
     (snapshot |> member "original_vendor_turn" |> member "execution_scope"
       = Keeper_execution_scope_id.to_json (Keeper_execution_scope_id.direct_operation operation_id));
+  let historical_task = snapshot |> member "messages" |> items
+    |> List.find_map (fun envelope ->
+      let message = envelope |> member "message" in
+      match message |> member "content_blocks" |> items with
+      | (`Assoc fields) :: _ -> (match List.assoc_opt "text" fields with
+          | Some (`String encoded) -> (match Yojson.Safe.from_string encoded with
+              | `Assoc task_fields as task when List.assoc_opt "schema" task_fields =
+                  Some (`String "masc.official-client-historical-task.v1") -> Some task
+              | _ -> None | exception Yojson.Json_error _ -> None)
+          | Some _ | None -> None)
+      | _ -> None)
+    |> function Some task -> task | None -> fail "original task text has no model-visible mapping" in
+  check string "original admitted text mapped after newer steering" original_task
+    (historical_task |> member "admitted_message" |> text);
+  check string "historical task mapped to original operation" "cooperative-original"
+    (historical_task |> member "operation_id" |> text);
+  check string "task reference retains saved vendor turn" observed.turn_id
+    (historical_task |> member "original_vendor_turn" |> member "turn_id" |> text);
   let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
   check string "the model receives only continuation intent" goal sent
 

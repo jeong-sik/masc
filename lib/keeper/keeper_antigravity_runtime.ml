@@ -377,7 +377,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -491,6 +491,10 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
         ?on_model_input_window_observation
         model_input_projection
     in
+    let* () = match official_task_reference with
+      | None -> Ok ()
+      | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
+          "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -1105,7 +1109,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                   recovery_detail))))
 ;;
 
-let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1125,7 +1129,7 @@ let run ~accepts_image_input ?required_native_posture ?official_client_continuat
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name

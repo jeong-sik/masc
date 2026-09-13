@@ -112,7 +112,7 @@ let catalog =
   ; { word = "run-next"
     ; aliases = []
     ; args = ""
-    ; summary = "put my submitted message first, then stop the observed turn"
+    ; summary = "prioritize my queued message, stop the observed turn, and resume"
     }
   ; { word = "approve"
     ; aliases = []
@@ -132,7 +132,7 @@ let catalog =
   ; { word = "steer"
     ; aliases = []
     ; args = "<message>"
-    ; summary = "interrupt, then run this before queued next turns"
+    ; summary = "submit this first, stop the observed turn, and resume"
     }
   ; { word = "thinking"
     ; aliases = []

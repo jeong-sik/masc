@@ -11609,7 +11609,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Esc stops the current turn; /run-next prioritizes your submitted message."])
+              "Esc stops the current turn and pauses queue consumption; /run-next prioritizes your message and resumes it."])
       in
       chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines)
   | Lane_addons_loaded (generation, result) ->

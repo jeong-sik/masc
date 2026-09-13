@@ -113,7 +113,7 @@ let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
-let with_fixture f =
+let with_fixture ?acquire f =
   let dir = Filename.temp_file "lane-runtime-" ".fixture" in
   Sys.remove dir; Unix.mkdir dir 0o700;
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
@@ -125,6 +125,7 @@ let with_fixture f =
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
               let state, backend = make_backend () in
+              let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
                 f env sw (Workspace.default_config dir) dir state))))))
 
@@ -141,9 +142,8 @@ let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env s
     "primary action completed" (Eio.Promise.await_exn primary);
   check Alcotest.int "blocked observation has not been released" 0
     (Option.value ~default:0 (Hashtbl.find_opt state.stops blocked));
-  Runtime.notify_activity ~config;
-  Runtime.notify_activity ~config;
-  Runtime.notify_activity ~config;
+  List.iter (fun () -> ignore (unwrap (dispatch config Runtime.Observe
+    ["instance_id", `String blocked]))) [();();()];
   check bool "coalesced notifications are visible" true
     (int "coalesced_wakes" (instance config blocked) >= 2);
   detach config blocked;
@@ -303,7 +303,53 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     detach config id;
     await_phase clock config id "detached")
 
+let test_file_activity_preserves_explicit_observation () =
+  with_fixture ~acquire:Lane_addon_sources.acquire (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    let snapshot cursor = `Assoc ["source_id",`String "file";"incarnation",`String "export";
+      "cursor",`String cursor;"complete",`Bool true;"detail",`Null;"observations",`List []] in
+    let replace cursor = write source_path (Yojson.Safe.to_string (snapshot cursor)) in
+    replace "first";
+    let file_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest dir "file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
+    let owned_id = attach config dir "owned-observer" in
+    let sequence id = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence file_id=1 && sequence owned_id=1);
+    let refresh () = Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed in
+    refresh ();
+    await clock (fun () -> int "unchanged_source_refreshes" (instance config file_id)=1);
+    check Alcotest.int "unchanged capture adds no retained output" 1 (sequence file_id);
+    check Alcotest.int "unrelated tool completion does not sample an owned environment" 1 (sequence owned_id);
+    refresh ();
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String file_id]));
+    await clock (fun () -> sequence file_id=2);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=3);
+    write source_path "truncated source";
+    refresh ();
+    await clock (fun () -> sequence file_id=4);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=5);
+    (* A recovered source must be observed even when its bytes equal those
+       before the intervening unavailable capture. *)
+    let retained = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let records = Store.observations retained ~instance_id:file_id |> unwrap in
+    check Alcotest.int "changed, failed and recovered captures are all retained" 5 (List.length records);
+    let sources,_ = List.nth records 3 in
+    check bool "capture failure reaches the worker as incomplete input" true
+      (match sources with `List [`Assoc fields] -> List.assoc_opt "complete" fields=Some (`Bool false) | _ -> false);
+    detach config file_id; detach config owned_id;
+    await_phase clock config file_id "detached";
+    await_phase clock config owned_id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "activity probes exact file captures while explicit observes remain stateful" `Quick
+    test_file_activity_preserves_explicit_observation;
   test_case "direct attach enforces package binding before worker startup" `Quick
     test_direct_attach_validates_package_binding;
   test_case "missing targets refuse while storage failures remain faults" `Quick

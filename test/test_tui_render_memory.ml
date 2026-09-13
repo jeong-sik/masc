@@ -197,6 +197,33 @@ let test_render_memory_body () =
   check bool "memory body rendered" true (!count > 0 && !count <= 20)
 ;;
 
+(* An empty Memory page says what every empty page says for a read that failed
+   and one that has not come back. It had its own words for both, and the
+   failure was "server error -- waiting for retry" when no connection was made. *)
+let test_an_empty_memory_page_uses_the_shared_notes () =
+  let lines state =
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_body ~cols:120 ~budget:30 state
+      ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  let unread = make_state () in
+  check bool "an unread page says it is not loaded" true
+    (contains Types.page_unread_note (lines unread));
+  let failed = make_state () in
+  failed.Types.memory_health_error <- Some "GET failed: connection refused";
+  let failed_body = lines failed in
+  check bool "a failed page says the shared failure note" true
+    (contains Types.page_failed_note failed_body);
+  check bool "and not its own server-error words" false
+    (contains "server error" failed_body)
+;;
+
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
@@ -745,6 +772,8 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "an empty memory page uses the shared notes" `Quick
+            test_an_empty_memory_page_uses_the_shared_notes
         ] )
     ; ( "one place per fact"
       , [ test_case "the title and the row each say one fact" `Quick

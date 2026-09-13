@@ -101,14 +101,6 @@ val markdown_with_closing :
 
 val document_markdown : width:int -> string -> string list
 
-val page_unread_note : string
-
-val page_failed_note : string
-
-val title_missing_reading : error:'a option -> string
-(** What a title says where its counts would go: whether the read was never
-    asked for or was asked for and failed. The title is the row on top, so
-    saying "not loaded" after a failure is the answer that gets read. *)
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->

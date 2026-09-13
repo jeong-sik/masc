@@ -1832,19 +1832,6 @@ let verifier_cli_slot_rejection slot_id =
   | Ok () -> None | Error detail -> Some detail
 ;;
 
-let verifier_exact_slot_admission ~runtime_id =
-  let direct () = match get_runtime_by_id runtime_id with
-    | Some runtime -> verifier_runtime_admission runtime
-    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
-  match Runtime_exact_output_registry.current () with
-  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
-  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
-     | Ok _ | Error _ -> direct ())
-;;
-
 let verifier_api_slot_ready slot_id =
   let state = runtime_state () in
   let candidates = [slot_id] in
@@ -1933,6 +1920,19 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+;;
+
+let verifier_exact_slot_admission ~runtime_id =
+  let direct () = match get_runtime_by_id runtime_id with
+    | Some runtime -> verifier_runtime_admission runtime
+    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
+  match Runtime_exact_output_registry.current () with
+  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
+  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
+     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
+     | Ok _ | Error _ -> direct ())
 ;;
 
 let is_local_runtime_id (id : string) : bool option =

@@ -252,8 +252,7 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     else (Hashtbl.add owners base_path owner; true)) in
   if admitted then (
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
-      (* Fire-and-forget notification: wake only acknowledges queue admission;
-         see the owner loop for execution outcomes. A stopped owner needs no wake. *)
+      (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
       if String.equal event.keepers_dir keepers_dir then ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);

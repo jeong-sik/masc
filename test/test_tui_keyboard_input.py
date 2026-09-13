@@ -12389,7 +12389,9 @@ def fusion_list_detail_interaction(
             # PRESET RUN, and the keeper column took the width the run id used
             # to sit whole in.
             b"RUN",
-            b"Flow: Question",
+            # The selected run's own state under the list; the static
+            # "Flow: Question → …" that opened this row is gone.
+            b"evidence retained",
         ):
             if column not in plain:
                 raise AssertionError(

@@ -164,7 +164,7 @@ let test_load_error_to_string () =
     check bool "missing reported" true
       (Vc.load_error_to_string Vc.Not_configured
        |> String_util.string_contains_substring
-            ~needle:"voice config missing at"));
+            ~needle:"voice config missing:"));
   with_explicit_voice_config "{ this is not json" (fun () ->
     match Vc.load_detailed () with
     | Error (Vc.Invalid _ as error) ->

@@ -507,9 +507,33 @@ let test_resolve_publishes_one_immutable_snapshot_across_domains () =
     check bool "all domains receive the published snapshot" true
       (List.for_all (fun resolution -> resolution == first) rest)
 
+let test_canonical_owner_over_input_alias () =
+  with_temp_dir "config-owner-alias" (fun root ->
+    let owner = Filename.concat root "owner" in
+    Unix.mkdir owner 0o755;
+    let owner = Unix.realpath owner in
+    let alias = Filename.concat root "alias" in
+    Unix.symlink owner alias;
+    Fun.protect ~finally:(fun () -> Unix.unlink alias; Config_dir_resolver.reset ()) (fun () ->
+      let config = Filename.concat owner ".masc/config" in
+      mkdir_p config;
+      write_file (Filename.concat config "runtime.toml") "[runtime]\n";
+      with_env "MASC_CONFIG_DIR" None (fun () ->
+        with_env "MASC_BASE_PATH_INPUT" (Some alias) (fun () ->
+          with_env "MASC_BASE_PATH" (Some owner) (fun () ->
+            Config_dir_resolver.reset ();
+            let locked = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:owner in
+            let resolved = Config_dir_resolver.resolve () in
+            check string "runtime reader uses the exact admitted configuration path"
+              locked (Filename.concat resolved.config_root.path Config_dir_resolver.runtime_toml_filename);
+            check (option string) "operator input remains available for diagnostics"
+              (Some alias) (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
+            check (option string) "host diagnostics retain the operator input alias"
+              (Some alias) (Host_config.from_env ()).base_path_raw)))))
+
 let () =
   run "config_dir_resolver"
-    [
+    [ ("canonical owner", [test_case "symlink input follows admitted owner" `Quick test_canonical_owner_over_input_alias]);
       ( "resolution",
         [
           test_case "env override valid" `Quick test_env_override_valid;

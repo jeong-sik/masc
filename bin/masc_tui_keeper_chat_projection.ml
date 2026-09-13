@@ -986,6 +986,13 @@ let decode_data_event ~request state json =
     required_string ~surface:"Keeper chat event" "type" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
+  let state = match state.terminal, state.reply_details, event_type with
+    | Some Run_finished, Some { turn_outcome = Continuation_checkpoint; _ }, ("RUN_STARTED" | "RUN_ERROR")
+      when state.text_ended ->
+      (* A reconnect can replay several complete checkpoint segments. Only a
+         validated checkpoint boundary admits another run for this request. *)
+      { initial_decode_state with acceptance = state.acceptance }
+    | _ -> state in
   match state.terminal with
   | Some _ -> Error Duplicate_terminal
   | None -> (

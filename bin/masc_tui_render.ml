@@ -9455,7 +9455,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match selected with
          | None -> "  No open tabs • Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab · 1-9:jump"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())

@@ -3947,6 +3947,18 @@ module Browser_lane_view = struct
         | None -> t
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0;
             scene_scope = None; scene_guard = None; load = Idle; read_view = Text_view }
+
+  let select_tab_index index t =
+    match t.reading, index with
+    | None, _ -> t
+    | Some _, index when index < 0 -> t
+    | Some reading, _ ->
+        (match List.nth_opt reading.tabs index with
+         | None -> t
+         | Some tab when Some tab.id = t.selected_tab -> t
+         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None;
+             scene_cursor = 0; scene_scope = None; scene_guard = None; load = Idle;
+             read_view = Text_view })
 end
 
 module Browser_history = struct

@@ -17,6 +17,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | --- | --- |
 | `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
+| `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
 | `J` / `K` | Scroll the observed browser page by one viewport, then refresh the same scene |
 | Page Up / Page Down, Home | Page scroll / top |

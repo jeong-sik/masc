@@ -140,8 +140,8 @@ let clip_format_for_kind (kind : Voice_config.endpoint_kind) =
 ;;
 
 let audio_url_of_file audio_file =
-  match Voice_bridge_core.clip_token_of_path audio_file with
-  | Some token -> Some (Masc_network_defaults.voice_audio_path token)
+  match Voice_bridge_core.clip_of_path audio_file with
+  | Some (token, _format) -> Some (Masc_network_defaults.voice_audio_path token)
   | None -> None
 ;;
 

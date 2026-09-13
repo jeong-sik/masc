@@ -572,6 +572,24 @@ let composer_cursor state ~rows ~cols =
 
 ;;
 
+(* The Overview's Pulse: Keeper turns that finished in each of the last eight
+   fifteen-second windows, oldest first. The finishes are counted from two
+   successive keeper-turn readings, so until one reading has come back there is
+   nothing to count -- and eight flat bars said "nothing finished" for a read
+   that had not been made or had been refused. The shared words say which. *)
+let overview_pulse_text (state : state) ~now =
+  match state.keeper_turns_observed_at with
+  | None -> title_missing_reading ~error:state.keeper_turns_error
+  | Some _ ->
+      let buckets = Array.make 8 0 in
+      List.iter
+        (fun (_, ts) ->
+          let idx = min 7 (int_of_float (Float.max 0.0 (now -. ts) /. 15.0)) in
+          let slot = 7 - idx in
+          buckets.(slot) <- buckets.(slot) + 1)
+        state.keeper_turn_finishes;
+      Chart.sparkline (Array.to_list buckets)
+
 (* The strip above every surface: the Tab ring with the active family
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,

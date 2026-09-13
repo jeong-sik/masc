@@ -379,23 +379,8 @@ let render_overview (state : state) =
         in
         let pulse_suffix =
           if cols >= 92 then
-            let activity_samples =
-              match state.keeper_turn_finishes with
-              | [] -> [ 0; 0; 0; 0; 0; 0; 0; 0 ]
-              | finishes ->
-                  let now = Unix.gettimeofday () in
-                  let buckets = Array.make 8 0 in
-                  List.iter
-                    (fun (_, ts) ->
-                      let delta = max 0.0 (now -. ts) in
-                      let idx = min 7 (int_of_float (delta /. 15.0)) in
-                      let slot = 7 - idx in
-                      if slot >= 0 && slot < 8 then buckets.(slot) <- buckets.(slot) + 1)
-                    finishes;
-                  Array.to_list buckets
-            in
-            let spark = Chart.sparkline activity_samples in
-            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset spark
+            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset
+              (overview_pulse_text state ~now:(Unix.gettimeofday ()))
           else ""
         in
         Printf.sprintf

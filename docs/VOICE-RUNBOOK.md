@@ -5,105 +5,68 @@ status: runbook
 # Voice Runbook
 
 Speech into and out of MASC: which endpoints carry it, what an operator has to
-run locally, and the two calls an external device makes. Everything here was
-measured on one workstation (M3 Max, macOS) on 2026-09-03/04; numbers are from
-that machine and say so where they matter.
+run locally, and the two calls an external device makes. Numbers were measured
+on one workstation (M3 Max, macOS 26), and each section says when.
 
 ## Starting from nothing on a new mac
 
-Measured on macOS 26 / M3 Max, 2026-09-12. A machine that has just been
-unboxed can speak without installing anything, and needs two downloads to
-hear.
+A mac that has just been unboxed can speak without installing anything, and
+needs three installs to hear. Measured on macOS 26 / M3 Max, 2026-09-12 and
+2026-09-13. The fresh-machine steps below were run with only `HOME` and `PATH`
+set (`env -i`), so nothing a workstation already exports — `MASC_BASE_PATH`,
+a Homebrew prefix, a model cache — stood in for the new machine.
 
 ### What is already there
 
 `/usr/bin/say` is in the base system and carries **nine Korean voices** among
-184 total. Nothing in the base system transcribes: macOS dictation is not
-scriptable, so hearing is the half that has to be fetched.
+184. Nothing in the base system transcribes or records to a file masc can
+read: macOS dictation is not scriptable.
 
-### The two downloads
+### What hearing needs
 
 ```
 masc prerequisite-actions whisper
 ```
 
-answers with both steps and asks before running either:
+names every step and runs none until one is chosen:
 
-| Step | What it fetches |
+| Step | What it installs |
 |---|---|
 | `brew install whisper-cpp` | 8.9MB bottle; its `whisper-cli` transcribes a file |
-| the model | `ggml-large-v3-turbo.bin`, 1,624,555,275 bytes |
-| `brew install sox` | 2.4MB installed, 14.4.2; its `rec` makes the file to transcribe |
+| the model | `ggml-large-v3-turbo.bin`, 1,624,555,275 bytes, fetched to a `.part` and moved into place once complete |
+| `brew install sox` | 2.4MB installed, 14.4.2; its `rec` records the file, its `play` sounds the start and end tones |
 
-The third one is easy to leave out and was. Transcribing a file and making one
-are different halves: masc records a capture with sox's `rec` and marks the
-start and end of a recording with sox's `play`. Neither is in the base system.
+None of them starts a server. `say`, `rec` and `whisper-cli` each run once and
+exit, so there is no port to pick and nothing left running.
 
-The tones say nothing when `play` is missing — they are swallowed at debug
-level. The recorder used to say a number. Measured 2026-09-13 by running the
-real capture with `PATH` pointed at an empty directory:
+Transcribing and recording are separate halves. A device that posts audio to
+`POST /api/v1/voice/transcribe` needs only the first two; a person speaking
+into the TUI needs `sox` as well. A capture with no `rec` on `PATH` answers
 
-| Build | What the capture answered |
-|---|---|
-| before | `rec exit 127` |
-| after | `rec is not installed; it comes with sox. `masc prerequisite-actions whisper` names the install.` |
+```
+rec is not installed; it comes with sox. `masc prerequisite-actions whisper` names the install.
+```
 
-The number was not only unhelpful but ambiguous. The process runner the
-recorder used folds every failure before a process exists — not found, a
-denied permission, a working directory that would not open — into exit 127,
-so reading 127 as "not installed" would have given some of those the wrong
-cause. The recorder now uses the runner that returns the refusal as a value,
-names sox only for `Executable_not_found`, and keeps the runner's own sentence
-for everything else. Both runners spawn through the same drain, so the cancel
-grace that keeps the end of a recording is unchanged.
+A new mac has no Homebrew, and two of the steps are Homebrew steps. Choosing
+one answers
 
-`test/voice_capture_without_sox` is that measurement kept: it runs
-`record_and_transcribe` with an empty `PATH`, so no microphone is opened and
-the answer does not depend on whether the machine running it has sox. Putting
-the old recorder branch back turns it red with `rec exit 127`.
+```
+Homebrew is not installed (brew is not on PATH), so nothing ran. Install it from https://brew.sh, then retry.
+```
 
-A device that posts audio to `POST /api/v1/voice/transcribe` needs none of
-this; a person speaking into the TUI does.
+and any other program that is not there is named the same way — `curl is not
+on PATH, so nothing ran.` for the model download.
 
-Neither starts a server. `say` and `whisper-cli` each run once and exit, so
-masc runs them the way it runs `curl` for the endpoints that are addresses:
-there is no port to pick, nothing to start before speaking, and nothing left
-running afterwards. Installing them is still the operator's step, which is what
-`prerequisite-actions` is — it names the commands and asks.
-
-### A fresh mac has no Homebrew
-
-Two of those steps are Homebrew steps, and a machine that has just been
-unboxed does not have Homebrew. Running one with `brew` absent from `PATH`,
-measured 2026-09-13:
-
-| Build | Receipt `reason` |
-|---|---|
-| before | `The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend.` |
-| after | `Homebrew is not installed (brew is not on PATH), so nothing ran. Install it from https://brew.sh, then retry.` |
-
-The first sentence sent the reader to terminal output that did not exist:
-`brew` never started. The same shape for any other program — the model
-download with `curl` absent — now reads `curl is not on PATH, so nothing ran.`
-The install journey prints this reason as it is, so the reader sees it at the
-menu they chose from.
-
-The reason is built from *which way* the step failed and from the argv this
-catalog wrote, never from anything the child printed: a receipt is kept free of
-child diagnostics on purpose, and the failure kind carries no text for them to
-travel in.
-
-Without a `HOME` to build a cache path from, the second step opens the model
+Without a `HOME` to build a cache path from, the model step opens the model
 downloads page instead of offering a command with nowhere to write. On Linux
-both steps are a link: whisper.cpp is built rather than packaged, and naming an
-apt package would install something else or nothing.
+whisper.cpp is built rather than packaged, so its steps are links; `sox` is an
+`apt-get` command on Debian and Ubuntu and a link elsewhere.
 
-### Setup asks for a voice on the way past
+### The install journey asks
 
-A fresh install does not have to be told about any of this. The journey asks
-as step 3, between the model connection and the sandbox. Walked on this
-machine 2026-09-13 in a `TERM=dumb` terminal, which is why the options are
-numbered; on a real terminal they are arrow keys:
+The journey asks as step 3, between the model connection and the sandbox.
+Walked in a `TERM=dumb` terminal, which is why the options are numbered — a
+real terminal uses arrow keys — answering 9, 1, 5:
 
 ```
 3 · Give imp a voice (optional)
@@ -118,108 +81,34 @@ numbered; on a real terminal they are arrow keys:
   9) Yuna — ko_KR
   10) Show every voice on this computer (184)
   11) Stay text only
-```
 
-Nine rows because the terminal says Korean — read from `LC_ALL`,
-`LC_MESSAGES`, `LANG` in that order. An English terminal leads with `en_*`
-and the other 175 are one keystroke away.
-
-Picking 2 wrote eight lines and nothing else:
-
-```toml
-[[voice.tts.endpoints]]
-id = "macos-say"
-kind = "macos_say"
-enabled = true
-
-[voice.tts]
-default_voice = "Flo (한국어(한국))"
-```
-
-The parenthesis is part of the name, kept whole. `masc voice-verify` against
-that workspace answered `108466 bytes of audio`.
-
-The write goes through `masc voice-local-setup`, which is the same writer the
-HTTP route uses — the same revision guard, and the same refusal to publish a
-section the loader would reject.
-
-### Hearing is a second question
-
-It is the half that needs the 1.6GB download, so it is asked only after the
-first is answered:
-
-```
 Let imp hear you too? whisper-cli transcribes locally; the model it reads is 1.6GB.
   1) Speak to imp as well
   2) Speaking only for now
-```
 
-Saying yes opens the prerequisite menu — the same one `masc
-prerequisite-actions whisper` prints. Leaving it without downloading is not a
-failure:
-
-```
 Install or start the selected prerequisite
   1) Install whisper.cpp with Homebrew
   2) Download the whisper model masc asks for
-  3) Refresh detection
-  4) Back to setup choices
+  3) Install sox, which masc records with
+  4) Refresh detection
+  5) Back to setup choices
 
-→ The model file is not there yet, so imp will speak but not listen.
-  Run masc voice-local-setup --model <file> once it is downloaded.
-  voice is configured
+imp can transcribe audio sent to it, but masc records from the microphone with sox's rec, which is not installed. Install sox (masc prerequisite-actions whisper names the command) before speaking into the TUI.
+voice is configured
 ```
 
-Speaking stayed on. The model path is read from the action that downloads it
-rather than spelled here, so the section cannot name a file the download put
-somewhere else.
+Nine rows because the terminal says Korean — read from `LC_ALL`,
+`LC_MESSAGES`, `LANG` in that order. An English terminal leads with `en_*`.
 
-### Walked again with nothing exported, 2026-09-13
+Hearing is configured when `whisper-cli` is on `PATH` and the model file is
+where the download step writes it; the step reads that path from the catalog's
+`writes` field rather than from the download's argv. Otherwise the journey
+says `Listening needs both whisper-cli and a model file, so imp will speak but
+not listen` and configures speaking alone. The `sox` line above appears only
+when `rec` is missing.
 
-The walk above ran in a shell that had `MASC_BASE_PATH` set, which hid two
-defects. Walked a second time with only `HOME` (a fresh directory holding the
-model) and `PATH` (`whisper-cli` and `/usr/bin`, no `rec`), answering 9, 1, 5:
-
-| | before | after |
-|---|---|---|
-| the voice question | **not shown** — the step printed nothing at all | 9 Korean voices, as above |
-| the model the step found | `…/ggml-large-v3-turbo.bin.part` — never exists after a download | `…/ggml-large-v3-turbo.bin` |
-| hearing | always "speak but not listen" | configured |
-| no `rec` on PATH | nothing said | `imp can transcribe audio sent to it, but masc records from the microphone with sox's rec, which is not installed. …` |
-
-**The question was not shown** because the voice listing ran without
-`--base-path`. Every masc command resolves a workspace before it runs, the
-listing included, and this step comes before the one that records a default
-workspace. With nothing to resolve the listing exits 1:
-
-| `voice-local-setup --list-voices` | exit | stdout |
-|---|---|---|
-| no `--base-path`, no `MASC_BASE_PATH`, no recorded default | 1 | 0 bytes |
-| `--base-path` at a directory never initialized | 0 | 14,420 bytes |
-| `--base-path` at an initialized workspace | 0 | 14,420 bytes |
-
-The step discarded stderr and read the empty list as "this computer has no
-voices", so it returned without a word. It now passes the workspace it is
-setting up, and a listing that fails prints its last stderr line instead.
-
-**The model was never found** because the step took curl's `-o` argument as the
-model's location, and the download fetches to a `.part` beside the final path
-and moves it only after curl succeeds. The catalog now publishes the final path
-as `writes` on the download action, and the step reads that. A test reads the
-real binary's catalog as well as the fixture, because the fixture was the copy
-that had kept the old argv while the catalog moved on.
-
-The workspace this walk wrote was then checked end to end:
-
-```
-voice-verify --audio utterance.wav
-  macos-say       answered: 85908 bytes of audio in "Yuna"
-  whisper-local   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
-```
-
-With `rec` on `PATH` the same walk printed no sox line.
-
-### Cancelling here does not cancel setup
+If the voice listing itself fails, the step prints the listing's own last
+error line and moves on; it does not skip the question silently.
 
 `q` at the voice question prints
 
@@ -228,14 +117,126 @@ setup cancelled; existing connections were preserved
 Continuing without voice. Run masc voice-local-setup to turn it on later.
 ```
 
-and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
-optional step cannot fail the thing it is optional to — and by this point the
-workspace and the model connection are already saved.
+and the journey goes on to the sandbox with `runtime.toml` untouched. By this
+point the workspace and the model connection are already saved.
 
-### The whole loop, on a fresh workspace, with nothing running
+The workspace this walk wrote answered:
 
-Walked end to end 2026-09-13 on M3 Max / macOS 26. No server was started, and
-nothing listened on a port at any point.
+```
+masc voice-verify --audio utterance.wav
+  macos-say       macos_say     answered: 85908 bytes of audio in "Yuna"
+  whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
+```
+
+### Outside the journey
+
+```
+masc init --base-path ~/work
+masc voice-local-setup --base-path ~/work --list-voices
+masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+```
+
+Voice is a section of the configuration `masc init` writes. On a directory
+that was never initialized, `voice-local-setup --voice` answers, exit 1 and
+nothing created:
+
+```
+No masc workspace at <base>: <base>/.masc/config/runtime.toml does not exist. Run masc init --base-path '<base>' first, then this again.
+```
+
+`--list-voices` reads `say` and nothing under the workspace, so an
+uninitialized directory is enough — but, like every masc command, it needs a
+base path:
+
+| `voice-local-setup --list-voices` | exit | stdout |
+|---|---|---|
+| no `--base-path`, no `MASC_BASE_PATH`, no recorded default | 1 | 0 bytes |
+| `--base-path` at a directory never initialized | 0 | 14,420 bytes |
+| `--base-path` at an initialized workspace | 0 | 14,420 bytes |
+
+The writer is the one the HTTP setup route uses: the same revision guard, and
+the same refusal to publish a section the loader would reject.
+
+### What the configuration says
+
+After a voice, a model, and one keeper mapped by hand:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+
+[voice.tts.agent_voices]
+alpha = "Eddy (한국어(한국))"
+
+[[voice.stt.endpoints]]
+id = "whisper-local"
+kind = "whisper_cli"
+enabled = true
+
+[voice.stt]
+default_model = "/Users/you/.cache/whisper/ggml-large-v3-turbo.bin"
+```
+
+The speaking section names no `default_model`: `say` takes none, and the
+section needs one only when it also holds a kind that is asked for a model by
+name. The listening section always needs one, and for `whisper_cli` it is a
+**file path** — what `-m` loads. A `base_url` on either command endpoint fails
+the load, naming the endpoint and its kind:
+
+```
+runtime.toml [voice]: stt.endpoints[0].base_url means nothing for whisper_cli, which runs a command
+```
+
+The voice name is the **whole label** `say` prints, parentheses included.
+
+### Which voice a keeper speaks in
+
+A keeper listed under `[voice.tts.agent_voices]` speaks in that voice; every
+other keeper speaks in `[voice.tts] default_voice`. Measured on the
+configuration above:
+
+```
+masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+```
+
+A `default_voice` on the **endpoint** outranks both, for every keeper at that
+endpoint. With `default_voice = "Yuna"` added under `[[voice.tts.endpoints]]`,
+`--agent alpha` answers `85908 bytes of audio in "Yuna"`, and nothing is
+logged.
+
+That field is for a section shared by providers whose voice names differ in
+shape — `say` takes a label, ElevenLabs a 20-character `voice_id`. When another
+provider shares the section, its default belongs to that provider, and
+`voice-local-setup --voice` writes the `say` voice onto the `say` endpoint.
+When every endpoint in the section is `say`, the command writes the section
+default and leaves the endpoint without a voice — on every run, removing one
+an endpoint already carries.
+
+On a section shared by two providers, `agent_voices` therefore does not reach
+the `say` endpoint. There is no per-provider keeper mapping.
+
+`--agent` is the check for a mapping. `say` answers a name it does not have by
+speaking in the system voice, so a mapping to a missing voice still reads
+`answered`, with the same byte count as the default. The voice name in the
+report is what tells them apart:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` (mapped to an installed voice) | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` (mapped to `NoSuchVoice`) | `79758 bytes of audio in "NoSuchVoice"` |
+
+A name that is not in `say -v '?'` is a mapping that never took.
+
+### The whole loop, measured
+
+A fresh workspace, no server started, nothing listening on a port:
 
 ```
 masc init --base-path /tmp/fresh                      0.79s   1,504 lines written
@@ -247,8 +248,7 @@ masc voice-local-setup --base-path /tmp/fresh \
      --model ~/models/whisper/ggml-large-v3-turbo.bin 0.37s   7 lines added
 ```
 
-`voice-local-setup` added 16 lines in total and changed none of the 1,504 that
-`init` wrote. Then, with `alpha` mapped to a Korean voice by hand:
+`voice-local-setup` changed none of the 1,504 lines `init` wrote. Then:
 
 ```
 masc voice-verify --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
@@ -265,132 +265,15 @@ stt  (utterance.wav, 144,276 bytes)
 | speak only | 0.75s |
 | speak and hear | 3.79s |
 
-The sentence came back exactly as it was spoken, including the full stop. The
-transcript is whisper's own; masc passed `-l auto` and did not name a language.
+The sentence came back as spoken, full stop included; masc passed `-l auto`
+and named no language.
 
-**What this does and does not prove.** It is the two halves a voice turn needs
-— a keeper's words become audio in that keeper's voice, and a recording becomes
-text a keeper can be sent. It is not a keeper turn: no model was called and no
-message was appended to a chat. The turn itself is the two HTTP calls under
-[External devices](#external-devices), and the reply comes back as a clip on
-the chat line, announced as whatever container it is (see [The announcement has
-to agree with it](#the-announcement-has-to-agree-with-it)).
+This is the two halves a voice turn needs — a keeper's words become audio in
+that keeper's voice, and a recording becomes text a keeper can be sent. It is
+not a keeper turn: no model was called and nothing was appended to a chat. The
+turn itself is the two HTTP calls under [External devices](#external-devices).
 
-Two downloads stand between a new machine and the hearing half — the 8.9MB
-brew bottle and the 1.6GB model, both named by `masc prerequisite-actions
-whisper`. Speaking needs neither: every number in the `tts` row above came off
-a machine with nothing installed for it.
-
-### Where the chosen voice is written, and why it matters
-
-Walked on a fresh workspace 2026-09-13, `masc init` then
-`masc voice-local-setup --voice Yuna`, then one keeper mapped by hand:
-
-```toml
-[[voice.tts.endpoints]]
-id = "macos-say"
-kind = "macos_say"
-enabled = true
-
-[voice.tts]
-default_voice = "Yuna"
-
-[voice.tts.agent_voices]
-alpha = "Eddy (한국어(한국))"
-```
-
-```
-masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
-masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
-```
-
-The mapped keeper gets its own voice; an unmapped one gets the workspace
-default. That is the order a reader expects, and it is not free — it depends
-on the chosen voice being written to `[voice.tts]` and **not** to the
-endpoint.
-
-A voice on the endpoint outranks `agent_voices`. Measured on the same
-workspace with the one line `default_voice = "Yuna"` added under
-`[[voice.tts.endpoints]]`:
-
-| Endpoint line | keeper `alpha` (mapped to Eddy) | keeper `beta` (unmapped) |
-|---|---|---|
-| present | **Yuna**, 85,908 bytes — the mapping is ignored | Yuna |
-| absent | **Eddy**, 119,044 bytes | Yuna, 85,908 bytes |
-
-Nothing is logged in the first row. The keeper speaks, the bytes are real, and
-the voice is simply not the one that was assigned.
-
-The field exists for a reason and is not going away: a voice name is
-provider-shaped — `say` takes a label, ElevenLabs a 20-character `voice_id` —
-so a workspace that already has a `[voice.tts]` section has a default that
-belongs to the other provider, and adding `say` alongside it has to carry its
-own. So `voice-local-setup` writes the endpoint voice only in that case
-(`Voice_setup.voice_placement`), and a fresh mac — one provider, no section
-yet — gets the section default with per-keeper voices layered over it.
-
-The cost of the remaining case is worth stating plainly: on a workspace with
-two TTS providers, `agent_voices` does not reach the second one. There is no
-per-provider agent mapping. A keeper mapped to an ElevenLabs `voice_id` would
-otherwise have that id handed to `say`, which does not fail on a name it does
-not have — it speaks in the system voice.
-
-### Outside the journey
-
-```
-masc init --base-path ~/work                      # once; voice is a section of what this writes
-masc voice-local-setup --list-voices              # needs no workspace
-masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
-```
-
-On a directory that was never initialized, measured 2026-09-13:
-
-| Build | `voice-local-setup --voice Yuna` answered |
-|---|---|
-| before | exit 1, `runtime.toml could not be read: … Sys_error("…/runtime.toml: No such file or directory")` |
-| after | exit 1, `No masc workspace at …: …/runtime.toml does not exist. Run masc init --base-path '…' first, then this again.` |
-
-Either way nothing is created. Following the second message — `masc init`, then
-the same command — answered `voice is configured`, exit 0.
-
-`--list-voices` reads `say` and nothing under the workspace, so a directory
-that was never initialized is enough. It still needs *a* base path, like every
-masc command: with no `--base-path`, no `MASC_BASE_PATH` and no recorded
-default it exits 1 with an empty stdout. Measured the same day — `--base-path`
-at an uninitialized directory answered 14,420 bytes.
-
-### What the configuration then says
-
-```toml
-[voice.tts]
-default_model = "-"          # say takes no model; the section still needs the key
-default_voice = "Yuna"
-
-[[voice.tts.endpoints]]
-id = "macos-say"
-kind = "macos_say"
-
-[voice.tts.agent_voices]
-alpha = "Yuna"
-beta = "Eddy (한국어(한국))"
-
-[voice.stt]
-default_model = "/Users/you/.cache/whisper/ggml-large-v3-turbo.bin"
-
-[[voice.stt.endpoints]]
-id = "whisper-local"
-kind = "whisper_cli"
-```
-
-`default_model` on the speech-in section is a **file path** here rather than a
-name, which is what the model means to a command that takes `-m`. A blank one
-is refused by name rather than defaulted to a path that may not exist.
-
-A `base_url` on either endpoint is refused when the configuration loads. These
-kinds run a command; an address on one would be read by nothing, and a field
-that is silently dropped reads as a setting that took.
-
-### What it costs, measured
+### What the commands cost
 
 The two commands masc runs, verbatim:
 
@@ -402,39 +285,16 @@ whisper-cli -m ggml-large-v3-turbo -l auto -nt -f clip.wav
   → " 안녕하세요. 키퍼입니다."                          →  5.1s wall
 ```
 
-The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
-whisper.cpp requires, so nothing is converted between the microphone and the
-transcript. And `-l auto` detects Korean, so there is no language to configure.
+The recording masc makes is 16 kHz mono 16-bit WAV, which is what whisper.cpp
+reads, so nothing is converted between the microphone and the transcript.
+Each `whisper-cli` run loads the model file itself; nothing stays resident
+between transcripts.
 
-### Checking one keeper's voice
+### The traps
 
-The section default is not what a keeper speaks in — a keeper mapped under
-`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
-
-```
-masc voice-verify --agent sangsu --json
-```
-
-Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
-exists and `nowhere` to a name that does not:
-
-| Probe | Answer |
-|---|---|
-| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
-| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
-| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
-
-All three say `answered`, because `say` answers a name it does not have by
-speaking in the system voice. The byte counts cannot separate them either —
-the third is the same 79,758 as the default. **The voice name in the report is
-what separates them**, and a name that is not in `say -v '?'` is a mapping
-that never took.
-
-### The trap: a wrong voice name is silent
-
-`say` does not fail on a voice it does not have. It exits 0 and speaks in the
-system voice. Worse, a name that exists in several languages picks one of them
-without saying which:
+**A wrong voice name is silent.** `say` exits 0 on a voice it does not have
+and speaks in the system voice. A name that exists in several languages picks
+one of them without saying which:
 
 | Command | Result on a Korean sentence |
 |---|---|
@@ -442,24 +302,11 @@ without saying which:
 | `say -v Eddy` | 4.7KB — an English voice reading Korean |
 | `say -v "Eddy (한국어(한국))"` | 72KB — the Korean voice |
 
-So a voice name typed from memory is a coin flip. Take it from the list:
+Take the name from `say -v '?'`. Its columns are space-padded, and the locale
+is not always two letters and two letters — `ar_001` is in the list.
 
-```
-say -v '?'
-```
-
-The id to put in the configuration is the **whole printed label**, parentheses
-included. `say` adds them to names that exist in several languages; trimming
-them selects a different language without saying so.
-
-Two shapes in that list will break a parser written from one example: the
-columns are space-padded rather than tabbed, and the locale is not always two
-letters and two letters — `ar_001` is in it.
-
-### The second trap: a wrong container is silent too
-
-`say` picks its encoder from the output file name, and it has no MP3 one. It
-does not say so:
+**A wrong container is silent too.** `say` picks its encoder from the output
+file name and has no MP3 encoder:
 
 | Command | Result |
 |---|---|
@@ -467,28 +314,22 @@ does not say so:
 | `say -o clip.wav "..."` | exits 1, `Opening output file failed: fmt?` |
 | `say --file-format=WAVE --data-format=LEI16@22050 -o clip.wav "..."` | 111KB of 16-bit mono WAVE |
 
-masc names every clip `<token>.<extension>` where the token is also the HTTP
-capability the dashboard fetches it by, so for a while the whole `macos_say`
-path wrote 16 bytes of silence and reported success. Fixed 2026-09-13: the
-container is named in the argv, `Voice_bridge_core.clip_format` carries which
-one a clip is in, and the serve route answers the content type of the format
-it found rather than `audio/mpeg` for everything.
+masc names the container in the argv and writes `say` clips as `.wav`.
+`masc voice-verify` refuses any clip below a believable size rather than
+counting a 0 exit as success.
 
-`masc voice-verify` catches this class on its own — it refuses any clip below
-a believable size rather than counting a 0 exit as success:
+**A command that did not run says why.** For the two command kinds a
+`refused` line names the reason:
 
-```
-{"tts":[{"endpoint_id":"macos-say","kind":"macos_say",
-         "state":"answered","detail":"113528 bytes of audio"}],
- "stt":[{"endpoint_id":"whisper-local","kind":"whisper_cli",
-         "state":"answered","detail":"heard 오늘 음성 설정을 마쳤습니다."}]}
-```
+| `command` points at | `voice-verify` reports |
+|---|---|
+| a name nothing installs | `… is not installed` |
+| a file with no execute bit | `… could not start: spawn of "…" failed: Permission denied` |
+| a program that ran and failed (`whisper_cli`) | `… exit <code>: <the end of its output>` |
 
-3.7s wall for both halves on an M3 Max, 2026-09-13.
-
-A failed command reports the **end** of its output, not the start: whisper-cli
-prints nine lines about which Metal library it loaded before it says which
-model file it could not open.
+A failure reports the **end** of the command's output: `whisper-cli` prints
+nine lines about which Metal library it loaded before it names the model file
+it could not open.
 
 ## Configuration
 
@@ -519,17 +360,13 @@ A configuring surface can set it, which is the point of it living here:
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
 other voice change goes through.
 
-> Until 2026-09-13 this setting had two spellings that never met. The TUI read
-> `[tui] voice_send_on_stop`, which no surface published; `[voice.stt]
-> send_on_stop` was published by `GET /api/v1/voice/config` and by the setup
-> route and read by nothing. Both arrived in the same commit, each side had
-> tests, and both sides passed. A file that still carries the `[tui]` one now
-> gets the default — move the line into `[voice.stt]`.
-
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
-paths refuse by name before any endpoint is asked. Present, each must name its
-`default_model`: a blank one fails the load naming `tts.default_model` or
-`stt.default_model`, since a blank name would reach providers as `model_id ""`.
+paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
+non-blank `default_model`. `[voice.tts]` names one when any of its endpoints is
+a kind asked for a model by name — every kind except `macos_say`; a section of
+`macos_say` endpoints alone needs none. A missing or blank one where it is
+needed fails the load as `tts.default_model is required` or
+`stt.default_model is required`.
 `[voice.capture]` and `[voice.gate]` are read as strictly as an endpoint is: a
 key the section does not know, or a value of the wrong type, fails the load
 naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.
@@ -556,6 +393,12 @@ capture after a change is what refuses, and each says so in its own words:
 `<reason>` is the loader's sentence: the key, the type it wanted, and what it
 got, as `capture.trigger_margin_db must be a number, got string: "6"`.
 
+A reader that has a default to fall back on — the voice for a keeper, the
+tuning, whether to play locally — falls back and logs
+`<what> falling back: voice config is present but unusable: <reason>` on every
+read. A workspace with no voice configuration at all logs nothing: that is not
+a fault.
+
 An endpoint declares a `kind`, and the kind decides the request that gets
 built — not a string match on the URL:
 
@@ -564,6 +407,11 @@ built — not a string match on the URL:
 | `elevenlabs_direct` | `POST <base>/text-to-speech/<voice_id>` | `POST <base>/speech-to-text` | `xi-api-key` |
 | `openai_compat` | `POST <base>/audio/speech` | `POST <base>/audio/transcriptions` | `Authorization: Bearer`, omitted entirely when no `api_key_env` |
 | `voice_mcp` | MCP tool call | — | — |
+| `macos_say` | `say -v <voice> --file-format=WAVE --data-format=LEI16@22050 -o <clip>.wav <text>` | — | — |
+| `whisper_cli` | — | `whisper-cli -m <default_model> -l auto -nt -f <audio>` | — |
+
+The two command kinds take an optional `command` naming the executable and
+refuse a `base_url`.
 
 `voice_tuning` (stability / similarity_boost / style) is ElevenLabs vocabulary
 and is not sent to an `openai_compat` endpoint, which never asked for it.
@@ -585,7 +433,8 @@ may already have played audio, and retrying would speak twice.
 
 No reader consumes one. `call_voice_mcp_endpoint` runs a single attempt, and
 recovery is the endpoint chain. `max_retries` in an endpoint table is rejected
-by the field whitelist, which is correct — see the incident below.
+by the endpoint field whitelist: a key an endpoint does not know fails the
+load, naming it.
 
 ## Local STT
 
@@ -624,36 +473,25 @@ speech is infrequent.
 
 ## Capture thresholds
 
-`record_and_transcribe` decides where a recording starts and ends itself. sox
-records; it no longer judges.
+`record_and_transcribe` decides where a recording starts and ends. sox only
+records: it writes continuously, the level is read straight from the growing
+file ten times a second, and one number drives the trigger, the end, and the
+bar the operator watches.
 
-It used to. The recorder ran with sox's `silence` filter, which took a fixed
-1% of full scale — about −40 dBFS. Measured on one workstation 2026-09-03:
+Three measurements on one workstation (2026-09-03/04) fix the design:
 
 | | |
 |---|---|
 | Noise floor, pass one | −37.2 dB |
 | Noise floor, pass two, minutes later, same room | −26.3 dB |
-| The constant that was the threshold | −40.0 dB |
+| Peak across five probes of one idle room | moved 1.9x |
+| RMS across the same probes | moved 1.2x |
 
-Both floors sit above it, so the filter heard sound continuously: recording
-began at once, the trailing-silence condition never came true, and every
-capture ran to its timeout and handed the transcriber a room.
-
-Making the threshold follow the room fixed that and exposed the next problem.
-The filter compares **peak**, and peak is an unstable basis — across five
-probes of the same idle room a minute apart it moved 1.9x while RMS moved
-1.2x. A threshold derived from it wandered on a room that had not changed.
-
-And nothing could watch it happen. **With the `silence` filter the output file
-stays at zero bytes until the trigger fires** — not even a WAV header, so
-`sox stat` on it fails with "RIFF header not found". A level meter reading
-that file reported nothing for exactly as long as the operator needed to see
-something.
-
-So the decision moved (2026-09-04). The recorder writes continuously, the
-level is read straight from the growing file ten times a second, and one
-number drives the trigger, the end, and the bar the operator watches.
+The room moves by more than 10 dB, so the threshold follows the room rather
+than a constant. Peak wanders on a room that has not changed, so the level is
+RMS. And sox's own `silence` filter is not used: it writes nothing — not even a
+WAV header — until its trigger fires, so there would be no level to show while
+the operator waits.
 
 | | |
 |---|---|
@@ -771,7 +609,7 @@ focused composer row is draft text.
 
 That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
 it: ending a capture hands the draft to the same send path Enter uses. Off by
-default, and described under Configuration below.
+default, and described under Configuration above.
 
 ## External devices
 
@@ -808,6 +646,10 @@ Notes that cost time to rediscover:
   was served locally or fell back.
 
 ## Checking that voice actually answers
+
+If voice behaves oddly, read `GET /api/v1/voice/config` first: it is the one
+surface that tells "not configured" from "configured and broken", and it
+answers 500 with the loader's reason at any time.
 
 `GET /api/v1/voice/config` says whether the configuration loads. It does not say
 whether any endpoint responds, and the fallback chain hides the difference: it
@@ -878,34 +720,6 @@ its own.
 `voice_mcp` endpoints are `not asked` for transcription: that kind synthesizes
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
-
-### "Not installed" means not there
-
-For the two command kinds, a `refused` line names why the command did not
-run. Measured 2026-09-13 with `voice-verify --audio` on a `whisper_cli`
-endpoint whose `command` was pointed at each case in turn:
-
-| `command` points at | Before | After |
-|---|---|---|
-| a name nothing installs | `… is not installed` | `… is not installed` |
-| a file with no execute bit | `… is not installed` | `… could not start: spawn of "…" failed: Permission denied` |
-| the real `whisper-cli` | `heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.` | the same sentence |
-
-The second row was the wrong advice. Reinstalling whisper-cpp does not add an
-execute bit to a file somewhere else, so the operator would follow the message
-and meet it again.
-
-The cause was reading exit 127 as the reason. The process runner these
-commands used returns 127 for a program that is not there, and also for every
-other failure before a process exists — a permission denied, a working
-directory that would not open. The speak, transcribe and voice-listing commands
-now use the runner that returns that refusal as a value, and only
-`Executable_not_found` is called not installed. A child that runs and itself
-exits 127 is reported as an exit with the end of its output, which is what it
-is.
-
-`test/voice_command_refusal` spawns both failing cases for real; putting the
-127 reading back turns the permission case red with `… is not installed`.
 
 ### Setting voice up over HTTP, measured end to end
 
@@ -1012,83 +826,41 @@ fixed one. Both clips planted by hand and fetched, 2026-09-13:
 | a token nobody wrote | `404` |
 | `not-a-token` | `400` |
 
-This is the reading half of the container fix: for a while every clip was
-named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
-of silence) or would have been announced as MP3. A player told the wrong
-type either refuses or plays nothing, and neither says why.
+### The chat line names the same type
 
-### The announcement has to agree with it
-
-The route above is what a clip is **served** as. What a keeper's spoken reply
-is **announced** as is a separate field, written when the reply is appended to
-the chat, and for a while it was the literal `audio/mpeg` for every clip:
+A keeper's spoken reply is appended to its chat with an `audio` record, and
+that record's `mime` is the type the clip route serves for the same file —
+`audio/wav` for a `say` clip, `audio/mpeg` for an HTTP provider's:
 
 ```json
 { "audio": { "token": "9f3c…", "audio_url": "/api/v1/voice/audio/9f3c…",
-             "mime": "audio/mpeg" } }
+             "mime": "audio/wav" } }
 ```
 
-A fresh mac speaks through `say`, which writes WAVE. So the route answered
-`audio/wav` for bytes the same chat line called MP3: two fields about one
-file, disagreeing.
-
-**What this did and did not break, traced 2026-09-13.** The dashboard's
-`<audio>` element is given `src` and no `type`, so the browser picks its
-decoder from the route's `content-type` and plays the clip correctly. The
-field is not decorative either: `normalizeAudioClip` drops a clip that has no
-`mime` at all, and the value it keeps is persisted on the chat line and
-emitted on the SSE payload. So the cost is not a silent player today — it is
-a wrong answer on the wire and in the history to anything that reads it
-instead of fetching: an external device following the SSE stream, an export,
-a player that picks a decoder from the field rather than the response.
-
-The cause is worth naming because it is not a typo. The path already knew the
-container: the helper that turned `…/9f3c.wav` into a token **matched that
-extension and then dropped it**, handing back the token alone. The caller,
-left holding half the answer, filled in the other half with a constant. Both
-halves now come back together (`clip_of_path`), and the record is built in one
-place (`Keeper_chat_store.audio_clip_of_synthesized_file`) rather than field
-by field at the call site.
-
-`test/voice_clip_announcement` writes a real file and checks that what the
-announcement says and what `find_clip` would serve are the same string —
-asserting the literal alone would pass again if only one side moved, which is
-how this started. Planting `mime = "audio/mpeg"` back turns that suite red on
-the WAVE case and nothing else.
-
-A clip under a container masc does not write (`.ogg`, say) is now announced as
-no clip at all, with a line in the log, because the serving route resolves a
-token by trying each container it knows and would answer `404` for it however
-it was labelled. The reply is still recorded as text.
+The dashboard's `<audio>` element plays from the route and does not read the
+field; the field is what the chat history and the SSE payload carry to
+anything that reads them instead of fetching. A synthesized file under a
+container masc does not write is announced as no clip, with a line in the log,
+and the reply is kept as text.
 
 ### Speaking to a keeper, not just probing it
 
-The probe and the turn are different code paths, and for a while only the
-probe worked. `POST /api/v1/voice/transcribe` — the route a browser capture
-goes through — reached for HTTP whatever the endpoint kind was, so the one a
-fresh mac has answered:
-
-```
-{"error":"all enabled STT endpoints failed:
-          whisper-local: voice config endpoint whisper-local missing base_url"}
-```
-
-while `voice-verify --audio` on the same configuration transcribed it fine.
-That is the shape worth naming: **a check that passes about a path that does
-not exist.** Fixed in #35627; measured on that build, same workspace, same
-`probe.wav`:
+`POST /api/v1/voice/transcribe` — the route a browser capture goes through —
+transcribes with the same endpoint kinds `voice-verify` probes, the command
+kinds included. On a workspace whose only STT endpoint is `whisper_cli`, with
+the same `probe.wav`:
 
 ```
 POST /api/v1/voice/transcribe   (raw wav body)
 → {"status":"transcribed","text":"오늘 음성 설정을 마쳤습니다.",
    "language_code":"unknown","endpoint_id":"whisper-local"}
-   6.9s wall (first call — the 1.6GB model is loaded per invocation)
+   6.9s wall
 ```
 
 `language_code` is `unknown` because the command answers with its transcript
-and no such field. whisper-cli was asked to detect the language (`-l auto`)
-and it does, but on its own stderr rather than on the wire. A caller that
-names a language is answered with that name.
+and no such field. whisper-cli detects the language (`-l auto`) but reports it
+on its own stderr, not on the wire. A caller that names a language is answered
+with that name.
 
 ### What each route refuses, measured
 
@@ -1120,27 +892,3 @@ A catalogue request carries the kind and, at most, the **name** of the
 variable holding the provider's key — never a value, because `runtime.toml`
 is committed. It carries no address and no command path: a route cannot check
 where one points, so the read uses the kind's own destination.
-
-## Incident: voice was down for six days and said nothing
-
-`runtime.toml [voice]` carried `max_retries` on both endpoint lists.
-`lib/voice_config/voice_config.ml` arrived on 2026-08-28 with a field whitelist that does not
-accept it, so every voice read failed from that day until 2026-09-03.
-
-It went unnoticed because four readers in `voice_bridge_core` matched
-`Error _` and substituted defaults — the hardcoded agent-voice map, 0.5/0.75/0.0
-tuning, playback off, the `"Sarah"` fallback voice. `Voice_config.load_detailed`
-separates `Not_configured` from `Invalid` precisely so the second reaches an
-operator, and its interface says so; those four collapsed both.
-
-The only surface that reported it was `GET /api/v1/voice/config`, which returns
-500 and no turn calls.
-
-Fixed in #32881: `Invalid` is logged per read, naming which reader fell back.
-`Not_configured` stays silent, since an environment without voice is not a
-fault.
-
-**If voice behaves oddly, read `GET /api/v1/voice/config` first.** It is the
-one surface that distinguishes "not configured" from "configured and broken".
-Then run `masc voice-verify`: the config route answers whether the settings
-load, and that one answers whether anything on the other end responds.

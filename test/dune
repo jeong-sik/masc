@@ -6084,4 +6084,4 @@
 (test
  (name test_tui_queue_inspection)
  (modules test_tui_queue_inspection)
- (libraries alcotest astring masc masc_tui_queue_inspection yojson))
+ (libraries alcotest astring masc masc.keeper_runtime masc_tui_queue_inspection yojson))

@@ -1347,6 +1347,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.keeper_runtime
   masc.voice_wizard
   masc.voice_setup
   masc.workspace_connection
@@ -1658,4 +1659,4 @@
  (name masc_tui_queue_inspection)
  (wrapped false)
  (modules masc_tui_queue_inspection)
- (libraries masc masc.keeper_runtime masc.keeper_chat_operations yojson))
+ (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity yojson))

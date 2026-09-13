@@ -2463,7 +2463,11 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
-  | Goal_phase.Awaiting_confirmation, _ -> (Theme.warn (), "proof passed - operator confirmation required via goal confirmation CLI")
+  (* Named by path: "goal confirmation CLI" is not a command anyone can type.
+     This screen has no key for the step it is asking for (#35996), and the
+     row has to fit the split pane, so the path is the whole instruction. *)
+  | Goal_phase.Awaiting_confirmation, _ ->
+    (Theme.warn (), "proof passed - confirm via scripts/goal-confirmation.py")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;

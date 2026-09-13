@@ -14634,10 +14634,15 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_default_model"):
-            if wanted not in changes:
-                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        if "put_endpoint" not in changes:
+            raise AssertionError(f"the save omitted put_endpoint: {body!r}")
+        # The model is the endpoint's own. Sent as set_default_model it replaced
+        # the model every endpoint already in the section is asked for.
+        if "set_default_model" in changes:
+            raise AssertionError(f"the wizard replaced the section model: {changes!r}")
         endpoint = changes["put_endpoint"].get("endpoint", {})
+        if endpoint.get("model") != "eleven_multilingual_v2":
+            raise AssertionError(f"the endpoint model was lost: {endpoint!r}")
         if endpoint.get("id") != "pty-endpoint":
             raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
         if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":

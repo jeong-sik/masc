@@ -27,6 +27,7 @@ type phase =
 type interrupt =
   | Not_requested
   | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
+  | Admission_paused
   | Signal_declined of string
       (** The server accepted the request and did not signal — no turn in
           flight, or the cancel itself failed. Carries its reason. *)

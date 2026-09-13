@@ -30,7 +30,7 @@ let action ~now_ns (interrupt : Masc_tui_keeper_chat_transcript.interrupt) =
   | Not_requested -> Launch_interrupt
   | Signal_sent { signalled_at_ns; _ } ->
     if Int64.sub now_ns signalled_at_ns <= grace_window_ns then Swallow else Leave
-  | Signal_declined _ | Signal_error _ -> Leave
+  | Admission_paused | Signal_declined _ | Signal_error _ -> Leave
 ;;
 
 (* A duplicate key belongs to the action just sent, even if its switch token

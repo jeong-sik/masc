@@ -610,7 +610,7 @@ let test_interrupt_receipt_is_bound_to_the_exact_request () =
        (response "parent-a")
    with
    | Ok (Interrupt_signal.Signalled _) -> ()
-   | Ok (Interrupt_signal.Not_signalled _) | Error _ ->
+   | Ok Interrupt_signal.Pending_admission_paused | Ok (Interrupt_signal.Not_signalled _) | Error _ ->
      Alcotest.fail "the keeper's own receipt was not accepted");
   match
     Interrupt_signal.decode_interrupt_signal ~expected_request_id:"parent-a"
@@ -631,6 +631,22 @@ let test_observed_interrupt_response_identity () =
   List.iter (fun json -> match decode json with
     | Error _ -> () | Ok _ -> Alcotest.fail "unbound observed receipt accepted")
     [response "successor"; `Assoc ["signalled", `Bool true]; `Null]
+;;
+
+let test_pending_admission_pause_is_not_a_cancellation_claim () =
+  let receipt = `Assoc ["request_id", `String "pending"; "signalled", `Bool false;
+    "paused", `Bool true; "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_interrupt_signal ~expected_request_id:"pending" receipt with
+   | Ok Interrupt_signal.Pending_admission_paused -> ()
+   | _ -> fail "exact pending pause receipt rejected");
+  let missing_pause = `Assoc ["request_id", `String "pending"; "signalled", `Bool false;
+    "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_interrupt_signal ~expected_request_id:"pending" missing_pause with
+   | Error _ -> () | Ok _ -> fail "unconfirmed pause accepted");
+  let observed = `Assoc ["interrupt_token", `String "observed"; "signalled", `Bool false;
+    "paused", `Bool true; "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_observed_interrupt_signal ~expected_token:"observed" observed with
+   | Error _ -> () | Ok _ -> fail "pending receipt accepted for an observed running turn")
 ;;
 
 let test_stop_ack_releases_only_input_after_that_stop () =
@@ -2494,6 +2510,8 @@ let () =
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
+        ; test_case "pending admission pause is not cancellation" `Quick
+            test_pending_admission_pause_is_not_a_cancellation_claim
         ; test_case "stop acknowledgement releases only later input" `Quick
             test_stop_ack_releases_only_input_after_that_stop
         ; test_case "control receipts are per Keeper" `Quick

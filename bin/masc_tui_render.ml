@@ -2669,49 +2669,12 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
-       (* Every phase counts, or the denominator drops the goals waiting on a
-          human and reports a completion share higher than the truth. *)
-       let total_goals =
-         p.pl_rollup.pr_active + p.pl_rollup.pr_verifying
-         + p.pl_rollup.pr_awaiting_confirmation + p.pl_rollup.pr_done
-         + p.pl_rollup.pr_dropped
-       in
-       let progress_pct =
-         if total_goals > 0 then p.pl_rollup.pr_done * 100 / total_goals else 0
-       in
-       let bar_width = if cols < 90 then 8 else 12 in
-       let progress_bar =
-         if total_goals > 0 then
-           Printf.sprintf "[%s] %2d%% (%d/%d)"
-             (Masc_tui_context_bars.ratio_bar ~width:bar_width
-                ~numerator:p.pl_rollup.pr_done ~denominator:total_goals)
-             progress_pct p.pl_rollup.pr_done total_goals
-         else "no goals"
-       in
-       let phase_counters =
-         Printf.sprintf
-           "%s● Exec: %d%s  %s◆ Ver: %d%s  %s◇ Conf: %d%s  %s✓ Done: %d%s  \
-            %s✕ Drop: %d%s"
-           (planning_phase_color Goal_phase.Executing)
-           p.pl_rollup.pr_active Ansi.reset
-           (planning_phase_color Goal_phase.Verifying)
-           p.pl_rollup.pr_verifying Ansi.reset
-           (planning_phase_color Goal_phase.Awaiting_confirmation)
-           p.pl_rollup.pr_awaiting_confirmation Ansi.reset
-           (planning_phase_color Goal_phase.Completed)
-           p.pl_rollup.pr_done Ansi.reset
-           (planning_phase_color Goal_phase.Dropped)
-           p.pl_rollup.pr_dropped Ansi.reset
-       in
-       let rollup =
-         Printf.sprintf "  Goals: %s%s%s %s  %s│%s  %s"
-           Ansi.bold (string_of_int total_goals) Ansi.reset
-           progress_bar (Theme.recede ()) Ansi.reset phase_counters
-       in
-       let backlog_sep =
-         Printf.sprintf " %s%s%s " (Theme.recede ())
-           Masc_tui_theme.Glyph.breadcrumb_sep Ansi.reset
-       in
+       let rollup = planning_rollup_row ~cols p.pl_rollup in
+       (* The backlog counts are a list. [▸] joined them -- the mark the tab
+          strip puts on the surface you are on -- so "todo ▸ claimed" read as a
+          path, and claimed, the one count with no glyph, looked like it had
+          one. *)
+       let backlog_sep = Printf.sprintf " %s·%s " (Theme.recede ()) Ansi.reset in
        let backlog =
          let items =
            [ ("todo", p.pl_backlog.pb_todo, Masc_tui_theme.Glyph.task_todo ^ " todo")
@@ -2736,7 +2699,7 @@ let render_planning_list (state : state) =
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
               Printf.sprintf "  Net change since %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                (Terminal_text.single_line first.pl_generated_at)
+                (Terminal_text.clock_timestamp first.pl_generated_at)
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));

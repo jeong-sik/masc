@@ -1850,6 +1850,41 @@ let planning_phase_color = function
 
 ;;
 
+(* The goal count, the completed share and one counter per phase. With no goals
+   the row read "Goals: 0 no goals  │  ● Exec: 0  ◆ Ver: 0  ◇ Conf: 0  ✓ Done: 0
+   ✕ Drop: 0" -- the count, a sentence saying the count, and five zeros -- over a
+   list that says "(no goals)" itself. The count is the whole reading there. *)
+let planning_rollup_row ~cols (rollup : planning_rollup) =
+  let total_goals =
+    (* Every phase counts, or the denominator drops the goals waiting on a
+       human and reports a completion share higher than the truth. *)
+    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+    + rollup.pr_done + rollup.pr_dropped
+  in
+  let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
+  if total_goals = 0 then count
+  else
+    let bar_width = if cols < 90 then 8 else 12 in
+    let progress_bar =
+      Printf.sprintf "[%s] %2d%% (%d/%d)"
+        (Masc_tui_context_bars.ratio_bar ~width:bar_width
+           ~numerator:rollup.pr_done ~denominator:total_goals)
+        (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
+    in
+    let counter phase glyph name value =
+      Printf.sprintf "%s%s %s: %d%s" (planning_phase_color phase) glyph name value
+        Ansi.reset
+    in
+    Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
+      (String.concat "  "
+         [ counter Goal_phase.Executing "●" "Exec" rollup.pr_active
+         ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
+         ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
+             rollup.pr_awaiting_confirmation
+         ; counter Goal_phase.Completed "✓" "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped "✕" "Drop" rollup.pr_dropped
+         ])
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title

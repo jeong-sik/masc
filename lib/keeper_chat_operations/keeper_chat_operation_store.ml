@@ -955,7 +955,7 @@ let gate_state = function
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _); _}); _}
   | None -> None
 
-let claimable_queued_with_db db ~now =
+let blocked_queued_scopes db ~now =
   let* executions = semantic_rows db ~active_only:true in
   let blocked = List.filter_map (fun (execution : Semantic.t) ->
     match gate_state (Some execution) with
@@ -973,6 +973,11 @@ let claimable_queued_with_db db ~now =
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
         | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
+  Ok blocked
+;;
+
+let claimable_queued_with_db db ~now =
+  let* blocked = blocked_queued_scopes db ~now in
   with_statement db ~operation:"read claimable original operations"
     ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
     (fun statement ->
@@ -1213,6 +1218,52 @@ let move_queued_to_end store ~operation_id =
        | Idempotency_conflict _
        | Integrity_error _ ),
        _ -> Error error)
+;;
+
+let move_queued_to_front store ~now ~operation_id =
+  let* () = ensure_open store in
+  let* () = with_transaction store (fun () ->
+    let* target = operation_or_unknown store.db operation_id in
+    let* () = match target.state with
+      | Operation.Queued -> Ok ()
+      | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+      | Operation.Cancelled _ -> Error (Not_queued operation_id) in
+    let* blocked = blocked_queued_scopes store.db ~now in
+    let* () = if List.exists (Keeper_execution_scope_id.equal
+        (Keeper_execution_scope_id.direct_operation operation_id)) blocked then
+      Error (Invalid_input "message is waiting for approval, reconciliation, or provider retry; priority cannot make it runnable")
+      else Ok () in
+    let* queued = with_statement store.db ~operation:"read queue order"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
+      (fun stmt ->
+        let rec read rows =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev rows)
+          else if rc = Sqlite3.Rc.ROW then
+            let* row = decode_operation stmt in read (row :: rows)
+          else Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
+        read []) in
+    match queued with
+    | first :: _ when Id.equal first.operation_id operation_id -> Ok ()
+    | _ ->
+      (* Sequences remain non-negative and unique. Moving every other queued
+         row to fresh positions preserves their order without touching running
+         work, input, ownership, or operation identities. *)
+      let rec move = function
+        | [] -> Ok ()
+        | (row : Operation.t) :: rest when Id.equal row.operation_id operation_id -> move rest
+        | row :: rest ->
+          let* sequence = next_sequence store.db in
+          let* () = with_statement store.db ~operation:"prioritize queued operation"
+            "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+            (fun stmt ->
+              let* () = bind_int64 store.db stmt ~operation:"bind sequence" 1 sequence in
+              let* () = bind_text store.db stmt ~operation:"bind operation" 2 (Id.to_string row.operation_id) in
+              let* () = expect_done store.db stmt ~operation:"move queue position" in
+              if Sqlite3.changes store.db = 1 then Ok () else Error (Not_queued row.operation_id)) in
+          move rest in
+      move queued) in
+  operation_or_unknown store.db operation_id
 ;;
 
 type semantic_error =
@@ -1576,7 +1627,14 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
                  ~input ~sources:[] ~now |> Result.map_error (fun e -> Invalid_input (Semantic.error_to_string e)) in
              let* ready = semantic_transition ~now Semantic.Confirm_sources created in
              semantic_transition ~now Semantic.Begin_execution ready) in
-      let* suspended = semantic_transition ~now (Semantic.Suspend_gate_reconciliation (binding, diagnostic)) execution in
+      (* This is admission of a caller-supplied binding. Refusing its scope,
+         obligations, or diagnostic does not mean the stored execution is corrupt. *)
+      let* suspended = Semantic.apply ~now
+          (Semantic.Suspend_gate_reconciliation (binding, diagnostic)) execution
+        |> Result.map_error (function
+          | Semantic.Invalid_transition _ as error -> Invalid_input (Semantic.error_to_string error)
+          | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
+            Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
       requeue_runtime_retry_with_db store.db operation) in

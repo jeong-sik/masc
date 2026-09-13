@@ -77,6 +77,32 @@ let duration_text = Masc_tui_message_layout.span_text
 
 let elapsed_text ~now started_at = duration_text (now -. started_at)
 
+(* The same running turn must remain visible while a submitted chat waits
+   behind it. No ETA can be inferred from the turn's elapsed age. *)
+let chat_activity ~now ~keeper_name ~error rows =
+  let stale = match error with None -> [] | Some detail -> ["Activity unavailable: " ^ detail] in
+  match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
+    String.equal row.ktr_keeper_name keeper_name) rows with
+  | None -> stale
+  | Some { ktr_state = Tui_decode.Keeper_turn_idle; _ } -> stale
+  | Some { ktr_state = Tui_decode.Keeper_turn_unavailable detail; _ } ->
+    stale @ ["Current turn unavailable: " ^ detail]
+  | Some { ktr_state = Tui_decode.Keeper_turn_running { lane; started_at_unix; preview }; _ } ->
+    let status = match preview with
+      | None -> "progress has not been reported"
+      | Some preview -> preview.Tui_decode.ktp_status_text
+    in
+    let text = match preview with
+      | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
+        ["Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail]
+      | Some _ | None -> []
+    in
+    let observed = match error with None -> "Current" | Some _ -> "Last observed" in
+    stale @ [Printf.sprintf "%s %s turn · %s · %s"
+      observed (lane_word lane) (elapsed_text ~now started_at_unix)
+      (Tui_decode.sanitize_terminal_text status)] @ text
+;;
+
 let is_running (row : Tui_decode.keeper_turn_row) =
   match row.ktr_state with
   | Tui_decode.Keeper_turn_running _ -> true
@@ -96,8 +122,17 @@ let is_running (row : Tui_decode.keeper_turn_row) =
     the mark sat on the still glyph — "running, but this surface does not
     repaint fast enough to animate" — while the answer was arriving on the
     screen in front of it. *)
-let anything_running ~turns ~live_transcript ~lanes =
-  List.exists is_running turns
+(* [awaiting_detail_read] is a wait with a number on it: the Keeper detail tabs
+   draw how long they have been blank, and those seconds are honest only because
+   something redraws them. A turn, a live transcript and a lane each do that
+   already; a detail read that the operator is watching does not move any mark,
+   so without this the counter was computed once on the keypress that opened the
+   tab and then not again until the refresh cadence came round -- with
+   --refresh 10, a six-second read drew "(loading…)" and then the answer, and
+   the elapsed notice never appeared at all. *)
+let anything_running ~turns ~live_transcript ~lanes ~awaiting_detail_read =
+  awaiting_detail_read
+  || List.exists is_running turns
   || live_transcript
   ||
   match lanes with

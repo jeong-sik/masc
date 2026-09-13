@@ -69,7 +69,7 @@ rejected."""
 [[params]]
 name = "task_id"
 type = "string"
-description = "Optional assigned Task to deliberate for. The runtime captures its actual title, description and linked Goal criteria before starting the panel."
+description = "Optional assigned Task to deliberate for. If neither task_id nor goal_id is supplied, the runtime selects your current active Task from authoritative ownership. Its title, description, completion contract and linked Goal criteria are captured before starting the panel; they are separate from your summary."
 [[params]]
 name = "goal_id"
 type = "string"

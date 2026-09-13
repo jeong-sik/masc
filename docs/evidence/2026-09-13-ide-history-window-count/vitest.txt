@@ -1,0 +1,10 @@
+
+ RUN  v4.1.5 /private/tmp/masc-ide-history-window-count-20260913/dashboard
+
+(node:80093) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  03:30:44
+   Duration  4.90s (transform 1.95s, setup 332ms, import 2.42s, tests 1.29s, environment 466ms)

@@ -12597,13 +12597,13 @@ let render_config_models (state : state) =
           see, and [e] would act on a row that is off screen. *)
        let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
-       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        let scroll =
          if cursor_line < scroll then cursor_line
          else if cursor_line >= scroll + table_height
          then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
+       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)
        for i = 0 to table_height - 1 do

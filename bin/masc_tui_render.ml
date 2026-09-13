@@ -13755,7 +13755,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:"1:timeline  2:links  3:installations  4:workers  5:rows  Tab:area  j/k:select  J/K:scroll  r:refresh  Esc:back"
     ~body:(fun ~budget c ->
-      match Masc_tui_lane_addons.visual_lines ~height:budget ~width:(framed_inner_width cols) view with
+      match Masc_tui_lane_addons.visual_lines
+        ~failed_note:Masc_tui_types.page_failed_note
+        ~height:budget ~width:(framed_inner_width cols) view with
       | Some lines ->
           let scroll = max 0 (min view.scroll (List.length lines-budget)) in
           lines |> List.filteri (fun i _ -> i>=scroll && i<scroll+budget)

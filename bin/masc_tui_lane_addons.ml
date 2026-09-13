@@ -297,7 +297,7 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
-let visual_lines ~height ~width view =
+let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
   let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
   let line ?(active=false) ?(tone=Normal) text = {active;cells=[tone,fit width text]} in
@@ -325,7 +325,7 @@ let visual_lines ~height ~width view =
       | None ->
           [line ~tone:(if Option.is_some view.error then Attention else Dim)
              (if Option.is_some view.error then
-                Masc_tui_types.page_failed_note
+                failed_note
               else "No reading yet · r:refresh")]
       | Some snapshot ->
         match view.focus with
@@ -479,8 +479,8 @@ let visual_lines ~height ~width view =
         @ (match view.receipt with None -> [] | Some json ->
             List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
 
-let lines ?(height=24) ~width view =
-  match visual_lines ~height ~width view with
+let lines ?(height=24) ?(failed_note = "") ~width view =
+  match visual_lines ~failed_note ~height ~width view with
   | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
@@ -502,7 +502,7 @@ let lines ?(height=24) ~width view =
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
     | None -> [if view.loading then "Refreshing…" else
-        if Option.is_some view.error then Masc_tui_types.page_failed_note
+        if Option.is_some view.error then failed_note
         else "No reading yet · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"

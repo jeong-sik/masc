@@ -131,7 +131,9 @@ let already_published ~base_path ~request_identity registry =
            let* proposal = Proposals.read ~base_path ~id |> Result.map_error store_error in
            (match proposal with
             | None -> find rest
-            | Some proposal when Yojson.Safe.equal (Proposals.to_json proposal) expected -> Ok true
+            | Some proposal when Yojson.Safe.equal (Proposals.to_json proposal) expected ->
+              let* () = Workspace_memory_publication.publish ~base_path ~proposal_id:id in
+              Ok true
             | Some _ -> Error "saved proposal differs from the successful exact-run output")
          | _ -> find rest)
       | _ -> find rest
@@ -218,6 +220,8 @@ let run ~base_path ~prepare =
          let envelope = Context.proposal_json context raw in
          let* id, stored = Domain_pool_ref.submit_io_or_inline (fun () -> Proposals.submit ~base_path envelope)
            |> Result.map_error store_error in
+         let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+           Workspace_memory_publication.publish ~base_path ~proposal_id:id) in
          Ok (id, Proposals.to_json stored, slot) in
        match result with
        | Error detail -> fail detail

@@ -2916,12 +2916,18 @@ module Browser_lane_view = struct
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ -> None
+  (* The browser a read goes to, when there is one. Live with none chosen has
+     no browser to name; this used to answer "choose browser", and every row
+     that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
-    | Automation, _ -> "browser"
-    | Live, Some client -> browser_name client.browser
-    | Live, None -> "choose browser"
+    | Automation, _ -> Some "browser"
+    | Live, Some client -> Some (browser_name client.browser)
+    | Live, None -> None
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
+    match browser_label t with
+    | Some browser ->
+      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
+    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
@@ -6232,6 +6238,14 @@ let apply_clamped_scroll (state : state) = function
    works the split out from it. *)
 let changes_preview_keep_rows = 5
 
+(* The renderer and navigation must agree when a valid diff replaces the list.
+   A stale index after refresh falls back to the current list. *)
+let opened_file_change (state : state) =
+  match state.changes_diff_row, state.changes with
+  | Some row, Some snapshot -> List.nth_opt snapshot.Tui_decode.fcs_changes row
+  | Some _, None | None, (Some _ | None) -> None
+
+
 (* The over-budget note and its divider, which the Changes drawing puts above
    the list. Chrome the drawing adds conditionally has to be counted here too
    -- a bound worked out from fewer chrome rows than the frame uses lets the
@@ -6394,13 +6408,24 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+(* Memory already trims its filter; count and cursor search must use that
+   same query. Other surfaces keep their literal-space search semantics. *)
+let surface_search_query surface query =
+  match surface with Memory -> String.trim query | _ -> query
+
+let memory_fact_search_text = function
+  | Memory_row_fact f ->
+      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+      ^ f.Tui_decode.mf_origin
+  | Memory_row_source_fact f ->
+      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+  | Memory_row_invalidation f ->
+      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+
 let memory_overview_query (state : state) =
     match state.search with
-    | Some q -> String.lowercase_ascii (String.trim q)
-    | None ->
-        if String.length (String.trim state.search_last) > 0 then
-          String.lowercase_ascii (String.trim state.search_last)
-        else ""
+    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
+    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
 
 let visible_memory_keepers (state : state) =
@@ -6545,25 +6570,15 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.trim q
-        | None -> String.trim state.search_last
+        | Some q -> surface_search_query Memory q
+        | None -> surface_search_query Memory state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
         else
           List.filter
             (fun row ->
-              let text =
-                match row with
-                | Memory_row_fact f ->
-                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-                    ^ f.Tui_decode.mf_origin
-                | Memory_row_source_fact f ->
-                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
-                | Memory_row_invalidation f ->
-                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
-              in
-              palette_contains ~needle:query text)
+              palette_contains ~needle:query (memory_fact_search_text row))
             all_rows
       in
       (match state.memory_facts_sort with
@@ -6826,6 +6841,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (List.length (memory_fact_rows state))
       else
         Some (memory_overview_scrolled state)
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some
         { sc_count =
@@ -7023,7 +7039,32 @@ let conversation_urls (state : state) : string list =
 
 
 
-let surface_row_texts (state : state) : surface -> string list option = function
+let code_file_search_focused (state : state) =
+  not state.repository_changes_open
+  && state.code_focus_file = Right_pane
+  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+
+(* The Git changes overlay before the surface it is drawn over. It draws over
+   three surfaces -- [scrolled_surface_rows] names them -- and an arm per
+   surface answered for two of them: over the Keepers roster the rows here
+   were keeper names, so a settled query counted the hidden roster and [n]
+   stepped the keeper cursor instead of landing on a matching path.
+   [goto_surface] closes the overlay on any move to another surface, which is
+   what makes the flag alone enough to say it is on screen. Its diff replaces
+   the list with text, and text has no row for a cursor to name. *)
+let surface_row_texts (state : state) : surface -> string list option =
+ fun surface ->
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         Option.map
+           (fun s ->
+             List.map (fun row -> row.Tui_decode.rc_path)
+               s.Tui_decode.rcs_changes)
+           state.repository_changes)
+  else
+  match surface with
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Keepers Keeper_detail when state.context_inspector_open ->
@@ -7080,18 +7121,19 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.vs_requests)
           state.verification
   | Harness ->
-      Option.map
+      if Option.is_some state.harness_detail then None
+      else Option.map
         (fun s ->
           List.map
             (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
             s.Tui_decode.hs_verdicts)
         state.harness
   | Repositories ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
+      (* Workspace Activity replaces the repository list with one repository's
+         own rows and its own cursor, and its handler takes every key the
+         surface has, "/" and n and N among them. The rows here are the list
+         behind it, which a settled query would then count and report. *)
+      if Option.is_some state.workspace_activity_repo then None
       else
         Option.map
           (fun s ->
@@ -7102,26 +7144,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
           state.repositories
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        (match memory_fact_rows state with
-         | [] -> None
-         | rows ->
-             Some
-               (List.map
-                  (function
-                    | Memory_row_fact fact ->
-                        fact.Tui_decode.mf_category ^ " "
-                        ^ fact.Tui_decode.mf_claim
-                    | Memory_row_source_fact fact ->
-                        fact.Tui_decode.msf_path ^ " "
-                        ^ fact.Tui_decode.msf_claim
-                    | Memory_row_invalidation row ->
-                        row.Tui_decode.mi_source_path ^ " "
-                        ^ row.Tui_decode.mi_reason)
-                  rows))
-      else
         Option.map
           (fun _ ->
-            List.map (fun k -> k.Tui_decode.mkh_keeper_id)
+             let rows = memory_fact_rows state in
+             (* The exact filter projection, including field order: a phrase
+                crossing a field boundary must remain countable and reachable. *)
+             List.map memory_fact_search_text rows)
+          state.memory_facts
+      else
+        Option.map
+          (* Keeper id and the state label, which is the pair
+             [visible_memory_keepers] keeps a row for. Leaving the label out
+             kept rows on screen that the search could neither count nor
+             reach. *)
+          (fun _ ->
+            List.map
+              (fun k ->
+                k.Tui_decode.mkh_keeper_id ^ " "
+                ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
@@ -7133,16 +7173,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.cs_connectors)
         state.connectors
   | Runtime ->
+      if Option.is_some state.runtime_detail_target then None
+      else
       Option.map
         (fun s ->
-          List.map
-            (fun c ->
-              c.Tui_decode.rcr_lane_id ^ " "
-              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
-            s.Tui_decode.rss_candidates)
+          match state.runtime_mode with
+          | Runtime_lanes ->
+              List.map
+                (fun c ->
+                  c.Tui_decode.rcr_lane_id ^ " "
+                  ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_candidates
+          | Runtime_all ->
+              List.map (fun runtime -> runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      Option.map
+      if Option.is_some state.system_logs_detail_seq then None
+      else Option.map
         (fun _ ->
           visible_system_log_entries state
           |> List.map
@@ -7152,19 +7200,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
               ^ " " ^ e.Tui_decode.sl_message))
         state.system_logs
   | Code ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
-      else
-      (* The Git changes overlay is a row list of its own. Otherwise, with a
-         file focused (and no file overlay over it), "/" searches the file's
-         lines; the tree remains the default search list. *)
-      if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then
+      (* With a file focused (and no file overlay over it), "/" searches the
+         file's lines; the tree remains the default search list. The Git
+         changes overlay is answered above, before any surface. *)
+      if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
@@ -7253,6 +7292,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
                          evidence.Tui_decode.fhe_post_id ^ " "
                          ^ evidence.Tui_decode.fhe_title)
                    entries)))
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (
       match state.changes with
       | None -> None
@@ -7276,6 +7316,48 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None
+
+(* The fetched file's rows are replaced when content changes, like the lists
+   behind [chat_rows_memo]. Keep one derived reading keyed by that identity
+   and the query, not by the pane or path: a repaint reuses it, while a refresh
+   of the same file must recount. Other surfaces retain their live projection. *)
+type code_search_count_memo =
+  { csc_rows : (string * string) list array
+  ; csc_query : string
+  ; csc_count : int
+  }
+
+let code_search_count_memo : code_search_count_memo option ref = ref None
+
+let code_file_search_count ~query rows =
+  match !code_search_count_memo with
+  | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->
+      memo.csc_count
+  | Some _ | None ->
+      let count =
+        Array.fold_left (fun count segments ->
+          let text = String.concat "" (List.map fst segments) in
+          if palette_contains ~needle:query text then count + 1 else count) 0 rows
+      in
+      code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
+      count
+
+let surface_search_count (state : state) surface ~query =
+  let query = surface_search_query surface query in
+  match surface with
+  | Code when code_file_search_focused state ->
+      (match Masc_tui_fetched.current state.code_file with
+       | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | None -> None)
+  | _ ->
+      Option.map
+        (fun rows ->
+          if String.equal query "" then 0
+          else List.fold_left (fun count text ->
+            if palette_contains ~needle:query text then count + 1 else count) 0 rows)
+        (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
 

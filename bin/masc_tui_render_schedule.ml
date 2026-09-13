@@ -270,7 +270,7 @@ let board_read_box_rows = 8
 
 (* The key footer the surface writes under that box. It was not counted here,
    so the box filled the surface on its own and the footer landed on the row
-   the composer owns -- z:wide, Y:copy link, c:reply and left/Esc:back were
+   the composer owns -- z:wide, Y:copy link, c:reply and Left/Esc:back were
    drawn every frame and reached the screen in none of them. *)
 let board_read_footer_rows = 1
 

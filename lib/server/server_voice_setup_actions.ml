@@ -41,9 +41,15 @@ let fields = function
               (String.concat ", " (List.map (fun key -> Printf.sprintf "%S" key) duplicates))))
   | _ -> Error (Invalid_request "expected a JSON object")
 
+(* Trimmed, because every reader of these values compares them trimmed and
+   none of them is free text: ids, section names, model and voice names, a
+   revision. Returning the raw string made padding a per-caller problem, and
+   one caller forgot -- [remove_endpoint] handed the padded id to the
+   exact-match TOML editor, which matched nothing while the response said
+   applied. *)
 let string_field ~what fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
   | Some _ | None ->
     Error (Invalid_request (Printf.sprintf "%s needs a non-empty %S" what key))
 
@@ -176,12 +182,11 @@ let endpoint_of_json json =
   let what = "an endpoint" in
   let* fields = fields json in
   let* () = no_unknown_fields ~what ~allowed:endpoint_allowed_fields fields in
-  let* raw_id = string_field ~what fields "id" in
   (* [Voice_config.select_endpoint] trims a requested id before comparing, so an
      id stored with padding could never be selected again -- not even with the id
-     the observation handed back. Stored trimmed, which is the form every reader
-     compares. *)
-  let id = String.trim raw_id in
+     the observation handed back. [string_field] trims, which is the form every
+     reader compares. *)
+  let* id = string_field ~what fields "id" in
   let* kind_text = string_field ~what fields "kind" in
   let* kind = kind_of_string kind_text in
   let* enabled = optional_bool ~what fields "enabled" in

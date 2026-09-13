@@ -541,12 +541,13 @@ let acquire_pid_lock port =
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
-  | Server_startup_takeover.Base_path_already_owned { pid } ->
-      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
+  | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
+      let detail =
+        Server_startup_takeover.base_path_contention_message
+          ~base_path ~lock_path owner
+      in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
-           owner base_path);
+        ("[FATAL] " ^ detail);
       exit 1
   | Server_startup_takeover.Base_path_rejected rejection ->
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
@@ -1871,6 +1872,165 @@ let voice_verify_cmd =
               configuration that does not load is reported as the loader's own sentence."
          ])
     Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
+(* Turning voice on without a server running.
+
+   The setup journey runs before there is anything to talk to over HTTP, and
+   the two command kinds need no server of their own, so this writes the
+   section through the same writer the route uses -- same revision guard, same
+   refusal to publish a section the loader would reject.
+
+   It writes only what it was asked for: listing is a separate mode because the
+   journey has to show the voices before it can ask which one. *)
+let voice_local_endpoint ~id ~kind =
+  { Voice_config.id
+  ; kind
+  ; base_url = None
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = None
+  ; enabled = true
+  ; timeout_seconds = None
+  ; default_voice = None
+  ; command = None
+  }
+
+let voice_local_voices_exit () =
+  match
+    Masc.Voice_bridge.list_voices
+      (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+  with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok voices ->
+    print_endline
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "voices", `List (List.map Masc.Voice_bridge.catalogue_voice_json voices) ]));
+    0
+
+let voice_local_setup_exit base_path speak_voice hear_model =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  let refuse message = prerr_endline message; 1 in
+  match Voice_setup.observe ~runtime_config_path with
+  | Error error -> refuse (Voice_setup.error_message error)
+  | Ok (revision, existing) ->
+    let standalone_path = Voice_config.voice_config_file_in base_path in
+    let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
+    let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
+    if Option.is_none existing && Sys.file_exists standalone_path then
+      refuse
+        (Printf.sprintf
+           "Voice settings are read from %s. Configure voice in that active file; \
+            local setup will not create a TOML section that overrides it."
+           standalone_path)
+    else if Option.is_some hear_model
+      && Option.exists
+           (fun (config : Voice_config.stt_config) -> List.exists
+             (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
+             config.Voice_config.endpoints)
+           stt then
+      refuse
+        "Existing STT endpoints share a provider model. Adding a local model file \
+         would change their model, so nothing was written. Configure the STT section explicitly."
+    else if Option.is_some speak_voice
+      && Option.exists
+           (fun (config : Voice_config.tts_config) -> List.exists
+             (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
+               && endpoint.Voice_config.kind <> Voice_config.Macos_say)
+             config.Voice_config.endpoints)
+           tts then
+      refuse "The endpoint macos-say already names another provider; nothing was written."
+    else
+      let speaking =
+        match speak_voice with
+        | None -> []
+        | Some voice ->
+          let endpoint =
+            { (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+              with default_voice = Some voice }
+          in
+          [ Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) ]
+          @ (match tts with
+             | Some _ -> []
+             | None -> [ Voice_setup.Set_tts_default_voice voice ])
+      in
+      let hearing =
+        match hear_model with
+        | None -> []
+        | Some model ->
+          [ Voice_setup.Put_endpoint
+              ( Voice_setup.Stt
+              , voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli )
+          ; Voice_setup.Set_default_model (Voice_setup.Stt, model)
+          ]
+      in
+      match speaking @ hearing with
+      | [] ->
+          prerr_endline
+            "Nothing to set up: pass --voice to speak, --model to listen, or both.";
+          2
+      | changes ->
+          match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
+          | Error error -> refuse (Voice_setup.error_message error)
+          | Ok () ->
+              print_endline "voice is configured";
+              0
+
+let voice_local_setup_cmd =
+  let voice =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "voice" ]
+          ~docv:"NAME"
+          ~doc:
+            "Speak with this system voice. The name is the whole label say prints, \
+             parentheses included: say does not fail on a name it does not have, and a \
+             bare name that exists in several languages selects one of them silently.")
+  in
+  let model =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "model" ]
+          ~docv:"FILE"
+          ~doc:"Listen with whisper-cli, loading this ggml model file.")
+  in
+  let list_voices =
+    Arg.(
+      value
+      & flag
+      & info
+          [ "list-voices" ]
+          ~doc:"Print the voices this machine has as JSON, and change nothing.")
+  in
+  Cmd.v
+    (Cmd.info
+       "voice-local-setup"
+       ~doc:"Turn on voice that needs no server, without one running."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "say is in the base system of every mac and whisper-cli comes from one brew \
+              formula. Both run once and exit, so neither needs a server -- which is why \
+              this can run during setup, before there is anything to talk to over HTTP."
+         ; `P
+             "Writes through the same writer the HTTP route uses: the same revision \
+              guard, and the same refusal to publish a section the loader would reject."
+         ])
+    Term.(
+      const (fun base_path voice model list_voices ->
+        if list_voices then voice_local_voices_exit ()
+        else voice_local_setup_exit base_path voice model)
+      $ base_path
+      $ voice
+      $ model
+      $ list_voices)
+
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -3236,6 +3396,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; voice_verify_cmd
+    ; voice_local_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_setup_render_cmd

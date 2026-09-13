@@ -206,7 +206,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
 }
 
 function decodeKeeperDecisionsResponse(raw: unknown): KeeperDecisionsResponse | null {
-  if (!isRecord(raw)) return null
+  if (!isRecord(raw) || !Array.isArray(raw.events)) return null
   return {
     ...decodeDashboardFeedMetadata(raw),
     events: asRecordArray(raw.events)

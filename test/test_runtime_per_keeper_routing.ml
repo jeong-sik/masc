@@ -935,7 +935,11 @@ let check_first_run_lanes path runtime_id ~cli =
         in
         Alcotest.(check (list string)) (id ^ " HTTP slots") expected_http lane.slot_ids;
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
-      (List.map Runtime.exact_lane_id Runtime.all_exact_lanes)
+      (List.map Runtime.exact_lane_id
+         (List.filter (function Runtime.Workspace_curator -> false | _ -> true) Runtime.all_exact_lanes));
+    Alcotest.(check bool) "shared-memory curator is explicitly configured" false
+      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =

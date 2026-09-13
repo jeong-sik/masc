@@ -6,6 +6,18 @@ let () = Mirage_crypto_rng_unix.use_default ()
 let rec remove path =
   if Sys.is_directory path then (Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path)
   else Unix.unlink path
+let panel_answer = String.concat "\n" (List.init 40 (fun n ->
+  Printf.sprintf "Independent evidence %d: C is primary; B must support silent choices." n))
+let original_evidence =
+  `Assoc
+    [ "source_context", `Assoc ["question", `String "Choose a mode"; "task", `Null; "goals", `List []]
+    ; "panel", `List
+        [ `Assoc ["model", `String "panel-api"; "status", `String "answered"; "answer", `String panel_answer]
+        ; `Assoc ["model", `String "panel-native"; "status", `String "answered"; "answer", `String "Keep separate choices; do not declare a winner."] ]
+    ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"]
+    ; "tool_trace", `Assoc ["status", `String "partial"]
+    ]
+
 let with_fixture f = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = Filename.temp_dir "fusion-decision-" "" in
@@ -27,7 +39,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
       Workspace.claim_task_r config ~agent_name:"fusion-keeper" ~task_id:task.task_id () |> require "claim" |> ignore;
       let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"} in
       Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-advice" ~author:"fusion-keeper"
-        ~content:"Judge recommends A" ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
+        ~content:"Judge recommends A" ~meta_json:original_evidence ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
         |> require "real Fusion post" |> ignore;
       f config task.task_id goal.id)
 
@@ -68,6 +80,25 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     ~args:(`Assoc ["run_id", `String "run-advice"]) () |> Yojson.Safe.from_string in
   check bool "model can read adopted decision even after run registry expiry" true
     Yojson.Safe.Util.(member "keeper_decisions" readback |> member "records" |> to_list |> List.mem event);
+  let open Yojson.Safe.Util in
+  check bool "durable source is found without a registry entry" true
+    (readback |> member "found" |> to_bool);
+  check bool "absent registry metadata is not fabricated" true
+    (readback |> member "run" = `Null);
+  let evidence = readback |> member "evidence" in
+  check string "original source is available" "available"
+    (evidence |> member "state" |> to_string);
+  let post = evidence |> member "post" in
+  check bool "full source context and both panel answers are preserved" true
+    (post |> member "meta" = original_evidence);
+  check string "source origin carries the canonical run identity" "run-advice"
+    (post |> member "origin" |> member "fusion_run_id" |> to_string);
+  check bool "decision joins the original source post" true
+    ((post |> member "id") = (event |> member "fusion_post_id"));
+  check bool "retrieved evidence hash is the decision's source hash" true
+    ((evidence |> member "evidence_sha256") = (event |> member "fusion_evidence_sha256"));
+  check string "judge advice is not rewritten as Keeper choice" "Choose A"
+    (post |> member "meta" |> member "judge" |> member "decision" |> to_string);
   let changed = Fusion_decision.parse (args task_id "rejected" "different choice in same turn") |> require "parse" in
   rejected (Fusion_decision.record ~config ~keeper:meta.name ~turn_ref changed);
   (match Fusion_decision.record ~config ~keeper:"foreign" ~turn_ref changed with
@@ -91,6 +122,25 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
        check bool "corrupt storage is runtime failure" true
          (Fusion_decision.failure_class error = Tool_result.Runtime_failure)
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
+
+let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _ ->
+  let meta name = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) |> require "meta" in
+  let invoke keeper run_id =
+    Keeper_tool_in_process_runtime.handle_masc_fusion_status ~config ~meta:(meta keeper)
+      ~args:(`Assoc ["run_id", `String run_id]) () |> Yojson.Safe.from_string in
+  let own = invoke "fusion-keeper" "run-advice" in
+  let open Yojson.Safe.Util in
+  check bool "retrieval does not record adoption" true
+    (own |> member "keeper_decisions" |> member "records" = `List []);
+  List.iter (fun (keeper, run_id) ->
+    let result = invoke keeper run_id in
+    check bool "unowned or missing source is not found" false
+      (result |> member "found" |> to_bool);
+    check string "unavailable source is explicit" "unavailable"
+      (result |> member "evidence" |> member "state" |> to_string);
+    check bool "unowned source does not expose post or panel content" true
+      (result |> member "evidence" |> member "post" = `Null))
+    ["foreign", "run-advice"; "fusion-keeper", "unknown-run"])
 
 let test_request_context_snapshot () = with_fixture (fun config task_id goal_id ->
   let args = `Assoc ["prompt", `String "Choose A or B"; "task_id", `String task_id;
@@ -169,4 +219,5 @@ let () = run "Fusion decision attribution" ["behavior", [
   test_case "omitted task selection captures current owned work without hiding read failures" `Quick test_current_work_context;
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
+  test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage]]

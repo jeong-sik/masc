@@ -1390,10 +1390,82 @@ let test_retract_records_a_citation () =
     (List.length (events_for ~keepers_dir ~keeper_id:meta.name))
 ;;
 
+let test_source_snapshot_commit_notifications () =
+  let module Source = Masc.Keeper_memory_source_current in
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-commit-notifications" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let physical_keepers_dir = Unix.realpath keepers_dir in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let source_path = "source.txt" in
+  let absolute = Filename.concat sandbox_root source_path in
+  let write_bytes bytes = match Fs_compat.save_file_atomic absolute bytes with
+    | Ok () -> () | Error detail -> Alcotest.fail detail
+  in
+  let observed = ref [] in
+  let stop = Notifications.subscribe (fun (event : Notifications.event) ->
+    if String.equal event.keepers_dir physical_keepers_dir then (
+      let snapshot =
+        Masc.Keeper_memory_os_aggregate_lock.with_lock
+          ~keepers_dir ~keeper_id:meta.name (fun () ->
+            File_lock_eio.with_lock
+              (Source.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+              (fun () -> Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name))
+      in
+      observed := (event, snapshot) :: !observed))
+  in
+  let write () = match Source.upsert_file_fact ~config ~meta ~keepers_dir
+      ~now:100. ~claim:"source-backed fact" ~source_path () with
+    | Ok _ -> ()
+    | Error (Source.Source_read_failed failure) -> Alcotest.fail (Source.source_read_failure_to_string failure)
+    | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
+  in
+  let revalidate () = match Source.revalidate ~config ~meta ~keepers_dir ~now:200. () with
+    | Ok projection -> projection | Error detail -> Alcotest.fail detail
+  in
+  Fun.protect ~finally:stop (fun () ->
+    ignore (revalidate ());
+    Alcotest.(check int) "absent revalidation is not a write" 0 (List.length !observed);
+    write_bytes "first source\n";
+    write ();
+    ignore (revalidate ());
+    Alcotest.(check int) "unchanged revalidation emits nothing" 1 (List.length !observed);
+    write_bytes "changed source\n";
+    let invalidated = revalidate () in
+    Alcotest.(check int) "source change persists invalidation" 1 (List.length invalidated.invalidations);
+    ignore (revalidate ());
+    Alcotest.(check int) "pending invalidation recheck emits nothing" 2 (List.length !observed);
+    write ();
+    Sys.remove absolute;
+    ignore (revalidate ());
+    (match Source.upsert_file_fact ~config ~meta ~keepers_dir ~now:300.
+      ~claim:"missing source" ~source_path () with
+     | Error (Source.Source_read_failed _) -> ()
+     | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
+     | Ok _ -> Alcotest.fail "missing source unexpectedly committed");
+    Alcotest.(check int) "only four snapshot commits notify" 4 (List.length !observed);
+    List.rev !observed |> List.iteri (fun index (event, snapshot) ->
+      Alcotest.(check int) "source revision" (index + 1) event.Notifications.revision;
+      Alcotest.(check bool) "source-bound store" true (event.store = Notifications.Source_bound);
+      match snapshot with
+      | Ok (Some snapshot) -> Alcotest.(check int) "committed state readable outside locks" event.revision snapshot.Source.revision
+      | Ok None | Error _ -> Alcotest.fail "notification preceded source commit");
+    stop ();
+    write_bytes "recreated source\n";
+    write ();
+    Alcotest.(check int) "unsubscribe detaches source listener" 4 (List.length !observed))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
-    [ ( "validation"
+    [ ( "commit notification"
+      , [ Alcotest.test_case "source writes and invalidations notify after locks" `Quick test_source_snapshot_commit_notifications ] )
+    ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy
         ; Alcotest.test_case
             "board reference validation"

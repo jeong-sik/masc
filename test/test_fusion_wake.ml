@@ -298,6 +298,15 @@ let test_fusion_completion_is_actionable () =
   in
   check string "post_id is canonical Fusion identity" "fusion-run:fus-1" ev.post_id;
   check bool "preview carries the resolved answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview);
+  check bool "preview provides canonical full-result lookup" true
+    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" ev.preview);
+  check bool "preview separates Keeper choice from judge advice" true
+    (contains ~needle:"masc_fusion_decision" ev.preview);
+  let long_answer = String.make 1000 'x' in
+  let long_event = Keeper_world_observation.pending_board_event_of_fusion_completion
+      ~meta ~arrived_at:1000.0 (fusion_payload ~resolved_answer:long_answer ()) in
+  check bool "lookup survives answer preview truncation" true
+    (contains ~needle:"masc_fusion_status({\"run_id\":\"fus-1\"})" long_event.preview);
   check string "author remains context" meta.name ev.author;
   check bool "post kind remains context" true
     (ev.post_kind = Board.System_post);

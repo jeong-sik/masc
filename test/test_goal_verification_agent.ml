@@ -217,7 +217,7 @@ let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
       on_tool_result
         ~input:verdict_json
         (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
-      Ok (Some verdict)
+      Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
     in
     match List.assoc_opt evaluator_runtime behaviors with
     | Some (Stub_approve reason) ->
@@ -230,7 +230,7 @@ let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
       answer
         (`Assoc [ "verdict", `String "REJECT"; "reason", `String reason ])
         (AR.Reject reason)
-    | Some Stub_malformed -> Ok None
+    | Some Stub_malformed -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=None}
     | Some Stub_unavailable ->
       Error
         (Agent_core.Error.Api
@@ -366,7 +366,7 @@ let test_goal_proof_reads_the_workspace_playground () =
           ~input
           (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
              "recorded");
-        Ok (Some (AR.Approve stated_reason))
+        Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
@@ -427,7 +427,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
             ; "reason", `String reason
             ])
         (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
-      Ok (Some verdict)
+      Ok {AR.selected_runtime_id="verifier-a";verdict=Some verdict}
   in
   let review () =
     with_lane_and_reviewer
@@ -511,7 +511,7 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
             ; "reason", `String "no measurement of the declared metric was found"
             ])
         (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0 "recorded");
-      Ok (Some (AR.Reject "no measurement of the declared metric was found"))
+      Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Reject "no measurement of the declared metric was found")}
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])

@@ -128,10 +128,19 @@ val keeper_detail_tab_bindings :
     conditional on the tab, not the surface: listing them per surface would
     advertise them on the tabs where they do nothing. *)
 
+val key_atoms : string -> string list
+(** The single keys a binding's [key] names: ["d/m/s"] is [d], [m] and [s],
+    ["b / e / u u"] is [b], [e] and [u], ["arrows+enter"] is [arrows] and
+    [enter]. Sorted, without repeats. *)
+
+val keeper_detail_tab_taken_keys : Masc_tui_types.keeper_detail_tab -> string list
+(** The single keys the tab's own bindings answer ({!key_atoms}); a Keeper
+    control on one of them does something else on that tab. *)
+
 val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
-(** The compact strip beside the tab row, [key:label] joined by two spaces,
-    led by the tab switch. Projects {!keeper_detail_tab_bindings} so the
-    strip and the help sheet cannot name different keys. *)
+(** The keys the Keeper detail footer leads with, [key:label] joined by two
+    spaces, led by the tab switch. Projects {!keeper_detail_tab_bindings} so
+    the footer and the help sheet cannot name different keys. *)
 
 val sheet_bindings : Masc_tui_types.surface -> binding list
 (** {!for_surface} as the help sheet lists it: without the refresh / next /

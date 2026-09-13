@@ -30,6 +30,10 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
+let supports_native_none = function
+  | Agent_core _ | Claude_code _ -> true
+  | Codex_app_server _ | Antigravity_cli _ -> false
+
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model

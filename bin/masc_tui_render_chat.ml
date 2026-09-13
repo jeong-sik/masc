@@ -630,7 +630,12 @@ let keeper_call_association state ~keeper_name
           (Option.equal String.equal state.keeper_calls_keeper
              (Some keeper_name))
       then Call_log_not_loaded
-      else if state.keeper_calls_loading then Call_log_loading
+      (* Refresh keeps the last snapshot for this Keeper. Replacing it with
+         a loading row drops every expanded output, changing the transcript's
+         height twice per poll and moving the reader's viewport. Only the
+         first read has no durable detail to draw yet. *)
+      else if state.keeper_calls_loading && Option.is_none state.keeper_calls
+      then Call_log_loading
       else
       match state.keeper_calls_error, state.keeper_calls with
       | Some detail, _ -> Call_log_unavailable detail
@@ -1875,7 +1880,9 @@ let render_keeper_message (state : state) =
                 (Option.equal String.equal state.msg_file_changes_keeper
                    (Some keeper_name))
             then "diffs pending"
-            else if state.msg_file_changes_loading then "diffs loading"
+            else if state.msg_file_changes_loading
+                    && Option.is_none state.msg_file_changes
+            then "diffs loading"
             else
               match state.msg_file_changes_error, state.msg_file_changes with
               | Some _, Some snapshot -> snapshot_status ~stale:true snapshot
@@ -2948,18 +2955,7 @@ let render_keeper_message (state : state) =
        actually pressed, which is what tells them how far along the word they
        are. *)
     let slash_hint =
-      let paint (span : Masc_tui_command.hint_span) =
-        match span with
-        | Masc_tui_command.Typed text -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Wrong text -> (Theme.bad ()) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
-      in
-      match
-        Masc_tui_command.hint_spans
-          (Masc_tui_command.hint (Buffer.contents state.msg_input))
-      with
-      | [] -> None
-      | spans -> Some (String.concat "" (List.map paint spans))
+      slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
       match slash_hint with

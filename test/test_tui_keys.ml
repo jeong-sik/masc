@@ -159,9 +159,9 @@ let test_system_logs_footer_names_browser_controls () =
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
-    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
+    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, o, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -1018,13 +1018,21 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("pane availability of " ^ key) expected
         (footer_has_key key hints)
     in
-    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts; Config_presets ]);
+    enabled "PgUp/PgDn"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes
+         ; Config_voice ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
-    List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
+    enabled "e"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
+    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
+    List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
      with a notice there, so the row does not offer them, and [o] goes back. *)
@@ -1055,6 +1063,12 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
     [ "Enter"; "E"; "x" ];
+  (* The themes list pages now, and its own keys still fit the row. *)
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("themes keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_themes))))
+    [ "PgUp/PgDn"; "Enter"; "x"; "f" ];
   List.iter (fun pane ->
     List.iter (fun cols ->
       let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
@@ -1068,7 +1082,7 @@ let test_config_pane_footer_actions () =
           (footer_has_key key row))
         (match pane with
          | Config_runtime -> [ "E"; "Enter"; "x"; "f" ]
-         | Config_themes -> [ "PgUp/PgDn"; "v"; "e"; "E" ]
+         | Config_themes -> [ "v"; "e"; "E" ]
          | Config_models | Config_params | Config_prompts | Config_presets
          | Config_voice -> []))
       [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
@@ -1533,6 +1547,25 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_runs, []
   ]
 
+(* The table's own key notation, read as single keys. The Keeper detail
+   footer drops a control whose key a tab answers itself, so the Sandbox
+   tab's "d/m/s" has to be read as the [s] it takes from shutdown. *)
+let test_key_atoms_read_the_table_notation () =
+  let atoms = Masc_tui_keys.key_atoms in
+  Alcotest.(check (list string)) "alternatives" [ "d"; "m"; "s" ] (atoms "d/m/s");
+  Alcotest.(check (list string)) "spaced alternatives and a double press"
+    [ "b"; "e"; "u" ] (atoms "b / e / u u");
+  Alcotest.(check (list string)) "a chord" [ "arrows"; "enter" ] (atoms "arrows+enter");
+  Alcotest.(check (list string)) "a single key" [ "L" ] (atoms "L");
+  Alcotest.(check bool) "Sandbox takes s and o" true
+    (List.for_all
+       (fun key -> List.mem key (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_sandbox))
+       [ "s"; "o" ]);
+  Alcotest.(check bool) "Channels takes e" true
+    (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check (list string)) "Info takes nothing" []
+    (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
+
 let test_detail_tab_bindings_cover_the_live_keys () =
   List.iter
     (fun (tab, expected) ->
@@ -1910,6 +1943,8 @@ let () =
     [ ( "table"
       , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
             test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "key atoms read the table notation" `Quick
+            test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick

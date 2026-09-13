@@ -379,23 +379,8 @@ let render_overview (state : state) =
         in
         let pulse_suffix =
           if cols >= 92 then
-            let activity_samples =
-              match state.keeper_turn_finishes with
-              | [] -> [ 0; 0; 0; 0; 0; 0; 0; 0 ]
-              | finishes ->
-                  let now = Unix.gettimeofday () in
-                  let buckets = Array.make 8 0 in
-                  List.iter
-                    (fun (_, ts) ->
-                      let delta = max 0.0 (now -. ts) in
-                      let idx = min 7 (int_of_float (delta /. 15.0)) in
-                      let slot = 7 - idx in
-                      if slot >= 0 && slot < 8 then buckets.(slot) <- buckets.(slot) + 1)
-                    finishes;
-                  Array.to_list buckets
-            in
-            let spark = Chart.sparkline activity_samples in
-            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset spark
+            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset
+              (overview_pulse_text state ~now:(Unix.gettimeofday ()))
           else ""
         in
         Printf.sprintf
@@ -814,7 +799,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     note_lines;
   box_line buf cols
     (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
-       (Terminal_text.single_line task.created_at)
+       (Terminal_text.short_timestamp task.created_at)
        (match task.created_by with
         | Some by -> Terminal_text.single_line by
         | None -> "-")
@@ -1597,7 +1582,7 @@ let render_approvals (state : state) =
         in
         ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
             (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
-            (Terminal_text.single_line approval.ap_created_at)
+            (Terminal_text.short_timestamp approval.ap_created_at)
             expires Ansi.reset
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
             (fit_width payload (max 8 (cols - 12)))
@@ -1728,7 +1713,7 @@ let render_question_reader (state : state) =
    scanning for, so those are the ones that get a mark. *)
 (* The widths now live beside their column names in [Render_schedule], which
    is the one place the header and the rows both read. The age column is sized
-   for the widest [span_text] draws, "1d00h": a board's oldest live threads are
+   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
 (* Four cells of lead sit ahead of the mark on the header and on every row, so
@@ -2181,7 +2166,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     (Printf.sprintf "  %s  %s\xc2\xb7%s  %s  %s\xc2\xb7%s  %s%s%s"
        author_chip
        Ansi.dim Ansi.reset
-       (Terminal_text.single_line post.bp_created_at)
+       (Terminal_text.short_timestamp post.bp_created_at)
        Ansi.dim Ansi.reset
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
@@ -2297,7 +2282,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      indent ^ bar
                  in
                  let author = Terminal_text.single_line c.bc_author in
-                 let created_at = Terminal_text.single_line c.bc_created_at in
+                 let created_at = Terminal_text.short_timestamp c.bc_created_at in
                  let author_role =
                    if String.equal author (Terminal_text.single_line post.bp_author) then
                      " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
@@ -2671,18 +2656,10 @@ let render_planning_list (state : state) =
        let rollup = planning_rollup_row ~cols p.pl_rollup in
        (* The backlog counts are a list. [▸] joined them -- the mark the tab
           strip puts on the surface you are on -- so "todo ▸ claimed" read as a
-          path, and claimed, the one count with no glyph, looked like it had
-          one. *)
+          path. *)
        let backlog_sep = Printf.sprintf " %s·%s " (Theme.recede ()) Ansi.reset in
        let backlog =
-         let items =
-           [ ("todo", p.pl_backlog.pb_todo, Masc_tui_theme.Glyph.task_todo ^ " todo")
-           ; ("claimed", p.pl_backlog.pb_claimed, "claimed")
-           ; ("running", p.pl_backlog.pb_running, Masc_tui_theme.Glyph.task_active ^ " running")
-           ; ("done", p.pl_backlog.pb_done, Masc_tui_theme.Glyph.task_done ^ " done")
-           ; ("cancelled", p.pl_backlog.pb_cancelled, Masc_tui_theme.Glyph.task_cancelled ^ " cancelled")
-           ]
-         in
+         let items = planning_backlog_counts p.pl_backlog in
          let counts = List.map (fun (k, v, _) -> k, v) items in
          let bands = Magnitude.of_counts counts in
          List.map2
@@ -3278,7 +3255,7 @@ let render_schedule_list (state : state) =
            match snapshot.scs_next_due_iso with
            | Some iso ->
                Printf.sprintf "  Next due: %s"
-                 (Tui_decode.short_timestamp_for_terminal iso)
+                 (Terminal_text.short_timestamp iso)
            | None -> ""
          in
          c.push (Ansi.bold ^ count_text ^ Ansi.reset);
@@ -3322,7 +3299,7 @@ let render_schedule_list (state : state) =
                let is_selected = idx = state.schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
-                 | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+                 | Some iso -> Terminal_text.short_timestamp iso
                  | None -> "-"
                in
                (* The payload target names who the wake reaches (a keeper for
@@ -3458,7 +3435,7 @@ let schedule_turn_rows
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ Tui_decode.short_timestamp_for_terminal timestamp
+              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then "yes" else "no") ^ at)
@@ -3582,7 +3559,7 @@ let schedule_detail_lines ~width (row : schedule_row)
   let timestamp value =
     match value with
     | None -> "\xe2\x80\x94"
-    | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+    | Some iso -> Terminal_text.short_timestamp iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -3595,10 +3572,10 @@ let schedule_detail_lines ~width (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> "\xe2\x80\x94"
     | Some status, None -> status
-    | None, Some at -> Tui_decode.short_timestamp_for_terminal at
+    | None, Some at -> Terminal_text.short_timestamp at
     | Some status, Some at ->
         Printf.sprintf "%s  %s" status
-          (Tui_decode.short_timestamp_for_terminal at)
+          (Terminal_text.short_timestamp at)
   in
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
@@ -3627,7 +3604,7 @@ let schedule_detail_lines ~width (row : schedule_row)
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
   ; field "Requested"
-      (Tui_decode.short_timestamp_for_terminal row.sch_requested_at_iso)
+      (Terminal_text.short_timestamp row.sch_requested_at_iso)
   ; field "Due" (timestamp row.sch_due_at_iso)
   ; field "Next due" (timestamp row.sch_next_due_at_iso)
   ; field "Expires" (timestamp row.sch_expires_at_iso)
@@ -4522,11 +4499,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · a appends a failover slot"
+    | None -> "  Standalone LLM lanes · o:Lane Add-ons · a:append slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -5301,14 +5278,6 @@ let render_clients (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
-  (* The wire carries RFC3339; the roster only needs the clock, the same
-     reading the header's own timestamp gives it a distance to. *)
-  let clock_of_iso value =
-    match String.index_opt value 'T' with
-    | Some at when String.length value - at >= 9 ->
-        String.sub value (at + 1) 8
-    | _ -> value
-  in
   if shown = 0 then begin
     let empty =
       match state.clients_surface_error with
@@ -5345,7 +5314,12 @@ let render_clients (state : state) =
               (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
               (fit_width keeper 16)
               (fit_width task 9)
-              (clock_of_iso row.cr_last_seen)
+              (* The clock alone, which the header's own clock gives a
+                 distance to -- so in the header's zone. The clock was cut
+                 out of the RFC3339 text, which is UTC, and printed unread:
+                 a client seen at 10:20 in Seoul read 01:20 under a 19:18
+                 header. *)
+              (Terminal_text.clock_timestamp row.cr_last_seen)
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)
@@ -6249,11 +6223,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
-    let tab_hint = Masc_tui_keys.keeper_detail_tab_hint state.detail_tab in
     let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs Ansi.dim tab_hint Ansi.reset
+        Ansi.reset tabs
     in
     box_line buf cols title;
 
@@ -6330,7 +6303,19 @@ let render_keeper_detail (state : state) =
        [fit_width] instead, which keeps the front and loses the back -- where
        [Left / Esc] and [q] sit -- so at 80 columns the row ended "t:c…" and
        named no way out. [key:label] for the roster pane's key too. *)
-    let hints = keeper_control_hints state (Some (keeper_reading state k)) in
+    (* The open tab's own keys lead, and a Keeper control on a key the tab
+       answers itself leaves the row. They were a strip at the end of the
+       title row, which the frame cut at 120 columns ("o:act…", "L:log…"),
+       while this row said "s:shutdown" and "o:container logs" on the
+       Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
+       container logs the strip called "actual logs". *)
+    let hints =
+      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      ^ "  "
+      ^ keeper_control_hints
+          ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
+          state (Some (keeper_reading state k))
+    in
     let hints =
       if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
       else hints
@@ -6598,7 +6583,7 @@ let activity_tab_strip ~on_logs =
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
-   the tab that is not open -- "▸Events  Logs (0 of 0 held, turns)" -- and read
+   the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
    as that tab's count. It stays after the strip rather than moving before it,
    so the tabs do not shift sideways when the count grows a digit. *)
 let activity_title ~on_logs reading =
@@ -10506,11 +10491,17 @@ let render_acting (state : state) =
         Printf.sprintf "feed: closed after %d (%s)" events
           (Terminal_text.single_line reason)
   in
+  (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
+     but under Turns a row is a folded turn and the held count is events, so
+     "3 of 120" compared two different things as if one were part of the
+     other. The scope name left with it: the row under the feed says it,
+     "scope turns · …", one line down. *)
   let header =
     Printf.sprintf "%s  %s  %s"
       (activity_title ~on_logs:false
-         (Printf.sprintf "(%d of %d held, %s)" shown held
-            (Acting.filter_label state.acting_filter)))
+         (Printf.sprintf "(%s \xc2\xb7 %s held)"
+            (Message_layout.count_noun shown "row")
+            (Message_layout.count_noun held "event")))
       timestamp
       (connection_badge state)
   in
@@ -12119,7 +12110,10 @@ let render_prompt_registry (state : state) =
        in
        let actual_input_lines =
          if not (String.equal row.pr_category "librarian") then []
-         else if state.prompts_librarian_input_loading then
+         else if state.prompts_librarian_input_loading
+                 && not (Option.exists
+                      (fun (key, _) -> String.equal key row.pr_key)
+                      state.prompts_librarian_input) then
            [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
          else
            match state.prompts_librarian_input_error with
@@ -12329,13 +12323,21 @@ let render_presets (state : state) =
         ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
-  if total = 0 then begin
-    incr drawn;
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (match state.presets_snapshot with
-       | None -> "  불러오는 중..."
-       | Some _ -> "  아직 프리셋이 없습니다 · s 로 지금 상태를 저장하세요")
-  end;
+  (* A read that failed said "불러오는 중..." under its own failure row: the
+     empty row asked only whether a snapshot had arrived. *)
+  (match state.presets_snapshot, state.presets_error with
+   | _, Some _ ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_failed_note
+   | None, None ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_unread_note
+   | Some snapshot, None ->
+       Option.iter
+         (fun line ->
+           incr drawn;
+           box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line))
+         (Masc_tui_preset_text.pane_empty_line snapshot));
   List.iteri
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + list_height then begin
@@ -12600,13 +12602,17 @@ let render_config_models (state : state) =
           see, and [e] would act on a row that is off screen. *)
        let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
-       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        let scroll =
          if cursor_line < scroll then cursor_line
          else if cursor_line >= scroll + table_height
          then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
+       (* The window is cut at the scroll the cursor settled, not the stored
+          one. Cut before, a cursor that moved further than a row -- a page
+          key, a list that shrank -- drew its rows outside the window, and
+          they came out blank. *)
+       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)
        for i = 0 to table_height - 1 do
@@ -12682,8 +12688,157 @@ let render_runtime_config_status state =
    endpoint answers first, since a local server that is down falls back to a
    paid one silently. And the input device, because a capture that comes back
    empty is more often the wrong microphone than a threshold. *)
-let render_voice (state : state) =
+(* The wizard screen. The questions, their order and the completeness rule are
+   Voice_wizard's; what is drawn here is only how a terminal shows them. *)
+(* The voice pane and its wizard: a fixed head and footer around lines read
+   through [state.config_scroll]. Both drew every line into the surface budget,
+   and [finish_surface] keeps the leading rows of a frame that runs over, so a
+   long endpoint list or probe report lost its tail and then its footer with no
+   key that could bring them back. The offset is clamped here, against the
+   lines actually laid out, and reported back as [Voice_scroll]. *)
+let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints =
+  let lines = frame_lines body in
+  let height =
+    (* The rows under the head, less the box bottom and the footer. *)
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - List.length (frame_lines head) - 2)
+  in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.config_scroll
+  in
+  let buf = Buffer.create (Buffer.length head + Buffer.length body + 256) in
+  Buffer.add_buffer buf head;
+  List.iteri
+    (fun index line ->
+      if index >= scroll && index < scroll + height then begin
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n'
+      end)
+    lines;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"
+    ~rows:terminal_rows ~cols buf
+;;
+
+let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
+  let buf = Buffer.create 2048 in
+  let field name value =
+    box_line buf cols
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+  in
+  let draft = session.vws_draft in
+  let side =
+    match draft.Voice_wizard.section with
+    | Voice_setup.Tts -> "speech out"
+    | Voice_setup.Stt -> "speech in"
+  in
+  let shown value = if String.trim value = "" then "—" else value in
+  let steps = Voice_wizard.steps draft in
+  let position =
+    let rec index n = function
+      | [] -> None
+      | step :: rest -> if step = session.vws_step then Some n else index (n + 1) rest
+    in
+    match index 1 steps with
+    | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
+    | None -> "?"
+  in
+  box_top head cols;
+  box_line head cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice · setup")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  box_line buf cols
+    (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
+       (Voice_wizard.step_prompt session.vws_step));
+  box_line buf cols "";
+  (* The answer being given. A closed set shows its current value and the keys
+     that walk it; a text field shows what has been typed, with a cursor so an
+     empty field is visibly a field. *)
+  (match session.vws_step with
+   | Voice_wizard.Section ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold side
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Provider ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold
+          (Voice_wizard.provider_label draft.Voice_wizard.provider)
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Review ->
+     (match Voice_wizard.gaps draft with
+      | [] ->
+        box_line buf cols
+          (Printf.sprintf "    %senter saves this%s" Ansi.bold Ansi.reset)
+      | gaps ->
+        List.iter
+          (fun gap ->
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "    %s" (Voice_wizard.gap_message gap)))
+          gaps)
+   | Voice_wizard.Name
+   | Voice_wizard.Address
+   | Voice_wizard.Credential
+   | Voice_wizard.Model
+   | Voice_wizard.Voice ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+  (* A local server that never asked for a key answers 200 only while nothing
+     sends it one, so the blank is worth saying out loud rather than leaving as
+     an empty line. *)
+  (match session.vws_step with
+   | Voice_wizard.Credential when String.trim session.vws_input = "" ->
+     box_line buf cols
+       (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
+   | Voice_wizard.Address when String.trim session.vws_input = "" ->
+     List.iter
+       (fun (what, address) ->
+         box_line buf cols
+           (Printf.sprintf "    %stry %s: %s%s" Ansi.dim what address Ansi.reset))
+       (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
+   | _ -> ());
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
+  field "side" side;
+  field "provider" (Voice_wizard.provider_label draft.Voice_wizard.provider);
+  field "name" (shown draft.Voice_wizard.endpoint_id);
+  field "address" (shown draft.Voice_wizard.address);
+  field "key var" (shown draft.Voice_wizard.credential_variable);
+  field "model" (shown draft.Voice_wizard.model);
+  (match draft.Voice_wizard.section with
+   | Voice_setup.Tts -> field "voice" (shown draft.Voice_wizard.voice)
+   | Voice_setup.Stt -> ());
+  (match session.vws_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+  (* Every endpoint, not just the first that answered. A chain stops at the
+     first, which is why a dead fallback reads as healthy until the endpoint in
+     front of it goes away. *)
+  (match session.vws_probe with
+   | [] -> ()
+   | lines ->
+     box_line buf cols "";
+     box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
+     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
+;;
+
+let render_voice (state : state) =
+  match state.voice_wizard with
+  | Some session -> render_voice_wizard state session
+  | None ->
+  let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
@@ -12704,13 +12859,70 @@ let render_voice (state : state) =
     | Some (`Int i) -> Some (string_of_int i)
     | Some _ | None -> None
   in
-  box_top buf cols;
-  box_line buf cols
+  (* One line per endpoint, from the admin setup read. The public config route
+     answers whether a fallback is configured and not which one, so a chain that
+     has quietly gone dead reads there exactly like a healthy one. *)
+  let endpoints section =
+    match state.voice_setup with
+    | None -> []
+    | Some json -> (
+        match member [ section; "endpoints" ] json with
+        | Some (`List items) ->
+            List.filter_map
+              (fun item ->
+                match string_of [ "id" ] item with
+                | None -> None
+                | Some id ->
+                    let kind = Option.value (string_of [ "kind" ] item) ~default:"?" in
+                    (* The server resolves it the way the transport does.
+                       Choosing between base_url and mcp_url here showed
+                       base_url for a voice_mcp endpoint that is called at
+                       its mcp_url. A command kind has no address. *)
+                    let address =
+                      Option.value (string_of [ "address" ] item) ~default:"—"
+                    in
+                    let off =
+                      match member [ "enabled" ] item with
+                      | Some (`Bool false) -> "  (disabled)"
+                      | Some _ | None -> ""
+                    in
+                    (* runtime.toml is an operator's file, not this pane's
+                       output. box_line's fit_width keeps ANSI, so an id, kind
+                       or address carrying control bytes rewrote the screen the
+                       moment the voice pane opened. The probe rows below
+                       already pass through the same filter. *)
+                    Some
+                      (Printf.sprintf "    %-20s %s%-18s%s %s%s"
+                         (Terminal_text.single_line id) Ansi.dim
+                         (Terminal_text.single_line kind)
+                         Ansi.reset (Terminal_text.single_line address) off))
+              items
+        | Some _ | None -> [])
+  in
+  let show_endpoints section =
+    match endpoints section with
+    | [] -> ()
+    | lines -> List.iter (fun line -> box_line buf cols line) lines
+  in
+  box_top head cols;
+  box_line head cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title " MASC Voice")
        (config_pane_strip state)
        (connection_badge state));
   box_line buf cols "";
+  (* Two independent reads feed this pane: the public config says what loaded,
+     and the setup read says which endpoints are declared. They used to share
+     one match, so a failed config read also erased the endpoint identities the
+     other read had returned. Each section now draws whatever it has. *)
+  let loaded_config =
+    match (state.voice_config, state.voice_config_error) with
+    | Some json, None -> Some json
+    | Some _, Some _ | None, Some _ | None, None -> None
+  in
+  let from_config render =
+    match loaded_config with Some json -> render json | None -> ()
+  in
   (match (state.voice_config, state.voice_config_error) with
    | _, Some message ->
        (* The distinction the pane exists for, said in words rather than drawn
@@ -12720,37 +12932,62 @@ let render_voice (state : state) =
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
-       field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
+       field "status" (Option.value (string_of [ "status" ] json) ~default:"?"));
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+    field "voice"
+      (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—"));
+  show_endpoints "tts";
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+    field "endpoint"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
+         ~default:"—");
+    field "fallback"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
+         ~default:"—"));
+  show_endpoints "stt";
+  (* Said once, not per section: the endpoints are missing from both when this
+     read fails, and repeating it twice would read as two faults. *)
+  (match state.voice_setup_error with
+   | None -> ()
+   | Some message ->
        box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
-       field "voice"
-         (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
-       field "endpoint"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
-            ~default:"—");
-       field "fallback"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-            ~default:"—"));
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  the endpoint list could not be read";
+       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");
   box_line buf cols "";
+  (* Where the endpoints above come from. With no [voice] section the loader
+     reads the standalone JSON, and naming runtime.toml there sent a reader to a
+     file that declares nothing. *)
+  let declared_by =
+    match Option.map (member [ "source" ]) state.voice_setup with
+    | Some (Some (`Assoc source)) -> (
+        match List.assoc_opt "path" source with
+        | Some (`String path) -> Terminal_text.single_line path
+        | Some _ | None -> "runtime.toml [voice]")
+    | Some (Some _ | None) | None -> "runtime.toml [voice]"
+  in
   box_line buf cols
-    (Printf.sprintf
-       "  %sruntime.toml [voice] declares this; the server says what loaded%s"
-       Ansi.dim Ansi.reset);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh");
-  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+    (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
+       Ansi.dim declared_by Ansi.reset);
+  (* The keys are the table's, as on every other Config pane. The row was
+     written here and left out Esc and q, which the fitter keeps only when
+     the hints name them, so the voice pane was the one Config pane that
+     named no way out. *)
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_voice)
 ;;
 
 let render_config (state : state) =
@@ -13106,7 +13343,9 @@ let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let header = help_masthead state in
-  ( List.length (Masc_tui_help.sheet ~header ~cols (help_lines state))
+  ( List.length
+      (Masc_tui_help.sheet ~header ~cols
+         (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
   , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
@@ -13327,7 +13566,10 @@ let render_keeper_deletions (state : state) =
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let header = help_masthead state in
-  let rendered_rows = Masc_tui_help.sheet ~header ~cols (help_lines state) in
+  let rendered_rows =
+    Masc_tui_help.sheet ~header ~cols
+      (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"help"
     ~frame:Chrome_overlay
     (* The title says what state the sheet is in; the keys that change it are

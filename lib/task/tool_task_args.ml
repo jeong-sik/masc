@@ -159,7 +159,7 @@ let parse_handoff_context ~(agent_name : string)
                  "handoff_context.evidence_refs entries must be %s for \
                   action=%s. The verification store cannot read any other \
                   form, and the reviewer sees it as missing evidence. Wrap \
-                  narrative, a Board post id, a commit, or a URL as %s. \
+                  narrative, a commit, or a URL as %s. \
                   Example: {\"summary\": \"tests green\", \"evidence_refs\": \
                   [\"%s\"]}."
                  Tool_task_completion_review.resolvable_evidence_ref_forms

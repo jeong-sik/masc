@@ -2373,6 +2373,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
+  (* The roster's last-seen clock went out as a slice of the wire text. *)
+  check_fields "render_clients" [ "cr_name"; "cr_agent_type"; "cr_last_seen" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
@@ -2653,6 +2655,7 @@ let test_the_config_frame_is_the_shared_contract () =
     ; "render_presets", "Masc_tui_keys.footer_hints_config"
     ; "render_themes", "Masc_tui_keys.footer_hints_config"
     ; "render_config_models", "Masc_tui_keys.footer_hints_config"
+    ; "render_voice", "Masc_tui_keys.footer_hints_config"
     ]
 ;;
 

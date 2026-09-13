@@ -36,7 +36,34 @@ description = "Revision from inspect for save; omit only when no configuration e
 [[params]]
 name = "subscriptions"
 type = "array"
-items = {type="object", additionalProperties=false, required=["keeper_name", "run_id", "installation_id", "output_id"], properties={keeper_name={type="string"}, run_id={type="string"}, installation_id={type="string"}, output_id={type="string"}}}
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "keeper_name"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params]]
+name = "run_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params]]
+name = "installation_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params]]
+name = "output_id"
+type = "string"
+required = true
+min_length = 1
 
 [[params]]
 name = "receipt"

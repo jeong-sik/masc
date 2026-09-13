@@ -49,8 +49,26 @@ let query_boundaries () =
     (Result.is_error (Routes.decode_body {|{"instance_id":"first","instance_id":"second"}|}));
   check bool "non-object body rejected" true (Result.is_error (Routes.decode_body "[]"))
 
+let subscription_items_keep_strict_schema () =
+  let schema = match Tool_schemas_misc.misc_registered_schema Tool_schemas_misc.Misc_lane_updates with
+    | Some schema -> schema | None -> fail "missing subscription schema" in
+  let member = Yojson.Safe.Util.member in
+  let items = schema.input_schema |> member "properties" |> member "subscriptions" |> member "items" in
+  check bool "subscription item rejects undeclared properties" true
+    (member "additionalProperties" items=`Bool false);
+  check (list string) "every subscription identity field remains required"
+    ["installation_id";"keeper_name";"output_id";"run_id"]
+    (member "required" items |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string |> List.sort String.compare);
+  List.iter (fun key ->
+    let property=items |> member "properties" |> member key in
+    check bool "identity fields remain nonempty strings" true
+      (member "type" property=`String "string" && member "minLength" property=`Int 1))
+    ["keeper_name";"run_id";"installation_id";"output_id"]
+
 let () =
   run "Lane Add-on surfaces"
-    [ "installed contract", [test_case "operator and Keeper discovery agree" `Quick reachable_operations];
+    [ "installed contract", [test_case "operator and Keeper discovery agree" `Quick reachable_operations;
+        test_case "subscription TOML emits strict nested item schema" `Quick subscription_items_keep_strict_schema];
       "request boundaries", [test_case "source identity remains exact" `Quick readonly_parameters_preserve_identity;
         test_case "query windows and duplicate identities" `Quick query_boundaries] ]

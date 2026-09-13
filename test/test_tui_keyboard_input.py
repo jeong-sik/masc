@@ -7281,14 +7281,16 @@ def chat_visibility_modes_interaction(
         initial += bytes(output[pane_start:])
         initial_frame = frame_containing(initial, b"ci-red-attribution")
         plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # The presenter may leave unchanged identity rows out of the frame
+        # that first draws attribution. Reconstruct the current terminal to
+        # check adjacency rather than requiring unrelated rows to be redrawn.
+        current_rows = screen_rows(bytes(output))
+        title_row = screen_row_of(
+            current_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
+        identity_row = screen_row_of(current_rows, b"gate:auto_judge")
+        if min(title_row, identity_row) < 0:
+            raise AssertionError(f"chat identity rows are missing: {current_rows!r}")
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "

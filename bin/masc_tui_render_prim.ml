@@ -1851,9 +1851,14 @@ let planning_phase_color = function
 ;;
 
 (* The goal count, the completed share and one counter per phase. With no goals
-   the row read "Goals: 0 no goals  │  ● Exec: 0  ◆ Ver: 0  ◇ Conf: 0  ✓ Done: 0
-   ✕ Drop: 0" -- the count, a sentence saying the count, and five zeros -- over a
-   list that says "(no goals)" itself. The count is the whole reading there. *)
+   the row read the count, a sentence saying the count, and five zero counters
+   over a list that says "(no goals)" itself. The count is the whole reading
+   there.
+
+   Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
+   marks the Backlog row under them wears for running, done and cancelled.
+   Verifying and awaiting confirmation are stages only a Goal has, so their
+   diamonds are theirs. *)
 let planning_rollup_row ~cols (rollup : planning_rollup) =
   let total_goals =
     (* Every phase counts, or the denominator drops the goals waiting on a
@@ -1877,13 +1882,28 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
       (String.concat "  "
-         [ counter Goal_phase.Executing "●" "Exec" rollup.pr_active
+         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
+             "Exec" rollup.pr_active
          ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
          ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
              rollup.pr_awaiting_confirmation
-         ; counter Goal_phase.Completed "✓" "Done" rollup.pr_done
-         ; counter Goal_phase.Dropped "✕" "Drop" rollup.pr_dropped
+         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
+             "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
+             "Drop" rollup.pr_dropped
          ])
+
+(* The Backlog counts, each with the mark its Task rows wear. Claimed had no
+   mark here while a claimed Task row draws the half circle, so the one count a
+   reader could match to a row was the one left bare. *)
+let planning_backlog_counts (backlog : planning_backlog) =
+  let open Masc_tui_theme.Glyph in
+  [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
+  ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
+  ; ("running", backlog.pb_running, progress_active ^ " running")
+  ; ("done", backlog.pb_done, progress_done ^ " done")
+  ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
+  ]
 
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.

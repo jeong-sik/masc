@@ -356,10 +356,12 @@ val strip_sgr : string -> string
 
 (** The shared glyph vocabulary. Plain text — callers colour it. *)
 module Glyph : sig
-  val task_done : string       (* ● *)
-  val task_active : string     (* ◐ *)
-  val task_todo : string       (* ○ *)
-  val task_cancelled : string  (* × *)
+  val progress_waiting : string  (* ○ *)
+  val progress_active : string   (* ◐ *)
+  val progress_done : string     (* ● *)
+  val progress_ended : string    (* × *)
+  (** How far a piece of work has got. Task rows, the Backlog counts and the
+      Goal counters read these, so one mark means one stage on a screen. *)
 
   val current_entry : string  (* ▸ *)
   (** Where you are, on a strip of places you could be: the surface strip's

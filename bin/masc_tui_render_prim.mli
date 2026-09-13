@@ -273,6 +273,11 @@ val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
     phase. *)
 
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
 

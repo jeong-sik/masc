@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-09-12T13:59:35.077413+00:00",
+  "files": [
+    {
+      "file": "decision.md",
+      "bytes": 11001,
+      "sha256": "e5eac06c7a7e75dedb0a20b2e0c07e6198123e3e7001d56a197567155752523d"
+    },
+    {
+      "file": "review.md",
+      "bytes": 8841,
+      "sha256": "b7de23ba12c1eb3ed0596af0e9171ee964265c8aeab119448d7c664c0ab266f5"
+    },
+    {
+      "file": "experience.pptx",
+      "bytes": 25462,
+      "sha256": "4e0099d695d4e0bce0f96e10f4c181ac049f641be70c6edfe2e21abd66cd1fae"
+    },
+    {
+      "file": "experience.mp4",
+      "bytes": 349039,
+      "sha256": "ac2f405b102b3a6bee1e5344b141ae0389f6551f937150a298d80ed9437b67a3"
+    }
+  ],
+  "pptx_relationship_errors": [],
+  "mp4_decode_exit": 0,
+  "mp4_decode_stderr": "",
+  "scope": "Independent snapshot hashes, PPTX XML relationship graph and full MP4 decode. PPTX app rendering and content/accessibility acceptance remain separate; operator-assisted correction on unchanged source2578."
+}

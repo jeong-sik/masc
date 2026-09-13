@@ -26,7 +26,17 @@ bundle=load(p/'bundle.json');report=load(p/'report.json');commit='3446d8a35ee132
 assert bundle['source_commit']==report['build']['binary_commit']==report['live_extension']['source_commit']==commit
 assert bundle['binaries']==bundle['binary_source_proof']['sha256']
 assert report['binary_sha256']==bundle['binaries']['masc-macos-arm64']
+sourceproof=load(p/'candidate-source-proof.json')
+assert sourceproof['source_commit']==commit and sourceproof['tracked_clean'] is True
+assert report['live_extension']['native_host_sha256']==bundle['binaries']['masc-browser-host-macos-arm64']
+assert bundle['runtime_provenance']['source_commit']==commit
+cleanup=report['cleanup']
+assert any(isinstance(e,dict) and e.get('keeper_shutdown_finalized') is True for e in cleanup)
+assert any(isinstance(e,dict) and e.get('keeper_shutdown_admission',{}).get('accepted') is True for e in cleanup)
+assert {e['name']:e['exit'] for e in cleanup if isinstance(e,dict) and 'name' in e}=={'server':0,'driver':0}
+assert [e for e in cleanup if isinstance(e,str)]==['owned live Firefox profile closed','owned unique native host manifest removed']
 tui=load(p/'tui-follow-audit.json');life=load(p/'tui-lifetime.json');assert tui['frames']==116 and tui['all_three_channels_followed']
+assert life['alive_at_copy'] and life['alive_after_keeper_observation'] and life['capture_errors']==[]
 assert life['exit']==0 and life['binary_sha256']==bundle['binaries']['masc-tui-macos-arm64']
 assert not any(e['monotonic']>report['turn_started_monotonic'] for e in life['input_events'])
 raw=(p/'tui-follow.pty').read_bytes()

@@ -24,8 +24,8 @@ Textual TUI screenshots are native PTY replays; firefox-final.png is a separate
 actual Firefox capture, not an atomically aligned image. No profile, credentials,
 provider configuration or complete provider trace is retained.
 
-Temporary probe and capture-helper files were copied after the run; the operator
-reported them unchanged during this run, but no pre-run wrapper hash was recorded.
+Temporary probe and capture-helper files were copied after the run; no pre-run
+wrapper hash was recorded.
 Candidate-source-proof covers committed sources, not those temporary wrappers.
 Arguments used source3446, server/TUI under /tmp/browser-live-context-native-3446/runtime,
 checkout /private/tmp/masc-browser-live-context-native and bundled-skills under

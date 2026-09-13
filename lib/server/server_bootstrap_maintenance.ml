@@ -196,6 +196,96 @@ let latest_keeper_msg_recovery_observation () =
   Atomic.get latest_keeper_msg_recovery
 ;;
 
+let latest_keeper_config_journal_recovery = Atomic.make None
+
+let latest_keeper_config_journal_recovery_report () =
+  Atomic.get latest_keeper_config_journal_recovery
+;;
+
+let recover_keeper_config_journal_on_startup ~base_path =
+  let recover () =
+    Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun path before ->
+        match before with
+        | Keeper_config_journal.Manifest_absent ->
+          Keeper_config_journal.remove_durable ~path
+        | Keeper_config_journal.Manifest_bytes bytes ->
+          Fs_compat.save_file_atomic_strict_staged path bytes
+          |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
+      ~runtime_restore:(fun path image ->
+        match image with
+        | Keeper_config_journal.Runtime_bytes source_text ->
+          Fs_compat.write_file_atomic_strict_staged path
+            ~write:(fun channel ->
+              Unix.fchmod (Unix.descr_of_out_channel channel) 0o600;
+              output_string channel source_text)
+          |> Result.map_error Fs_compat.atomic_replace_failure_to_string
+        | Keeper_config_journal.Runtime_absent ->
+          Keeper_config_journal.remove_durable ~path)
+  in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let failed detail : Keeper_config_journal.report =
+    { outcome = Recovery_failed { detail; notes = [] }
+    ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+    ; record = None }
+  in
+  let report =
+    match Keeper_config_journal.load
+            ~journal_path:(Keeper_config_journal.journal_path_for_base_path ~base_path) with
+    | Ok None ->
+      { Keeper_config_journal.outcome = No_journal
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Error detail ->
+      { Keeper_config_journal.outcome = Journal_corrupt detail
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Ok (Some _) ->
+    try
+      Fs_compat.mkdir_p (Filename.dirname runtime_path);
+      match File_lock_eio.with_durable_lock_observed
+              ~lock_path:(runtime_path ^ ".lock") recover with
+      | File_lock_eio.Lock_not_acquired error ->
+        failed (File_lock_eio.durable_lock_error_to_string error)
+      | File_lock_eio.Body_completed { value; release_error = None } -> value
+      | File_lock_eio.Body_completed { value; release_error = Some error } ->
+        { value with outcome = Recovery_failed
+            { detail = File_lock_eio.durable_lock_error_to_string error; notes = [] } }
+    with
+    | Sys_error detail -> failed detail
+    | Unix.Unix_error (error, action, path) ->
+      failed (Printf.sprintf "%s %s: %s" action path (Unix.error_message error))
+  in
+  Atomic.set latest_keeper_config_journal_recovery (Some report);
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | Keeper_config_journal.Recovered_rolled_back _ ->
+     Log.Server.info "keeper_config_journal: startup recovery rolled back an interrupted config write (journal cleared)"
+   | Keeper_config_journal.Journal_corrupt detail ->
+     Log.Server.warn "keeper_config_journal: startup recovery found an unreadable journal (%s); leaving it in place for diagnosis"
+       detail
+   | Keeper_config_journal.Recovery_failed { detail; notes } ->
+     Log.Server.warn "keeper_config_journal: startup recovery could not converge (%s; %s); journal preserved for retry"
+       detail
+       (String.concat "; " notes));
+  report
+;;
+
+let with_initial_configuration ~base_path initialize =
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_config_path in
+  (* Directory creation is atomic. No configuration bytes are read or seeded
+     before journal admission; a concurrent creator is an existing root. *)
+  Fs_compat.mkdir_p (Filename.dirname config_root);
+  let created =
+    try Unix.mkdir config_root 0o755; true with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> false in
+  Runtime.with_config_lock ~runtime_config_path (fun () ->
+    if created then
+      Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created;
+    Ok (initialize ~runtime_config_path))
+;;
+
 let recover_keeper_msg_requests_on_startup ~base_path =
   let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
   Atomic.set latest_keeper_msg_recovery (Some report);

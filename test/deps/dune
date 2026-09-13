@@ -26,6 +26,7 @@
   (re_export cohttp)
   (re_export cohttp-eio)
   (re_export masc.cost_ledger)
+  (re_export masc.config_journal)
   (re_export cstruct)
   (re_export dated_jsonl)
   (re_export digestif)

@@ -263,10 +263,20 @@ let child_item (root : path_item) name =
   { path; exists; source = root.source }
 
 let inputs_from_env () =
+  let cwd = current_working_dir () in
+  (* An explicit workspace anchors relative config overrides for both global
+     readers and resolve_for_base_path writers. Resolve a relative workspace
+     against the process cwd once, before using it as that shared anchor. *)
+  let cwd, env_base_path = match current_env_base_path_opt () with
+    | None -> cwd, None
+    | Some base_path ->
+      let base_path = Env_config_core.normalize_masc_base_path_input base_path
+        |> absolute_path_from ~cwd in
+      base_path, Some base_path in
   {
-    cwd = current_working_dir ();
+    cwd;
     executable_name = Sys.executable_name;
-    env_base_path = current_env_base_path_opt ();
+    env_base_path;
     env_config_dir = current_env_config_dir_opt ();
   }
 

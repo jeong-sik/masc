@@ -38,6 +38,13 @@ val owned_active_task_id_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
+(** The same current-task selection, preserving authoritative backlog read
+    failures rather than treating them as absence. Does not change metadata. *)
+val owned_active_task_id_result_for_meta :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (Keeper_id.Task_id.t option, string) result
+
 (** Persist [meta.current_task_id] after comparing it with backlog ownership. *)
 val sync_current_task_id_from_backlog :
   config:Workspace.config ->

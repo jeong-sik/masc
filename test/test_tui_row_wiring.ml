@@ -430,32 +430,18 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
          > 0))
     [ "Tui_decode.Health_offline"; "Tui_decode.Health_zombie" ]
 
-(* These labels were committed as the UTF-8 bytes interpreted once and then
-   encoded again, so operators saw byte-decoding debris instead of the
-   arrow/dash. Pin the semantic values, not their source spelling.
-
-   The Code footer used to be pinned here too. #32643 rebuilt it out of
-   Masc_tui_keys, where the pan keys are spelled "Shift-Left / Shift-Right" in
-   ASCII, so the glyph literal this asserted no longer exists anywhere in the
-   surface -- and an assertion whose subject is gone had been failing since
-   that merge, unseen, because CI links no test executable. *)
+(* The preview's em dash once appeared as double-encoded UTF-8. Running
+   marks belong to Masc_tui_answering and are exercised as rendered rows by
+   test_tui_answering, including their terminal-cell width. *)
 let test_visible_navigation_glyphs_are_not_mojibake () =
-  let count binding literals =
+  let count literals =
     Ast_grep.count_string_literals_in_value_binding ~module_path:render
-      ~binding_name:binding ~literals
+      ~binding_name:"render_answering" ~literals
   in
-  Alcotest.(check int) "Answering draws the real running arrow" 2
-    (count "render_answering" [ "\xe2\x96\xb6 "; "\xe2\x96\xb6 writing" ]);
   Alcotest.(check int) "Answering draws the real em dash" 1
-    (count "render_answering"
-       [ "live preview \xe2\x80\x94 none for this row" ]);
-  Alcotest.(check int) "no double-encoded glyph literal remains" 0
-    (count "render_answering"
-       [ "\xc3\xa2\xc2\x96\xc2\xb6 "
-       ; "\xc3\xa2\xc2\x96\xc2\xb6 writing"
-       ; "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row"
-       ]
-)
+    (count [ "live preview \xe2\x80\x94 none for this row" ]);
+  Alcotest.(check int) "preview has no double-encoded em dash" 0
+    (count [ "live preview \xc3\xa2\xc2\x80\xc2\x94 none for this row" ])
 
 (* The Attention panel's badge. Critical and bad share a colour, so the word
    is the only thing that tells those two rows apart -- and the badge fitted

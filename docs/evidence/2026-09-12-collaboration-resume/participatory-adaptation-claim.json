@@ -1,0 +1,459 @@
+{
+  "observed_at": "2026-09-12T13:11:49.383370+00:00",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "task_state": {
+    "id": "task-004",
+    "status": "in_progress",
+    "assignee": "exhibit-editor",
+    "created_at": "2026-09-12T12:56:05Z",
+    "started_at": "2026-09-12T12:56:58Z",
+    "execution_links": {
+      "operation_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001"
+    }
+  },
+  "actual_tool_receipts": [
+    {
+      "ts": 1789217800.994281,
+      "record_kind": "tool_call",
+      "keeper": "exhibit-editor",
+      "tool": "keeper_tasks_list",
+      "input": {
+        "projection": "full",
+        "status": "todo"
+      },
+      "output": "{\"backlog_authority\":\"primary\",\"degraded\":false,\"projection\":\"full\",\"matching_count\":1,\"returned_count\":1,\"truncated\":false,\"kind\":\"snapshot\",\"revision\":\"tasks:2e39d6eb4779f7d4543eb50cb3d40556f83be0b4e0c711bbf9b74c0aff8033ac\",\"snapshot\":[{\"id\":\"task-004\",\"title\":\"연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기\",\"description\":\"완성된 세 편의 연작 소설을 초등 고학년과 보호자가 함께 보는 짧은 도서관 체험으로 확장한다. 관객에게 줄거리를 빠르게 알려주는 것과 각 인물의 선택을 관객 자신의 판단으로 남기는 것은 충돌할 수 있다. 고정된 영상의 속도와 진행자가 조절할 수 있는 발표도 서로 다르다. 팀이 기존 작품과 독자 관점에서 중요한 표현 방식을 결정하고 반론을 다룬 뒤 PPTX와 MP4 두 실물을 만든다. 최종 파일은 exhibit-editor의 adaptation/에 모으고, 분담과 창작 방식은 팀이 정한다. 외부 사람에게 연락하거나 공개 게시하지 않고 허구의 준비용 시제품으로 다룬다. 이전 두 Goal의 사람 확인 대기는 이번 조사·제작의 착수 조건이 아니다.\",\"priority\":3,\"files\":[],\"created_at\":\"2026-09-12T12:56:05Z\",\"created_by\":\"admin\",\"contract\":{\"strict\":true,\"completion_contract\":[\"adaptation/decision.md에 기존 serial/story.md의 실제 장면과 독자 조건을 근거로 서로 다른 체험 방식 3가지를 비교한다. 빠른 설명과 독자 선택권, 시청각 접근성과 표현의 밀도 사이의 상충을 분석하고 선택한 방식·버린 대안·불확실성을 기록한다. 서로 독립적인 두 관점의 구체적 반론과 응답을 실제 실행 또는 동료 대화 식별자로 연결한다.\",\"adaptation/experience.pptx는 실제로 열 수 있는 4~8슬라이드 발표 파일이며 한국어 이야기·선택 질문·질문 후 결과 또는 성찰·허구 고지를 포함한다. 슬라이드에는 관객이 생각할 수 있는 구간과 진행자 노트가 있고, 기존 세 편의 인물 관계와 선택의 인과를 뒤집지 않는다. 실제 렌더 또는 열람으로 글리프 누락·겹침·잘림을 확인한다.\",\"adaptation/experience.mp4는 같은 체험을 전달하는 실제 디코딩 가능한 60~180초 영상이다. 서로 다른 장면, 읽을 수 있는 한국어 제목·선택 질문·허구 고지가 있으며 무음으로 보아도 핵심 사건과 질문을 이해할 수 있다. 음향을 쓰면 자체 제작 또는 사용 근거를 기록한다. 코덱·화면 크기·길이·대표 장면의 실제 디코딩 검증과 PPTX 내용 대조를 수행한다.\",\"adaptation/evidence.json과 adaptation/review.md에 실제 PPTX/MP4 및 검수 이미지의 파일명·바이트·SHA256, 실행한 열람/디코딩·동료 검토의 결과와 한계를 기록한다. 긴 글 읽기가 어려운 독자와 소리를 듣지 못하는 상황의 두 시나리오를 검토하고, 관객의 선택권이나 이해를 개선한 실제 수정 전후를 한 건 이상 남긴다. 실제 사용자 조사를 하지 않았다면 사용자 검증으로 주장하지 않는다. 기존 전시와 연작 원본·Goal 증거는 보존한다.\"],\"required_evidence\":[\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/decision.md\",\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.pptx\",\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.mp4\",\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/review.md\",\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/evidence.json\"]},\"status\":\"todo\"}]}",
+      "success": true,
+      "duration_ms": 4.56690788269043,
+      "runtime_contract": {
+        "keeper_name": "exhibit-editor",
+        "trace_id": "trace-1789042595401-00001",
+        "session_id": "trace-1789042595401-00001",
+        "generation": null,
+        "keeper_turn_id": 406,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "docker",
+        "sandbox_root": "/home/keeper/playground/exhibit-editor",
+        "sandbox_roots": [
+          ".masc/playground/docker/exhibit-editor/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "glm-coding.glm-5.3"
+      },
+      "action_radius": {
+        "tool_name": "keeper_tasks_list",
+        "action_key": "keeper_tasks_list",
+        "target_kind": "tool",
+        "target_path": null,
+        "sandbox_target": "docker",
+        "observed_paths": [],
+        "success": true,
+        "duration_ms": 4.56690788269043,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "keeper.task.list",
+        "capability_id": "masc_tasks",
+        "keeper_model_projection": "internal_name",
+        "public_name": "keeper_tasks_list",
+        "canonical_name": "keeper_tasks_list",
+        "description": "List backlog tasks. Rows carry id, title, priority, created_at, status, assignee; projection=full adds description, files, contract, handoff_context, execution_links. awaiting_verification means the task awaits the completion-authority verdict and no Keeper can claim it; never Read producer sandbox paths. Rows are ordered by priority, then created_at, then id. When truncated is true the response carries next_cursor; pass it as cursor with the same status, include_done and projection to read the rows after that page. The last page has none.",
+        "executor": "in_process",
+        "backend": "ocaml_runtime",
+        "sandbox": "none",
+        "runtime_handler": "tool_task_dispatch",
+        "execution": "concurrent",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "json",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "backlog_authority": {
+                "type": "string"
+              },
+              "degraded": {
+                "type": "boolean"
+              },
+              "projection": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "snapshot": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "identity": {
+                            "type": "object",
+                            "properties": {
+                              "source_id": {
+                                "type": "string"
+                              },
+                              "package_id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "source_id",
+                              "package_id",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "content_revision": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "identity",
+                          "content_revision"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "priority",
+                    "created_at",
+                    "status"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "matching_count": {
+                "type": "integer"
+              },
+              "returned_count": {
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "backlog_authority",
+              "degraded",
+              "projection",
+              "kind",
+              "revision"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "receipt_labels": {
+          "descriptor_id": "keeper.task.list",
+          "capability_id": "masc_tasks",
+          "keeper_model_projection": "internal_name",
+          "public_name": "keeper_tasks_list",
+          "canonical_name": "keeper_tasks_list",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_task_dispatch",
+          "execution": "concurrent",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": true,
+        "cwd_scope": null,
+        "polling_read": false,
+        "tool_name": "keeper_tasks_list"
+      },
+      "agent_name": "exhibit-editor",
+      "model": "runtime",
+      "runtime_profile": "glm-coding.glm-5.3",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "08f56f233bf72b4bde347223526dce474c61e808c512aa3a94bce36ff8443c76",
+      "execution_id": "exec-1789217800993-0073",
+      "tool_use_id": "call_d22c72d0e4424c9bb8c83c61",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "concurrent",
+      "disposition": "completed",
+      "trace_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001",
+      "turn": 730,
+      "keeper_turn_id": 406,
+      "sandbox_profile": "docker",
+      "network_mode": "none",
+      "result_bytes": 3905,
+      "definition_source": "tools/keeper_tasks_list.toml"
+    },
+    {
+      "ts": 1789217818.749109,
+      "record_kind": "tool_call",
+      "keeper": "exhibit-editor",
+      "tool": "keeper_task_claim",
+      "input": {
+        "task_id": "task-004"
+      },
+      "output": "{\"result\":\"exhibit-editor claimed task-004 Task auto-started — begin work now.\",\"claim_observation\":{\"event_type\":\"collaboration.todo.claim_observed\",\"observed_at\":1789217818.747772,\"substrate\":{\"kind\":\"todo_claim\",\"source\":\"masc.workspace\",\"workspace_id\":null},\"actor\":{\"id\":\"exhibit-editor\",\"role\":null,\"display_name\":null},\"todo_claim\":{\"todo_id\":\"task-004\",\"state\":\"claim_verified\",\"scope_widened\":false,\"claimed_by\":\"exhibit-editor\",\"winner_actor_id\":\"exhibit-editor\"}},\"claimed_task\":{\"task_id\":\"task-004\",\"title\":\"연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기\",\"priority\":3,\"goal_id\":\"memory-garden-participatory-adaptation\"}}",
+      "success": true,
+      "duration_ms": 22.680997848510742,
+      "runtime_contract": {
+        "keeper_name": "exhibit-editor",
+        "trace_id": "trace-1789042595401-00001",
+        "session_id": "trace-1789042595401-00001",
+        "generation": null,
+        "keeper_turn_id": 406,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "docker",
+        "sandbox_root": "/home/keeper/playground/exhibit-editor",
+        "sandbox_roots": [
+          ".masc/playground/docker/exhibit-editor/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "glm-coding.glm-5.3"
+      },
+      "action_radius": {
+        "tool_name": "keeper_task_claim",
+        "action_key": "keeper_task_claim",
+        "target_kind": "tool",
+        "target_path": null,
+        "sandbox_target": "docker",
+        "observed_paths": [],
+        "success": true,
+        "duration_ms": 22.680997848510742,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "keeper.task.claim",
+        "capability_id": "keeper_task_claim",
+        "keeper_model_projection": "internal_name",
+        "public_name": "keeper_task_claim",
+        "canonical_name": "keeper_task_claim",
+        "description": "Claim MASC backlog work. With no task_id, claims the next eligible unclaimed todo task that matches your capabilities. awaiting_verification tasks are pending a verdict from the system LLM agent at the completion-authority boundary and are not claimable Keeper work. Never Read producer sandbox paths directly. With task_id, claims that exact task when a user, mention, board item, or keeper_tasks_list row identifies it; an awaiting_verification task returns the typed pending-verdict refusal. If you already own another Claimed/InProgress task, finish it with keeper_task_done or hand it back with keeper_task_release first; keeper_task_claim does not auto-release active work.",
+        "executor": "in_process",
+        "backend": "ocaml_runtime",
+        "sandbox": "none",
+        "runtime_handler": "tool_task_dispatch",
+        "execution": "serial",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "opaque"
+        },
+        "receipt_labels": {
+          "descriptor_id": "keeper.task.claim",
+          "capability_id": "keeper_task_claim",
+          "keeper_model_projection": "internal_name",
+          "public_name": "keeper_task_claim",
+          "canonical_name": "keeper_task_claim",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_task_dispatch",
+          "execution": "serial",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": false,
+        "cwd_scope": null,
+        "polling_read": false,
+        "tool_name": "keeper_task_claim"
+      },
+      "agent_name": "exhibit-editor",
+      "model": "runtime",
+      "runtime_profile": "glm-coding.glm-5.3",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "08f56f233bf72b4bde347223526dce474c61e808c512aa3a94bce36ff8443c76",
+      "execution_id": "exec-1789217818749-0074",
+      "tool_use_id": "call_9d2e21b79e0e4449ab0cd716",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "disposition": "completed",
+      "trace_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001",
+      "turn": 731,
+      "keeper_turn_id": 406,
+      "sandbox_profile": "docker",
+      "network_mode": "none",
+      "result_bytes": 659,
+      "definition_source": "tools/keeper_task_claim.toml"
+    },
+    {
+      "ts": 1789217844.941742,
+      "record_kind": "tool_call",
+      "keeper": "exhibit-editor",
+      "tool": "masc_run_init",
+      "input": {
+        "agent_name": "exhibit-editor",
+        "task_id": "task-004"
+      },
+      "output": "{\"task_id\":\"task-004\",\"agent_name\":\"exhibit-editor\",\"plan\":\"\",\"created_at\":\"2026-09-12T12:57:24Z\",\"updated_at\":\"2026-09-12T12:57:24Z\"}",
+      "success": true,
+      "duration_ms": 12.432098388671875,
+      "runtime_contract": {
+        "keeper_name": "exhibit-editor",
+        "trace_id": "trace-1789042595401-00001",
+        "session_id": "trace-1789042595401-00001",
+        "generation": null,
+        "keeper_turn_id": 406,
+        "task_id": "task-004",
+        "goal_ids": [],
+        "sandbox_profile": "docker",
+        "sandbox_root": "/home/keeper/playground/exhibit-editor",
+        "sandbox_roots": [
+          ".masc/playground/docker/exhibit-editor/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "glm-coding.glm-5.3"
+      },
+      "action_radius": {
+        "tool_name": "masc_run_init",
+        "action_key": "masc_run_init",
+        "target_kind": "tool",
+        "target_path": null,
+        "sandbox_target": "docker",
+        "observed_paths": [],
+        "success": true,
+        "duration_ms": 12.432098388671875,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "masc.run.init",
+        "capability_id": "masc_run_init",
+        "keeper_model_projection": "internal_name",
+        "public_name": "masc_run_init",
+        "canonical_name": "masc_run_init",
+        "description": "Create an execution memory directory to track the run plan.\n\nThe directory is .masc/runs/{task_id}/. Call when starting work on a claimed task to enable structured progress tracking. After init, use masc_run_plan to set approach and masc_run_get to review.",
+        "executor": "in_process",
+        "backend": "ocaml_runtime",
+        "sandbox": "none",
+        "runtime_handler": "tool_masc_run_dispatch",
+        "execution": "serial",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "opaque"
+        },
+        "receipt_labels": {
+          "descriptor_id": "masc.run.init",
+          "capability_id": "masc_run_init",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_run_init",
+          "canonical_name": "masc_run_init",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_run_dispatch",
+          "execution": "serial",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": false,
+        "cwd_scope": null,
+        "polling_read": false,
+        "tool_name": "masc_run_init"
+      },
+      "agent_name": "exhibit-editor",
+      "model": "runtime",
+      "runtime_profile": "glm-coding.glm-5.3",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "08f56f233bf72b4bde347223526dce474c61e808c512aa3a94bce36ff8443c76",
+      "execution_id": "exec-1789217844941-0075",
+      "tool_use_id": "call_b4d153081732402eb81e1154",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "disposition": "completed",
+      "trace_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001",
+      "turn": 732,
+      "keeper_turn_id": 406,
+      "task_id": "task-004",
+      "sandbox_profile": "docker",
+      "network_mode": "none",
+      "result_bytes": 134,
+      "definition_source": "tools/masc_run_init.toml"
+    }
+  ],
+  "operator_direct_kickoff": false,
+  "fusion_registry_observation": {
+    "generated_at": "2026-09-12T13:00:46Z",
+    "replay": {
+      "status": "absent"
+    },
+    "historical_evidence": [],
+    "count": 0,
+    "runs": []
+  },
+  "scope": "Actual autonomous turn406 discovered backlog, claimed task004 and initialized its run. No artifact or spontaneous Fusion success claimed."
+}

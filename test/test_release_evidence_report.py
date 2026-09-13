@@ -4,6 +4,7 @@ Uses the shell script's actual renderer and synthetic captures, without a
 server, lifecycle test run, or OCaml build.
 """
 
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +77,39 @@ class ReleaseEvidenceReport(unittest.TestCase):
             self.assertNotIn("bundle.md", report)
             self.assertNotIn("bundle.json", report)
             self.assertEqual(list(output.parent.iterdir()), [output])
+
+    def test_imported_lifecycle_requires_current_source_and_intact_logs(self):
+        spec = importlib.util.spec_from_file_location(
+            "lifecycle", ROOT / "scripts/keeper-full-lifecycle-evidence.py")
+        assert spec is not None and spec.loader is not None
+        lifecycle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lifecycle)
+        # Synthetic runner outcomes exercise transport and verification only;
+        # these fixtures are not native lifecycle evidence.
+        sha = lifecycle.source_sha(ROOT)
+        with tempfile.TemporaryDirectory(prefix="masc-lifecycle-import-") as tmp:
+            output = Path(tmp)
+            with mock.patch.object(lifecycle.subprocess, "run", return_value=
+                                   subprocess.CompletedProcess([], 0, "synthetic fixture\n")):
+                self.assertEqual(lifecycle.run_bundle(ROOT, output, sha), 0)
+            self.assertEqual(lifecycle.verify_bundle(ROOT, output), 0)
+            bundle_path = output / "bundle.json"
+            original = bundle_path.read_text()
+            bundle = json.loads(original)
+            bundle["source_sha"] = "0" * 40
+            bundle_path.write_text(json.dumps(bundle))
+            self.assertEqual(lifecycle.verify_bundle(ROOT, output), 1)
+            bundle_path.write_text(original)
+            (output / bundle["scenarios"][0]["log"]).write_text("tampered")
+            self.assertEqual(lifecycle.verify_bundle(ROOT, output), 1)
+
+    def test_verification_cannot_override_checkout_identity(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/keeper-full-lifecycle-evidence.py"),
+             "--verify", "--build-source-sha", "a" * 40],
+            text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot be used with --verify", result.stderr)
 
     def test_help_describes_private_captures(self):
         result = subprocess.run(["bash", str(SCRIPT), "--help"],

@@ -66,6 +66,9 @@ type observation = {
 
 type entry = { at_frame : int; who : string; key_name : string; down : bool }
 
+val entry_json : entry -> Yojson.Safe.t
+(** The native input ledger's record encoding. *)
+
 type error =
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
@@ -200,11 +203,16 @@ type identified_capture = {
   observation : observation;
   frame : frame;
   input_count : int;
+  input_ledger : entry list;
+      (** Newest-first immutable input records through [input_count], captured
+          with the frame and incarnation. Encoding/persistence belongs outside
+          the machine lock. *)
 }
 
 val capture_with_identity : unit -> (identified_capture, error) result
 (** Atomically reads the same machine as {!capture}, with its explicit history
-    identity and input cursor. Never steps, peeks, or changes a RAM baseline. *)
+    identity, input cursor and ledger. Never steps, peeks, or changes a RAM
+    baseline. The immutable list is shared without traversal or copying. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

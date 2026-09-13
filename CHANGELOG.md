@@ -1,7 +1,6 @@
 # Changelog
 
-
-## [0.35.16] - 2026-09-13
+## [0.35.15] - 2026-09-13
 
 ### Fixed
 
@@ -32,6 +31,17 @@
 - TUI: a manual refresh keeps the readings and scroll on screen, list selection stays visible across resizes and mode changes, the Memory facts selection stays inside the drawn viewport, expanded tool details stay expanded across a refresh, Esc on the Memory table clears its filter before leaving, a retry on a direct image link drops the body it cached, the Code file pane asks for the directory it moved into, palette slot answers are read rather than typed, the palette lists each destination once, the themes and models lists take the page keys, and the TUI and setup keep why a server they started exited before it was ready (#35914, #35908, #35909, #35907, #35841, #35836, #35821, #35779, #35846, #35902, #35864).
 - TUI: the chat header separates phase from runtime, `/about` states only what it was given, `/burn` shows cost, a conflict warning leads the footer, counts use one pluralisation helper, and the truncation mark is one mark that keeps the port in diagnostics (#35802, #35798, #35865, #35862, #35867, #35396).
 - TUI: row counts in Task Review, Changes and Logs match the rows drawn; copied context includes the selected browser target action; the cheat sheet wraps an entry instead of cutting it, puts each section title above its keys and uses one heading style; smaller label and layout corrections across Activity, Keepers, Planning, Goals, Memory, Code and Browser Lane (#35790, #35686, #35896, #35786, #35818, #35731, #35769, #35776, #35840, #35850, #35851, #35872, #35881, #35882, #35883, #35892, #35895, #35722).
+- HTTP pool: preserve DNS/TCP failures under one connection deadline, reclaim failed or cancelled client sockets, and connect through the address that passed the TCP probe without pinning later DNS reconnects (#35381, #35389, #35394).
+- HTTP pool: propagate internal client-scope failures to buffered and streaming request waits instead of leaving callers waiting for an optional timeout (#35423).
+- Installation: keep the selected workspace across working-directory changes, preserve the existing default when server startup fails, and leave unrelated defaults intact during purge (#35376).
+- Keeper: constitution tools return the standard `ok` response envelope used by other tools (#35451).
+- Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
+- TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).
+- Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
+- TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
+- TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
+- Chat: persist tool execution results before completion events and refuse stale cached or trace-only output when exact result retrieval fails (#35919, #35924).
+- Keeper: pause admission when interrupting chat, and allow cancellation during official-client MCP tool dispatch (#35928, #35936).
 
 ### Added
 
@@ -47,28 +57,6 @@
 - Browser: `masc-browser-host --bidi-url` attaches to an explicitly enabled loopback Firefox BiDi endpoint for shared live input (#35819).
 - Server: the endpoint probe answers over HTTP/2 (#35676).
 - TUI: the palette reaches both halves of Task Review, a detail read that is waiting says how long it has waited, `/` says how many entries matched and stays after Enter, the composer row on every surface names the slash command being typed, and Lane Add-ons open from the Lanes screen (#35668, #35502, #35410, #35910, #35915).
-
-### Changed
-
-- Skills: browser observation recovery loads on demand (#35695).
-- Documentation: one-command installation with the sandbox installation guidance, talking to `imp` by voice with a runbook measured on a new workspace, and RFC-0450 on the witness ledger (#35537, #35880, #35815, #35491).
-
-## [0.35.15] - 2026-09-12
-
-### Fixed
-
-- HTTP pool: preserve DNS/TCP failures under one connection deadline, reclaim failed or cancelled client sockets, and connect through the address that passed the TCP probe without pinning later DNS reconnects (#35381, #35389, #35394).
-- HTTP pool: propagate internal client-scope failures to buffered and streaming request waits instead of leaving callers waiting for an optional timeout (#35423).
-- Installation: keep the selected workspace across working-directory changes, preserve the existing default when server startup fails, and leave unrelated defaults intact during purge (#35376).
-- Keeper: constitution tools return the standard `ok` response envelope used by other tools (#35451).
-- Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
-- TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).
-- Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
-- TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
-- TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
-
-### Added
-
 - Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
 - Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
 - TUI: the turn dashboard folds to one line, which returns Ctrl-S to the surface (#35458).
@@ -88,6 +76,17 @@
 - Browser: the navigate-content composition ships, and tool receipts retain the scenes a TUI review reads (#35620, #35546).
 - TUI: the Board column's marks carry names, and the help sheet holds the same words (#35528).
 - Benchmarks: arm K also runs on opencode, without Anthropic credentials (#35406).
+- Official clients: deliver supported image tool results with validated MIME/base64 content and retained failure receipts (#35384).
+- CLI: `masc inspect-file` inspects original PDF, PPTX and MP4 files without changing Task or Goal state (#35921).
+
+### Changed
+
+- Skills: browser observation recovery loads on demand (#35695).
+- Documentation: one-command installation with the sandbox installation guidance, talking to `imp` by voice with a runbook measured on a new workspace, and RFC-0450 on the witness ledger (#35537, #35880, #35815, #35491).
+
+### Verification limits
+
+- Native `inspect-file` tests passed all nine cases on macOS and Linux for #35921. End-to-end official-client attachment, image tool-result and follow-up conversation verification remains deferred; this release does not claim that matrix passed.
 
 ## [0.35.14] - 2026-09-12
 

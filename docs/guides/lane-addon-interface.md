@@ -28,3 +28,9 @@ The common package JSON includes both contracts. A display-only package can omit
 The current contract does not claim that an image is installed or that a source
 has supplied complete observations. Those remain separate installation and
 coverage states.
+
+`interface.refresh_policy` optionally declares `every_hint` (the default) or
+`source_changes`. The latter opts a package into suppression of equal automatic
+file captures; it never suppresses explicit observation requests. See
+[source refresh semantics](lane-addon-refresh.md) for source interests and the
+limits of this policy.

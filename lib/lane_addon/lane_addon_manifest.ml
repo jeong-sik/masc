@@ -69,8 +69,12 @@ let load ~path =
     let* interface = match Otoml.find_opt document Fun.id ["interface"] with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
-        when List.for_all (fun (key,_) -> List.mem key ["binding_schema";"presentation"]) fields -> Ok fields
-      | Some _ -> Error "interface accepts binding_schema and presentation JSON strings" in
+        when List.for_all (fun (key,_) -> List.mem key ["binding_schema";"presentation";"refresh_policy"]) fields -> Ok fields
+      | Some _ -> Error "interface accepts binding_schema, presentation and refresh_policy" in
+    let* refresh_policy = match List.assoc_opt "refresh_policy" interface with
+      | None | Some (Otoml.TomlString "every_hint") -> Ok Every_hint
+      | Some (Otoml.TomlString "source_changes") -> Ok Source_changes
+      | Some _ -> Error "interface.refresh_policy requires every_hint or source_changes" in
     let json name = match List.assoc_opt name interface with
       | None -> Ok None
       | Some (Otoml.TomlString bytes) ->
@@ -115,7 +119,7 @@ let load ~path =
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path; skills_directory; action_tool; outputs; binding_schema; presentation;
+      directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; binding_schema; presentation;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with

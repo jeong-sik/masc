@@ -9,7 +9,7 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -17,7 +17,7 @@ jobs:
         run: python3 test/test_model_release_refresh.py
       - name: Observe current official sources
         run: python3 scripts/refresh-model-release-evidence.py --catalog config/model-releases.json --output model-release-observation/report.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: model-release-observation
           path: model-release-observation/report.json

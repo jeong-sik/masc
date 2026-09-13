@@ -74,6 +74,17 @@ let parse = function
   | _ -> Error "binding requires an object"
 let source_id = function Snapshot_file {id;_} | Msx_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
+type activity = Tool_completed | Msx_changed | Browser_changed
+type refresh_interest = source list
+let refresh_interest = parse
+let interested sources activity = List.exists (function
+  | Snapshot_file _ -> true
+  | Msx_capture _ -> activity=Msx_changed
+  | Browser_document _ -> activity=Browser_changed
+  | Lane_output _ -> false) sources
+let snapshot_files_only = function
+  | [] -> false
+  | sources -> List.for_all (function Snapshot_file _ -> true | _ -> false) sources
 let dependencies binding =
   let* sources = parse binding in
   Ok (List.filter_map (function Lane_output {installation_id;_} -> Some installation_id

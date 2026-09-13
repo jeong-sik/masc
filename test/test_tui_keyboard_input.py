@@ -7290,21 +7290,32 @@ def chat_visibility_modes_interaction(
                 timeout=5.0,
             )
         initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # "Adjacent rows" is a fact about the screen, not about one frame. The
+        # renderer redraws only dirty rows, so the frame that happens to carry
+        # ci-red-attribution can be a partial redraw starting at a date
+        # separator -- with no title row in it at all. Which rows share a frame
+        # depends on what changed, so reading a frame couples this assertion to
+        # redraw partitioning: it passed on main and failed here for a header
+        # edit that moved no rows. screen_rows keys by cursor address and the
+        # later write to a row wins, so it answers where each row is now.
+        drawn = screen_rows(initial)
+        title_row = screen_row_of(
+            drawn, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
+        identity_row = screen_row_of(drawn, b"gate:auto_judge")
+        if title_row < 0 or identity_row < 0:
+            raise AssertionError(
+                "the chat navigation row or the operational identity row is not "
+                f"on screen: title={title_row} identity={identity_row} "
+                f"{bytes(initial[-2000:])!r}"
+            )
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: title={title_row} "
+                f"identity={identity_row}"
             )
+        plain_initial_frame = CSI_RE.sub(b"", initial)
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:

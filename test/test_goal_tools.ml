@@ -659,7 +659,7 @@ let test_operator_confirmation_binds_current_proof () =
      the goal phase write, then retry the actual application operation. *)
   (match Goal_verification.record_human_confirmation config ~goal_id:goal.id verdict
       ~operator_id:"authenticated-operator" with
-   | Ok _ -> () | Error detail -> fail (confirmation_error_to_string detail));
+   | Ok _ -> () | Error detail -> fail detail);
   let first = match confirm ~operator_id:"another-operator" () with
     | Ok json -> json | Error detail -> fail (confirmation_error_to_string detail) in
   check string "operator confirmation completes" "completed"

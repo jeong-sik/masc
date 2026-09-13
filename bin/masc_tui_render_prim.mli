@@ -154,6 +154,9 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+val surface_chrome_budget : Masc_tui_types.state -> terminal_rows:int -> int
+(** Available body rows for the shared surface chrome. *)
+
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
   Masc_tui_types.state ->

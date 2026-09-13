@@ -127,7 +127,7 @@ let configuration_and_ports () =
   let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
-  let lines = UI.lines ~width:100 view in
+  let lines = UI.lines ~width:100 view @ UI.lines ~width:100 {view with focus=UI.Instances} in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
   check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
@@ -168,7 +168,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with snapshot=Some snapshot;
+  let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -186,10 +186,39 @@ let metric_fields_and_receipts_remain_readable () =
       ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
     [40;80;200]
 
+let selection_stays_visible () =
+  let module Row = Masc.Lane_addon_types in
+  let rows = List.init 80 (fun index -> ({
+    Row.id=Printf.sprintf "row-%d" index; lane_id=Printf.sprintf "lane-%d" index;
+    kind=Row.Event; title=String.make 160 'x'; observed_at=float_of_int index;
+    subject_id="fixture"; clock=None; actor=None; fields=[]; evidence=[]; related_ids=[]
+  } : Row.row)) in
+  let instance : UI.instance = {id=String.make 120 'i'; run_id="run"; addon_id="fixture";
+    title=String.make 120 't'; revision="1"; phase=Row.Attached; observation_seq=1;
+    rows_count=80; source_path=None; binding=`Assoc []; outputs=[];
+    skills_directory=None; incarnation="instance"; action_schema=None} in
+  let snapshot : UI.snapshot = {instances=[instance]; configuration=None;
+    output={rows;coverage=[]}; complete=None} in
+  List.iter (fun (width,height) ->
+    let request : UI.action_request = {instance_id=instance.id;incarnation=instance.incarnation;
+      request_id="long-receipt";action=`Assoc []} in
+    let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;row_cursor=79;
+      last_action=Some request;receipt=Some (`String (String.make 1000 'r'))} in
+    let lines = UI.lines ~height ~width view in
+    let first_screen = List.filteri (fun index _ -> index < height) lines in
+    check bool "last selection visible without manually scrolling inventory" true
+      (List.exists (String.starts_with ~prefix:"> [ ] lane-79") first_screen);
+    check bool "long labels fit a single row" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
+    check bool "selected lane detail has exact identity" true (List.mem "Row row-79" lines);
+    check bool "unselected row details are not expanded" false (List.mem "Row row-0" lines))
+    [40,16;80,24;120,50]
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
+  test_case "large inventories keep the selected lane visible" `Quick selection_stays_visible;
   test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]

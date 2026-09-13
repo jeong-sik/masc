@@ -218,9 +218,11 @@ let for_surface = function
           ~help:"add a failover candidate to this lane's walk order"
       ; b Navigate "e" "lane config"
           ~help:"open this lane's runtime.exact_output_lanes section"
+      ; b Navigate "A" "add-ons"
+          ~help:"open Lane add-ons, declarations, instances, and output"
       ; b Navigate "p" "runtime"
-          ~help:"back to the Runtime surface this hangs off"
-      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+          ~help:"open the Runtime surface"
+      ; b Act "Esc" "overview" ~help:"back to Overview"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching standalone lane; the run list \
                  and a run's detail carry no searchable rows"
@@ -784,7 +786,7 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Config / Runtime / Lanes", Lanes
+  ; "Lanes", Lanes
   ; "Config / Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals

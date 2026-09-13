@@ -11192,7 +11192,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if view.generation <> generation then view else
         match result with
         | Error detail -> {view with loading=false;error=Some detail}
-        | Ok (snapshot, receipt, action) -> {view with loading=false;error=None;snapshot=(match snapshot with None -> view.snapshot | Some _ -> snapshot);
+        | Ok (snapshot, receipt, action) ->
+            let snapshot = match snapshot with None -> view.snapshot | Some _ -> snapshot in
+            let view = match snapshot with
+              | None -> view
+              | Some snapshot ->
+                  let clamp cursor length = max 0 (min cursor (length - 1)) in
+                  let declarations = Option.fold ~none:0
+                    ~some:(fun (config : Masc_tui_lane_addons.configuration) -> List.length config.declarations)
+                    snapshot.configuration in
+                  {view with
+                    configuration_cursor=clamp view.configuration_cursor declarations;
+                    instance_cursor=clamp view.instance_cursor (List.length snapshot.instances);
+                    row_cursor=clamp view.row_cursor (List.length snapshot.output.rows)} in
+            {view with loading=false;error=None;snapshot;
             action_receipt=(match action with None -> view.action_receipt | Some _ -> action);
             receipt=(match receipt with None -> view.receipt | Some _ -> receipt)})
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -16197,27 +16210,29 @@ and is loaded on demand through keeper_skill.
                      | "t" ->
                          (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
-                     | "o" -> selected (fun id -> Addons.Observe id)
-                     | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "o" when view.focus = Addons.Instances -> selected (fun id -> Addons.Observe id)
+                     | "d" when view.focus = Addons.Instances -> selected (fun id -> Addons.Detach id)
+                     | "\t" | "tab" -> update { view with scroll=0; document_key=None; focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->
-                         let _, cols = get_terminal_size () in
+                         let terminal_rows, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
-                         let last = List.length (Addons.lines ~width view) - 1 in
+                         let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+                         let last = max 0 (List.length (Addons.lines ~height:budget ~width view) - budget) in
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
+                         let view = {view with document_key=None;scroll=0} in
                          (match view.snapshot, view.focus with
                           | Some snapshot, Addons.Configurations ->
                               let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
-                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
-                          | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | None, _ -> ())
-                     | " " ->
+                              update {view with scroll=0; configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
+                          | Some snapshot, Addons.Instances -> update { view with scroll=0; instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
+                          | Some snapshot, Addons.Rows -> update { view with scroll=0; row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
+                          | None, _ -> update view)
+                     | " " when view.focus = Addons.Rows ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
-                     | "e" when view.selected <> [] ->
+                     | "e" when view.focus = Addons.Rows && view.selected <> [] ->
                          (match Addons.selected_instance view with None -> () | Some instance ->
                            launch_lane_addons state ~mailbox:async_messages
                              (Addons.Evidence (`Assoc ["instance_id", `String instance.id;
@@ -19465,8 +19480,7 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
                  | Lanes_overview ->
-                     (* Back to the Runtime parent it hangs off, loaded. *)
-                     goto_surface state ~mailbox:async_messages Runtime)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Acting | Metrics | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
@@ -21309,7 +21323,7 @@ and is loaded on demand through keeper_skill.
               && Option.is_none state.runtime_detail_target ->
             (* The third Runtime reading: not what the lanes call, not what
                the workspace could call, but who is attached to it — the
-               clients roster, off the ring under Runtime the way Lanes is.
+               clients roster, off the ring under Runtime.
                This arm sits above the chat arm because that one takes [c]
                unguarded on every surface that names a Keeper. *)
             goto_surface state ~mailbox:async_messages Clients
@@ -21470,8 +21484,7 @@ and is loaded on demand through keeper_skill.
               lane names is absent from it, which is exactly the runtime an
               operator is looking for when they go to assign one. Same [p]
               that moves panes on Tools and Config. The third stop is the
-              standalone service lanes, off the ring the way Task Review
-              hangs off Planning; [p] there returns here. *)
+              standalone service Lanes surface; [p] there returns here. *)
            (match state.runtime_mode with
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
@@ -21481,6 +21494,8 @@ and is loaded on demand through keeper_skill.
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
+       | Some "A" when state.view = Lanes ->
+           launch_lane_addons state ~mailbox:async_messages Masc_tui_lane_addons.Inspect
        | Some "p" | Some "P" when state.view = Clients ->
            goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"

@@ -2186,6 +2186,7 @@ let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
     (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
     (Memory, "Memory");
     (Approvals, "Approvals");
     (Board, "Board");
@@ -2199,8 +2200,8 @@ let surface_ring : (surface * string) list =
    onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
    collapses onto Keepers -- its rows are one keeper's file writes, chosen by
    the roster cursor, so it was never a destination of its own. Channels,
-   Automation, and Runs are selected-Keeper detail tabs; standalone Lanes
-   remain Runtime observation, and Code remains a Workspace child.
+   Automation, and Runs are selected-Keeper detail tabs; Lanes has its own
+   destination, and Code remains a Workspace child.
    Resources and Tools collapse onto Config: an MCP resource catalog and
    the tool catalog with its receipts and usage are both answers to "what
    is registered here", read rarely and never raced against. System logs
@@ -2214,7 +2215,7 @@ let surface_ring_index (view : surface) =
     | Keepers _ -> Keepers Keeper_list
     | Verification | Harness -> Planning
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
+    | Runtime | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -4169,7 +4170,7 @@ type state = {
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
-  (* The clients roster, off the ring under Runtime the way Lanes is. A
+  (* The clients roster, off the ring under Runtime. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;
@@ -6962,7 +6963,7 @@ let visible_surface_ring_index (state : state) (view : surface) =
     | Verification | Harness -> Planning
     | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
     | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
+    | Runtime | Clients -> Config
     | Code -> Repositories
     | Resources | Tools -> Config
     | System_logs -> Acting
@@ -7677,7 +7678,6 @@ let palette_entries (state : state) =
      nearer half look like the only one there is. *)
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Task Verdicts", Palette_goto Harness ]
-  @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Code", Palette_goto Code ]

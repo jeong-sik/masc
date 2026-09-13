@@ -243,35 +243,80 @@ let instance_lines view instances =
     @ (match item.action_schema with None -> [] | Some schema ->
         ["   action schema · incarnation " ^ item.incarnation]
         @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
-let lines ~width view =
-  let header = ["Optional cross-lane observations; Keeper and existing machine owners continue independently.";
-    " n:new TOML  E:edit selected TOML  r:inspect  Tab:installations/instances/rows  :advanced command";
-    ("Focus: " ^ match view.focus with Configurations -> "TOML installations" | Instances -> "Instances" | Rows -> "Observation rows");
-    (if view.loading then "Request pending; Esc returns to existing activity." else "Retained server observations")] in
+let lines ?(height=24) ~width view =
+  let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
+  let header = [String.concat "  " [tab Configurations "Installations"; tab Instances "Instances"; tab Rows "Observations"];
+    (match view.focus with
+     | Configurations -> "n:new TOML  E:edit selected TOML  Tab:next area"
+     | Instances -> "o:observe  d:detach  E:edit TOML  :act {…}:action  t:status"
+     | Rows -> "Space:select evidence  e:export  Tab:next area");
+    (if view.loading then "Request pending · retained observations below · Esc:back"
+     else "Retained server observations · J/K:scroll · :command")] in
   let error = match view.error with None -> [] | Some detail -> ["Error: " ^ detail] in
+  (* Keep the selected item inside a bounded list. Details belong only to that
+     selection, so a large inventory cannot bury the current lane's output. *)
+  let window cursor render items =
+    let size = List.length items in
+    let capacity = max 1 (height / 3) in
+    let first = max 0 (min (max 0 (size - capacity)) (cursor - capacity / 2)) in
+    (if size = 0 then [] else [Printf.sprintf "Items %d–%d of %d" (first+1) (min size (first+capacity)) size])
+    @ (List.mapi (fun index item -> index, item) items
+       |> List.filter_map (fun (index, item) ->
+         if index < first || index >= first + capacity then None
+         else Some (Masc_tui_message_layout.fit_width
+           (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
-    | None -> ["No response yet."]
+    | None -> [if view.loading then "Loading Lane Add-ons…" else "No response yet. Press r to inspect Lane Add-ons."]
     | Some snapshot ->
-        configuration_lines view snapshot @
-        timeline_lines ~width snapshot.output.rows @ ["Instances (Tab changes focus)"] @
-        instance_lines view snapshot.instances @
-        ["Coverage"] @ List.map (fun (source : Row.coverage) -> Printf.sprintf " %s · %s · cursor %s · %s%s"
-          source.source_id source.incarnation (Option.value ~default:"unknown" source.cursor)
-          (if source.complete then "complete" else "partial")
-          (match source.detail with None -> "" | Some detail -> " · " ^ detail)) snapshot.output.coverage @
-        (match snapshot.complete with None -> [] | Some complete -> [if complete then "Slice complete within reported coverage" else "Slice partial"]) @
-        ["Cross-lane observations (space selects evidence)"] @
-        List.concat (List.mapi (fun i (row : Row.row) ->
-          [Printf.sprintf "%s [%s] %.3f · %s · %s · %s"
-            (if view.row_cursor = i then ">" else " ") (if List.mem row.id view.selected then "x" else " ")
-            row.observed_at row.lane_id row.id row.title;
-           Printf.sprintf "   subject %s · actor %s%s" row.subject_id (Option.value ~default:"unknown" row.actor)
-             (match row.clock with None -> "" | Some clock -> " · " ^ clock.domain ^ " " ^ clock.value);
-           "   fields"] @
-           List.map (fun line -> "     " ^ line)
-             (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))) @
-           List.map (fun (e : Row.evidence) -> "   evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256) row.evidence @
-           (if row.related_ids = [] then [] else ["   related " ^ String.concat ", " row.related_ids])) snapshot.output.rows) in
+        let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
+          (List.length snapshot.instances)
+          (List.length (List.sort_uniq String.compare (List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows)))
+          (List.length snapshot.output.rows) (List.length view.selected)] in
+        let content = match view.focus with
+        | Configurations ->
+            (match snapshot.configuration with
+             | None -> ["TOML configuration status unknown · r:refresh"]
+             | Some config ->
+                 window view.configuration_cursor (fun (d : declaration) ->
+                   Option.value ~default:"unresolved installation" d.installation_id ^ " · " ^
+                   (if d.issues <> [] then "needs attention" else if d.applied = d.desired then "applied" else "pending") ^
+                   " · " ^ Filename.basename d.source_path) config.declarations
+                 @ (if config.declarations=[] then ["No installations. Press n to create a TOML declaration."] else [])
+                 @ [""; "Installation details"]
+                 @ configuration_lines {view with configuration_cursor=0}
+                     {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}})
+        | Instances ->
+            window view.instance_cursor (fun (item : instance) ->
+              item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
+            @ (match selected_instance view with
+               | None -> ["No instances. Tab to Installations to create or repair a declaration.";
+                          "Manual attachment: :attach {manifest_path,run_id,binding}"]
+               | Some item -> [""; "Instance details"]
+                   @ instance_lines {view with instance_cursor=0} [item])
+        | Rows ->
+            window view.row_cursor (fun (row : Row.row) ->
+              (if List.mem row.id view.selected then "[x] " else "[ ] ") ^ row.lane_id ^ " · " ^ row.title) snapshot.output.rows
+            @ ["Evidence target: " ^ (match selected_instance view with
+              | None -> "none · select an instance before exporting"
+              | Some item -> item.title ^ " · " ^ item.id)]
+            @ (match selected_row view with
+               | None -> ["No observations. Tab to Instances and press o to observe a selected instance."]
+               | Some row ->
+                   [""; "Lane timeline · " ^ row.lane_id]
+                   @ timeline_lines ~width (List.filter (fun (candidate : Row.row) -> candidate.lane_id=row.lane_id) snapshot.output.rows)
+                   @ [""; row.title; "Row " ^ row.id;
+                      Printf.sprintf "Observed %.3f · subject %s · actor %s" row.observed_at row.subject_id (Option.value ~default:"unknown" row.actor)]
+                   @ (match row.clock with None -> [] | Some clock -> ["Clock " ^ clock.domain ^ " · " ^ clock.value])
+                   @ String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))
+                   @ List.map (fun (e : Row.evidence) -> "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256) row.evidence
+                   @ (if row.related_ids=[] then [] else ["Related " ^ String.concat ", " row.related_ids]))
+            @ [""; "Coverage"]
+            @ List.map (fun (source : Row.coverage) -> source.source_id ^ " · " ^
+                (if source.complete then "complete" else "partial") ^ " · incarnation " ^ source.incarnation ^
+                " · cursor " ^ Option.value ~default:"unknown" source.cursor ^
+                Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail) snapshot.output.coverage
+            @ (match snapshot.complete with None -> [] | Some complete -> [if complete then "Slice complete within reported coverage" else "Slice partial"]) in
+        summary @ content in
   let receipt = match view.receipt with None -> [] | Some json ->
     "Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json) in
   let draft = match view.draft with None -> [] | Some draft -> [(if view.naming then "New TOML filename: " else ":") ^ draft] in
@@ -288,7 +333,9 @@ let lines ~width view =
               "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result))) in
-  header @ error @ draft @ action @ documents @ content @ receipt
+  let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
+    (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
+  compact header @ compact error @ draft @ documents @ content @ action @ error @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))

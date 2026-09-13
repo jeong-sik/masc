@@ -1000,17 +1000,19 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+let surface_chrome_budget state ~terminal_rows =
+  (* top, title, divider, bottom and footer *)
+  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+
 let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols title;
   box_divider buf cols;
   (* top + title + divider + bottom + footer: the five rows the contract
      itself draws. Everything else is the body's budget. *)
-  let contract_rows = 5 in
-  let budget = max 1 (rows - contract_rows) in
+  let budget = surface_chrome_budget state ~terminal_rows in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
      shoves the bottom gap and the footer off screen, which breaks every

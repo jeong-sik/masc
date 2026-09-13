@@ -6227,11 +6227,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
-    let tab_hint = Masc_tui_keys.keeper_detail_tab_hint state.detail_tab in
     let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs Ansi.dim tab_hint Ansi.reset
+        Ansi.reset tabs
     in
     box_line buf cols title;
 
@@ -6304,7 +6303,19 @@ let render_keeper_detail (state : state) =
        [fit_width] instead, which keeps the front and loses the back -- where
        [Left / Esc] and [q] sit -- so at 80 columns the row ended "t:c…" and
        named no way out. [key:label] for the roster pane's key too. *)
-    let hints = keeper_control_hints state (Some (keeper_reading state k)) in
+    (* The open tab's own keys lead, and a Keeper control on a key the tab
+       answers itself leaves the row. They were a strip at the end of the
+       title row, which the frame cut at 120 columns ("o:act…", "L:log…"),
+       while this row said "s:shutdown" and "o:container logs" on the
+       Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
+       container logs the strip called "actual logs". *)
+    let hints =
+      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      ^ "  "
+      ^ keeper_control_hints
+          ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
+          state (Some (keeper_reading state k))
+    in
     let hints =
       if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
       else hints

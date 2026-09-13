@@ -805,10 +805,20 @@ let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun
     in
     assert (not (Tool_result.is_success result));
     assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
-    assert (str_contains (Tool_result.message result) "note:<text>")
+    assert (str_contains (Tool_result.message result) "note:<text>");
+    (* The list names board:<post-id> as a form of its own, so the same
+       message cannot also tell the submitter to wrap a Board post id in a
+       note: one sentence would contradict the other. *)
+    assert (str_contains (Tool_result.message result) "board:<post-id>");
+    assert (not (str_contains (Tool_result.message result) "a Board post id"))
   in
-  (* Every form the live workspace actually submitted and had rejected. *)
-  reject "board:p-b8655a197dcf2f5da46655e10b3acbd1";
+  (* Every form the live workspace actually submitted and had rejected, less
+     the one that stopped being a fault: task-174's [board:p-…] is a declared
+     form since the verifier reads Board and Fusion sources directly (#35536),
+     so it belongs to the accepted forms below. A bare prefix still names
+     nothing, and must keep drawing the list of forms that do. *)
+  reject "board:";
+  reject "fusion:";
   reject "file:///Users/x/repo/out.diff";
   reject "https://github.com/o/r/pull/1";
   reject "artifacts/relative/but/unprefixed.md";
@@ -836,6 +846,8 @@ let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () 
                 , `List
                     [ `String "artifact:out/report.md"
                     ; `String "note:board post p-b8655a19 carries the rationale"
+                    ; `String "board:p-b8655a197dcf2f5da46655e10b3acbd1"
+                    ; `String "fusion:fusion-run-501"
                     ] );
               ] );
         ])

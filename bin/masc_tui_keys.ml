@@ -957,8 +957,26 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 
-(* The compact strip beside the tab row. Same [key:label] spelling the
-   footer uses, and the tab switch leads because it is on every tab. *)
+(* The single keys a binding's key names, in this table's own notation:
+   alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice
+   apart with a space ("u u"), and a chord with "+" ("arrows+enter"). *)
+let key_atoms key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.concat_map (String.split_on_char '+')
+  |> List.filter (fun atom -> not (String.equal atom ""))
+  |> List.sort_uniq String.compare
+
+(* The keys a detail tab's own arms answer before the Keeper controls do.
+   Sandbox takes [s] for the remote_ssh backend and [o] for its container
+   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+let keeper_detail_tab_taken_keys tab =
+  List.concat_map
+    (fun binding -> key_atoms binding.key)
+    (keeper_detail_tab_bindings tab)
+
+(* The keys the detail footer leads with. Same [key:label] spelling as the
+   rest of the row, and the tab switch leads because it is on every tab. *)
 let keeper_detail_tab_hint tab =
   String.concat "  "
     ("[ ]:tab"

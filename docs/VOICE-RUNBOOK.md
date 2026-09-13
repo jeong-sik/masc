@@ -561,6 +561,50 @@ named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
 of silence) or would have been announced as MP3. A player told the wrong
 type either refuses or plays nothing, and neither says why.
 
+### The announcement has to agree with it
+
+The route above is what a clip is **served** as. What a keeper's spoken reply
+is **announced** as is a separate field, written when the reply is appended to
+the chat, and for a while it was the literal `audio/mpeg` for every clip:
+
+```json
+{ "audio": { "token": "9f3c…", "audio_url": "/api/v1/voice/audio/9f3c…",
+             "mime": "audio/mpeg" } }
+```
+
+A fresh mac speaks through `say`, which writes WAVE. So the route answered
+`audio/wav` for bytes the same chat line called MP3: two fields about one
+file, disagreeing.
+
+**What this did and did not break, traced 2026-09-13.** The dashboard's
+`<audio>` element is given `src` and no `type`, so the browser picks its
+decoder from the route's `content-type` and plays the clip correctly. The
+field is not decorative either: `normalizeAudioClip` drops a clip that has no
+`mime` at all, and the value it keeps is persisted on the chat line and
+emitted on the SSE payload. So the cost is not a silent player today — it is
+a wrong answer on the wire and in the history to anything that reads it
+instead of fetching: an external device following the SSE stream, an export,
+a player that picks a decoder from the field rather than the response.
+
+The cause is worth naming because it is not a typo. The path already knew the
+container: the helper that turned `…/9f3c.wav` into a token **matched that
+extension and then dropped it**, handing back the token alone. The caller,
+left holding half the answer, filled in the other half with a constant. Both
+halves now come back together (`clip_of_path`), and the record is built in one
+place (`Keeper_chat_store.audio_clip_of_synthesized_file`) rather than field
+by field at the call site.
+
+`test/voice_clip_announcement` writes a real file and checks that what the
+announcement says and what `find_clip` would serve are the same string —
+asserting the literal alone would pass again if only one side moved, which is
+how this started. Planting `mime = "audio/mpeg"` back turns that suite red on
+the WAVE case and nothing else.
+
+A clip under a container masc does not write (`.ogg`, say) is now announced as
+no clip at all, with a line in the log, because the serving route resolves a
+token by trying each container it knows and would answer `404` for it however
+it was labelled. The reply is still recorded as text.
+
 ### Speaking to a keeper, not just probing it
 
 The probe and the turn are different code paths, and for a while only the

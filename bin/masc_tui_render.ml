@@ -6677,7 +6677,13 @@ let render_system_logs (state : state) =
       match
         empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
       with
-      | Page_failed -> "  (load failed; the count above is not a reading)"
+      (* [empty_page_of] returns [Page_failed] for an error with no snapshot
+         and for an error over one, so a note about the title's count is true
+         only in the second: with no snapshot the header draws no count at
+         all and the note pointed at a row that is not on the screen. The
+         shared note holds in both, and the staleness is already said twice
+         above -- by the badge and by the error row this listing draws. *)
+      | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
       | Page_empty when loaded_entries > 0 ->
           "  (no entries match the current category filter)"

@@ -10782,17 +10782,31 @@ let render_runtime_pick (state : state) =
 (* The file pane's usable rows: top gap, title, divider, bottom gap, and
    the footer. One owner — the dispatch keeps the cursor visible against the
    same number the renderer draws with. *)
+(* The two-pane surfaces -- Code and Resources -- opened on their list pane's
+   header ("▸ /", "▸ Resources") with no row above it. Every other surface
+   opens on its name, the clock and the connection badge, and the badge is the
+   row that says the server has gone; on these two nothing did. The title row
+   sits above both panes, so each pane gives up one row to it. *)
+let pane_surface_title_rows = 1
+
+let pane_surface_title (state : state) ~name =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  Printf.sprintf "%s  %02d:%02d:%02d  %s"
+    (screen_title (" MASC " ^ name))
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+    (connection_badge state)
+
 let code_pane_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  framed_content_height ~rows
+  max 1 (framed_content_height ~rows - pane_surface_title_rows)
 
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  box_line buf cols (pane_surface_title state ~name:"Workspace / Code");
   let split = cols >= keeper_split_threshold_cols in
-  let list_rows_budget = framed_content_height ~rows in
+  let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
@@ -11539,8 +11553,10 @@ let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  box_line buf cols (pane_surface_title state ~name:"Config / Resources");
+  let pane_rows = max 1 (framed_content_height ~rows - pane_surface_title_rows) in
   let split = cols >= keeper_split_threshold_cols in
-  let list_rows_budget = framed_content_height ~rows in
+  let list_rows_budget = pane_rows in
   let rows_list =
     match state.resources_list with Some rows -> rows | None -> []
   in
@@ -11635,7 +11651,7 @@ let render_resources (state : state) =
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    let content_height = framed_content_height ~rows in
+    let content_height = pane_rows in
     (match shown_resource with
      | None ->
          for _ = 1 to content_height do

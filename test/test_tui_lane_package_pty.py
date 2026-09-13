@@ -145,7 +145,7 @@ def main(executable: str) -> None:
             release.set()
             if not terminal.wait_for_fixture_event(process, master_fd, output, finished, timeout=5):
                 raise AssertionError("delayed save did not finish")
-            terminal.wait_for_output(process, master_fd, output, b"Retained server observations",
+            terminal.wait_for_output(process, master_fd, output, b"No reading yet",
                                      start=after_release, timeout=5)
             state["delay"] = False
             # Inspect leaves the selected draft unchanged, so an incremental
@@ -157,7 +157,7 @@ def main(executable: str) -> None:
             if not terminal.wait_for_fixture_event(process, master_fd, output, refreshed.requested, timeout=5):
                 raise AssertionError("refresh request did not reach fixture")
             terminal.release_and_wait_for_frame(process, master_fd, output, refreshed,
-                                                b"Retained server observations")
+                                                b"No reading yet")
             if not refreshed.completed.is_set():
                 raise AssertionError("refresh fixture did not complete")
             fixtures["/api/v1/lane-addons"] = inspect

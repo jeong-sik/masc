@@ -7512,7 +7512,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement
@@ -7523,7 +7523,7 @@ let render_harness_detail (state : state) verdict =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, max_scroll =
+  let scroll, position =
     if cols < keeper_split_threshold_cols then
       harness_detail_pane state ~rows ~cols verdict buf
     else begin
@@ -7551,8 +7551,8 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh"
-            scroll max_scroll));
+            "j/k:scroll  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh  %s"
+            position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
 

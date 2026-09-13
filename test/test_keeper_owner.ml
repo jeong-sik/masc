@@ -1706,7 +1706,7 @@ let test_stale_chat_interrupt_cannot_pause_successor () =
     (Option.get (Owner.projection owner).meta).paused
 ;;
 
-let test_observed_stop_cancels_request_owned_stalled_http () =
+let run_observed_control_with_request_owned_stalled_http ~interactive =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun outer ->
   let socket = Eio.Net.listen env#net ~sw:outer ~reuse_addr:false ~backlog:1
@@ -1728,13 +1728,18 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
   let body_started, mark_body_started = Eio.Promise.create () in
   let http_cancelled, mark_http_cancelled = Eio.Promise.create () in
   let turn_ready, mark_turn_ready = Eio.Promise.create () in
+  let successor_started = ref false in
   let current = Atomic.make None in
   let first = operation_id "observed-stop-http" in
   let queued = operation_id "observed-stop-queued" in
   let operation_executor ~sw ~keeper_name:_ ~claim =
     let operation : Chat_operation.t = match owner_ok (claim ()) with Some value -> value | None -> fail "no claim" in
-    if not (Chat_operation.Operation_id.equal operation.operation_id first)
-    then fail "paused successor ran";
+    if not (Chat_operation.Operation_id.equal operation.operation_id first) then (
+      check bool "only interactive Enter admits successor" true interactive;
+      check bool "intended message consumed" true (Chat_operation.Operation_id.equal operation.operation_id queued);
+      successor_started := true;
+      Owner.Operation_succeeded {outcome_ref="new-answer"})
+    else (
     (* This HTTP task belongs to the enclosing request, not the inner model
        switch. The fixture stalls on an actual body read, not a timer in f. *)
     Eio.Fiber.fork ~sw (fun () ->
@@ -1756,18 +1761,28 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
     (* Mirror execute_keeper_stream_tool_streaming: an inner interruption can
        become a returned failure while the outer request waits for children. *)
     Owner.Operation_failed {kind=Chat_operation.Turn_cancelled;
-      detail=Keeper_registry_types.operator_interrupt_detail;outcome_ref=None}
+      detail=Keeper_registry_types.operator_interrupt_detail;outcome_ref=None})
   in
   let owner = owner_ok (start_owner_with_executor ~sw:outer
     ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
     ~operation_executor:(Some operation_executor) ~keeper_name:"observed-http"
     ~initial_meta:(Some (make_meta "observed-http")) ()) in
   List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
-    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first;queued];
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) (if interactive then [first] else [first;queued]);
   Eio.Promise.await turn_ready;
   Eio.Promise.await body_started;
-  (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"}))) with
-   | Owner.Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
+  if interactive then (
+    let acceptance, receipt = owner_ok (Owner.submit_interactive_operation owner
+      ~operation_id:queued ~source:operation_source ~input:(operation_input "new question")
+      ~intent:{control_token=Owner.chat_control_token owner;
+        target=Some (Observed_turn {current;interrupt_token="observed"})}) in
+    check bool "Enter persists a new operation" false acceptance.existing;
+    check bool "Enter signals the exact running owner" true
+      (receipt.outcome=Owner.Applied && receipt.signalled && not receipt.resumed);
+    check bool "Enter leaves consumption open" false (Option.get (Owner.projection owner).meta).paused)
+  else
+    (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"}))) with
+     | Owner.Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
   let cancelled = Eio.Fiber.first
     (fun () -> Eio.Promise.await http_cancelled; true)
     (fun () -> Eio.Time.sleep env#clock 2.0; false) in
@@ -1775,9 +1790,23 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
      switch teardown. This deadline is fixture-only, never runtime policy. *)
   Eio.Promise.resolve unblock_server ();
   ignore (await_terminal owner first 1_000);
-  check bool "observed Esc reaches request-owned HTTP read" true cancelled;
+  check bool "observed control reaches request-owned HTTP read" true cancelled;
+  if interactive then (
+    let operation = await_terminal owner queued 1_000 in
+    check bool "Enter consumes the new message without run-next" true !successor_started;
+    match operation.Chat_operation.state with
+    | Chat_operation.Succeeded _ -> ()
+    | _ -> fail "interactive successor did not answer");
   check bool "real teardown releases owner slot" true (Owner.turn_in_flight owner = None);
-  check int "queued input remains paused" 1 (Owner.operation_projection owner).queued_count
+  check int "only Esc retains paused input" (if interactive then 0 else 1) (Owner.operation_projection owner).queued_count
+;;
+
+let test_observed_stop_cancels_request_owned_stalled_http () =
+  run_observed_control_with_request_owned_stalled_http ~interactive:false
+;;
+
+let test_interactive_enter_replaces_request_owned_stalled_http () =
+  run_observed_control_with_request_owned_stalled_http ~interactive:true
 ;;
 
 let test_is_operator_interrupt_unwraps_every_shape () =
@@ -3462,6 +3491,8 @@ let () =
             test_stale_chat_interrupt_cannot_pause_successor
         ; test_case "observed Esc cancels request-owned stalled HTTP" `Quick
             test_observed_stop_cancels_request_owned_stalled_http
+        ; test_case "interactive Enter consumes input after cancelling stalled HTTP" `Quick
+            test_interactive_enter_replaces_request_owned_stalled_http
         ; test_case "interactive admission honors stop and replay authority" `Quick test_interactive_admission_respects_stop_authority
         ; test_case
             "is_operator_interrupt unwraps every shape"

@@ -2579,7 +2579,7 @@ let test_the_overlays_are_the_shared_contract () =
             (calls by_hand))
         [ "framed_top"; "framed_bottom" ])
     [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions"
-    ; "render_palette" ];
+    ; "render_palette"; "render_help"; "render_agenda" ];
   (* [keeper_deletions_viewport] bounds the record's scroll with
      [framed_content_height], and the body is drawn against the contract's
      budget. They agree only while the five rows have one owner. *)

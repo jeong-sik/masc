@@ -21,14 +21,13 @@ for o in proof['observations']:
  assert hashlib.sha256(data).hexdigest()==ref['sha256'] and len(data)==ref['bytes']
  assert data==delivered[o['execution_id']]
  assert any(a.get('_blob')==ref for a in by_id[o['execution_id']]['artifact_refs'])
-import importlib.util
-helper=p.parent.parent/'browser-continuity-20260913/audit.py'
-spec=importlib.util.spec_from_file_location('continuity',helper);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 load=lambda path:json.loads(path.read_text())
 bundle=load(p/'bundle.json');report=load(p/'report.json');commit='fd441e234f58f34e2889d8fde0fc20d3ea2be4d1'
 assert bundle['source_commit']==report['build']['binary_commit']==report['live_extension']['source_commit']==commit
 assert bundle['binaries']==bundle['binary_source_proof']['sha256']
 assert report['binary_sha256']==bundle['binaries']['masc-macos-arm64']
+assert report['live_extension']['native_host_sha256']==bundle['binaries']['masc-browser-host-macos-arm64']
+assert {e['name']:e['exit'] for e in report['cleanup'] if isinstance(e,dict) and 'name' in e}=={'server':0,'driver':0}
 tui=load(p/'tui-follow-audit.json');life=load(p/'tui-lifetime.json');assert tui['frames']==53 and tui['all_three_channels_followed']
 assert life['exit']==0 and life['binary_sha256']==bundle['binaries']['masc-tui-macos-arm64']
 assert not any(e['monotonic']>report['turn_started_monotonic'] for e in life['input_events'])
@@ -36,6 +35,8 @@ raw=(p/'tui-follow.pty').read_bytes()
 for name,seen in tui['seen'].items():assert (p/f'tui-{name}.pty').read_bytes()==raw[:seen['offset']]
 assert (p/'answer.txt').read_text()==load(p/'composition-audit.json')['answer']
 instruction=load(p/'instruction-source-proof.json')
+assert instruction['source_commit']==report['instruction_source_commit']=='9109071810955b29163077ba3837e586d0118739'
+assert report['instruction_sha256']==instruction['new_sha256']
 assert instruction['modified_paths']==['SKILL.md']
 assert instruction['baseline_export_source_commit']==bundle['source_commit']
 assert bundle==load(p.parent/'full-native-fd441/bundle.json')
@@ -47,6 +48,9 @@ assert bundle['packages']['browser-lanes']['SKILL.md']==instruction['old_sha256'
 assert [name for name,digest in files.items() if bundle['packages']['browser-lanes'][name]!=digest]==['SKILL.md']
 second=raw_events[1]
 assert second['tool_name']=='keeper_skill'
+second_row=next(r for r in by_id.values() if r['tool_use_id']==second['tool_use_id'])
+assert second_row['input']['identity']['package_id']=='browser-lanes'
+assert second_row['input']['identity']['name']=='browser-lanes'
 body=(installed/'SKILL.md').read_text().split('---',2)[2][1:]
 assert second['tool_result']==body
 for line in (p/'SHA256SUMS').read_text().splitlines():

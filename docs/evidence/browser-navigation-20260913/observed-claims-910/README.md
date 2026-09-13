@@ -18,7 +18,7 @@ is planned, not established as done. answer.txt preserves the exact terminal ans
 No algorithmic semantic-accuracy or universal-quality proof is claimed.
 
 Run python3 audit.py from any directory in the complete repository archive.
-The portable audit reuses ../compare_runs.py and the browser-continuity audit helper,
+The portable audit reuses ../compare_runs.py for execution joins and exact JSON extraction,
 checks exact result slices against stored bytes, instruction identity, component
 identity and recorded TUI frame/input provenance. Textual TUI PNGs are replays;
 firefox-final.png is a separate actual Firefox screenshot. Scope is synthetic only;

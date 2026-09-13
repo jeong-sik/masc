@@ -5618,6 +5618,20 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ filter_rows)
     @ numbered @ rejected @ attached_tool_lines
 
+(* The last proactive cycle's outcome in words. The row printed the wire
+   token -- "never_started", "tool_use" -- beside a Last Turn that said
+   "(never)": one fact, two spellings, and one of them the server's. An
+   exhaustive match, so an outcome the contract adds has to be given a word
+   before the screen draws it. *)
+let proactive_outcome_word = function
+  | Masc.Keeper_meta_contract.Proactive_never_started -> "never started"
+  | Masc.Keeper_meta_contract.Proactive_unknown -> "unknown"
+  | Masc.Keeper_meta_contract.Proactive_silent -> "silent"
+  | Masc.Keeper_meta_contract.Proactive_text_response -> "replied with text"
+  | Masc.Keeper_meta_contract.Proactive_tool_use -> "used tools"
+  | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
+  | Masc.Keeper_meta_contract.Proactive_error -> "error"
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
@@ -5806,7 +5820,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_empty ();
 
     add_section "Autonomy";
-    add_row "Last Outcome:" k.k_last_proactive_outcome;
+    add_row "Last Outcome:"
+      (match k.k_last_proactive_outcome with
+       | Some outcome -> proactive_outcome_word outcome
+       | None -> "-");
     add_empty ();
 
     (* Timestamps section *)

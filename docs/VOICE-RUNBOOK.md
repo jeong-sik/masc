@@ -617,6 +617,12 @@ POST /api/v1/voice/probe/stt   (raw wav body)
 
 The transcript is the sentence that was spoken, word for word.
 
+Both probe routes answer over HTTP/1.1 and over h2c, because the HTTP/2
+gateway carries them too. `curl` speaks HTTP/1.1 unless told otherwise, so the
+commands above reach the HTTP/1.1 router. The rest of `/api/v1/voice` is
+HTTP/1.1 only — `/voice/transcribe` and `/voice/audio/<token>` return 404 to an
+h2c client, which #35592 tracks.
+
 **What the public config then says.** `GET /api/v1/voice/config` needs no
 token and carries no model where none was named:
 

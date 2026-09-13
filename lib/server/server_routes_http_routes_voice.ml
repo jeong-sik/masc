@@ -112,21 +112,8 @@ let respond_json ?(status = `OK) ~request reqd json =
   Http.Response.json_value ~status ~compress:true ~request json reqd
 
 let audio_temp_suffix request =
-  let media_type =
-    match Http.Request.header request "content-type" with
-    | None -> ""
-    | Some raw ->
-      let raw = String.lowercase_ascii (String.trim raw) in
-      (match String.index_opt raw ';' with
-       | None -> raw
-       | Some idx -> String.trim (String.sub raw 0 idx))
-  in
-  match media_type with
-  | "audio/mp4" | "audio/x-m4a" -> ".mp4"
-  | "audio/mpeg" | "audio/mp3" -> ".mp3"
-  | "audio/ogg" -> ".ogg"
-  | "audio/wav" | "audio/wave" | "audio/x-wav" -> ".wav"
-  | "audio/webm" | _ -> ".webm"
+  Server_voice_probe.audio_suffix_of_content_type
+    (Http.Request.header request "content-type")
 
 (** RFC-0236 P1 — transcribe browser-captured speech.
 
@@ -197,60 +184,21 @@ let handle_voice_setup ~base_path ~act request reqd body =
      | Ok result -> respond_json_value_with_cors ~status:`OK request reqd result
      | Error error -> respond_voice_setup_error request reqd error)
 
-(* Probing every endpoint, rather than serving from the first that answers.
-
-   The fallback chain behind agent_speak stops at the first endpoint that
-   works, which is right for a turn and wrong for "is this configuration
-   working": a chain that succeeds says nothing about the endpoints behind
-   the one that answered, so a dead fallback looks exactly like a healthy one
-   until the endpoint in front of it goes away. [Voice_bridge.probe_tts] and
-   [probe_stt] ask all of them and report each separately; these routes are
-   how a dashboard or a wizard asks for that report. *)
-let probe_report_json attempts =
-  `Assoc [ "endpoints", `List (List.map Voice_bridge.probe_attempt_json attempts) ]
-
 let probe_failed request reqd reason =
   respond_json ~status:`Bad_request ~request reqd (`Assoc [ "error", `String reason ])
 
-let handle_probe_tts request reqd body =
-  match Yojson.Safe.from_string body with
-  (* Narrowed to what the parser throws: a wildcard here would swallow
-     Eio.Cancel.Cancelled and leave a cancelled fiber reporting a parse
-     failure. *)
-  | exception Yojson.Json_error _ ->
-    probe_failed request reqd "the request body is not JSON"
-  | json ->
-    let message =
-      match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "message" fields with
-         | Some (`String text) when String.trim text <> "" -> Some text
-         | Some _ | None -> None)
-      | _ -> None
-    in
-    (match message with
-     | None ->
-       probe_failed request reqd
-         "a probe needs a non-empty \"message\" for the endpoints to synthesize"
-     | Some message ->
-       (match Voice_bridge.probe_tts ~message () with
-        | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
-        | Error reason -> probe_failed request reqd reason))
+let probe_answer request reqd = function
+  | Ok json -> respond_json ~request reqd json
+  | Error reason -> probe_failed request reqd reason
 
-(* The audio arrives in the raw body, the way /voice/transcribe takes it. *)
+let handle_probe_tts request reqd body =
+  probe_answer request reqd (Server_voice_probe.tts_report ~body)
+
 let handle_probe_stt request reqd body =
-  if String.length body = 0
-  then probe_failed request reqd "empty audio body"
-  else
-    Eio.Switch.run (fun sw ->
-      let tmp = Filename.temp_file "masc_voice_probe_" (audio_temp_suffix request) in
-      Eio.Switch.on_release sw (fun () ->
-        try Sys.remove tmp with
-        | Sys_error _ -> ());
-      Fs_compat.save_file tmp body;
-      match Voice_bridge.probe_stt ~audio_file:tmp () with
-      | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
-      | Error reason -> probe_failed request reqd reason)
+  probe_answer request reqd
+    (Server_voice_probe.stt_report
+       ~content_type:(Http.Request.header request "content-type")
+       ~body)
 
 (* Which voices an endpoint has, asked before the endpoint is written.
 

@@ -391,7 +391,7 @@ self_test() {
   # takes the pane count out of the strip this file draws, so an added pane
   # moves it.
   check "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_config_key_help_matches_the_panes.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_config_key_help_matches_the_panes.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list

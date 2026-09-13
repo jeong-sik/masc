@@ -660,7 +660,7 @@ let parse_control_response ~expected_request_id fields =
 ;;
 
 let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
-    ~on_stream_event ~ignored =
+    ~on_stream_event =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -680,8 +680,10 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
     in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-      ~ignored
-  | ("system" | "rate_limit_event") when ignored < 32 ->
+  | "system" | "rate_limit_event" ->
+    (* Informational frames before the control response. The admission
+       deadline bounds a client that never answers; a count of them does not
+       change what the client is doing. *)
     await_initialize
       io
       ~mcp_session
@@ -690,7 +692,6 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~assistant_usage
       ~request_id
       ~on_stream_event
-      ~ignored:(ignored + 1)
   | other ->
     protocol_error
       "initialize"
@@ -1082,13 +1083,11 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     else Ok (turn_id, result, usage)
 ;;
 
-let max_ignored_messages = 256
-
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~stream_started ~response_emitted ~ignored =
+    ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -1107,7 +1106,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
       ~response_emitted
   | "control_response" ->
@@ -1151,7 +1150,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted ~ignored
+      ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
@@ -1159,7 +1158,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted ~ignored
+      ~stream_started ~response_emitted
   | "result" ->
     let parsed_result =
       parse_result
@@ -1214,7 +1213,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; resumed
       ; usage
       }
-  | "user" when ignored < max_ignored_messages ->
+  | "user" ->
     let* finished_ids = native_tool_result_ids ~expected_session_id fields in
     List.iter
       (fun call_id ->
@@ -1229,18 +1228,20 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
-      ~response_emitted ~ignored:(ignored + 1)
-  | ("system" | "tool_progress") when ignored < max_ignored_messages ->
+      ~response_emitted
+  | "system" | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
-       arrive through assistant/user messages.  Consume it as bounded stream
-       activity without treating an in-flight tool as a protocol failure. *)
+       arrive through assistant/user messages.  Consume it as stream activity
+       without treating an in-flight tool as a protocol failure. How many of
+       these a turn carries says nothing about its health; the idle deadline
+       and the wall-clock ceiling bound the turn. *)
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
-      ~response_emitted ~ignored:(ignored + 1)
+      ~response_emitted
   | other ->
     protocol_error
       "turn"
@@ -1422,7 +1423,6 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       ~assistant_usage
       ~request_id:initialize_id
       ~on_stream_event
-      ~ignored:0
   in
   let* () =
     invoke_state_callback ~stage:"session ready callback" (fun () ->
@@ -1472,7 +1472,6 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~on_stream_event
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
-    ~ignored:0
 ;;
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools

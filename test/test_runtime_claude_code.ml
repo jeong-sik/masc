@@ -243,6 +243,22 @@ let test_subscription_turn_and_env_scrub () =
       check bool "no usage block yields none" true (Option.is_none turn.usage))
 ;;
 
+(* A turn that runs many built-in tools carries hundreds of tool_progress and
+   user frames. The runtime used to stop consuming them after 256 and report
+   the next one as an unsupported message type, turning a healthy long turn
+   into a protocol error. 300 is past that removed cap. *)
+let long_turn_progress_messages = 300
+
+let test_long_turn_with_many_progress_messages_completes () =
+  with_fixture
+    (List.init long_turn_progress_messages (fun _ -> Emit tool_progress)
+     @ [ Emit assistant; Emit result ])
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
 let test_routed_credentials_reach_probe_and_turn () =
   let bindings = [ "ANTHROPIC_AUTH_TOKEN", "fixture-token";
     "ANTHROPIC_BASE_URL", "https://gateway.example.test/anthropic";
@@ -2036,6 +2052,10 @@ let () =
             "subscription auth and env scrub"
             `Quick
             test_subscription_turn_and_env_scrub
+        ; test_case
+            "long turn with many progress messages completes"
+            `Quick
+            test_long_turn_with_many_progress_messages_completes
         ; test_case "routed credentials reach probe and turn" `Quick test_routed_credentials_reach_probe_and_turn
         ; test_case
             "progress resets stream idle timeout"

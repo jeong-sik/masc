@@ -71,7 +71,6 @@
 - TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
 - Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
 - TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
-- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
 - TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
 - TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
 - Skills: builtin packages refresh as complete packages (#35442).

@@ -81,6 +81,57 @@ let config_bindings =
   ; b Meta "q" "quit", None
   ]
 
+(* The Runtime keys, by the reading they act on. [p] goes somewhere different
+   from each reading, so the footer names where it goes from here while the
+   cheat sheet names the whole walk. [e] appends to the keeper lane under the
+   cursor, and the all-runtimes reading has no lane row to append to. *)
+type runtime_key =
+  | Every_reading of binding
+  | Keeper_lanes_only of binding
+  | Reading_walk
+
+let runtime_reading_walk_help =
+  "walk the three substrate readings; the third is the standalone Lanes surface"
+
+let runtime_keys =
+  [ Every_reading (b Navigate "j/k" "move / scroll")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading
+      (b Act "Right / Enter" "detail"
+         ~help:"show the full runtime, lane, dispatch, and probe fields")
+  ; Reading_walk
+  ; Every_reading
+      (b Navigate "c" "clients"
+         ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; Keeper_lanes_only
+      (b Act "e" "add failover"
+         ~help:"append a failover candidate to the lane under the cursor (keeper lanes only)")
+  ; Every_reading (b Act "Left / Esc" "back")
+  ; Every_reading
+      (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
+  ; Every_reading (b Search "n / N" "next / previous match")
+  ]
+
+let runtime_sheet_binding = function
+  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Reading_walk ->
+    b Navigate "p" "keeper lanes / all runtimes / service lanes"
+      ~help:runtime_reading_walk_help
+
+let runtime_footer_binding ~(mode : runtime_mode) = function
+  | Every_reading binding -> Some binding
+  | Keeper_lanes_only binding ->
+    (match mode with
+     | Runtime_lanes -> Some binding
+     | Runtime_all -> None)
+  | Reading_walk ->
+    Some
+      (b Navigate "p"
+         (match mode with
+          | Runtime_lanes -> "all runtimes"
+          | Runtime_all -> "service lanes")
+         ~help:runtime_reading_walk_help)
+
 (* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
    The terminal used to take this byte for flow control -- raw mode clears
    IXON now, which is what makes it bindable at all. A letter would not do:
@@ -267,7 +318,7 @@ let for_surface = function
           ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
-      ; b Act "y / n" "approval" ~help:"answer a tool approval"
+      ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "Q" "leave"
           ~help:"leave with a turn running, without interrupting it \
                  (empty draft, no capture or edit in flight)"
@@ -366,7 +417,8 @@ let for_surface = function
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "c" "complete" ~help:"complete goal"
+      ; b Act "c" "request completion"
+          ~help:"send the goal to the completion judge; press again to submit"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
@@ -504,22 +556,7 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Runtime ->
-      [ b Navigate "j/k" "move / scroll"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Act "Right / Enter" "detail"
-          ~help:"show the full runtime, lane, dispatch, and probe fields"
-      ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
-          ~help:"walk the three substrate readings; the third is the \
-                 standalone Lanes surface"
-      ; b Navigate "c" "clients"
-          ~help:"everyone attached to this workspace, off the ring under \
-                 Runtime"
-      ; b Act "Left / Esc" "back"
-      ; b Search "/" "find"
-          ~help:"jump the cursor to a matching lane id or runtime id"
-      ; b Search "n / N" "next / previous match"
-      ]
-      @ row_list_edges @ listing_meta
+      List.map runtime_sheet_binding runtime_keys @ row_list_edges @ listing_meta
   | Config ->
       List.map fst config_bindings
   | Resources ->
@@ -754,6 +791,18 @@ let footer_hints_code ~pane =
        if String.equal b.key "j/k" then
          { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
        else b)
+  |> hints_of_bindings
+
+(* The Runtime footer is the table's, with the two keys that depend on the
+   reading on screen: [p] names where it goes from here, and [e] exists only on
+   the keeper-lane reading, where a row names a lane to append to. The renderer
+   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
+   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
+   or [Esc], the way back to Config, and called the global refresh a live
+   one. *)
+let footer_hints_runtime ~(mode : runtime_mode) =
+  List.filter_map (runtime_footer_binding ~mode) runtime_keys
+  @ row_list_edges @ listing_meta
   |> hints_of_bindings
 
 let footer_hints_resources ~detail_focus =

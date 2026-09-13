@@ -89,6 +89,7 @@ def main(executable: str) -> None:
                 return terminal.send_and_wait(process, master_fd, output, value, needle)
 
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
+            key(b"D", b"TOML installations")
             key(b"n", b"New TOML filename:")
             key(b"terminal.toml\r", b"Draft edited; s saves")
             if requests:

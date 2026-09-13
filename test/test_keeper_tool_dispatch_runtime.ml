@@ -8401,7 +8401,7 @@ let test_peer_artifact_materializes_exact_binary () =
     Fs_compat.save_file source bytes;
     let docker = Filename.concat config.base_path "docker" in
     let script = Printf.sprintf
-      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\ninspect)\n  [ \"$2\" = --format ] || exit 95\n  [ \"$3\" = '{{json .State.Running}}' ] || exit 96\n  printf 'true\\n'; exit 0;;\nexec)\n  shift\n  while [ \"$#\" -gt 0 ]; do\n    case \"$1\" in\n      --user|-w|--env|-e) shift 2;;\n      -i) shift;;\n      masc-keeper-docker-*) shift; break;;\n      *) exit 97;;\n    esac\n  done;;\nrun)\n  while [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\n  shift;;\n*) exit 92;;\nesac\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\n[ \"$#\" = 2 ] || exit 98\nexec /bin/cat %s\n"
+      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\ninspect)\n  [ \"$2\" = --format ] || exit 95\n  [ \"$3\" = '{{json .State.Running}}' ] || exit 96\n  printf 'true\\n'; exit 0;;\nexec)\n  shift\n  while [ \"$#\" -gt 0 ]; do\n    case \"$1\" in\n      --user|-w|--env|-e) shift 2;;\n      -i) shift;;\n      masc-keeper-docker-*) shift; break;;\n      *) exit 97;;\n    esac\n  done;;\nrun)\n  while [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\n  shift;;\n*) exit 92;;\nesac\n[ \"$1\" = head ] || exit 93\n[ \"$2\" = -c ] || exit 99\n[ \"$4\" = %s ] || exit 94\n[ \"$#\" = 4 ] || exit 98\nexec /usr/bin/head -c \"$3\" %s\n"
       (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root sender.name) "generated.png"))
       (Filename.quote source) in
     Fs_compat.save_file docker script; Unix.chmod docker 0o755;

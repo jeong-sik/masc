@@ -88,10 +88,10 @@ type node = { node_id : string; kind : kind; tag : string; text : string;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 let text_role (node : node) =
   match node.kind with
-  | Text -> (match node.heading_level with
+  | Text | Control _ -> (match node.heading_level with
       | Some level -> Heading level
       | None -> text_role_of_tag node.tag)
-  | Raster | Region _ | Control _ -> Plain_text
+  | Raster | Region _ -> Plain_text
 
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;

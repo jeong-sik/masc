@@ -180,8 +180,12 @@ let () =
   let body = {node with node_id="body"; tag="p"; text="Post body"} in
   let nested_heading = {heading with node_id="nested-heading"; tag="span"; heading_level=Some 2} in
   let aria_heading = {heading with node_id="aria-heading"; tag="span"; heading_level=Some 3} in
+  let heading_link = {heading with node_id="heading-link"; kind=Control {
+      clickable=true; editable=false; disabled=false; href=Some "https://example.org/post"};
+      tag="a"; heading_level=Some 2} in
   assert (Masc.Browser_scene.text_role nested_heading = Masc.Browser_scene.Heading 2);
   assert (Masc.Browser_scene.text_role aria_heading = Masc.Browser_scene.Heading 3);
+  assert (Masc.Browser_scene.text_role heading_link = Masc.Browser_scene.Heading 2);
   assert (Masc.Browser_scene.text_role {heading with kind=Raster} = Masc.Browser_scene.Plain_text);
   let heading_scene = {scene with content={content with nodes=[heading;body]}} in
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80

@@ -120,7 +120,8 @@ let runtime = {js|function browserScene(args) {
     }
     return parts.join('').trim();
   };
-  // A text node inside a heading often belongs to a span or link. Preserve
+  // A text node inside a heading often belongs to a span, while a link heading
+  // is observed as a control. Preserve
   // that observed semantic ancestry without treating font size, CSS classes,
   // or text resemblance as a heading signal. ARIA headings require an
   // explicit valid level; an incomplete role stays unclassified.
@@ -129,8 +130,8 @@ let runtime = {js|function browserScene(args) {
       const tag=ancestor.localName || '';
       if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
       if (ancestor.getAttribute('role') === 'heading') {
-        const level=Number(ancestor.getAttribute('aria-level'));
-        return Number.isSafeInteger(level) && level >= 1 && level <= 6 ? level : null;
+        const raw=ancestor.getAttribute('aria-level');
+        return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
       }
     }
     return null;
@@ -215,7 +216,8 @@ let runtime = {js|function browserScene(args) {
       describe('control',node,label,boxes(node.getClientRects(),node),{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
-        clickable:typeof node.click === 'function' && !node.matches(':disabled')});
+        clickable:typeof node.click === 'function' && !node.matches(':disabled'),
+        headingLevel:headingLevel(node)});
       continue;
     }
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {

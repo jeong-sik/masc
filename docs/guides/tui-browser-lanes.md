@@ -139,10 +139,12 @@ The image viewport retains its browser scrolling controls.
 The scene is DOM-order text, controls and image placeholders. CSS geometry is
 available to tools; this first TUI projection does not reproduce CSS layout or
 compose inline raster regions. Use image view for the browser's painted result.
-Text nodes with an observed heading ancestor are shown with a `#` outline
-prefix, so article titles and section headings remain visible while reading the
-DOM-order body. The scene records an `h1`–`h6` ancestor, including text nested
-under a span or link, and an explicit `role="heading"` with `aria-level` 1–6.
+Text nodes and observed controls with an observed heading ancestor are shown
+with a `#` outline prefix, so article titles and section headings remain
+visible while reading the DOM-order body. The scene records an `h1`–`h6`
+ancestor, including text nested under a span and links whose own control node
+is the observed heading target, plus an explicit `role="heading"` with
+`aria-level` 1–6.
 Missing or invalid ARIA levels stay plain text; the reader does not infer
 headings from text, CSS, font size, or class names.
 TUI scene controls support clicking; literal text filling is available through

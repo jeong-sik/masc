@@ -85,6 +85,6 @@ ci = base / 'native-host-ci'
 provenance = json.loads((ci / 'provenance.json').read_text())
 assert (ci / 'SOURCE_COMMIT').read_text().strip() == provenance['source_commit'] == 'c082d495b1edc03588142b310177712718c36b49'
 assert provenance['run_id'] == 34732183649
-assert 'Ran 15 tests' in (ci / 'native-host-tests.log').read_text()
-assert (ci / 'native-host-tests.log').read_text().strip().endswith('OK')
+assert 'Ran 15 tests' in (ci / 'native-host-tests.txt').read_text()
+assert (ci / 'native-host-tests.txt').read_text().strip().endswith('OK')
 print('PASS: retained native host CI identity and 15-test result; binary hashes verified at artifact download')

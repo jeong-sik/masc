@@ -22,6 +22,7 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  form : Masc_tui_schema_form.t option;
 }
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
@@ -364,16 +365,18 @@ let open_actions ~request_id view =
   let* action_schema =
     let* properties = field "properties" schema in
     field "action" properties in
-  let* choices = match finite_values action_schema with
-    | Some (_::_ as choices) -> Ok choices
-    | Some [] | None -> Error "This action needs parameters. D shows its schema; :act accepts an explicit action." in
+  let* choices,form = match finite_values action_schema with
+    | Some (_::_ as choices) -> Ok (choices,None)
+    | Some [] | None ->
+        let* form = Masc_tui_schema_form.create ~schema:action_schema ~initial:(`Assoc []) in
+        Ok ([],Some form) in
   let choices = List.filter (fun action ->
     Result.is_ok (Action.validate ~schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id ~action))) choices in
-  if choices=[] then Error "The advertised schema has no valid preset action. D shows details."
+  if choices=[] && Option.is_none form then Error "The advertised schema has no valid preset action. D shows details."
   else Ok {view with action_menu=Some {
     target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
-    schema;choices;cursor=0}; presentation=Summary;scroll=0;error=None}
+    schema;choices;form;cursor=0}; presentation=Summary;scroll=0;error=None}
 
 let move_action view delta =
   {view with scroll=0;action_menu=Option.map (fun menu ->
@@ -388,12 +391,23 @@ let submit_action view =
       && instance.action_schema=Some menu.schema) snapshot.instances) with
     | Some instance -> Ok instance
     | None -> Error "The selected Add-on changed. Refresh and choose its action again." in
-  let* action = match List.nth_opt menu.choices menu.cursor with
-    | Some action -> Ok action | None -> Error "No selected action." in
+  let* action = match menu.form with
+    | Some form -> Masc_tui_schema_form.value form
+    | None -> (match List.nth_opt menu.choices menu.cursor with
+      | Some action -> Ok action | None -> Error "No selected action.") in
   let* action = Action.canonical action in
   let* _ = Action.validate ~schema:menu.schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id:menu.request_id ~action) in
   Ok {instance_id=instance.id;incarnation=instance.incarnation;request_id=menu.request_id;action}
+
+let edit_action ~key view =
+  let* menu = match view.action_menu with Some menu -> Ok menu | None -> Error "No action form" in
+  let* form = match menu.form with Some form -> Ok form | None -> Error "No action form" in
+  let* event = Masc_tui_schema_form.handle ~key form in
+  match event with
+  | Masc_tui_schema_form.Cancel -> Ok ({view with action_menu=None;error=None;scroll=0},None)
+  | Updated form -> Ok ({view with action_menu=Some {menu with form=Some form};error=None;scroll=0},None)
+  | Submit _ -> let* request = submit_action view in Ok (view,Some request)
 
 let scalar_text = function
   | `String text -> Some text
@@ -530,13 +544,17 @@ let flow_lines view =
 let lines ~width view =
   match view.action_menu with
   | Some menu ->
-      (["Run action on " ^ menu.target_title;
+      (["Run action on " ^ menu.target_title]
+       @ Option.to_list (Option.map (fun error -> "Input error: " ^ error) view.error)
+       @ (match menu.form with
+       | Some form -> Masc_tui_schema_form.lines form
+       | None -> [
         Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
           (menu.cursor+1) (List.length menu.choices);
         "J/K:scroll action details"]
        @ (match List.nth_opt menu.choices menu.cursor with
           | Some action -> action_fields "" action
-          | None -> ["No selected action"]))
+          | None -> ["No selected action"])))
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))

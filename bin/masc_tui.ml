@@ -16484,6 +16484,15 @@ and is loaded on demand through keeper_skill.
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
                 (match view.action_menu, view.draft with
+                 | Some {form=Some _;_}, _ ->
+                     if key="pageup" || key="pagedown" then (
+                       let _, cols = get_terminal_size () in
+                       let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
+                       update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
+                     else (match Addons.edit_action ~key view with
+                      | Ok (next,None) -> update next
+                      | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                      | Error detail -> update {view with error=Some detail})
                  | Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}

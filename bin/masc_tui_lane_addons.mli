@@ -22,6 +22,7 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  form : Masc_tui_schema_form.t option;
 }
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
@@ -53,4 +54,5 @@ val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string)
 val open_actions : request_id:string -> t -> (t, string) result
 val move_action : t -> int -> t
 val submit_action : t -> (action_request, string) result
+val edit_action : key:string -> t -> (t * action_request option, string) result
 val pending_action : t -> action_request option

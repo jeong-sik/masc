@@ -276,7 +276,30 @@ let guided_actions () =
   check bool "another instance retains its generic reading" true
     (List.mem "    missing=3" foreign);
   check bool "presentation metadata cannot cross instance namespaces" false
-    (List.exists (fun line -> String.starts_with ~prefix:"    Missing records:" line) foreign)
+    (List.exists (fun line -> String.starts_with ~prefix:"    Missing records:" line) foreign);
+  let form_schema = match schema with
+    | `Assoc fields ->
+        let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+        let action = Yojson.Safe.from_string
+          {|{"type":"object","properties":{"query":{"type":"string","minLength":3}},"required":["query"],"additionalProperties":false}|} in
+        `Assoc (("properties",`Assoc (("action",action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+    | _ -> assert false in
+  let form_view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000002"
+    {UI.initial with snapshot=Some {snapshot with instances=[{instance with action_schema=Some form_schema}]}} |> ok in
+  let edit key view = match UI.edit_action ~key view |> ok with
+    | next,None -> next | _,Some _ -> fail "editing must not submit" in
+  let typed = form_view |> edit "j" |> edit "o" |> edit "b" in
+  let reviewed = edit "\019" typed in
+  check bool "review remains explicit before submission" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Review input" line) (UI.lines ~width:100 reviewed));
+  let submitted = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "review Enter must submit" in
+  check bool "free text including navigation letters is preserved" true
+    (submitted.action=`Assoc ["query",`String "job"]);
+  let replaced = {reviewed with snapshot=Some {snapshot with instances=[{instance with id="replacement";incarnation="replacement";action_schema=Some form_schema}]}} in
+  check bool "review does not authorize a replaced worker" true
+    (Result.is_error (UI.edit_action ~key:"enter" replaced))
+
 
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";

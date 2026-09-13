@@ -49,6 +49,16 @@ let keeper_chat_timeout_sec = 180.0
    lose the only report that says what landed. *)
 let preset_restore_timeout_sec = 120.0
 
+(* The server asks every declared endpoint in turn, and a provider that is
+   simply slow can hold one of them for tens of seconds. The ordinary 10s
+   deadline gave up while the scan was still running and the pane reported a
+   probe failure for endpoints that were about to answer. This is patience for
+   the whole scan, not a bound on it: the scan is bounded by the server's
+   per-endpoint budget times however many endpoints are declared, and a scan
+   that outlasts this is reported as the probe failing rather than as an
+   endpoint refusing. *)
+let voice_probe_timeout_sec = 120.0
+
 (* One name for the send target. The buffered send and the streaming send are
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)
@@ -280,6 +290,29 @@ let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
   with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* A POST whose effect matters, told apart by what is known about that effect.
+   [post_json] folds a dropped connection and a server's refusal into one
+   string, and a caller that cannot tell them apart treats a write that may have
+   landed as one that did not. A 4xx is the server declining in its own words.
+   Everything else -- no response, a deadline, a 5xx, a success whose body does
+   not read -- leaves the effect unknown. *)
+type post_outcome =
+  | Post_answered of Yojson.Safe.t
+  | Post_refused of string
+  | Post_unanswered of string
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
+    (match decode_json ~allow_empty:true ~status_code ~body:response with
+     | Error message -> Post_refused message
+     | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
+  | Ok (status_code, response) ->
+    (match decode_json ~allow_empty:false ~status_code ~body:response with
+     | Ok json -> Post_answered json
+     | Error message -> Post_unanswered message)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with

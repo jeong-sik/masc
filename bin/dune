@@ -1060,6 +1060,8 @@
  (modules masc_tui_types)
  (libraries mtime.clock.os masc_tui_esc_interrupt
   masc_tui_answering
+  masc.voice_wizard
+  masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_lane_declaration
@@ -1338,6 +1340,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.voice_wizard
+  masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
   masc_tui_lane_declaration

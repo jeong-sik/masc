@@ -921,8 +921,11 @@ let test_fleet_total_cost () =
    is the only place the Config screen names a surface the ring folds under it,
    and a reader who cannot see it has no way to the surface but the palette. *)
 let test_config_footer_names_child_hops () =
+  (* The five short labels after f are pane-scoped writes and views that were
+     in no list at all -- which pane each belongs to is in the help the ?
+     overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -980,6 +983,11 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    enabled "e"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
+    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
     List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   List.iter (fun pane ->

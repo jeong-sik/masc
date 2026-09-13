@@ -12713,8 +12713,157 @@ let render_runtime_config_status state =
    endpoint answers first, since a local server that is down falls back to a
    paid one silently. And the input device, because a capture that comes back
    empty is more often the wrong microphone than a threshold. *)
-let render_voice (state : state) =
+(* The wizard screen. The questions, their order and the completeness rule are
+   Voice_wizard's; what is drawn here is only how a terminal shows them. *)
+(* The voice pane and its wizard: a fixed head and footer around lines read
+   through [state.config_scroll]. Both drew every line into the surface budget,
+   and [finish_surface] keeps the leading rows of a frame that runs over, so a
+   long endpoint list or probe report lost its tail and then its footer with no
+   key that could bring them back. The offset is clamped here, against the
+   lines actually laid out, and reported back as [Voice_scroll]. *)
+let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints =
+  let lines = frame_lines body in
+  let height =
+    (* The rows under the head, less the box bottom and the footer. *)
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - List.length (frame_lines head) - 2)
+  in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.config_scroll
+  in
+  let buf = Buffer.create (Buffer.length head + Buffer.length body + 256) in
+  Buffer.add_buffer buf head;
+  List.iteri
+    (fun index line ->
+      if index >= scroll && index < scroll + height then begin
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n'
+      end)
+    lines;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"
+    ~rows:terminal_rows ~cols buf
+;;
+
+let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
+  let buf = Buffer.create 2048 in
+  let field name value =
+    box_line buf cols
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+  in
+  let draft = session.vws_draft in
+  let side =
+    match draft.Voice_wizard.section with
+    | Voice_setup.Tts -> "speech out"
+    | Voice_setup.Stt -> "speech in"
+  in
+  let shown value = if String.trim value = "" then "—" else value in
+  let steps = Voice_wizard.steps draft in
+  let position =
+    let rec index n = function
+      | [] -> None
+      | step :: rest -> if step = session.vws_step then Some n else index (n + 1) rest
+    in
+    match index 1 steps with
+    | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
+    | None -> "?"
+  in
+  box_top head cols;
+  box_line head cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice · setup")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  box_line buf cols
+    (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
+       (Voice_wizard.step_prompt session.vws_step));
+  box_line buf cols "";
+  (* The answer being given. A closed set shows its current value and the keys
+     that walk it; a text field shows what has been typed, with a cursor so an
+     empty field is visibly a field. *)
+  (match session.vws_step with
+   | Voice_wizard.Section ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold side
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Provider ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold
+          (Voice_wizard.provider_label draft.Voice_wizard.provider)
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Review ->
+     (match Voice_wizard.gaps draft with
+      | [] ->
+        box_line buf cols
+          (Printf.sprintf "    %senter saves this%s" Ansi.bold Ansi.reset)
+      | gaps ->
+        List.iter
+          (fun gap ->
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "    %s" (Voice_wizard.gap_message gap)))
+          gaps)
+   | Voice_wizard.Name
+   | Voice_wizard.Address
+   | Voice_wizard.Credential
+   | Voice_wizard.Model
+   | Voice_wizard.Voice ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
+  (* A local server that never asked for a key answers 200 only while nothing
+     sends it one, so the blank is worth saying out loud rather than leaving as
+     an empty line. *)
+  (match session.vws_step with
+   | Voice_wizard.Credential when String.trim session.vws_input = "" ->
+     box_line buf cols
+       (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
+   | Voice_wizard.Address when String.trim session.vws_input = "" ->
+     List.iter
+       (fun (what, address) ->
+         box_line buf cols
+           (Printf.sprintf "    %stry %s: %s%s" Ansi.dim what address Ansi.reset))
+       (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
+   | _ -> ());
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
+  field "side" side;
+  field "provider" (Voice_wizard.provider_label draft.Voice_wizard.provider);
+  field "name" (shown draft.Voice_wizard.endpoint_id);
+  field "address" (shown draft.Voice_wizard.address);
+  field "key var" (shown draft.Voice_wizard.credential_variable);
+  field "model" (shown draft.Voice_wizard.model);
+  (match draft.Voice_wizard.section with
+   | Voice_setup.Tts -> field "voice" (shown draft.Voice_wizard.voice)
+   | Voice_setup.Stt -> ());
+  (match session.vws_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+  (* Every endpoint, not just the first that answered. A chain stops at the
+     first, which is why a dead fallback reads as healthy until the endpoint in
+     front of it goes away. *)
+  (match session.vws_probe with
+   | [] -> ()
+   | lines ->
+     box_line buf cols "";
+     box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
+     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
+;;
+
+let render_voice (state : state) =
+  match state.voice_wizard with
+  | Some session -> render_voice_wizard state session
+  | None ->
+  let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
@@ -12735,13 +12884,70 @@ let render_voice (state : state) =
     | Some (`Int i) -> Some (string_of_int i)
     | Some _ | None -> None
   in
-  box_top buf cols;
-  box_line buf cols
+  (* One line per endpoint, from the admin setup read. The public config route
+     answers whether a fallback is configured and not which one, so a chain that
+     has quietly gone dead reads there exactly like a healthy one. *)
+  let endpoints section =
+    match state.voice_setup with
+    | None -> []
+    | Some json -> (
+        match member [ section; "endpoints" ] json with
+        | Some (`List items) ->
+            List.filter_map
+              (fun item ->
+                match string_of [ "id" ] item with
+                | None -> None
+                | Some id ->
+                    let kind = Option.value (string_of [ "kind" ] item) ~default:"?" in
+                    (* The server resolves it the way the transport does.
+                       Choosing between base_url and mcp_url here showed
+                       base_url for a voice_mcp endpoint that is called at
+                       its mcp_url. A command kind has no address. *)
+                    let address =
+                      Option.value (string_of [ "address" ] item) ~default:"—"
+                    in
+                    let off =
+                      match member [ "enabled" ] item with
+                      | Some (`Bool false) -> "  (disabled)"
+                      | Some _ | None -> ""
+                    in
+                    (* runtime.toml is an operator's file, not this pane's
+                       output. box_line's fit_width keeps ANSI, so an id, kind
+                       or address carrying control bytes rewrote the screen the
+                       moment the voice pane opened. The probe rows below
+                       already pass through the same filter. *)
+                    Some
+                      (Printf.sprintf "    %-20s %s%-18s%s %s%s"
+                         (Terminal_text.single_line id) Ansi.dim
+                         (Terminal_text.single_line kind)
+                         Ansi.reset (Terminal_text.single_line address) off))
+              items
+        | Some _ | None -> [])
+  in
+  let show_endpoints section =
+    match endpoints section with
+    | [] -> ()
+    | lines -> List.iter (fun line -> box_line buf cols line) lines
+  in
+  box_top head cols;
+  box_line head cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title " MASC Voice")
        (config_pane_strip state)
        (connection_badge state));
   box_line buf cols "";
+  (* Two independent reads feed this pane: the public config says what loaded,
+     and the setup read says which endpoints are declared. They used to share
+     one match, so a failed config read also erased the endpoint identities the
+     other read had returned. Each section now draws whatever it has. *)
+  let loaded_config =
+    match (state.voice_config, state.voice_config_error) with
+    | Some json, None -> Some json
+    | Some _, Some _ | None, Some _ | None, None -> None
+  in
+  let from_config render =
+    match loaded_config with Some json -> render json | None -> ()
+  in
   (match (state.voice_config, state.voice_config_error) with
    | _, Some message ->
        (* The distinction the pane exists for, said in words rather than drawn
@@ -12751,37 +12957,58 @@ let render_voice (state : state) =
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
-       field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
+       field "status" (Option.value (string_of [ "status" ] json) ~default:"?"));
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+    field "voice"
+      (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—"));
+  show_endpoints "tts";
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+    field "endpoint"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
+         ~default:"—");
+    field "fallback"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
+         ~default:"—"));
+  show_endpoints "stt";
+  (* Said once, not per section: the endpoints are missing from both when this
+     read fails, and repeating it twice would read as two faults. *)
+  (match state.voice_setup_error with
+   | None -> ()
+   | Some message ->
        box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
-       field "voice"
-         (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
-       field "endpoint"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
-            ~default:"—");
-       field "fallback"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-            ~default:"—"));
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  the endpoint list could not be read";
+       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");
   box_line buf cols "";
+  (* Where the endpoints above come from. With no [voice] section the loader
+     reads the standalone JSON, and naming runtime.toml there sent a reader to a
+     file that declares nothing. *)
+  let declared_by =
+    match Option.map (member [ "source" ]) state.voice_setup with
+    | Some (Some (`Assoc source)) -> (
+        match List.assoc_opt "path" source with
+        | Some (`String path) -> Terminal_text.single_line path
+        | Some _ | None -> "runtime.toml [voice]")
+    | Some (Some _ | None) | None -> "runtime.toml [voice]"
+  in
   box_line buf cols
-    (Printf.sprintf
-       "  %sruntime.toml [voice] declares this; the server says what loaded%s"
-       Ansi.dim Ansi.reset);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh");
-  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+    (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
+       Ansi.dim declared_by Ansi.reset);
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:"j/k:scroll  p:next pane  r:refresh  e:set up"
 ;;
 
 let render_config (state : state) =

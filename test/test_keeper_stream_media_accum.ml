@@ -109,6 +109,30 @@ let test_runtime_attempt_discards_unfinished_media () =
   | _ -> fail "expected only the fallback attempt image"
 ;;
 
+(* A liveness timeout ends the attempt like a provider failure. The media block
+   it left open is discarded, so a stop for that index afterwards completes
+   nothing and the fallback carries no image from the timed-out attempt. *)
+let test_timeout_discards_unfinished_media () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  A.start_runtime_attempt accum;
+  A.on_event accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string "timed out"
+             }
+       });
+  A.on_event accum (Timeout "idle timeout after 120.0s");
+  A.on_event accum (ContentBlockStop { index = 0 });
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  check int "no media block from the timed-out attempt" 0
+    (List.length (A.to_chat_blocks ~base_dir accum))
+;;
+
 let test_open_media_finalized_on_message_stop () =
   (* Mirrors the bridge's message-end safety net: an open media block is still
      reload-visible when the provider omits ContentBlockStop. Multiple open
@@ -387,6 +411,8 @@ let () =
           test_case "audio media -> Voice block" `Quick test_audio_media_as_voice_block;
           test_case "runtime attempt discards unfinished media" `Quick
             test_runtime_attempt_discards_unfinished_media;
+          test_case "liveness timeout discards unfinished media" `Quick
+            test_timeout_discards_unfinished_media;
           test_case "open media finalized on message stop" `Quick
             test_open_media_finalized_on_message_stop;
           test_case "stop reason freezes media until next exact scope" `Quick

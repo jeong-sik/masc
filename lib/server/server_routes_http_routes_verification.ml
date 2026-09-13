@@ -148,23 +148,56 @@ let error_json message =
   `Assoc [ "ok", `Bool false; "error", `String message ]
 ;;
 
-let commit_goal_confirmation_json ~config ~operator_id json =
+(* A confirmation the store refused (wrong binding, unknown goal, failed
+   write) is the caller's 400 as before. A store this build cannot read is
+   not: it answers the RFC-0444 envelope with the status this module already
+   uses for a dependency that is not there. *)
+type confirmation_error =
+  | Confirmation_rejected of string
+  | Goal_store_unavailable of Goal_store.unavailable
+
+let confirmation_error_to_string = function
+  | Confirmation_rejected detail -> detail
+  | Goal_store_unavailable unavailable -> Goal_store.unavailable_to_string unavailable
+;;
+
+(* Annotated: [Store_unavailable] is a constructor of three Goal_store sums
+   (write_error, delete_goal_error, lookup); without the annotation the
+   compiler picks the last one declared. *)
+let confirmation_error_of_write_error (error : Goal_store.write_error) =
+  match error with
+  | Goal_store.Store_unavailable unavailable -> Goal_store_unavailable unavailable
+  | Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
+    Confirmation_rejected (Goal_store.write_error_to_string error)
+;;
+
+let respond_confirmation_error request reqd = function
+  | Confirmation_rejected detail ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail)
+  | Goal_store_unavailable unavailable ->
+    respond_json_value_with_cors ~status:`Service_unavailable request reqd
+      (Goal_unavailable_envelope.to_yojson unavailable)
+;;
+
+let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, confirmation_error) result =
+  let rejected = Result.map_error (fun detail -> Confirmation_rejected detail) in
   match json with
                | `Assoc fields ->
                  let names = List.map fst fields in
                  let allowed = ["goal_id"; "criterion_revision"; "request_id"; "verification_run_id"] in
                  if List.exists (fun key -> not (List.mem key allowed)) names
                     || List.length names <> List.length (List.sort_uniq String.compare names)
-                 then Error "unknown or duplicate confirmation fields"
+                 then Error (Confirmation_rejected "unknown or duplicate confirmation fields")
                  else
                    let open Result.Syntax in
-                   let* goal_id = non_empty_string_field fields "goal_id" in
-                   let* criterion_revision = non_empty_string_field fields "criterion_revision" in
-                   let* request_id = non_empty_string_field fields "request_id" in
-                   let* verification_run_id = non_empty_string_field fields "verification_run_id" in
+                   let* goal_id = rejected (non_empty_string_field fields "goal_id") in
+                   let* criterion_revision = rejected (non_empty_string_field fields "criterion_revision") in
+                   let* request_id = rejected (non_empty_string_field fields "request_id") in
+                   let* verification_run_id = rejected (non_empty_string_field fields "verification_run_id") in
                    Workspace_goals.confirm_completion config
                      ~goal_id ~operator_id ~criterion_revision ~request_id ~verification_run_id
-               | _ -> Error "request body must be an object"
+                   |> Result.map_error confirmation_error_of_write_error
+               | _ -> Error (Confirmation_rejected "request body must be an object")
 
 ;;
 
@@ -175,17 +208,17 @@ let add_routes router =
          (fun state _operator_id req reqd ->
            let config = Mcp_server.workspace_config state in
            let result = match trimmed_query_param req "goal_id" with
-             | None -> Error "goal_id is required"
+             | None -> Error (Confirmation_rejected "goal_id is required")
              | Some goal_id -> Goal_store.transact_goal config ~goal_id (fun goal ->
                  Goal_verification.get_record_authoritative config ~goal_id
                  |> Result.map (fun record -> goal, `Assoc ["goal", Goal_store.goal_to_yojson goal;
                      "verification", (match record with None -> `Null | Some record ->
                        Goal_verification.record_to_yojson_for_goal ~goal record)]))
                  |> Result.map snd
-                 |> Result.map_error Goal_store.write_error_to_string in
+                 |> Result.map_error confirmation_error_of_write_error in
            match result with
            | Ok result -> respond_json_value_with_cors request reqd result
-           | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail))
+           | Error error -> respond_confirmation_error request reqd error)
          request reqd)
   |> Http.Router.post "/api/v1/goals/confirmation" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -194,10 +227,10 @@ let add_routes router =
              let parsed = try
                commit_goal_confirmation_json ~config:(Mcp_server.workspace_config state)
                  ~operator_id (Yojson.Safe.from_string body)
-             with Yojson.Json_error detail -> Error detail in
+             with Yojson.Json_error detail -> Error (Confirmation_rejected detail) in
              match parsed with
              | Ok result -> respond_json_value_with_cors request reqd result
-             | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail)))
+             | Error error -> respond_confirmation_error request reqd error))
          request reqd)
   |> Http.Router.get "/api/v1/verification/requests" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -303,6 +336,7 @@ let add_routes router =
 
 module For_testing = struct
   let commit_goal_confirmation_json = commit_goal_confirmation_json
+  let confirmation_error_to_string = confirmation_error_to_string
   let parse_operator_verdict_json = parse_operator_verdict_json
   let operator_evidence_json = operator_evidence_json
   let commit_operator_verdict = commit_operator_verdict

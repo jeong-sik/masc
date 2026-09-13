@@ -1790,6 +1790,7 @@ let run_turn
                              ~runtime_id_string:selected_runtime_id
                              ~max_context:selected_max_context
                              ~checkpoint_owner
+                             ~official_client_settlement:selected_run.official_client_settlement
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
                              ~receipt_response_text_present_ref

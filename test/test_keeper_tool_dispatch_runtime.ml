@@ -7991,7 +7991,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -8030,11 +8030,13 @@ let test_direct_gate_current_history_resume ?(retention_rollover=false) ?(advanc
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
         | None | Some Masc.Keeper_tool_execution.Generic_deferred
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
+      let native_settlement = ref None in
       let native_fixture = if native then Some (native_gate_fixture ~config ~meta ~deferred ()) else None in
       let () = match native_fixture with
         | None -> ()
         | Some (run, _, executions) ->
           let actual = run ~goal:"Finish the original research" ~on_transmitted:(fun _ -> ()) () in
+          native_settlement := actual.Masc.Keeper_codex_runtime.settled_session;
           (match actual.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
           check int "native tool receives the actual deferred Gate receipt once" 1 !executions in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -8073,10 +8075,18 @@ let test_direct_gate_current_history_resume ?(retention_rollover=false) ?(advanc
           ~failed_runtime_id:"primary.fixture" ~next_runtime_id:"alternate.fixture"
           ~later_runtime_ids:["final.fixture"]
           ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
-      let suspend () = Gate.suspend ?official_client:(if native then Some ("official.gate", frame) else None) ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
+      let source = if native then
+        Gate.Returned_official_client {settled_session=(match !native_settlement with Some value -> value | None -> fail "native producer dropped settlement");frame}
+        else if runtime_failure then Gate.Failed_agent_core else Gate.Returned_agent_core original in
+      let unavailable_path = if not source_unavailable then None else
+        Some (if native then Masc.Keeper_official_client_session_store.path ~base_path ~keeper_name |> require "native source path"
+          else Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id) in
+      Option.iter (fun path -> Unix.rename path (path ^ ".held")) unavailable_path;
+      let suspend () = Gate.suspend ~source ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
       check bool "actual yield parks the same operation" true
         ((if binding_failure then Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path suspend
           else suspend ()) |> require "suspend");
+      Option.iter (fun path -> Unix.rename (path ^ ".held") path) unavailable_path;
       check bool "unresolved request is not claimable" true
         ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
       if checkpoint_failure || binding_failure then (
@@ -8663,6 +8673,10 @@ let () =
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unprepared Gate recovers frozen runtime suffix after authority repair" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "returned Agent Core checkpoint survives unavailable source store at Gate yield" `Quick
+        (test_direct_gate_current_history_resume ~source_unavailable:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "returned native settlement survives unavailable source store at Gate yield" `Quick
+        (test_direct_gate_current_history_resume ~source_unavailable:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unprepared native Gate rejects a later independent native session" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~advance_native:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unprepared native Gate recovers original runtime and session after authority repair" `Quick

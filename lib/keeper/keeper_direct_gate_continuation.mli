@@ -9,7 +9,11 @@ val load : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   operation_id:Keeper_chat_operation.Operation_id.t -> session_dir:string ->
   (admission option, string) result
 val runtime_lane : admission -> Keeper_turn_driver.deferred_runtime_lane option
-val suspend : ?official_client:(string * Keeper_repetition_snapshot.t) -> ?runtime_lane:Keeper_turn_driver.deferred_runtime_lane -> config:Workspace.config -> keeper_name:string ->
+type yield_source =
+  | Returned_agent_core of Agent_core.Checkpoint.t
+  | Returned_official_client of { settled_session : Keeper_official_client_session_store.t; frame : Keeper_repetition_snapshot.t }
+  | Failed_agent_core
+val suspend : source:yield_source -> ?runtime_lane:Keeper_turn_driver.deferred_runtime_lane -> config:Workspace.config -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> session_dir:string -> session_id:string ->
   approval_ids:string list -> unit -> (bool, string) result
 val reconcile : config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> (unit, string) result

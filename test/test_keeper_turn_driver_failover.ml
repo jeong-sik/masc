@@ -2046,6 +2046,12 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let native_settlement_fixture runtime_id : Masc.Keeper_official_client_session_store.t =
+  {client_kind=Masc.Keeper_official_client_session_store.Codex;runtime_id;
+   phase=Masc.Keeper_official_client_session_store.Settled {session_id="winning-session";turn_id="winning-turn"};
+   turn_count=1;tool_surface_sha256=String.make 64 'a';last_recovery_resolution=None;
+   last_transient_release=None;updated_at=1.}
+
 let test_cross_owner_fallback_returns_winning_runtime_authority () =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     let runtime runtime_id =
@@ -2064,7 +2070,10 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
           if String.equal runtime_id primary.id
           then
             attempt_without_effect
-              (Error (retryable_network_error "primary failed"))
+              (Driver.For_testing.selected_runtime_result
+                 ~official_client_settlement:(native_settlement_fixture primary.id)
+                 runtime ~lane_attempt_index:idx
+                 (Error (retryable_network_error "primary failed")))
               None
           else
             attempt_without_effect
@@ -2081,6 +2090,8 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         "expected fallback success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "failed native candidate cannot transfer its receipt to Core fallback"
+        true (selected.official_client_settlement = None);
       Alcotest.(check string)
         "selected runtime id"
         "primary.test_model"
@@ -2114,6 +2125,7 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
           attempt_without_effect
             (Driver.For_testing.selected_runtime_result
+               ~official_client_settlement:(native_settlement_fixture runtime.id)
                runtime
                ~lane_attempt_index:idx
                (Ok (completed_run_result ())))
@@ -2126,6 +2138,8 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         "expected first-candidate success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "winning native candidate keeps its exact producer settlement"
+        true (selected.official_client_settlement = Some (native_settlement_fixture primary.id));
       Alcotest.(check int)
         "no rotation: lane_attempt_index stays 0"
         0

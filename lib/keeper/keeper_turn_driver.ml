@@ -62,6 +62,7 @@ type provider_attempt_outcomes =
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
@@ -79,10 +80,11 @@ type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
 
-let selected_runtime_result (runtime : Runtime.t) ~lane_attempt_index result =
+let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~lane_attempt_index result =
   Result.map
     (fun run_result ->
        { run_result
+       ; official_client_settlement
        ; selected_runtime_id = runtime.id
        ; selected_max_context = Runtime.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
@@ -1467,6 +1469,7 @@ let run_named
                             "provider config transforms cannot target a \
                              codex-app-server runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             ; successful_tool_completion =
@@ -1529,7 +1532,7 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx codex_result
+        ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1597,6 +1600,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target an antigravity-cli runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1636,7 +1640,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx antigravity_result
+        ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1705,6 +1709,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target a claude-code runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1749,7 +1754,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx claude_result
+        ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )

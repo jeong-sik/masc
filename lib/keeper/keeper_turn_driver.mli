@@ -89,6 +89,7 @@ val restore_deferred_runtime_lane :
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
@@ -347,6 +348,7 @@ module For_testing : sig
     (Runtime.t, Agent_core.Error.t) result
 
   val selected_runtime_result :
+    ?official_client_settlement:Keeper_official_client_session_store.t ->
     Runtime.t ->
     lane_attempt_index:int ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->

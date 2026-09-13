@@ -4,12 +4,14 @@ let report = function
   | Ok json -> print_endline (Yojson.Safe.to_string json); 0
   | Error error ->
     let kind, runtime_id = match error with
-      | Batch.Verification_failed id -> "verification_failed", `String id
+      | Batch.Verification_failed { runtime_id; _ } -> "verification_failed", `String runtime_id
+      | Verification_unreadable { runtime_id; _ } -> "verification_unreadable", `String runtime_id
       | Changed_configuration -> "changed_configuration", `Null
       | Invalid_selection -> "invalid_selection", `Null
       | Invalid_configuration -> "invalid_configuration", `Null
       | Configuration_unavailable -> "configuration_unavailable", `Null
-      | Validation_failed -> "validation_failed", `Null
+      | Child_not_started _ -> "child_not_started", `Null
+      | Validation_failed _ -> "validation_failed", `Null
       | Write_failed -> "write_failed", `Null
       | Rollback_failed -> "rollback_failed", `Null
       | Lock_unavailable -> "lock_unavailable", `Null in

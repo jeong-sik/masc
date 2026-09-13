@@ -99,7 +99,7 @@ let test_invalid_call_and_errors () =
        check bool "no response fabricated" false result.response)
     [ Verify.Provider_rejected "the provider returned HTTP 400"
     ; Timed_out
-    ; Unavailable Missing_credential
+    ; Unavailable (Missing_credential "provider \"p\" requires non-empty credential env \"KEY\"")
     ]
 ;;
 
@@ -141,7 +141,7 @@ let test_client_failures_stay_apart () =
        Yojson.Safe.Util.to_string
        [ signed_in_detail; started_detail; config_detail ]);
   let result =
-    measure (fun _ ~prompt:_ -> Error (Verify.Unavailable Missing_credential))
+    measure (fun _ ~prompt:_ -> Error (Verify.Unavailable Unsupported_runtime))
   in
   check
     bool
@@ -149,6 +149,109 @@ let test_client_failures_stay_apart () =
     true
     (failure_field result "detail" = `Null);
   check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
+;;
+
+(* Proves the credential arm keeps the dispatch check's own account. A runtime
+   whose declared file credential resolved to nothing usable reports
+   [Invalid_credential] with a reason naming the file carrier, and one whose
+   environment credential is unset reports [Missing_credential] naming the
+   variable. On origin/main both arrive as a payload-free [Missing_credential],
+   so the bad file reads as a missing credential with no detail. *)
+let test_credential_failures_carry_the_dispatch_reason () =
+  let config =
+    match
+      Runtime_toml.parse_string
+        {|
+[runtime]
+default = "cloud.first"
+[providers.cloud]
+display-name = "My endpoint"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+[providers.cloud.credentials]
+type = "inline"
+value = "placeholder"
+[models.first]
+api-name = "first-model"
+max-context = 4096
+tools-support = true
+streaming = true
+[cloud.first]
+|}
+    with
+    | Ok config -> config
+    | Error _ -> fail "credential fixture parses"
+  in
+  (* A file credential that resolves to nothing is dropped at materialization,
+     so the runtime is materialized with an empty inline secret and the declared
+     credential is swapped in afterwards; [verify] reads the declaration, not
+     the file. *)
+  let materialize credential =
+    let providers =
+      List.map
+        (fun (provider : Runtime_schema.provider) ->
+           { provider with credentials = Some (Runtime_schema.Inline "") })
+        config.Runtime_schema.providers
+    in
+    match config.Runtime_schema.bindings with
+    | [] | _ :: _ :: _ -> fail "credential fixture declares one binding"
+    | [ binding ] ->
+      (match Runtime.of_binding { config with providers } binding with
+       | Error reason -> fail (Runtime.string_of_drop_reason reason)
+       | Ok runtime ->
+         { runtime with
+           Runtime.provider =
+             { runtime.Runtime.provider with Runtime_schema.credentials = Some credential }
+         })
+  in
+  let verify runtime =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let directory = Filename.temp_file "runtime-verification-credential-" "" in
+        Unix.unlink directory;
+        Unix.mkdir directory 0o700;
+        let directory = Unix.realpath directory in
+        Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+        Verify.verify
+          ~secure_random:env#secure_random
+          ~sw
+          ~net:env#net
+          ~mgr:env#process_mgr
+          ~clock:env#clock
+          ~cwd:Eio.Path.(env#fs / directory)
+          ~cwd_path:directory
+          ~timeout_s:15.
+          runtime))
+  in
+  let credential_file = Filename.temp_file "runtime-verification-credential-" ".json" in
+  Out_channel.with_open_bin credential_file (fun out ->
+    output_string out "{\"type\":\"service_account\"}");
+  Unix.chmod credential_file 0o600;
+  Fun.protect
+    ~finally:(fun () -> Sys.remove credential_file)
+    (fun () ->
+       let file = verify (materialize (Runtime_schema.File credential_file)) in
+       check int "an unusable declared credential is unavailable" 2 (Verify.exit_code file);
+       check
+         string
+         "a bad file credential is not reported as missing"
+         "invalid_credential"
+         (Yojson.Safe.Util.to_string (failure_field file "code"));
+       let reason = Yojson.Safe.Util.to_string (failure_field file "detail") in
+       check bool "the reason names the file carrier" true (contains reason "file");
+       check bool "the reason names the provider" true (contains reason "cloud"));
+  let env_key = "MASC_TEST_VERIFY_UNSET_CREDENTIAL_ENV_7C1B4E" in
+  let unset = verify (materialize (Runtime_schema.Env env_key)) in
+  check
+    string
+    "an unset environment credential stays missing"
+    "missing_credential"
+    (Yojson.Safe.Util.to_string (failure_field unset "code"));
+  check
+    bool
+    "the missing credential names its variable"
+    true
+    (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key)
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -511,6 +614,10 @@ let () =
         ; test_case "tool result must be consumed" `Quick test_result_must_be_consumed
         ; test_case "missing observed model" `Quick test_missing_model_identity
         ; test_case "invalid input and errors" `Quick test_invalid_call_and_errors
+        ; test_case
+            "credential failures carry the dispatch reason"
+            `Quick
+            test_credential_failures_carry_the_dispatch_reason
         ; test_case
             "client failures stay apart"
             `Quick

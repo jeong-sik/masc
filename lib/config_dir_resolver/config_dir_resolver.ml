@@ -61,7 +61,7 @@ let allow_inherited_test_config_paths () =
    preserving the operator spelling in MASC_BASE_PATH_INPUT for diagnostics.
    Configuration IO must follow that owner, not reinterpret the input alias. *)
 let effective_env_base_path () =
-  match Sys.getenv_opt Env_config_core.base_path_env_key |> trim_opt with
+  match Env_config_core.raw_value_opt Env_config_core.base_path_env_key |> trim_opt with
   | Some path -> Some (Env_config_core.normalize_masc_base_path_input path)
   | None -> (Host_config.from_env ()).base_path
 

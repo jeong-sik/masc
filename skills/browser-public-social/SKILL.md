@@ -57,6 +57,12 @@ observed landmark. The TUI prints a compact boundary when that context changes,
 and scoped article reads avoid repeating their own scope label. Preserve this
 observed region with copied context instead of reconstructing a post or channel
 from text or a CSS class.
+Inline text fragments inside one observed block are shown as one reading row
+when the observed block identity repeats; that verified group closes at the
+repeat and unproven ancestry stays separate. Controls, headings, block
+boundaries, and region changes remain separate. The underlying observed node
+identities and selection order are retained for context copying and action
+routing.
 
 After an article is scoped, keep the displayed role and label with the body
 when reporting it. The copied context must retain that observed scope label

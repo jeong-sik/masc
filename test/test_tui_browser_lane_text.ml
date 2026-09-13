@@ -204,6 +204,31 @@ let () =
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
     {view with scene=Some heading_scene; scene_cursor=0}) in
   assert (heading_lines = ["[>1] ## Post title"; "Post body"]);
+  let paragraph = {node with node_id="paragraph"; tag="p"; text="Hello "} in
+  let emphasis = {node with node_id="emphasis"; tag="span"; text="world"} in
+  let paragraph_tail = {node with node_id="paragraph"; tag="p"; text="!"} in
+  let inline_scene = {scene with content={content with
+    nodes=[paragraph; emphasis; paragraph_tail]}} in
+  let inline_lines, inline_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some inline_scene; scene_cursor=0} in
+  assert (inline_lines = ["[>1] Hello world!"] && inline_selected = Some 0);
+  let inline_selected_lines, inline_selected_row = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some inline_scene; scene_cursor=1} in
+  assert (inline_selected_lines = ["[>2] Hello world!"] && inline_selected_row = Some 0);
+  let separate_paragraphs = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="paragraph-b-inline"; text="B"}]}} in
+  let separate_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some separate_paragraphs; scene_cursor=0} in
+  assert (separate_lines = ["[>1] A"; "B"]);
+  let trailing_inline = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="paragraph-a-inline"; text="B"};
+    {paragraph with node_id="paragraph-a"; text="C"};
+    {emphasis with node_id="paragraph-b-inline"; text="D"}]}} in
+  let trailing_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some trailing_inline; scene_cursor=0} in
+  assert (trailing_lines = ["[>1] ABC"; "D"]);
   let article : Masc.Browser_scene.region_ref =
     {node_id="article"; role=Masc.Browser_scene.Article; label="Post A"} in
   let article_heading = {heading with ancestor_region=Some article} in

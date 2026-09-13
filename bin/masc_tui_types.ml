@@ -4015,12 +4015,13 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
     | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
     | "header" | "li" | "main" | "p" | "pre" | "section" | "summary" -> true
     | _ -> false in
-  let block_geometry (node : Masc.Browser_scene.node) =
+  let block_geometry (nodes : Masc.Browser_scene.node list)
+      (node : Masc.Browser_scene.node) =
     let semantic_block = match Masc.Browser_scene.text_role node with
       | Masc.Browser_scene.Heading _ -> true
       | Masc.Browser_scene.Plain_text -> block_tag node.tag in
     if not semantic_block then None
-    else match node.rects with
+    else match List.concat_map (fun (node : Masc.Browser_scene.node) -> node.rects) nodes with
       | [] -> None
       | first :: rest ->
           let top, bottom = List.fold_left
@@ -4029,6 +4030,69 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
             (first.y, first.y +. first.height) rest in
           Some (top, bottom) in
   let region_id (region : Masc.Browser_scene.region_ref) = region.node_id in
+  let same_region left right = match left, right with
+    | None, None -> true
+    | Some left, Some right -> region_id left = region_id right
+    | Some _, None | None, Some _ -> false in
+  (* A DOM paragraph may arrive as several adjacent text nodes when inline
+     spans or emphasis elements sit inside it. Keep the observed node ids in
+     each group for selection, while presenting their exact text as one read
+     row. Block boundaries and semantic regions still force a new group. *)
+  let coalesce_text_nodes (nodes : Masc.Browser_scene.node list) =
+    let can_join (anchor : Masc.Browser_scene.node) (node : Masc.Browser_scene.node) =
+      match anchor.kind, node.kind with
+      | Masc.Browser_scene.Text, Masc.Browser_scene.Text
+        when same_region anchor.ancestor_region node.ancestor_region
+          && (block_tag anchor.tag
+              || match Masc.Browser_scene.text_role anchor with
+                 | Masc.Browser_scene.Heading _ -> true
+                 | Masc.Browser_scene.Plain_text -> false) ->
+          (match Masc.Browser_scene.text_role anchor,
+                 Masc.Browser_scene.text_role node with
+           | Masc.Browser_scene.Plain_text, Masc.Browser_scene.Plain_text ->
+               not (block_tag node.tag) || node.node_id = anchor.node_id
+           | Masc.Browser_scene.Heading left, Masc.Browser_scene.Heading right ->
+               left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
+           | _ -> false)
+      | _ -> false in
+    let flush current acc = match current with
+      | None -> acc
+      | Some (members, (anchor : Masc.Browser_scene.node), texts) ->
+          let ordered_members = List.rev members in
+          let anchor_repeated = match ordered_members with
+            | [] -> false
+            | _ :: rest -> List.exists
+                (fun (node : Masc.Browser_scene.node) ->
+                   node.node_id = anchor.node_id) rest in
+          if anchor_repeated then
+            (ordered_members, anchor, String.concat "" (List.rev texts)) :: acc
+          else
+            (* Without a repeated observed container id, an inline node may
+               belong to the next paragraph. Keep this run as separate rows
+               instead of guessing its block ancestry. *)
+            List.rev_append
+              (List.map (fun (node : Masc.Browser_scene.node) ->
+                 ([node], node, node.text)) ordered_members)
+              acc in
+    let rec loop current acc = function
+      | [] -> List.rev (flush current acc)
+      | node :: rest ->
+          (match current with
+           | Some (members, anchor, texts) when can_join anchor node ->
+               let anchor_count = List.fold_left
+                   (fun count (member : Masc.Browser_scene.node) ->
+                      if member.node_id = anchor.node_id then count + 1 else count)
+                   0 members in
+               let anchor_repeated = anchor_count > 1 in
+               if anchor_repeated then
+                 let acc = flush current acc in
+                 loop (Some ([node], node, [node.text])) acc rest
+               else
+                 loop (Some (node :: members, anchor, node.text :: texts)) acc rest
+           | _ ->
+               let acc = flush current acc in
+               loop (Some ([node], node, [node.text])) acc rest) in
+    loop None [] nodes in
   match view.scene with
   | Some scene ->
     (* The target index came from re-scanning [scene_targets] for every node,
@@ -4043,13 +4107,20 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Browser_lane_view.scene_targets view);
     let reversed, _, selected, _, _ = List.fold_left
       (fun (reversed, offset, selected, previous_block_bottom, previous_region)
-        (node : Masc.Browser_scene.node) ->
-      let index = Hashtbl.find_opt target_index node.node_id in
+        (nodes, (anchor : Masc.Browser_scene.node), text) ->
+      let group_indices = List.filter_map
+          (fun (node : Masc.Browser_scene.node) ->
+             Hashtbl.find_opt target_index node.node_id) nodes
+        |> List.sort_uniq Int.compare in
+      let index = match group_indices with
+        | [] -> None
+        | first :: _ -> Some first in
+      let selected_index = List.find_opt (fun i -> i = view.scene_cursor) group_indices in
       (* Text is the reading surface. DOM tags do not help read a paragraph,
          author or timestamp; the selected text still has its observed index
          for n/p and context copying. Controls and regions retain their action
          labels and the same indices as the interaction model. *)
-      let label = match node.kind with
+      let label = match anchor.kind with
         | Text -> None
         | Raster -> Some "image · Ctrl-O"
         | Region role ->
@@ -4060,19 +4131,23 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Control _ -> Some "button/link" in
       let prefix = match label, index with
         | _, None -> ""
-        | None, Some i ->
-            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | None, Some _ ->
+            (match selected_index with
+             | Some selected -> Printf.sprintf "[>%d] " (selected + 1)
+             | None -> "")
         | Some label, Some i ->
             Printf.sprintf "[%s%d %s] "
-              (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      let text = match Masc.Browser_scene.text_role node with
-        | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ node.text
-        | Masc.Browser_scene.Plain_text -> node.text in
-      let geometry = block_geometry node in
+              (match selected_index with Some _ -> ">" | None -> "")
+              (match selected_index with Some selected -> selected + 1 | None -> i + 1)
+              label in
+      let text = match Masc.Browser_scene.text_role anchor with
+        | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ text
+        | Masc.Browser_scene.Plain_text -> text in
+      let geometry = block_geometry nodes anchor in
       let separator = match geometry, previous_block_bottom with
         | Some (top, _), Some bottom when top > bottom -> [""]
         | _ -> [] in
-      let region_header = match node.ancestor_region, previous_region with
+      let region_header = match anchor.ancestor_region, previous_region with
         | Some region, Some previous when region_id region = region_id previous -> []
         | Some region, _ ->
             (match scene.content.scope with
@@ -4083,8 +4158,8 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | None, _ -> [] in
       let boundary = separator @ region_header in
       let lines = wrap (prefix ^ text) in
-      let selected = match selected, index with
-        | None, Some i when i = view.scene_cursor ->
+      let selected = match selected, selected_index with
+        | None, Some _ ->
             Some (offset + List.length boundary)
         | _ -> selected in
       let previous_block_bottom = match geometry with
@@ -4092,8 +4167,9 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | None -> None in
       List.rev_append lines (List.rev_append boundary reversed),
       offset + List.length boundary + List.length lines, selected,
-      previous_block_bottom, node.ancestor_region)
-      ([], 0, None, None, None) scene.content.nodes in
+      previous_block_bottom, anchor.ancestor_region)
+      ([], 0, None, None, None)
+      (coalesce_text_nodes scene.content.nodes) in
     List.rev reversed, selected
   | None -> match view.reading with
   | None -> [], None

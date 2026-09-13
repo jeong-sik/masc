@@ -154,6 +154,12 @@ boundary when that context changes, while a scoped article read suppresses the
 duplicate boundary because its scope row already names the article. This is
 observed region identity and label data, not a selector or a guess from page
 text. `y` includes the same ancestor region identity in copied context.
+Adjacent observed text nodes inside the same semantic block are coalesced for
+the reading row when the observed block identity repeats, preserving their
+exact text and each node's selection number. The group closes at that verified
+repeat; an unproven tail stays as separate rows. Crossing a block tag, control,
+raster, heading level, or observed region starts a new row group; the
+projection never merges an action target into prose.
 For eligible observed block-tag nodes, a positive vertical gap from the
 preceding eligible node becomes one blank TUI row. An intervening inline node
 breaks that comparison, zero-gap line fixtures stay compact, and the reader

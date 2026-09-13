@@ -814,8 +814,12 @@ WHISPER_ACTIONS = json.dumps(dict(schema='masc.prerequisite_actions.v1', actions
          effect=dict(kind='run_commands', argv_steps=[['brew', 'install', 'whisper-cpp']])),
     dict(id='whisper_model_download', label='Download the whisper model masc asks for', detail='', source_url='',
          requires_admin=False, completion='recheck_required',
+         writes='/home/.cache/whisper/ggml-large-v3-turbo.bin',
          effect=dict(kind='run_commands', argv_steps=[
-             ['curl', '-L', '--create-dirs', '-o', '/home/.cache/whisper/ggml-large-v3-turbo.bin', 'https://example/model']])),
+             ['curl', '-fL', '--create-dirs', '-o', '/home/.cache/whisper/ggml-large-v3-turbo.bin.part',
+              'https://example/model'],
+             ['mv', '/home/.cache/whisper/ggml-large-v3-turbo.bin.part',
+              '/home/.cache/whisper/ggml-large-v3-turbo.bin']])),
 ]))
 
 
@@ -877,6 +881,19 @@ class LocalVoice(unittest.TestCase):
             self.assertEqual(SETUP.whisper_model_path('/bin/masc'),
                              '/home/.cache/whisper/ggml-large-v3-turbo.bin')
 
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_the_real_catalog_names_the_final_model_file(self):
+        # The fixture above is a copy of the catalog, and a copy can drift: the
+        # download moved to a .part beside the final path while the fixture kept
+        # the old argv, and this function returned the .part for every real
+        # computer with the tests green. So the real binary's catalog is read.
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, HOME=home):
+                path = SETUP.whisper_model_path(BINARY)
+        self.assertIsNotNone(path)
+        self.assertEqual(Path(path).name, 'ggml-large-v3-turbo.bin')
+        self.assertTrue(path.startswith(home), path)
+
     def test_a_model_that_is_not_there_leaves_speaking_on(self):
         # Saying nothing about the model is not the same as saying nothing at
         # all: a keeper that speaks and does not listen is the better half of
@@ -916,6 +933,60 @@ class LocalVoice(unittest.TestCase):
                     self.assertEqual('--model' in arguments, expected)
                     if expected:
                         self.assertEqual(arguments[-2:], ['--model', str(model)])
+
+    def test_the_listing_is_asked_about_the_workspace_being_set_up(self):
+        # Every masc command resolves a workspace first, the listing included.
+        # This step runs before the one that records a default, so the list
+        # must name the workspace rather than depend on the launcher's env.
+        with patch.object(SETUP, 'pick', side_effect=[[1], [1]]), \
+                patch.object(SETUP.subprocess, 'run',
+                             side_effect=[completed(VOICES), completed()]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace', '--list-voices'])
+
+    def test_a_listing_that_fails_says_why_instead_of_skipping_silently(self):
+        # Measured: with no workspace to resolve the listing exits 1 with its
+        # reason as the last stderr line. An empty list used to skip the voice
+        # question without a word.
+        failed = subprocess.CompletedProcess(
+            [], 1, stdout='',
+            stderr='[2026-09-13] [INFO] [MCP] Tag registry initialized\n'
+                   '[2026-09-13] [ERROR] [Backend] MASC_BASE_PATH is not set.\n')
+        with patch.object(SETUP, 'pick') as picker, \
+                patch.object(SETUP.subprocess, 'run', side_effect=[failed]) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertIn('Could not list the voices on this computer', printed.getvalue())
+        self.assertIn('MASC_BASE_PATH is not set', printed.getvalue())
+        self.assertNotIn('Tag registry', printed.getvalue())
+        picker.assert_not_called()
+        self.assertEqual(len(run.call_args_list), 1)
+
+    def test_hearing_without_a_recorder_is_configured_and_says_so(self):
+        # Transcribing needs whisper-cli and a model; recording from the
+        # microphone needs sox's rec as well. A reader who installed the first
+        # two and left sox still gets hearing configured -- a device posting
+        # audio needs nothing more -- and is told what the TUI will lack.
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'ggml.bin'
+            model.write_bytes(b'model fixture')
+            for recorder, warned in ((None, True), ('/fixture/rec', False)):
+                which = {'whisper-cli': '/fixture/whisper-cli', 'rec': recorder}
+                with self.subTest(recorder=recorder), \
+                        patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                        patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                        patch.object(SETUP, 'whisper_model_path', return_value=str(model)), \
+                        patch.object(SETUP.shutil, 'which', side_effect=which.get), \
+                        patch.object(SETUP.subprocess, 'run',
+                                     side_effect=[completed(VOICES), completed()]) as run, \
+                        korean_terminal(), \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    SETUP.select_local_voice('/bin/masc', '/workspace')
+                    self.assertEqual(run.call_args_list[-1].args[0][-2:], ['--model', str(model)])
+                    self.assertEqual("sox's rec" in printed.getvalue(), warned)
 
     def test_cancelling_the_voice_question_does_not_cancel_setup(self):
         # An optional step cannot fail the thing it is optional to. By the time

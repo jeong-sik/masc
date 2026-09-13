@@ -480,7 +480,7 @@ let flow_lines view =
          let name instance = match List.find_opt (fun (d : declaration) -> d.instance_id=Some instance.id) declarations with
            | Some {installation_id=Some id;_} -> id
            | _ -> instance.id in
-         let complete = Option.fold ~none:false ~some:(fun c -> c.complete) snapshot.configuration in
+         let complete = Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration in
          let notices = (if complete then [] else ["Installation inventory incomplete; dependency identities may be unresolved"])
            @ List.concat_map (fun (d : declaration) -> List.map (fun issue -> d.source_path ^ ": " ^ issue) d.issues) declarations in
          notices @ (if snapshot.instances=[] then ["No Add-on instances in the received snapshot"]

@@ -5,7 +5,8 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
 type action = { id : string; label : string; detail : string;
-  source_url : string; requires_admin : bool; action_effect : action_effect }
+  source_url : string; requires_admin : bool; action_effect : action_effect;
+  writes : string option }
 type outcome = External_step_pending | Commands_completed_recheck_required
   | Failed of { step : int; reason : string }
 
@@ -46,15 +47,15 @@ let open_action ~host ~id ~label ~detail ~source_url url =
     | Linux _ -> ["xdg-open"; url]
     | Unsupported -> [] in
   {id; label; detail; source_url; requires_admin=false;
-   action_effect=Open_official_installer {url; argv}}
-let commands ~id ~label ~detail ~source_url ~requires_admin argv =
-  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv}
+   action_effect=Open_official_installer {url; argv}; writes=None}
+let commands ?writes ~id ~label ~detail ~source_url ~requires_admin argv =
+  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv; writes}
 let install_cli client =
   let name = Runtime_official_cli_install.name client in
   {id=name ^ "_native_install"; label="Install " ^ name ^ " using its official installer";
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
-   action_effect=Install_official_cli client}
+   action_effect=Install_official_cli client; writes=None}
 let catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
@@ -73,7 +74,11 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_models_source whisper_models_source
     | Some dir ->
       let final = Filename.concat dir whisper_model_file in
-      commands ~id:"whisper_model_download"
+      (* [writes] is the final path, stated as data. A reader that needs to
+         know where the model landed used to take the curl [-o] argument, and
+         when the fetch moved to a [.part] beside the path that argument became
+         a file that never exists after a successful download. *)
+      commands ~writes:final ~id:"whisper_model_download"
         ~label:"Download the whisper model masc asks for"
         ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
         ~source_url:whisper_models_source ~requires_admin:false
@@ -226,7 +231,8 @@ let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
     "source_url",`String action.source_url; "requires_admin",`Bool action.requires_admin;
-    "effect",effect_json action.action_effect; "completion",`String "recheck_required"]) actions)]
+    "effect",effect_json action.action_effect; "completion",`String "recheck_required";
+    "writes",(match action.writes with Some path -> `String path | None -> `Null)]) actions)]
 let execute ~run action =
   let rec commands completed index = function
     | [] -> completed

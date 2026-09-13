@@ -10819,10 +10819,12 @@ def keeper_gate_mode_footer_interaction(
         output,
         rows=30,
         columns=200,
-        needle=re.compile(rb"g\x1b\[0m auto"),
+        needle=re.compile(rb"g(?:\x1b\[[0-9;]*m)*:auto"),
         final_cursor=b"\x1b[?25l",
     )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
+    # Assert the rendered action, independent of key-label SGR styling.
+    footer_text = screen_text(footer)
+    if b"g:auto" not in footer_text or b"g:yolo" in footer_text:
         raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
     os.write(master_fd, b"q")
 

@@ -553,9 +553,11 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                 })
               images )
     in
-    let snapshot_messages = match session_mode with
-      | Runtime_claude_code.Start -> prepared.messages
-      | Runtime_claude_code.Resume _ -> initial_messages in
+    let snapshot_messages = List.filter (fun (message : Agent_core.Types.message) ->
+      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
+      <> Agent_core.Types.Extra_system_context_provenance.Present) prepared.messages in
+    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
+      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let snapshot = `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
@@ -572,16 +574,17 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
            do not replay completed effects. Use the current user prompt for new instructions."
         ; Yojson.Safe.to_string (`Assoc
             ["schema", `String "masc.official-client-canonical-context.v1";
-             "snapshot_sha256", `String snapshot_sha256; "messages", snapshot]) ] in
+             "snapshot_sha256", `String snapshot_sha256;
+             "source_snapshot_sha256", `String source_snapshot_sha256;
+             "source_message_count", `Int (List.length initial_messages);
+             "projection", `String "prepared_model_input"; "messages", snapshot]) ] in
     (* Attribute current replacement context only after a complete user write;
        the vendor-owned tool transcript remains outside this capture. *)
     let report_transmitted_input () =
       on_transmitted_model_input
         (match session_mode with
          | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-         | Runtime_claude_code.Resume _ -> Host.Whole_input_transmitted
-             (initial_messages @ List.filter (fun (message : Agent_core.Types.message) ->
-               message.role = System) prepared.messages))
+         | Runtime_claude_code.Resume _ -> Host.Whole_input_transmitted prepared.messages)
     in
     let prompt =
       match session_mode with

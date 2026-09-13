@@ -6619,7 +6619,9 @@ def memory_facts_interaction() -> Interaction:
             process, master_fd, output, b"authored", start=0, timeout=5.0
         )
         # Visit every category through its filter so each row is visible even
-        # when the selected detail panel leaves a short list viewport.
+        # when the selected detail panel leaves a short list viewport. The
+        # category row is the shared tab strip (#36051): the entry being read
+        # is marked with the current-entry glyph directly before its label.
         for category, badge, text in (
             (b"blocker", b"[BLOCKER   ]", b"port 8935 is already claimed"),
             (b"lesson", b"[LESSON    ]", b"the deploy needs assets"),
@@ -6627,7 +6629,7 @@ def memory_facts_interaction() -> Interaction:
             (b"dropped", b"[DROPPED   ]", b"docs/old.md"),
         ):
             filtered = send_and_wait(
-                process, master_fd, output, b"c", b"\xe2\x97\x8f " + category
+                process, master_fd, output, b"c", b"\xe2\x96\xb8" + category
             )
             plain = CSI_RE.sub(b"", filtered)
             for expected in (badge, text):

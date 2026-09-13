@@ -3495,7 +3495,8 @@ module Browser_lane_view = struct
       that choice unambiguous.  This is deliberately a closed, exact-role
       shortcut: it never guesses from labels, text, CSS classes, or a URL.
       A [main] landmark wins over an [article]; an ambiguous page stays under
-      operator control through the ordinary region picker. *)
+      operator control through the ordinary region picker. Role strings are
+      classified at the browser boundary before this exact match. *)
   type primary_region_error =
     | No_primary_region
     | Ambiguous_primary_region
@@ -3508,7 +3509,7 @@ module Browser_lane_view = struct
         | Region role -> Some (role, index, node)
         | Text | Raster | Control _ -> None) in
     let choose role =
-      match List.filter (fun (candidate, _, _) -> String.equal candidate role) regions with
+      match List.filter (fun (candidate, _, _) -> candidate = role) regions with
       | [(_, index, node)] ->
           (match t.scene with
            | Some scene -> `Chosen (index, {Browser_lane.document_id=scene.content.document_id;
@@ -3516,11 +3517,11 @@ module Browser_lane_view = struct
            | None -> `Missing)
       | [] -> `Missing
       | _ -> `Ambiguous in
-    match choose "main" with
+    match choose Masc.Browser_scene.Main with
     | `Chosen target -> Ok target
     | `Ambiguous -> Error Ambiguous_primary_region
     | `Missing ->
-        (match choose "article" with
+        (match choose Masc.Browser_scene.Article with
          | `Chosen target -> Ok target
          | `Ambiguous -> Error Ambiguous_primary_region
          | `Missing -> Error No_primary_region)
@@ -3889,7 +3890,8 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       let label = match node.kind with
         | Text -> None
         | Raster -> Some "image · Ctrl-O"
-        | Region role -> Some ("region · " ^ role)
+        | Region role ->
+            Some ("region · " ^ Masc.Browser_scene.region_role_to_string role)
         | Control {disabled=true;_} -> Some "disabled"
         | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"

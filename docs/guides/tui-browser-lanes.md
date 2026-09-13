@@ -110,8 +110,10 @@ destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.
 `m` is the short semantic path for a page's primary reading surface: the first
 press observes `main`/`article` landmarks, and the second focuses the unique
-exact-role match. Multiple matches stay in the region picker instead of being
-chosen by text, URL, or CSS heuristics.
+exact-role match. Role names are classified at the observation boundary;
+unknown roles remain visible but cannot become an implicit primary target.
+Multiple matches stay in the region picker instead of being chosen by text, URL,
+or CSS heuristics.
 If the destination read is still pending or fails, the footer exposes `r`/`s`/`v`
 as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,

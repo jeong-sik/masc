@@ -7987,7 +7987,9 @@ default = "official.primary"
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run ?official_client_continuation:continuation
+      Masc.Keeper_codex_runtime.run
+        ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+          ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
         ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
         ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."

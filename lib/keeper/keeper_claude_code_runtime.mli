@@ -35,6 +35,7 @@ module For_testing : sig
 end
 
 val run :
+  accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->

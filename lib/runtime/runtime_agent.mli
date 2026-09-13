@@ -298,14 +298,9 @@ val decide_modality_reroute_for_runtime_candidates :
     [checkpoint_messages] and [initial_messages], so media already in a resumed
     checkpoint counts. *)
 
-val runtime_accepts_image_input : runtime_id:string -> bool
-(** Whether this runtime's selected model accepts image input, composed the way
-    dispatch composes it: the model declaration overlaid on provider caps, then
-    constrained by the execution transport — so Antigravity answers [false]
-    whatever its model declares, and an unknown runtime id answers [false]
-    rather than admitting media nobody vouched for. The official-client host
-    reads it to refuse an image tool result before settling it, instead of
-    letting the provider reject the turn after the tool has run. *)
+val runtime_accepts_image_input : runtime:Runtime.t -> bool
+(** Image admission from the selected materialized runtime, without rereading
+    a mutable registry. Includes model and execution transport capabilities. *)
 
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->

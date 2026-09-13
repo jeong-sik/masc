@@ -38,6 +38,8 @@ val dos_peek : Masc_domain.tool_schema
 
 (** Optional Lane Add-on observation and lifecycle tools. *)
 val lane_attach : Masc_domain.tool_schema
+val lane_declaration_read : Masc_domain.tool_schema
+val lane_declaration_save : Masc_domain.tool_schema
 val lane_inspect : Masc_domain.tool_schema
 val lane_observe : Masc_domain.tool_schema
 val lane_slice : Masc_domain.tool_schema

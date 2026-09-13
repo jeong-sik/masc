@@ -1,0 +1,479 @@
+{
+  "schema": "masc.lane-value-evidence.v1",
+  "original_run_root_name": "97aa42db44-3c85e9839b494b57a3cfb8d17c85a1f6",
+  "original_process_json_sha256": "fe170852fbdd67738512aae8b6a0d6ec50659f92b459d5633164cc8e72f6cb05",
+  "files": {
+    ".masc/lane-addons/evidence/37c07965c2cbe6ebde780d3d150dda3d221d8b1d5a0f5d8ef7d3daab7c5641e0.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/37c07965c2cbe6ebde780d3d150dda3d221d8b1d5a0f5d8ef7d3daab7c5641e0.json",
+      "sha256": "37c07965c2cbe6ebde780d3d150dda3d221d8b1d5a0f5d8ef7d3daab7c5641e0",
+      "bytes": 1925,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/401069424d672befce251d72b2e0aa316ab30b6ecb7f4d05e6a7f17f06f71aff.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/401069424d672befce251d72b2e0aa316ab30b6ecb7f4d05e6a7f17f06f71aff.json",
+      "sha256": "401069424d672befce251d72b2e0aa316ab30b6ecb7f4d05e6a7f17f06f71aff",
+      "bytes": 677,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/5c712e113c3744d2562e1e3733304060729e4ca46f4323d3c69f0322c7c53e21.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/5c712e113c3744d2562e1e3733304060729e4ca46f4323d3c69f0322c7c53e21.json",
+      "sha256": "5c712e113c3744d2562e1e3733304060729e4ca46f4323d3c69f0322c7c53e21",
+      "bytes": 8,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/64bd0df55a1dbeeb3085453e3bad748bbb2a43e19f7bbe96d019f969fee00e86.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/64bd0df55a1dbeeb3085453e3bad748bbb2a43e19f7bbe96d019f969fee00e86.json",
+      "sha256": "64bd0df55a1dbeeb3085453e3bad748bbb2a43e19f7bbe96d019f969fee00e86",
+      "bytes": 678,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/7f3f06962adc825ee210c6de4a38891767f87ac32b8c5885b3ff1e408cb16e28.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/7f3f06962adc825ee210c6de4a38891767f87ac32b8c5885b3ff1e408cb16e28.json",
+      "sha256": "7f3f06962adc825ee210c6de4a38891767f87ac32b8c5885b3ff1e408cb16e28",
+      "bytes": 679,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/845f47796080c36f53c186bf194c86d4bddb80891144165c7408e9dee174b296.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/845f47796080c36f53c186bf194c86d4bddb80891144165c7408e9dee174b296.json",
+      "sha256": "845f47796080c36f53c186bf194c86d4bddb80891144165c7408e9dee174b296",
+      "bytes": 8,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/9d063b01917e72ae9ca1b43b5cf0a1f3df0d2abbe75f6aa6636033443c2492b0.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/9d063b01917e72ae9ca1b43b5cf0a1f3df0d2abbe75f6aa6636033443c2492b0.json",
+      "sha256": "9d063b01917e72ae9ca1b43b5cf0a1f3df0d2abbe75f6aa6636033443c2492b0",
+      "bytes": 1925,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/9f1beb96ea7b4d72030ad87b3053f8bd7e5c796826f061af8bb8f1fd627bb84d.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/9f1beb96ea7b4d72030ad87b3053f8bd7e5c796826f061af8bb8f1fd627bb84d.json",
+      "sha256": "9f1beb96ea7b4d72030ad87b3053f8bd7e5c796826f061af8bb8f1fd627bb84d",
+      "bytes": 579,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/af333b673c4793b16b2084c60b254c7b0b3758da8ff02f1995e03604e2855df0.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/af333b673c4793b16b2084c60b254c7b0b3758da8ff02f1995e03604e2855df0.json",
+      "sha256": "af333b673c4793b16b2084c60b254c7b0b3758da8ff02f1995e03604e2855df0",
+      "bytes": 8,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/b62ae411aee621145c1c296d1cac9a8d74a60c92223c78a54367993e48e8d076.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/b62ae411aee621145c1c296d1cac9a8d74a60c92223c78a54367993e48e8d076.json",
+      "sha256": "b62ae411aee621145c1c296d1cac9a8d74a60c92223c78a54367993e48e8d076",
+      "bytes": 2160,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/bc6d428e8ea201e4b2b5bd175eab497350285d329a738b42268867ea1c219df4.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/bc6d428e8ea201e4b2b5bd175eab497350285d329a738b42268867ea1c219df4.json",
+      "sha256": "bc6d428e8ea201e4b2b5bd175eab497350285d329a738b42268867ea1c219df4",
+      "bytes": 8,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/d1d8b461c321983f27a1bdeefe2ac79e69acd5251ff9ab9f9c73a6b65a8f8ac3.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/d1d8b461c321983f27a1bdeefe2ac79e69acd5251ff9ab9f9c73a6b65a8f8ac3.json",
+      "sha256": "d1d8b461c321983f27a1bdeefe2ac79e69acd5251ff9ab9f9c73a6b65a8f8ac3",
+      "bytes": 9708,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/evidence/f75e936539dcc851b651aed66e604026fe1d487a96fd65960b33c5bf83b4b05b.json": {
+      "original_relative_path": ".masc/lane-addons/evidence/f75e936539dcc851b651aed66e604026fe1d487a96fd65960b33c5bf83b4b05b.json",
+      "sha256": "f75e936539dcc851b651aed66e604026fe1d487a96fd65960b33c5bf83b4b05b",
+      "bytes": 674,
+      "purpose": "Original content-addressed dependency of a selected row or frozen bundle"
+    },
+    ".masc/lane-addons/observations/0cdd45306af3761282030106e12d7bd665ca5f52402331f89f26687d096a1b1a/00000000000000000003.json": {
+      "original_relative_path": ".masc/lane-addons/observations/0cdd45306af3761282030106e12d7bd665ca5f52402331f89f26687d096a1b1a/00000000000000000003.json",
+      "sha256": "cc06e1ea5b67fbc601c8ef5ce34de71ad2d943d6a569a4c2c5339bead79430b3",
+      "bytes": 387,
+      "purpose": "Original restored-statistics record: missing producer, no metric row or count"
+    },
+    ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000001.json": {
+      "original_relative_path": ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000001.json",
+      "sha256": "a601515bdea35ec95ad4e4043994b32ebeca369e60f2623380e34026931687ec",
+      "bytes": 1536,
+      "purpose": "Original observation for a selected measured or DOS row"
+    },
+    ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000002.json": {
+      "original_relative_path": ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000002.json",
+      "sha256": "cd151bbc601dfa6d0ec6168ec147bd1577eb1b05faa732de87481378e9866a6b",
+      "bytes": 2031,
+      "purpose": "Original observation for a selected measured or DOS row"
+    },
+    ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000006.json": {
+      "original_relative_path": ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000006.json",
+      "sha256": "57e074e0a804c1edd24079f88fcb43f3b6347de851f5ef97e11cdb4b3cda8ddb",
+      "bytes": 1536,
+      "purpose": "Original observation for a selected measured or DOS row"
+    },
+    ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000008.json": {
+      "original_relative_path": ".masc/lane-addons/observations/64a41921207c217838c17afe6f21b3ac2c14ec549f3363f35ee1adf004a33c5c/00000000000000000008.json",
+      "sha256": "1071d36d13db2e0df148b61fd29f70c0a0b391cb581d9b83d9389811cf9bc6ac",
+      "bytes": 1540,
+      "purpose": "Original observation for a selected measured or DOS row"
+    },
+    ".masc/lane-addons/observations/97e54fa560301e79e8891b651931531b7543d0963e13635fe4fa5453eb75bec2/00000000000000000003.json": {
+      "original_relative_path": ".masc/lane-addons/observations/97e54fa560301e79e8891b651931531b7543d0963e13635fe4fa5453eb75bec2/00000000000000000003.json",
+      "sha256": "d1d8b461c321983f27a1bdeefe2ac79e69acd5251ff9ab9f9c73a6b65a8f8ac3",
+      "bytes": 9708,
+      "purpose": "Original observation for a selected measured or DOS row"
+    },
+    "evidence/0008.json": {
+      "original_relative_path": "evidence/0008.json",
+      "sha256": "6b91cf5714cd08e75c416b8cfa0ae9b4b37507b376e53b83a8050e19d22f7d58",
+      "bytes": 224,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0008.raw": {
+      "original_relative_path": "evidence/0008.raw",
+      "sha256": "b35ccf80be73f3da3f35327fae2953cb73c3d314c0e3ab820d96a17739898d5e",
+      "bytes": 15438,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0012.json": {
+      "original_relative_path": "evidence/0012.json",
+      "sha256": "d022480e0599d2abedd341802248774264e8d9192af192477cf2613dd60a5dc7",
+      "bytes": 474,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0012.raw": {
+      "original_relative_path": "evidence/0012.raw",
+      "sha256": "8637767d8423e326be46ef61cb160db72e3427d438b57f87c061d41c7788c69d",
+      "bytes": 372,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0013.json": {
+      "original_relative_path": "evidence/0013.json",
+      "sha256": "4344c0ae076a174e3945510136a88ecc2ebd1fa4f53b32102464b951a8376b60",
+      "bytes": 337,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0013.raw": {
+      "original_relative_path": "evidence/0013.raw",
+      "sha256": "2e2649b622025348d01b9425f542ebe404128abb4dd8d01550b8d299c4cd7751",
+      "bytes": 783,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0029.json": {
+      "original_relative_path": "evidence/0029.json",
+      "sha256": "1f5997bfaa71e0bf0addbc81da990d4d072dc35679f01f21438f5f62f8830ffc",
+      "bytes": 428,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0029.raw": {
+      "original_relative_path": "evidence/0029.raw",
+      "sha256": "2d9611483d3e606b603460b3f4da37ba00bbe703b53f863458a9d24d5dbec196",
+      "bytes": 1009,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0030.json": {
+      "original_relative_path": "evidence/0030.json",
+      "sha256": "4fc2f13cc4f11868db797d5c1e797b5467d1daf3f76ce4647c680e8e0f55cb96",
+      "bytes": 290,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0030.raw": {
+      "original_relative_path": "evidence/0030.raw",
+      "sha256": "750162f39149f4f2bebde55c2970e2be2a3dc351fbdd79df3cd5ae8463351236",
+      "bytes": 1521,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0031.json": {
+      "original_relative_path": "evidence/0031.json",
+      "sha256": "22bef7d54224dbc84d3c40277ad88fb7af22413ecee2f5969ede1d4be483b6ad",
+      "bytes": 225,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0031.raw": {
+      "original_relative_path": "evidence/0031.raw",
+      "sha256": "a0a3b1b8ac806ec9266945e8ae8333ce99593e447512fb7b945604c2000f04ca",
+      "bytes": 14672,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0033.json": {
+      "original_relative_path": "evidence/0033.json",
+      "sha256": "9996055bf65f73b3de7087e057c48bdc7c6edb748ae2c712193c0c155e36b8d9",
+      "bytes": 493,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0033.raw": {
+      "original_relative_path": "evidence/0033.raw",
+      "sha256": "cc9230003245c4988c5efa1c39c8bdb9992fb6193c1211896321b93a6d42ef59",
+      "bytes": 391,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0034.json": {
+      "original_relative_path": "evidence/0034.json",
+      "sha256": "257c6e0549840a39583badf440c67ab8982269ab1a7c7747208b0236e016a763",
+      "bytes": 354,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0034.raw": {
+      "original_relative_path": "evidence/0034.raw",
+      "sha256": "4e01ebd2bc3056e98a38c26ebd036c0d35a88d295820e62bfae84f402173bb90",
+      "bytes": 821,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0035.json": {
+      "original_relative_path": "evidence/0035.json",
+      "sha256": "ad326663f6caf3c459c94327b570ac705665ab4ed65c92fa9378f4e6fcfaf7db",
+      "bytes": 223,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0035.raw": {
+      "original_relative_path": "evidence/0035.raw",
+      "sha256": "3540c5fe23e7e441cbd0aa4b8b73e67839117022471636fde546e4801b0b9802",
+      "bytes": 14672,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0042.json": {
+      "original_relative_path": "evidence/0042.json",
+      "sha256": "545a19cde8493a2d7e3a92e74adacf892b9c6448a32884dd5f36f50644f5e8b0",
+      "bytes": 224,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0042.raw": {
+      "original_relative_path": "evidence/0042.raw",
+      "sha256": "598517d48c38e2887df731739809998d9a3f3d91288d260233f0e13ad4a1e670",
+      "bytes": 19716,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0043.json": {
+      "original_relative_path": "evidence/0043.json",
+      "sha256": "ec3105cfa00ae6660d759c93c924f0b07e4bbdde6dc2244a5d2228f3f5739ffa",
+      "bytes": 289,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0043.raw": {
+      "original_relative_path": "evidence/0043.raw",
+      "sha256": "a90ab67b8cbc65c8a64d95ec9fa743e4332acd38e07a8bbfa0d9d3333821b258",
+      "bytes": 1545,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0044.json": {
+      "original_relative_path": "evidence/0044.json",
+      "sha256": "44a0cecdc80675b519e587c96c0776f45e4cadd29ab3387b9f5c7dd0f364eb1e",
+      "bytes": 225,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0044.raw": {
+      "original_relative_path": "evidence/0044.raw",
+      "sha256": "9c932f15b6530baef0703bb2f19549752aa2be85659f04047ab8cc694f2f6b6c",
+      "bytes": 9567,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0046.json": {
+      "original_relative_path": "evidence/0046.json",
+      "sha256": "5ef695043402229c15dea0f95242157b708c2008df5bef3e8b8cfab65265483a",
+      "bytes": 491,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0046.raw": {
+      "original_relative_path": "evidence/0046.raw",
+      "sha256": "fb7bd46ae2c0fb509eba207f628c306b564801d69a5b6afa3a0390586be576eb",
+      "bytes": 389,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0047.json": {
+      "original_relative_path": "evidence/0047.json",
+      "sha256": "353a4adb0dcb1dcdee9f8fbb9dd5c343f7c1f0b201d68b647076aa154fbfbe89",
+      "bytes": 355,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0047.raw": {
+      "original_relative_path": "evidence/0047.raw",
+      "sha256": "b2b09a8dbfa1842af4b76639fd884bb5b333dba6172401700b059ee4d38ea3cd",
+      "bytes": 818,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0048.json": {
+      "original_relative_path": "evidence/0048.json",
+      "sha256": "bc2528b8e045526e808fada5068382aceea32de454d63aeec24657b59ee1b27f",
+      "bytes": 225,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0048.raw": {
+      "original_relative_path": "evidence/0048.raw",
+      "sha256": "fda47c02875dceb535f2c5ab394bdde5f800aedea541e598b690a26ac8603f6d",
+      "bytes": 9571,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0062.json": {
+      "original_relative_path": "evidence/0062.json",
+      "sha256": "12c0e4f7aacaa6fcd276602dfb7b4bc8aa1fa2ef9eae56d80c8e7b93cd2a7da9",
+      "bytes": 290,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0062.raw": {
+      "original_relative_path": "evidence/0062.raw",
+      "sha256": "26fc4ae69d01e2c0893377d885fef2354cad572aa963d206146dacfa4326df01",
+      "bytes": 1521,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0064.json": {
+      "original_relative_path": "evidence/0064.json",
+      "sha256": "91355e407e02add3f92bca53965520db9aadfa3bd0b738be8a8bfea42e4a8fa2",
+      "bytes": 288,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0064.raw": {
+      "original_relative_path": "evidence/0064.raw",
+      "sha256": "b8ddd2885b804a24101be5f2f5fa30aa7f8287aa989b7385b990c3e9b3260e1c",
+      "bytes": 1545,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0066.json": {
+      "original_relative_path": "evidence/0066.json",
+      "sha256": "d612ca8f3f12bc1dc7811727a02a01fa05a7f006c1ef38eefa32a6de480e466f",
+      "bytes": 290,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0066.raw": {
+      "original_relative_path": "evidence/0066.raw",
+      "sha256": "2c3c732d42a6c18a457427f9bd8935a28c9a4e4ae0ea25e65dcb6c2f072097be",
+      "bytes": 1882,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0067.json": {
+      "original_relative_path": "evidence/0067.json",
+      "sha256": "edf7400f9f1d58efbec6d55b7c9389fd23162661f3256bd8b8da1e7a4d14b758",
+      "bytes": 223,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0067.raw": {
+      "original_relative_path": "evidence/0067.raw",
+      "sha256": "9ff6c4032623f95e28cbca3f6191d4e88c8e9eda2cfd98e9e32e1b1a2e1b160a",
+      "bytes": 8283,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0068.json": {
+      "original_relative_path": "evidence/0068.json",
+      "sha256": "c7193c6e496f02e7452ab161bc31491dfee567f94ba8cc6b87a1d4ccc643cacf",
+      "bytes": 302,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/0068.raw": {
+      "original_relative_path": "evidence/0068.raw",
+      "sha256": "cb4a2193a613457a8708bb6b22e71f03617e6f411e62cbfcc1ad6f85e90af5b1",
+      "bytes": 120805,
+      "purpose": "Selected original HTTP request receipt / response for one of the three claims"
+    },
+    "evidence/browser-all-detached/response-001.json": {
+      "original_relative_path": "evidence/browser-all-detached/response-001.json",
+      "sha256": "9ff6c4032623f95e28cbca3f6191d4e88c8e9eda2cfd98e9e32e1b1a2e1b160a",
+      "bytes": 8283,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-all-detached/response-002.json": {
+      "original_relative_path": "evidence/browser-all-detached/response-002.json",
+      "sha256": "9ff6c4032623f95e28cbca3f6191d4e88c8e9eda2cfd98e9e32e1b1a2e1b160a",
+      "bytes": 8283,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-all-detached/response-003.json": {
+      "original_relative_path": "evidence/browser-all-detached/response-003.json",
+      "sha256": "cb4a2193a613457a8708bb6b22e71f03617e6f411e62cbfcc1ad6f85e90af5b1",
+      "bytes": 120805,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-all-detached/result.json": {
+      "original_relative_path": "evidence/browser-all-detached/result.json",
+      "sha256": "4bdfcf1c11ba1d4ac8b38050d8da1e0ed9fb2dba9f0b4515423901c1fe53d55b",
+      "bytes": 6554,
+      "purpose": "Original browser screenshot hashes and response receipts"
+    },
+    "evidence/browser-increment-and-unchanged/response-001.json": {
+      "original_relative_path": "evidence/browser-increment-and-unchanged/response-001.json",
+      "sha256": "d28adc651709ea28f90a2fe73bc6be0269073f57d097dd1f7494849f04d9e82f",
+      "bytes": 18196,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-increment-and-unchanged/response-002.json": {
+      "original_relative_path": "evidence/browser-increment-and-unchanged/response-002.json",
+      "sha256": "d28adc651709ea28f90a2fe73bc6be0269073f57d097dd1f7494849f04d9e82f",
+      "bytes": 18196,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-increment-and-unchanged/response-003.json": {
+      "original_relative_path": "evidence/browser-increment-and-unchanged/response-003.json",
+      "sha256": "ebb93c3fdfc5b24432cdc66f4752eaed99c6f1138c9ffb2ef6e8b2ea3d58a0a7",
+      "bytes": 66234,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-increment-and-unchanged/result.json": {
+      "original_relative_path": "evidence/browser-increment-and-unchanged/result.json",
+      "sha256": "fd5877568ae8fd3174c07ae6924890948a446b7179be3062f7cad6d6646afd50",
+      "bytes": 6038,
+      "purpose": "Original browser screenshot hashes and response receipts"
+    },
+    "evidence/browser-metric-detached/response-001.json": {
+      "original_relative_path": "evidence/browser-metric-detached/response-001.json",
+      "sha256": "fda47c02875dceb535f2c5ab394bdde5f800aedea541e598b690a26ac8603f6d",
+      "bytes": 9571,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-metric-detached/response-002.json": {
+      "original_relative_path": "evidence/browser-metric-detached/response-002.json",
+      "sha256": "fda47c02875dceb535f2c5ab394bdde5f800aedea541e598b690a26ac8603f6d",
+      "bytes": 9571,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-metric-detached/response-003.json": {
+      "original_relative_path": "evidence/browser-metric-detached/response-003.json",
+      "sha256": "a227b5d227943ddd3226c542c786d60e85ae607cf56802b63af96211ab7855e0",
+      "bytes": 90038,
+      "purpose": "Original response witnessed by the selected browser checkpoint"
+    },
+    "evidence/browser-metric-detached/result.json": {
+      "original_relative_path": "evidence/browser-metric-detached/result.json",
+      "sha256": "0f112e77c3bacd03ec2fb1145f12e2a833b0ef8e62942b512c1bb82dc347c3e9",
+      "bytes": 5739,
+      "purpose": "Original browser screenshot hashes and response receipts"
+    },
+    "evidence/summary.json": {
+      "original_relative_path": "evidence/summary.json",
+      "sha256": "839062ab2a3b28b993c8561f9d780d0eed4a6a26ce0c7de9c0e57087b9b7fdd1",
+      "bytes": 24265,
+      "purpose": "Recorded normal exit and all five container cleanup outcomes"
+    }
+  },
+  "screenshots": {
+    "value-plus-one.png": {
+      "original_relative_path": "evidence/browser-increment-and-unchanged/retained-fields-1.png",
+      "sha256": "80d0a55bb8adb576213b65fd2a7837f5d9fd42e32c26ee1a32cd6d0ab4687d9a",
+      "bytes": 106245
+    },
+    "metric-missing.png": {
+      "original_relative_path": "evidence/browser-metric-detached/source-coverage.png",
+      "sha256": "93f69cd6804f03b8520ef9669257c4bf20301f2921dbc37714dc25f7e754f289",
+      "bytes": 466284
+    },
+    "frozen-after-detach.png": {
+      "original_relative_path": "evidence/browser-all-detached/retained-row-1.png",
+      "sha256": "6b649a4df2a54404d9d405adf0236a5468a0bfe2c34c14affb34d3924812ebdf",
+      "bytes": 45446
+    }
+  },
+  "selected_increment_row_id": "01a0972a-62f9-7000-863a-ee4c9d373b0f/3/a47e85b253f2264d09230f9a1f4bdd926a8b59f04d925ff6cb78427f53dfc64b",
+  "source_identity": {
+    "host_commit": "97aa42db44586bf29160fc9895cc2eb6903352db",
+    "binary_sha256": "c543d77522e8ca109184c66f9fdf02bc57f765169663ccc703f89d6b8b8162d2",
+    "dashboard_commit": "4d4889433d26c390232d8affaa62200e1c5ccfe4",
+    "dos_package_commit": "e0d4e0c35ae9b550d53a952c3340709f2deac4c6",
+    "dos_manifest_commit": "97aa42db44586bf29160fc9895cc2eb6903352db",
+    "metric_package_commit": "4e45af54e726776838a1da01b33e2e1c7050b08b",
+    "statistics_package_commit": "a534bd96e36106df1a2bfc6a8a352ff342b27e98"
+  },
+  "source_identity_basis": "Derived from the audited original process record identified by its SHA; credentials/path-bearing process.json is intentionally not exported. Offline reader proves selected recorded joins, not CI authenticity or a current deployment.",
+  "source_files": {
+    "metric_server": {
+      "original_relative_path": "packages/addons/value-difference/server.py",
+      "sha256": "0c26128ea09fa3953bf23fe917b99845d437b585d1c24b1b5ff51002b5f8d1a6"
+    },
+    "guest_asm": {
+      "original_relative_path": "packages/addons/dos-world/guest/lanedemo.asm",
+      "sha256": "9d9368db091f8148a94202151d4424fec6fbcd143fbc05bc70d7759309bc7c9a"
+    }
+  },
+  "omissions": "No authentication files, login receipts, runtime configuration, tokens, executables, image archives, or unselected screenshots. Other rows in selected raw Slice responses may reference unexported material; only the three stated claims are verified.",
+  "archive_sha256": "f937012f6f064dce204869323339829291f1b69ad651a99b7f9c9937c879457f"
+}

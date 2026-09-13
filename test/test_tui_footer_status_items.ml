@@ -26,6 +26,20 @@ let check_one_line label text =
   in
   Alcotest.(check int) label 1 newlines
 
+let test_literal_search_status_survives_hint_fitting () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let hints = "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close  q:quit" in
+  List.iter (fun width ->
+    let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+      ~dim:"" ~reset:"" ~max_cells:width ~port:8935 ~hints () in
+    check_bool "literal query and count are never split as hint items" true
+      (contains ~needle:prefix rendered);
+    check_bool "quit remains available" true (contains ~needle:"q:quit" rendered);
+    check_at_most_cells "footer remains bounded" width (String.trim rendered)) [60;100;200];
+  let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+    ~dim:"" ~reset:"" ~max_cells:10 ~port:8935 ~hints () in
+  check_at_most_cells "even the literal prefix can be cell-truncated" 10 (String.trim rendered)
+
 let test_port_closes_every_footer () =
   check_string "port closes a plain footer"
     "<dim>  j/k:move  Tab:next  | Port: 8935<reset>\n"
@@ -916,9 +930,56 @@ let test_ansi_keeper_keys_remain_individually_droppable () =
         (contains ~needle:":delete" row)
   done
 
+(* A row can carry a conflict notice and a search marker at once. The notice
+   leads, the marker follows it, and the keys come after. Both are literal:
+   neither is split into hint items, and keys give way before either does. *)
+let test_a_conflict_notice_leads_the_search_marker () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let notice = "MISMATCH local /work/masc (r:retry)" in
+  let hints = "j/k:move  p:pause  w:wake  s:shutdown  q:quit" in
+  let status =
+    [ Masc_tui_footer.Server_base_path "/me"
+    ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+    ]
+  in
+  check_string "notice, then marker, then keys"
+    ("<dim>  " ^ notice ^ "  " ^ prefix ^ "  " ^ hints
+     ^ "  | Base: /me | Port: 8935<reset>\n")
+    (Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"<dim>"
+       ~reset:"<reset>" ~max_cells:200 ~port:8935 ~hints ());
+  let position needle text =
+    try Some (Str.search_forward (Str.regexp_string needle) text 0)
+    with Not_found -> None
+  in
+  List.iter
+    (fun max_cells ->
+      let row =
+        Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"" ~reset:""
+          ~max_cells ~port:8935 ~hints ()
+      in
+      check_at_most_cells "the combined row stays within cells" max_cells row;
+      match position notice row, position prefix row with
+      | Some at_notice, Some at_prefix ->
+        check_bool "the notice is drawn before the marker" true
+          (at_notice < at_prefix)
+      | Some _, None | None, Some _ | None, None -> ())
+    [ 70; 80; 100; 120 ];
+  let cut =
+    Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"" ~reset:""
+      ~max_cells:80 ~port:8935 ~hints ()
+  in
+  check_bool "at 80 cells the notice survives" true (contains ~needle:notice cut);
+  check_bool "at 80 cells the marker survives" true (contains ~needle:prefix cut);
+  check_bool "at 80 cells a droppable key gave way instead" false
+    (contains ~needle:"s:shutdown" cut)
+
 let tests =
   [ ( "tui-footer-status-items"
-    , [ Alcotest.test_case "port closes every footer" `Quick
+    , [ Alcotest.test_case "literal search status survives hint fitting" `Quick
+          test_literal_search_status_survives_hint_fitting
+      ; Alcotest.test_case "a conflict notice leads the search marker" `Quick
+          test_a_conflict_notice_leads_the_search_marker
+      ; Alcotest.test_case "port closes every footer" `Quick
           test_port_closes_every_footer
       ; Alcotest.test_case "conflict paths stay atomic through fitting" `Quick
           test_conflict_paths_remain_atomic

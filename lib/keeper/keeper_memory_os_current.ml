@@ -97,13 +97,16 @@ let journal_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ journal_suffix)
 ;;
 
+let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
+;;
+
 let list_keeper_ids_for_keepers_dir ~keepers_dir =
   if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
   then []
   else
     Sys.readdir keepers_dir
     |> Array.to_list
-    |> List.filter_map (Filename.chop_suffix_opt ~suffix)
+    |> List.filter_map keeper_id_of_filename
     |> List.sort String.compare
 ;;
 
@@ -1116,8 +1119,13 @@ let update_locked_with_error
   then Error (store_error "dropped statements must carry canonical identities and reasons")
   else (
     Fs_compat.mkdir_p keepers_dir;
+    let notification_keepers_dir = Unix.realpath keepers_dir in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    Keeper_memory_os_aggregate_lock.with_lock
+    let committed = ref None in
+    let notify () =
+      Option.iter Keeper_memory_commit_notifications.notify_committed !committed
+    in
+    let write () = Keeper_memory_os_aggregate_lock.with_lock
       ?clock
       ~keepers_dir
       ~keeper_id
@@ -1173,6 +1181,12 @@ let update_locked_with_error
          let content = Yojson.Safe.pretty_to_string (to_json next) ^ "\n" in
          match Fs_compat.save_file_atomic snapshot_path content with
          | Ok () ->
+           committed := Some
+             { Keeper_memory_commit_notifications.keepers_dir = notification_keepers_dir
+             ; keeper_id
+             ; store = Ordinary
+             ; revision = next.revision
+             };
            append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
            List.iter
              (fun invalidation ->
@@ -1190,7 +1204,17 @@ let update_locked_with_error
                 (Printf.sprintf
                    "current Memory OS atomic write failed path=%s: %s"
                    snapshot_path
-                   message)))))
+                   message))))
+    in
+    (* Dispatch only after BOTH locks have unwound. The marker is set at the
+       snapshot commit, so a later journal failure/cancellation cannot suppress
+       an already committed change or make a failed write look committed. *)
+    match write () with
+    | result -> notify (); result
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      notify ();
+      Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 let update_locked ?clock ?dropped_statements ~keepers_dir ~keeper_id ~now build =

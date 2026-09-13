@@ -298,6 +298,20 @@ val set_turn_switch :
     keeper is not registered. *)
 val clear_turn_switch : base_path:string -> string -> unit
 
+val clear_turn_switch_if_current :
+  base_path:string -> string -> Eio.Switch.t -> unit
+val current_turn_interrupt_token : base_path:string -> string -> string option
+
+type observed_turn_interrupt_result =
+  | Observed_turn_signalled
+  | Observed_turn_changed
+  | Observed_turn_signal_failed of string
+
+(** Compare and remove one observed switch atomically. A stale token never
+    cancels the successor. Signalled does not mean termination completed. *)
+val interrupt_observed_turn :
+  base_path:string -> string -> interrupt_token:string -> observed_turn_interrupt_result
+
 type exact_turn_interrupt_result =
   | Exact_turn_cancelled of int
   | Exact_no_turn_in_flight

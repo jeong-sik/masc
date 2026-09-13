@@ -28,6 +28,7 @@ let describe = function
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
+  | Command.Run_next -> "run-next"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
   | Command.Steer_turn message -> "steer:" ^ message
@@ -123,6 +124,7 @@ let test_pane_commands_parse_by_word () =
     ; "acting-pane-tab-unknown:code"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
+    ; "run-next"
     ; "interrupt"
     ; "interrupt:tester"
     ; "steer:answer the correction\nwith this context"
@@ -168,6 +170,7 @@ let test_pane_commands_parse_by_word () =
        ; "/activity code"
        ; "/keeper orbiter"
        ; "/keeper   "
+       ; "/run-next"
        ; "/interrupt"
        ; "/interrupt tester"
        ; "/steer answer the correction\nwith this context"
@@ -419,7 +422,9 @@ let test_plain_text_has_no_hint () =
   check string "a slash mid-sentence" "none" (hint "look at a/b")
 
 let test_a_lone_slash_lists_everything () =
-  check int "one candidate per command" (List.length Command.catalog)
+  (* One candidate per spelling, not per command: the composer answers to an
+     alias, so the bare slash offers it too. *)
+  check int "one candidate per spelling" (List.length Command.spellings)
     (match Command.hint "/" with
      | Command.Candidates { entries; _ } -> List.length entries
      | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
@@ -489,14 +494,74 @@ let test_the_hint_line_says_what_the_hint_holds () =
 (* The catalog is what the help and the composer both read. A command listed
    there that the parser does not know would be documented and then refused. *)
 let test_every_catalogued_command_parses () =
+  (* Every spelling, not every command: an alias the catalog names and the
+     parser does not know would be offered in the composer and then refused. *)
   List.iter
-    (fun (entry : Command.command_help) ->
+    (fun word ->
       check bool
-        (Printf.sprintf "/%s parses" entry.Command.word)
+        (Printf.sprintf "/%s parses" word)
         true
-        (match Command.parse ("/" ^ entry.Command.word) with
+        (match Command.parse ("/" ^ word) with
          | Command.Unknown _ -> false
          | _ -> true))
+    Command.spellings
+
+(* The catalog says each command once. Two entries under one summary is an
+   alias that took a row of its own: the sheet then prints the same sentence
+   twice and a reader cannot tell whether the two words differ. *)
+let test_no_two_commands_share_a_summary () =
+  let seen = Hashtbl.create 64 in
+  List.iter
+    (fun (entry : Command.command_help) ->
+      match Hashtbl.find_opt seen entry.Command.summary with
+      | Some other ->
+          failf "/%s and /%s carry the same summary: %s" other
+            entry.Command.word entry.Command.summary
+      | None -> Hashtbl.add seen entry.Command.summary entry.Command.word)
+    Command.catalog;
+  check int "one summary per entry" (List.length Command.catalog)
+    (Hashtbl.length seen)
+
+(* An alias rides in its command's row rather than claiming one. *)
+let test_an_alias_shares_its_command_row () =
+  check bool "the catalog carries at least one alias" true
+    (List.exists
+       (fun (entry : Command.command_help) -> entry.Command.aliases <> [])
+       Command.catalog);
+  check bool "/patch spells /review in its own column" true
+    (List.exists
+       (fun line -> String.starts_with ~prefix:"/patch (/review)" line)
+       Command.help_lines);
+  check int "and /review opens no row of its own" 0
+    (List.length
+       (List.filter
+          (fun line -> String.starts_with ~prefix:"/review" line)
+          Command.help_lines));
+  check int "one row per command" (List.length Command.catalog)
+    (List.length Command.help_lines)
+
+(* An alias is one command under another spelling, so every composer path must
+   answer the two the same way. The pairs are read off the catalog rather than
+   listed here, so a fifth alias is covered the day it arrives. *)
+let test_an_alias_answers_like_its_command () =
+  List.iter
+    (fun (entry : Command.command_help) ->
+      List.iter
+        (fun alias ->
+          check bool
+            (Printf.sprintf "/%s parses as /%s" alias entry.Command.word)
+            true
+            (Command.parse ("/" ^ alias)
+             = Command.parse ("/" ^ entry.Command.word));
+          check bool
+            (Printf.sprintf "/%s navigates like /%s" alias entry.Command.word)
+            (Command.is_slash_navigable ("/" ^ entry.Command.word))
+            (Command.is_slash_navigable ("/" ^ alias));
+          check string
+            (Printf.sprintf "/%s is chosen under its own spelling" alias)
+            ("chosen:" ^ alias)
+            (hint ("/" ^ alias)))
+        entry.Command.aliases)
     Command.catalog
 
 let test_help_lines_come_from_the_catalog () =
@@ -851,6 +916,12 @@ let () =
             test_the_hint_line_says_what_the_hint_holds
         ; test_case "every catalogued command parses" `Quick
             test_every_catalogued_command_parses
+        ; test_case "no two commands share a summary" `Quick
+            test_no_two_commands_share_a_summary
+        ; test_case "an alias shares its command row" `Quick
+            test_an_alias_shares_its_command_row
+        ; test_case "an alias answers like its command" `Quick
+            test_an_alias_answers_like_its_command
         ; test_case "help lines come from the catalog" `Quick
             test_help_lines_come_from_the_catalog
         ; test_case "the typed run is what was pressed" `Quick

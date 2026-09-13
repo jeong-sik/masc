@@ -78,6 +78,7 @@ let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"
    executable projection cannot be produced. *)
 let keeper_skills_unavailable_diagnostic = "keeper.skills.unavailable_diagnostic"
 let librarian = "librarian"
+let workspace_memory_curator = "workspace_memory_curator"
 
 (* Runtime-owned instruction assets.  A caller may supply data to these
    templates, but the instruction wording itself never lives beside the
@@ -356,6 +357,10 @@ let keeper_world_event_rows_fusion_title_failed =
 
 let keeper_world_event_rows_fusion_title_cancelled =
   "keeper.world.event_rows.fusion_title_cancelled"
+;;
+
+let keeper_world_event_rows_fusion_result_lookup =
+  "keeper.world.event_rows.fusion_result_lookup"
 ;;
 
 let keeper_world_event_rows_fusion_cancelled_preview =
@@ -657,3 +662,5 @@ let agent_core_handoff_prompt_param_description =
 let agent_core_agent_tool_prompt_param_description =
   "agent_core.agent_tool.prompt_param_description"
 ;;
+let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
+let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"

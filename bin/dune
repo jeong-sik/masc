@@ -26,6 +26,7 @@
  (libraries
   masc.workspace_connection
   masc.voice_config
+  masc.voice_setup
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -408,10 +409,16 @@
  (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_lane_declaration)
+ (wrapped false)
+ (modules masc_tui_lane_declaration)
+ (libraries yojson))
+
+(library
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout yojson))
+ (libraries masc masc_tui_message_layout masc_tui_lane_declaration yojson))
 
 (library
  (name masc_tui_command)
@@ -1051,9 +1058,11 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries
+ (libraries mtime.clock.os masc_tui_esc_interrupt
+  masc_tui_answering
   masc.masc_tool_blob_store
   masc_tui_lane_addons
+  masc_tui_lane_declaration
   masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
@@ -1331,6 +1340,7 @@
  (libraries
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_lane_declaration
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

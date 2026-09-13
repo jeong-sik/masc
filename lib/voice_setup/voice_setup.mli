@@ -115,3 +115,29 @@ val apply
     [default_model] its section requires have to land together, and applying
     them one at a time would refuse the first half and leave the file in a
     state the loader rejects. *)
+
+type voice_placement =
+  | On_the_section (** the section's default is say's to set: the voice becomes it *)
+  | On_the_endpoint (** another provider shares the section and owns its default *)
+
+val voice_placement : Voice_config.tts_config option -> voice_placement
+(** Where a voice chosen for a local (command-run) endpoint is written, given
+    the TTS section as it is now.
+
+    There are two places because a voice name is provider-shaped: [say] takes a
+    label like ["Yuna"], ElevenLabs a 20-character id. One workspace default
+    cannot serve both, so an endpoint carries its own when it has to.
+
+    But an endpoint voice outranks [voice.tts.agent_voices]
+    ({!Voice_config.voice_for_agent_at_endpoint}), so one written where it is
+    not needed makes every per-keeper voice inert: measured 2026-09-13, a
+    keeper mapped to Eddy spoke in Yuna (85,908 bytes) with it and in Eddy
+    (119,044 bytes) without it.
+
+    So the question is who owns the section's default, not whether a section
+    exists. A section whose endpoints are all [say] -- including one this
+    command wrote on an earlier run -- is say's, and gets the section default;
+    only a section that also holds another provider puts the voice on the
+    endpoint, and accepts that the mappings do not reach it. Asking only
+    whether a section existed sent the second run of the same command to the
+    endpoint. *)

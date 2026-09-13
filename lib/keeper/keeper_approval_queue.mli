@@ -293,6 +293,14 @@ val ensure_settled_continuation_chat_projection :
   resolution:Keeper_event_queue.hitl_resolution ->
   (continuation_projection_result, string) result
 
+(** Record instruction delivery after an official client transmitted the admitted
+    resolution and a later turn settled in the same captured session. This is
+    not an effect receipt and does not consume an available one-shot grant. *)
+val record_native_continuation_delivery :
+  base_path:string -> keeper_name:string ->
+  resolution:Keeper_event_queue.hitl_resolution ->
+  (continuation_projection_result, string) result
+
 (** Record the continuation as failed when the turn that received the
     replay failed after the provider answered ([route] satisfies
     {!Keeper_runtime_failure_route.response_observed}). The same readiness

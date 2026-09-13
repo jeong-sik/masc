@@ -75,6 +75,7 @@ val keeper_observation_rejected_digest_row : string
     metric/target reachable in principle? *)
 
 val librarian : string
+val workspace_memory_curator : string
 
 val fusion_judge : string
 val fusion_judge_refine : string
@@ -238,6 +239,7 @@ val keeper_world_fleet_messages_row : string
 val keeper_world_event_rows_fusion_title_succeeded : string
 val keeper_world_event_rows_fusion_title_failed : string
 val keeper_world_event_rows_fusion_title_cancelled : string
+val keeper_world_event_rows_fusion_result_lookup : string
 val keeper_world_event_rows_fusion_cancelled_preview : string
 val keeper_world_event_rows_scheduled_wake_title : string
 val keeper_world_event_rows_external_attention_title : string
@@ -397,3 +399,5 @@ val agent_core_unknown_tool_not_bare : string
 val agent_core_handoff_description : string
 val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
+val keeper_context_workspace_memory_available : string
+val keeper_context_workspace_memory_unavailable : string

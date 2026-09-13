@@ -57,6 +57,9 @@ click은 같은 scene의 documentId/nodeId를 쓸 수 있고 selector와 섞지 
 좌표 조작에는 현재 viewport 관측이 필요하다. 클릭·입력·이동·스크롤 등 조작 뒤에는
 새 관측으로 실제 결과를 확인한다. 제목·본문·사이트별 대상을 요청과 대조하고, 요청된
 각 단계의 수행 여부를 구분한다. 재사용하는 것은 동선이며, 다른 문서의 참조가 아니다.
+TUI에서 href가 관측된 control의 Enter는 일반 click이 아니라 관찰된 same-tab
+`follow_link`로 실행된다. follow receipt의 destination URL과 navigation source를
+다음 scene read에 넘겨 같은 URL reload나 오래된 document를 완료로 오인하지 않는다.
 
 본문이 충분하면 그 결과로 다음 채널을 이어가거나 답한다. 보이는 내용·scope·truncated를
 확인해 실제 수집 범위와 근거 링크를 남긴다. 잘렸다면 더 작은 관측 영역, 지원되는

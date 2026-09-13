@@ -781,6 +781,32 @@ That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
 it: ending a capture hands the draft to the same send path Enter uses. Off by
 default, and described under Configuration above.
 
+### A conversation left running, measured
+
+`Ctrl-A` in imp's chat pane with `send_on_stop` on, the `rec` stand-in saying
+`연속 모드에서 두 번째 문장입니다.` (2.4s after 0.8s of room noise) every time it
+was started, for 60s, then `Ctrl-A` again:
+
+| | |
+|---|---|
+| the noise-floor probe | 0.5s, once, before the first capture |
+| captures in 60s | 6, each stopped after 5.5–5.6s of audio |
+| from one capture's start to the next | 10.5s, 11.6s, 11.3s, 12.9s, 11.5s |
+| the first sentence | sent at once; imp's turn took 32s |
+| the two sentences said during that turn | held in the TUI as one `NEXT 1`, joined by a newline, and sent as one message when the turn ended |
+| the three said during the next turn | held as `NEXT 1` behind it |
+| the second `Ctrl-A` | ended the mode after the capture in progress; no capture started after it |
+
+A message held behind a running turn is in the TUI, not at the server — the
+chat pane says `1 message waiting in this TUI; not sent to the server yet`.
+Closing the TUI drops it: the three sentences above were not sent and were not
+there when the TUI was opened again. The first `q` says so before the second
+one quits, count first:
+
+```
+q: 1 unsent message is dropped if you press again to quit, or any other key to stay
+```
+
 ## External devices
 
 Any device that can make two HTTP calls can send speech to a keeper and read

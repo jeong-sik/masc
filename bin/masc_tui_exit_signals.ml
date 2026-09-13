@@ -32,3 +32,17 @@ let poll t =
       Interrupt_armed
     end
   else Continue
+
+(* The count comes first: the events pane cuts a notice at a few dozen
+   columns, and a count after "press again to quit" was cut off at 100. *)
+let quit_notice ~key ~waiting =
+  match waiting with
+  | 0 -> Printf.sprintf "%s: press again to quit, or any other key to stay" key
+  | 1 ->
+    Printf.sprintf
+      "%s: 1 unsent message is dropped if you press again to quit, or any other key to stay"
+      key
+  | n ->
+    Printf.sprintf
+      "%s: %d unsent messages are dropped if you press again to quit, or any other key to stay"
+      key n

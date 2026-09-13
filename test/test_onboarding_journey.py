@@ -35,16 +35,24 @@ def observation(base=None, checks=()):
                 base_path=base, checks=rows)
 
 def pdf_readiness(ready=False):
+    """The wire shape MASC sends. Belongs anywhere a catalog or receipt is built."""
     return dict(schema='masc.pdf_tools_readiness.v1', status='tools_available' if ready else 'unavailable',
                 pdf_inspection='not_run', scope='current_process_environment', checks=[dict(command=name, status='started' if ready else 'missing')
                     for name in ('pdftotext', 'pdftoppm')])
+
+
+def pdf_readiness_parsed(ready=False):
+    """What pdf_tools_status now returns. Parsed from the wire shape above
+    rather than hand-built, so a fixture that drifts out of what the decoder
+    accepts fails here instead of passing a value production never produces."""
+    return SETUP.decode_pdf_tools_readiness(pdf_readiness(ready))
 
 class Journey(unittest.TestCase):
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
         renderer.start()
         self.addCleanup(renderer.stop)
-        pdf = patch.object(SETUP, 'pdf_tools_status', return_value=pdf_readiness())
+        pdf = patch.object(SETUP, 'pdf_tools_status', return_value=pdf_readiness_parsed())
         pdf.start()
         self.addCleanup(pdf.stop)
 
@@ -356,7 +364,7 @@ class Journey(unittest.TestCase):
             labels.append(options)
             return [3] if len(labels) == 1 else [0]
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
-                patch.object(SETUP, 'pdf_tools_status', side_effect=[pdf_readiness(), pdf_readiness(True)]), \
+                patch.object(SETUP, 'pdf_tools_status', side_effect=[pdf_readiness_parsed(), pdf_readiness_parsed(True)]), \
                 patch.object(SETUP, 'prerequisite_menu', return_value=True) as install, \
                 patch.object(SETUP, 'pick', side_effect=choose), contextlib.redirect_stderr(io.StringIO()):
             result = SETUP.select_sandbox('/owned/masc', '/workspace')
@@ -364,6 +372,18 @@ class Journey(unittest.TestCase):
         self.assertIn('install missing tools', labels[0][3])
         self.assertIn('tools available', labels[1][3])
         self.assertEqual(result, ['--sandbox-profile', 'docker', '--network-mode', 'inherit'])
+
+    def test_readiness_is_parsed_into_a_closed_answer(self):
+        self.assertTrue(SETUP.decode_pdf_tools_readiness(pdf_readiness(True)).available)
+        parsed = SETUP.decode_pdf_tools_readiness(pdf_readiness())
+        self.assertFalse(parsed.available)
+        self.assertEqual([(row.command, row.status) for row in parsed.checks],
+                         [('pdftotext', 'missing'), ('pdftoppm', 'missing')])
+        # A word the wire never sends is refused here, rather than read as
+        # "not available" by every caller that compares against a literal.
+        for status in ('TOOLS_AVAILABLE', 'available', 'tools_available '):
+            with self.subTest(status=status), self.assertRaises(SETUP.SetupError):
+                SETUP.decode_pdf_tools_readiness(dict(pdf_readiness(True), status=status))
 
     def test_pdf_install_menu_requires_actual_recheck(self):
         action = dict(id='poppler_install', label='Install PDF tools', detail='Uses the selected package manager',
@@ -566,7 +586,15 @@ class Journey(unittest.TestCase):
                             break
                         captured += chunk
                 self.assertIn(b'Your workspace', captured, captured.decode(errors='replace'))
-                os.write(fd, b'q')
+                # Esc, not q. Since the picker gained type-to-filter (#35206)
+                # every printable byte types into the query -- a model id can
+                # start with any letter -- and the picker's own hint line says
+                # so: "type to filter · Esc clears · Ctrl-C cancels". Measured
+                # on this build: q leaves the picker showing `Filter: q / no
+                # matches`, Esc on an empty filter exits 1 writing nothing, and
+                # Ctrl-C is taken by the terminal as SIGINT before the loop
+                # sees it, so the process dies by signal rather than exiting.
+                os.write(fd, b'\x1b')
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     waited, status = os.waitpid(pid, os.WNOHANG)
@@ -644,6 +672,12 @@ class Journey(unittest.TestCase):
                 os.write(fd, str(chosen).encode() + b'\n')
                 until(b'Connect a model')
                 os.write(fd, b'q\n')
+                # Cancelling the connection question no longer ends the
+                # journey: it offers the workspace back rather than losing it.
+                # Leaving by the second option is what ends setup, and the
+                # exit code is still 1 -- the model connection was not saved.
+                until(b'Connection setup')
+                os.write(fd, b'2\n')
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     waited, status = os.waitpid(pid, os.WNOHANG)
@@ -691,6 +725,7 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP, 'workspace_port', return_value=9876), \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
                     patch.object(SETUP, 'select_sandbox', return_value=[]), \
+                    patch.object(SETUP, 'select_local_voice'), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
                     patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
                     contextlib.redirect_stderr(io.StringIO()):
@@ -732,6 +767,7 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'select_setup_server', return_value=8945), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
                 patch.object(SETUP, 'select_sandbox', return_value=[]), \
+                patch.object(SETUP, 'select_local_voice'), \
                 patch.object(SETUP, 'open_workspace') as opened, \
                 patch.object(SETUP.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 1)]), \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -760,6 +796,241 @@ class Journey(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', return_value=response):
             with self.assertRaises(SETUP.SetupError):
                 SETUP.onboarding_status('/bin/masc')
+
+
+def completed(stdout='', code=0):
+    return subprocess.CompletedProcess([], code, stdout=stdout)
+
+
+VOICES = json.dumps(dict(voices=[
+    dict(id='Albert', name='Albert', language='en_US'),
+    dict(id='Yuna', name='Yuna', language='ko_KR'),
+    dict(id='Eddy (\ud55c\uad6d\uc5b4(\ud55c\uad6d))', name='Eddy (\ud55c\uad6d\uc5b4(\ud55c\uad6d))', language='ko_KR'),
+]))
+
+WHISPER_ACTIONS = json.dumps(dict(schema='masc.prerequisite_actions.v1', actions=[
+    dict(id='whisper_cli_brew_install', label='Install whisper.cpp with Homebrew', detail='', source_url='',
+         requires_admin=False, completion='recheck_required',
+         effect=dict(kind='run_commands', argv_steps=[['brew', 'install', 'whisper-cpp']])),
+    dict(id='whisper_model_download', label='Download the whisper model masc asks for', detail='', source_url='',
+         requires_admin=False, completion='recheck_required',
+         writes='/home/.cache/whisper/ggml-large-v3-turbo.bin',
+         effect=dict(kind='run_commands', argv_steps=[
+             ['curl', '-fL', '--create-dirs', '-o', '/home/.cache/whisper/ggml-large-v3-turbo.bin.part',
+              'https://example/model'],
+             ['mv', '/home/.cache/whisper/ggml-large-v3-turbo.bin.part',
+              '/home/.cache/whisper/ggml-large-v3-turbo.bin']])),
+]))
+
+
+def korean_terminal():
+    # All three, because the reader's locale is the first of them that is set
+    # and a shell that exports LC_ALL would otherwise decide this test.
+    return patch.dict(os.environ,
+                      {'LC_ALL': 'ko_KR.UTF-8', 'LC_MESSAGES': 'ko_KR.UTF-8', 'LANG': 'ko_KR.UTF-8'},
+                      clear=False)
+
+
+class LocalVoice(unittest.TestCase):
+    """The voice question the journey asks before the sandbox.
+
+    Speaking needs nothing downloaded -- say is in the base system -- so the
+    step exists to pick a name from a list rather than to install anything.
+    A name is picked rather than typed because say does not fail on one it
+    does not have: it exits 0 in the system voice, and the reader hears a
+    different voice with no error anywhere.
+    """
+
+    def test_a_voice_is_saved_by_the_name_the_listing_printed(self):
+        with patch.object(SETUP, 'pick', side_effect=[[1], [1]]) as picker, \
+                patch.object(SETUP.subprocess, 'run',
+                             side_effect=[completed(VOICES), completed()]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        # ko_KR first because the terminal says Korean, and the parenthesised
+        # name is kept whole: dropping the parenthesis selects another
+        # language's voice of the same name.
+        self.assertEqual(picker.call_args_list[0].args[1][:2],
+                         ['Yuna \u2014 ko_KR', 'Eddy (\ud55c\uad6d\uc5b4(\ud55c\uad6d)) \u2014 ko_KR'])
+        self.assertEqual(run.call_args_list[-1].args[0],
+                         ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace',
+                          '--voice', 'Eddy (\ud55c\uad6d\uc5b4(\ud55c\uad6d))'])
+
+    def test_staying_text_only_writes_nothing(self):
+        with patch.object(SETUP, 'pick', return_value=[3]), \
+                patch.object(SETUP.subprocess, 'run', side_effect=[completed(VOICES)]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['voice-local-setup'])
+
+    def test_a_computer_with_no_catalogue_is_not_asked(self):
+        # Not a failure to report: a computer whose say publishes no voices
+        # has none to offer, and the journey carries on to the sandbox.
+        with patch.object(SETUP, 'pick') as picker, \
+                patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        picker.assert_not_called()
+
+    def test_hearing_names_the_file_the_download_wrote(self):
+        # The path is read from the action that writes it, so the section
+        # cannot name a file the download put somewhere else.
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed(WHISPER_ACTIONS)]):
+            self.assertEqual(SETUP.whisper_model_path('/bin/masc'),
+                             '/home/.cache/whisper/ggml-large-v3-turbo.bin')
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_the_real_catalog_names_the_final_model_file(self):
+        # The fixture above is a copy of the catalog, and a copy can drift: the
+        # download moved to a .part beside the final path while the fixture kept
+        # the old argv, and this function returned the .part for every real
+        # computer with the tests green. So the real binary's catalog is read.
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, HOME=home):
+                path = SETUP.whisper_model_path(BINARY)
+        self.assertIsNotNone(path)
+        self.assertEqual(Path(path).name, 'ggml-large-v3-turbo.bin')
+        self.assertTrue(path.startswith(home), path)
+
+    def test_a_model_that_is_not_there_leaves_speaking_on(self):
+        # Saying nothing about the model is not the same as saying nothing at
+        # all: a keeper that speaks and does not listen is the better half of
+        # the feature, and refusing the whole write would lose it.
+        with patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                patch.object(SETUP, 'whisper_model_path', return_value='/nowhere/ggml.bin'), \
+                patch.object(SETUP.subprocess, 'run',
+                             side_effect=[completed(VOICES), completed()]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertEqual(run.call_args_list[-1].args[0],
+                         ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace',
+                          '--voice', 'Yuna'])
+
+    def test_listening_requires_both_cli_and_a_regular_model_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'ggml.bin'
+            model.write_bytes(b'model fixture')
+            for executable, model_path, expected in (
+                    (None, str(model), False),
+                    ('/fixture/whisper-cli', directory, False),
+                    ('/fixture/whisper-cli', str(model), True)):
+                with self.subTest(executable=executable, model=model_path), \
+                        patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                        patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                        patch.object(SETUP, 'whisper_model_path', return_value=model_path), \
+                        patch.object(SETUP.shutil, 'which', return_value=executable), \
+                        patch.object(SETUP.subprocess, 'run',
+                                     side_effect=[completed(VOICES), completed()]) as run, \
+                        korean_terminal(), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    SETUP.select_local_voice('/bin/masc', '/workspace')
+                    arguments = run.call_args_list[-1].args[0]
+                    self.assertIn('--voice', arguments)
+                    self.assertEqual('--model' in arguments, expected)
+                    if expected:
+                        self.assertEqual(arguments[-2:], ['--model', str(model)])
+
+    def test_the_listing_is_asked_about_the_workspace_being_set_up(self):
+        # Every masc command resolves a workspace first, the listing included.
+        # This step runs before the one that records a default, so the list
+        # must name the workspace rather than depend on the launcher's env.
+        with patch.object(SETUP, 'pick', side_effect=[[1], [1]]), \
+                patch.object(SETUP.subprocess, 'run',
+                             side_effect=[completed(VOICES), completed()]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace', '--list-voices'])
+
+    def test_a_listing_that_fails_says_why_instead_of_skipping_silently(self):
+        # Measured: with no workspace to resolve the listing exits 1 with its
+        # reason as the last stderr line. An empty list used to skip the voice
+        # question without a word.
+        failed = subprocess.CompletedProcess(
+            [], 1, stdout='',
+            stderr='[2026-09-13] [INFO] [MCP] Tag registry initialized\n'
+                   '[2026-09-13] [ERROR] [Backend] MASC_BASE_PATH is not set.\n')
+        with patch.object(SETUP, 'pick') as picker, \
+                patch.object(SETUP.subprocess, 'run', side_effect=[failed]) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertIn('Could not list the voices on this computer', printed.getvalue())
+        self.assertIn('MASC_BASE_PATH is not set', printed.getvalue())
+        self.assertNotIn('Tag registry', printed.getvalue())
+        picker.assert_not_called()
+        self.assertEqual(len(run.call_args_list), 1)
+
+    def test_hearing_without_a_recorder_is_configured_and_says_so(self):
+        # Transcribing needs whisper-cli and a model; recording from the
+        # microphone needs sox's rec as well. A reader who installed the first
+        # two and left sox still gets hearing configured -- a device posting
+        # audio needs nothing more -- and is told what the TUI will lack.
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'ggml.bin'
+            model.write_bytes(b'model fixture')
+            for recorder, warned in ((None, True), ('/fixture/rec', False)):
+                which = {'whisper-cli': '/fixture/whisper-cli', 'rec': recorder}
+                with self.subTest(recorder=recorder), \
+                        patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                        patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                        patch.object(SETUP, 'whisper_model_path', return_value=str(model)), \
+                        patch.object(SETUP.shutil, 'which', side_effect=which.get), \
+                        patch.object(SETUP.subprocess, 'run',
+                                     side_effect=[completed(VOICES), completed()]) as run, \
+                        korean_terminal(), \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    SETUP.select_local_voice('/bin/masc', '/workspace')
+                    self.assertEqual(run.call_args_list[-1].args[0][-2:], ['--model', str(model)])
+                    self.assertEqual("sox's rec" in printed.getvalue(), warned)
+
+    def test_cancelling_the_voice_question_does_not_cancel_setup(self):
+        # An optional step cannot fail the thing it is optional to. By the time
+        # this runs the workspace and the model are saved and the sandbox step
+        # is still ahead, so `q` here means "not this", not "abandon setup".
+        with patch.object(SETUP, 'pick', side_effect=SETUP.SetupError('setup cancelled')), \
+                patch.object(SETUP.subprocess, 'run', side_effect=[completed(VOICES)]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertIn('Continuing without voice', printed.getvalue())
+        # Asked for the listing, wrote nothing.
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['voice-local-setup'])
+
+    def test_the_journey_asks_before_the_sandbox(self):
+        # A reader who leaves at the sandbox step still leaves with a keeper
+        # that can speak.
+        order = []
+        with patch.object(SETUP, 'onboarding_status', return_value=observation('/workspace')), \
+                patch.object(SETUP, 'pick', return_value=[0]), \
+                patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945), \
+                patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
+                patch.object(SETUP, 'select_local_voice', side_effect=lambda *_: order.append('voice')), \
+                patch.object(SETUP, 'select_sandbox', side_effect=lambda *a, **k: order.append('sandbox')), \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.journey('/bin/masc', None, 8945, 10)
+        self.assertEqual(order, ['voice', 'sandbox'])
+
+
+class PdfToolsProbe(unittest.TestCase):
+    # Journey replaces pdf_tools_status for every case, so the probe itself is
+    # exercised here, without that stand-in.
+    def test_readiness_probe_that_never_answers_is_a_setup_error(self):
+        # The sandbox menu asks before every draw, so an unbounded probe would
+        # hold the setup screen. The bound reaches subprocess.run, and running
+        # out of it is refused rather than read as some readiness.
+        expired = subprocess.TimeoutExpired(['/owned/masc'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+        with patch.object(SETUP.subprocess, 'run', side_effect=expired) as run, \
+                self.assertRaisesRegex(SETUP.SetupError, 'did not answer about PDF tool availability in time'):
+            SETUP.pdf_tools_status('/owned/masc')
+        self.assertEqual(run.call_args.kwargs['timeout'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
 
 
 class InvalidWorkspaceDiagnostic(unittest.TestCase):

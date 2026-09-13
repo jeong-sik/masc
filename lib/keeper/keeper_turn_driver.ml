@@ -52,7 +52,6 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
-type runtime_selection = Resolve_assignment | Exact_runtime | Exact_route
 
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -278,7 +277,6 @@ let lane_declares ~lane_id runtime_id =
   | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
 
 let attempt_runtime_candidates
-    ?(preserve_order = false)
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
@@ -340,7 +338,6 @@ let attempt_runtime_candidates
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let demote_rest rest =
-    if preserve_order then rest else
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
@@ -945,7 +942,6 @@ let official_client_dispatch ~provider_config_transform =
 
 let run_named
     ~runtime_id
-    ?(runtime_selection = Resolve_assignment)
     ?(keeper_name = "")
     ?pre_tool_rejects
     ~base_path
@@ -997,6 +993,7 @@ let run_named
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_request_attribution
+    ?official_client_continuation
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -1015,10 +1012,16 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
-  if runtime_selection <> Resolve_assignment && Option.is_some deferred_runtime_lane then
+  let tool_requirement = match output_contract with
+    | Tool_verdict -> Keeper_required_tools.Required
+    | Provider_default -> tool_requirement in
+  if output_contract = Tool_verdict
+     && (Option.is_none (Runtime.get_runtime_by_id runtime_id)
+         || Option.is_some deferred_runtime_lane) then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-      {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
-  else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+      { field = "verifier.runtime"; detail = "A verifier slot requires a direct runtime binding without a deferred lane" }))
+  else
+  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
          (Agent_core.Error.InvalidConfig
@@ -1097,15 +1100,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match runtime_selection, deferred_runtime_lane with
-    | Exact_runtime, _ -> Ok (None, [runtime_id])
-    | Exact_route, _ ->
-      Ok (None, match Runtime.get_lane_by_id runtime_id with
-        | Some lane -> Runtime_lane.declared_candidates lane
-        | None -> [runtime_id])
-    | Resolve_assignment, Some hint ->
+    match output_contract, deferred_runtime_lane with
+    | Tool_verdict, _ -> Ok (None, [runtime_id])
+    | Provider_default, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | Resolve_assignment, None ->
+    | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->
@@ -1169,10 +1168,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
-    match runtime_selection with
-    | Exact_runtime | Exact_route -> []
-    | Resolve_assignment ->
-    modality_reroute_candidates
+    match output_contract with
+    | Tool_verdict -> []
+    | Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
@@ -1255,9 +1253,9 @@ let run_named
     fun ~mode blocks ->
       (* Exact-lane admission also owns provider selection for image evidence:
          retain unread artifacts, but never dispatch an out-of-lane vision call. *)
-      let mode = match runtime_selection with
-        | Resolve_assignment -> mode
-        | Exact_runtime | Exact_route -> Keeper_vision_ingest.Store_only in
+      let mode = match output_contract with
+        | Provider_default -> mode
+        | Tool_verdict -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
@@ -1273,7 +1271,6 @@ let run_named
       lane_id_opt
   in
   attempt_runtime_candidates
-    ~preserve_order:(runtime_selection <> Resolve_assignment)
     ~pre_tool_rejects
     ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
@@ -1333,7 +1330,11 @@ let run_named
            && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
           Error (Keeper_required_tools.to_core_error
             {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
-        else match recovery_view, runtime.Runtime.execution with
+        else match official_client_continuation with
+        | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
+            || Runtime_execution.checkpoint_owner runtime.Runtime.execution <> Runtime_execution.Official_client ->
+          Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
+        | Some _ | None -> match recovery_view, runtime.Runtime.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
@@ -1343,10 +1344,22 @@ let run_named
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      (match Result.bind source_reader_ready (fun () ->
+      let verifier_ready = match output_contract with
+        | Provider_default -> Ok ()
+        | Tool_verdict ->
+          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
+            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+              current_goal_blocks with
+            | Runtime_agent.No_reroute_needed -> Ok ()
+            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
+          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
+      (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
-          |> Result.map_error Keeper_required_tools.to_core_error) with
+          |> Result.map_error Keeper_required_tools.to_core_error)) with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,
@@ -1441,6 +1454,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1569,6 +1583,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1680,6 +1695,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->

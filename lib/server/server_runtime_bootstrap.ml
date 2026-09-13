@@ -609,6 +609,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Env_config_core.base_path_input_env_key
     (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
+  Config_dir_resolver.reset ();
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   Server_slack_connector_config.configure ~config_root;
@@ -784,6 +785,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Runtime_config_read_failed of string
+  | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
@@ -822,6 +824,13 @@ let owner_initialization_error_to_string = function
      root that holds runtime.toml"
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
+  | Keeper_config_recovery_failed report ->
+    let detail = match report.Keeper_config_journal.outcome with
+      | Journal_corrupt detail -> detail
+      | Recovery_failed { detail; notes } -> String.concat "; " (detail :: notes)
+      | No_journal | Recovered_rolled_back _ -> "recovery completion was not accepted"
+    in
+    "keeper configuration recovery failed: " ^ detail
   | Run_registry_already_installed `Fusion ->
     "Fusion run registry already has a process owner"
   | Run_registry_already_installed `Verification ->
@@ -907,6 +916,16 @@ let initialize_owner_state_blocking
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
   Fs_compat.set_fs fs;
+  (* Restore durable configuration before constructing any state from it.
+     A failed read/restore is an initialization error, as for the other
+     authoritative stores; it cannot publish a ready owner. *)
+  let recovery =
+    Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path
+  in
+  (match recovery.Keeper_config_journal.outcome with
+   | No_journal | Recovered_rolled_back _ -> ()
+   | Journal_corrupt _ | Recovery_failed _ ->
+     raise (Owner_initialization_failed (Keeper_config_recovery_failed recovery)));
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let fusion_registry =
     Filename.concat masc_dir Fusion_run_registry.storage_filename
@@ -1059,6 +1078,13 @@ let initialize_owner_state_blocking
   Runtime_log_sink.install ();
   Log.Server.info
     "Runtime_log_sink installed (agent core -> MASC structured log)";
+  let state, t1, prepared_keeper_persistence =
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+      (fun ~runtime_config_path:locked_runtime_config_path ->
+  (* Keep constructor configuration reads, runtime publication and owner
+     inventory preparation in one journal-free observation interval. No
+     manifest lock is acquired here; composite writers keep their established
+     manifest-before-runtime lock order. *)
   let state =
     create_server_state
       ~sw
@@ -1072,7 +1098,11 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  let runtime_config_path = Runtime.config_path () in
+  let runtime_config_path = match Runtime.config_path () with
+    | Some path when not (String.equal path locked_runtime_config_path) ->
+      raise (Owner_initialization_failed
+        (Runtime_config_read_failed "runtime configuration path changed during initial configuration admission"))
+    | path -> path in
   let runtime_config_observation =
     match runtime_config_path with
     | None -> Error Runtime_startup_state.Config_missing
@@ -1217,6 +1247,11 @@ let initialize_owner_state_blocking
       raise
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
+  in
+  (state, t1, prepared_keeper_persistence)) with
+    | Ok initialized -> initialized
+    | Error detail ->
+      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
   in
   (match
      Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->
@@ -1542,7 +1577,9 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw state
+    start_goal_verifier ~sw state;
+    Server_workspace_memory_curator.start ~sw
+      ~base_path:(Mcp_server.workspace_config state).base_path
   in
   if Runtime_startup_state.requires_setup () then
     Eio.Fiber.fork ~sw (fun () ->

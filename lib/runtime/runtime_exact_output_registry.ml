@@ -59,6 +59,10 @@ type t =
   ; required_lane_ids : string list
   }
 
+let catalog_generation_fingerprint t =
+  Exact_output.resolver_catalog_generation t.resolver_snapshot
+  |> Exact_output.catalog_generation_fingerprint
+
 type publication_error =
   | Registry_not_published
   | Publication_busy

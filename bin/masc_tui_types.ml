@@ -94,6 +94,15 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* Whether the rows kept from this workspace's own directory -- agents, tasks,
+   keepers, their logs -- were read from it. They are read only once the server
+   says it serves this workspace, and cleared again when it serves another, and
+   both leave the lists empty with no error beside them. An empty roster alone
+   therefore cannot say "no keepers"; this says whether it may. *)
+type local_workspace_reading =
+  | Local_workspace_unread
+  | Local_workspace_read
+
 let canonical_path path =
   if String.equal path ""
   then ""
@@ -2382,7 +2391,6 @@ let runtime_listing_chrome ~error ~action_error ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
-let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -2916,12 +2924,18 @@ module Browser_lane_view = struct
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ -> None
+  (* The browser a read goes to, when there is one. Live with none chosen has
+     no browser to name; this used to answer "choose browser", and every row
+     that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
-    | Automation, _ -> "browser"
-    | Live, Some client -> browser_name client.browser
-    | Live, None -> "choose browser"
+    | Automation, _ -> Some "browser"
+    | Live, Some client -> Some (browser_name client.browser)
+    | Live, None -> None
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
+    match browser_label t with
+    | Some browser ->
+      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
+    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
@@ -3246,6 +3260,20 @@ module Browser_lane_view = struct
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
+        let target_kind = match node.kind with
+          | Region _ -> "region" | Control _ -> "control" | Text -> "text" | Raster -> "raster" in
+        let pinned = ["lane",`String (source_name scene.source);"tabId",`Int scene.tab_id;
+          "expectedUrl",`String scene.content.url] @
+          (match scene.client_id with None -> [] | Some id -> ["clientId",`String id]) in
+        let target = ["documentId",`String scene.content.document_id;"nodeId",`String node.node_id] in
+        (* The same typed action decides Enter in the TUI. A selected region
+           is a scoped read, even when it contains navigational links. *)
+        let default_action = match scene_target_action node with
+          | None -> `Null
+          | Some Read_region -> `Assoc ["kind",`String "read_region";"tool",`String "BrowserRead";
+              "input",`Assoc (pinned @ ["mode",`String "scene";"scope",`Assoc target])]
+          | Some Click_control -> `Assoc ["kind",`String "click_control";"tool",`String "BrowserInteract";
+              "input",`Assoc (pinned @ ["action",`String "click"] @ target)] in
         let source = match node.source_context with
           | Masc.Browser_source_context.Unmapped -> `Null
           | Invalid detail -> `Assoc ["error", `String detail]
@@ -3253,7 +3281,11 @@ module Browser_lane_view = struct
               "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
               "sha256",`String source.digest] in
         Some (Yojson.Safe.pretty_to_string (`Assoc [
-          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "context",`String ("Browser observation of the selected " ^ target_kind
+            ^ ". defaultAction describes its Enter action in the TUI."
+            ^ (match node.source_context with Masc.Browser_source_context.Unmapped -> ""
+               | Invalid _ | Located _ -> " The source hint is page-provided; verify the chosen checkout and file SHA-256 before editing."));
+          "targetKind",`String target_kind;"defaultAction",default_action;
           "lane",`String (source_name scene.source);
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
@@ -3497,6 +3529,37 @@ type msx_frame = {
   msx_disk : string option;
   msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
+
+(* A container-log read that has been asked for and not answered. The keeper and
+   the generation identify it; the stamp says when it was asked, in monotonic
+   nanoseconds. *)
+type sandbox_logs_request = {
+  slr_keeper: string;
+  slr_generation: int;
+  slr_started_ns: int64;
+}
+
+(* Each read has a generation; overlapping reads retain the pending interval's
+   start, but only the newest response may clear it or populate the view. *)
+type detail_read_request = {
+  drr_tab: keeper_detail_tab;
+  drr_keeper: string;
+  drr_generation: int;
+  drr_started_ns: int64;
+}
+
+type observed_interrupt_status =
+  | Interrupt_sending
+  | Interrupt_signalled
+  | Interrupt_declined of string
+  | Interrupt_failed of string
+
+type observed_interrupt =
+  { oi_keeper : string
+  ; oi_token : string
+  ; oi_started_at : float
+  ; oi_sent_ns : int64
+  ; oi_status : observed_interrupt_status }
 
 type state = {
   mutable metrics_scroll: int;
@@ -3764,12 +3827,19 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable keeper_run_cursor: int;
+  mutable detail_reads: detail_read_request list;
+  mutable detail_read_generation: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
-  mutable keeper_sandbox_logs_inflight: (string * int) option;
+  (* The container-log read, which is its own read: the operator opens the
+     Sandbox tab, waits for its status, and presses o/l later. Its start lives
+     with the request rather than beside it, so an in-flight log read cannot
+     exist without the stamp that times it, and status and logs pending at once
+     are timed apart. *)
+  mutable keeper_sandbox_logs_inflight: sandbox_logs_request option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -3868,7 +3938,7 @@ type state = {
   mutable fleet_safety: fleet_safety option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
-  mutable last_refresh: float;
+  mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
@@ -3956,6 +4026,8 @@ type state = {
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_observed_interrupts: observed_interrupt list;
+  mutable keeper_run_next_inflight: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -4158,6 +4230,7 @@ type state = {
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
@@ -5016,6 +5089,87 @@ let selected_acting_entry state =
   | Masc_tui_acting.Turns -> None
   | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
 
+(* What a pending read says while it is pending.
+
+   The seconds appear only after a couple of them. A read that answers at once
+   would otherwise flash a number nobody asked for, and the number exists for
+   the reads that do not answer at once: against a live server the Sandbox
+   tab's status took between five and sixteen seconds (measured 2026-09-12),
+   which is long enough to be read as a stall and keyed at. The footer's
+   answering badge spends its elapsed seconds for the same reason. *)
+let pending_seconds_floor = 2
+
+let loading_notice ?elapsed_s what =
+  match elapsed_s with
+  | Some seconds when seconds >= pending_seconds_floor ->
+      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
+  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+
+let nanoseconds_per_second = 1_000_000_000L
+
+(* How long a read has been pending, in whole seconds. [now_ns] is an argument
+   so the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's status
+   and its container logs are two reads and can be pending at once.
+
+   No clamp, because a monotonic reading cannot go backwards. A wall clock can,
+   and the clamp that used to be here turned that into a silent zero. *)
+let pending_elapsed_s ~now_ns started_ns =
+  Option.map
+    (fun since ->
+      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    started_ns
+
+let pending_detail_read (state : state) ~tab ~keeper =
+  List.find_opt
+    (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
+    state.detail_reads
+
+let detail_read_started state ~tab ~keeper =
+  Option.map (fun request -> request.drr_started_ns)
+    (pending_detail_read state ~tab ~keeper)
+
+(* A refresh supersedes the response, not the elapsed interval. Periodic OAuth
+   polling waits for an in-flight read; explicit refreshes and service switches
+   may still supersede it so a pre-mutation response cannot win. *)
+let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
+  let started_ns =
+    match pending_detail_read state ~tab ~keeper with
+    | Some request -> request.drr_started_ns
+    | None -> now_ns
+  in
+  state.detail_read_generation <- state.detail_read_generation + 1;
+  let request =
+    { drr_tab = tab; drr_keeper = keeper;
+      drr_generation = state.detail_read_generation; drr_started_ns = started_ns }
+  in
+  state.detail_reads <- request :: List.filter
+      (fun pending -> pending.drr_tab <> tab || not (String.equal pending.drr_keeper keeper))
+      state.detail_reads;
+  request
+
+(* A current terminal answer retires its wait, even off screen or on error.
+   Superseded responses cannot retire or populate a newer read. The caller
+   still checks selection before putting an accepted answer on screen. *)
+let finish_detail_read (state : state) request =
+  let current =
+    match pending_detail_read state ~tab:request.drr_tab ~keeper:request.drr_keeper with
+    | Some pending -> pending.drr_generation = request.drr_generation
+    | None -> false
+  in
+  if current then
+    state.detail_reads <-
+      List.filter (fun pending -> pending.drr_generation <> request.drr_generation)
+        state.detail_reads;
+  current
+
+let detail_read_waiting state ~tab ~keeper =
+  Option.is_some (pending_detail_read state ~tab ~keeper)
+  || (tab = Detail_sandbox
+      && match state.keeper_sandbox_logs_inflight with
+         | Some request -> String.equal request.slr_keeper keeper
+         | None -> false)
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
@@ -5341,6 +5495,8 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_run_cursor = 0;
+  detail_reads = [];
+  detail_read_generation = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
@@ -5382,7 +5538,7 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
-  last_refresh = 0.0;
+  local_workspace = Local_workspace_unread;
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
@@ -5428,6 +5584,8 @@ let create_state
   keeper_turns = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_observed_interrupts = [];
+  keeper_run_next_inflight = None;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -5540,6 +5698,7 @@ let create_state
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
+  lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
   browser_lane = None;
   browser_history = None;
@@ -5772,6 +5931,33 @@ let visible_system_log_entries (state : state) =
    stable producer order; each turn is Input -> Progress -> Tool -> Output.
    Pending requests are withheld for the separate NEXT lane. Wall clocks never
    decide conversation order. *)
+(* What a page says when it holds nothing, in one place: the words for
+   {!empty_page}'s [Page_unread] and [Page_failed]. They sit beside the type so
+   a module below the renderer -- Memory's body is one -- draws the same words.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+
+let page_failed_note = "  (load failed; nothing here is a reading)"
+
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -5787,6 +5973,15 @@ let empty_page_of ~snapshot ~error =
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
+
+(* The page for a list kept from this workspace's directory, which carries no
+   snapshot of its own: the list is empty both before the read and after it. *)
+let local_rows_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.local_workspace with
+       | Local_workspace_unread -> None
+       | Local_workspace_read -> Some ())
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =
@@ -6087,6 +6282,14 @@ let apply_clamped_scroll (state : state) = function
    works the split out from it. *)
 let changes_preview_keep_rows = 5
 
+(* The renderer and navigation must agree when a valid diff replaces the list.
+   A stale index after refresh falls back to the current list. *)
+let opened_file_change (state : state) =
+  match state.changes_diff_row, state.changes with
+  | Some row, Some snapshot -> List.nth_opt snapshot.Tui_decode.fcs_changes row
+  | Some _, None | None, (Some _ | None) -> None
+
+
 (* The over-budget note and its divider, which the Changes drawing puts above
    the list. Chrome the drawing adds conditionally has to be counted here too
    -- a bound worked out from fewer chrome rows than the frame uses lets the
@@ -6249,13 +6452,24 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+(* Memory already trims its filter; count and cursor search must use that
+   same query. Other surfaces keep their literal-space search semantics. *)
+let surface_search_query surface query =
+  match surface with Memory -> String.trim query | _ -> query
+
+let memory_fact_search_text = function
+  | Memory_row_fact f ->
+      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+      ^ f.Tui_decode.mf_origin
+  | Memory_row_source_fact f ->
+      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+  | Memory_row_invalidation f ->
+      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+
 let memory_overview_query (state : state) =
     match state.search with
-    | Some q -> String.lowercase_ascii (String.trim q)
-    | None ->
-        if String.length (String.trim state.search_last) > 0 then
-          String.lowercase_ascii (String.trim state.search_last)
-        else ""
+    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
+    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
 
 let visible_memory_keepers (state : state) =
@@ -6400,25 +6614,15 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.trim q
-        | None -> String.trim state.search_last
+        | Some q -> surface_search_query Memory q
+        | None -> surface_search_query Memory state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
         else
           List.filter
             (fun row ->
-              let text =
-                match row with
-                | Memory_row_fact f ->
-                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-                    ^ f.Tui_decode.mf_origin
-                | Memory_row_source_fact f ->
-                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
-                | Memory_row_invalidation f ->
-                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
-              in
-              palette_contains ~needle:query text)
+              palette_contains ~needle:query (memory_fact_search_text row))
             all_rows
       in
       (match state.memory_facts_sort with
@@ -6641,17 +6845,29 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
             (match state.system_logs with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
-        ; sc_overflow_takes_row = false
+        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        listing ~error:state.verification_error
-          (match state.verification with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.vs_requests)
+        (* Under the list sit the armed approval and the server's last
+           refusal, one row each while they stand, and the scroll row while the
+           queue overflows. They are frame rows too; a count without them puts
+           the footer past the frame's last row. *)
+        Some
+          { sc_count =
+              (match state.verification with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.vs_requests)
+          ; sc_chrome =
+              listing_chrome ~error:state.verification_error
+              + (if Option.is_some state.verification_verdict_armed then 1 else 0)
+              + (if Option.is_some state.verification_verdict_error then 1 else 0)
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
@@ -6681,6 +6897,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (List.length (memory_fact_rows state))
       else
         Some (memory_overview_scrolled state)
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some
         { sc_count =
@@ -6690,7 +6907,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = false
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()
@@ -6878,7 +7095,32 @@ let conversation_urls (state : state) : string list =
 
 
 
-let surface_row_texts (state : state) : surface -> string list option = function
+let code_file_search_focused (state : state) =
+  not state.repository_changes_open
+  && state.code_focus_file = Right_pane
+  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+
+(* The Git changes overlay before the surface it is drawn over. It draws over
+   three surfaces -- [scrolled_surface_rows] names them -- and an arm per
+   surface answered for two of them: over the Keepers roster the rows here
+   were keeper names, so a settled query counted the hidden roster and [n]
+   stepped the keeper cursor instead of landing on a matching path.
+   [goto_surface] closes the overlay on any move to another surface, which is
+   what makes the flag alone enough to say it is on screen. Its diff replaces
+   the list with text, and text has no row for a cursor to name. *)
+let surface_row_texts (state : state) : surface -> string list option =
+ fun surface ->
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         Option.map
+           (fun s ->
+             List.map (fun row -> row.Tui_decode.rc_path)
+               s.Tui_decode.rcs_changes)
+           state.repository_changes)
+  else
+  match surface with
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Keepers Keeper_detail when state.context_inspector_open ->
@@ -6935,18 +7177,19 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.vs_requests)
           state.verification
   | Harness ->
-      Option.map
+      if Option.is_some state.harness_detail then None
+      else Option.map
         (fun s ->
           List.map
             (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
             s.Tui_decode.hs_verdicts)
         state.harness
   | Repositories ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
+      (* Workspace Activity replaces the repository list with one repository's
+         own rows and its own cursor, and its handler takes every key the
+         surface has, "/" and n and N among them. The rows here are the list
+         behind it, which a settled query would then count and report. *)
+      if Option.is_some state.workspace_activity_repo then None
       else
         Option.map
           (fun s ->
@@ -6957,26 +7200,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
           state.repositories
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        (match memory_fact_rows state with
-         | [] -> None
-         | rows ->
-             Some
-               (List.map
-                  (function
-                    | Memory_row_fact fact ->
-                        fact.Tui_decode.mf_category ^ " "
-                        ^ fact.Tui_decode.mf_claim
-                    | Memory_row_source_fact fact ->
-                        fact.Tui_decode.msf_path ^ " "
-                        ^ fact.Tui_decode.msf_claim
-                    | Memory_row_invalidation row ->
-                        row.Tui_decode.mi_source_path ^ " "
-                        ^ row.Tui_decode.mi_reason)
-                  rows))
-      else
         Option.map
           (fun _ ->
-            List.map (fun k -> k.Tui_decode.mkh_keeper_id)
+             let rows = memory_fact_rows state in
+             (* The exact filter projection, including field order: a phrase
+                crossing a field boundary must remain countable and reachable. *)
+             List.map memory_fact_search_text rows)
+          state.memory_facts
+      else
+        Option.map
+          (* Keeper id and the state label, which is the pair
+             [visible_memory_keepers] keeps a row for. Leaving the label out
+             kept rows on screen that the search could neither count nor
+             reach. *)
+          (fun _ ->
+            List.map
+              (fun k ->
+                k.Tui_decode.mkh_keeper_id ^ " "
+                ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
@@ -6988,16 +7229,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.cs_connectors)
         state.connectors
   | Runtime ->
+      if Option.is_some state.runtime_detail_target then None
+      else
       Option.map
         (fun s ->
-          List.map
-            (fun c ->
-              c.Tui_decode.rcr_lane_id ^ " "
-              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
-            s.Tui_decode.rss_candidates)
+          match state.runtime_mode with
+          | Runtime_lanes ->
+              List.map
+                (fun c ->
+                  c.Tui_decode.rcr_lane_id ^ " "
+                  ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_candidates
+          | Runtime_all ->
+              List.map (fun runtime -> runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      Option.map
+      if Option.is_some state.system_logs_detail_seq then None
+      else Option.map
         (fun _ ->
           visible_system_log_entries state
           |> List.map
@@ -7007,19 +7256,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
               ^ " " ^ e.Tui_decode.sl_message))
         state.system_logs
   | Code ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
-      else
-      (* The Git changes overlay is a row list of its own. Otherwise, with a
-         file focused (and no file overlay over it), "/" searches the file's
-         lines; the tree remains the default search list. *)
-      if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then
+      (* With a file focused (and no file overlay over it), "/" searches the
+         file's lines; the tree remains the default search list. The Git
+         changes overlay is answered above, before any surface. *)
+      if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
@@ -7108,6 +7348,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
                          evidence.Tui_decode.fhe_post_id ^ " "
                          ^ evidence.Tui_decode.fhe_title)
                    entries)))
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (
       match state.changes with
       | None -> None
@@ -7131,6 +7372,48 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None
+
+(* The fetched file's rows are replaced when content changes, like the lists
+   behind [chat_rows_memo]. Keep one derived reading keyed by that identity
+   and the query, not by the pane or path: a repaint reuses it, while a refresh
+   of the same file must recount. Other surfaces retain their live projection. *)
+type code_search_count_memo =
+  { csc_rows : (string * string) list array
+  ; csc_query : string
+  ; csc_count : int
+  }
+
+let code_search_count_memo : code_search_count_memo option ref = ref None
+
+let code_file_search_count ~query rows =
+  match !code_search_count_memo with
+  | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->
+      memo.csc_count
+  | Some _ | None ->
+      let count =
+        Array.fold_left (fun count segments ->
+          let text = String.concat "" (List.map fst segments) in
+          if palette_contains ~needle:query text then count + 1 else count) 0 rows
+      in
+      code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
+      count
+
+let surface_search_count (state : state) surface ~query =
+  let query = surface_search_query surface query in
+  match surface with
+  | Code when code_file_search_focused state ->
+      (match Masc_tui_fetched.current state.code_file with
+       | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | None -> None)
+  | _ ->
+      Option.map
+        (fun rows ->
+          if String.equal query "" then 0
+          else List.fold_left (fun count text ->
+            if palette_contains ~needle:query text then count + 1 else count) 0 rows)
+        (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
 
@@ -7213,6 +7496,142 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
+let keeper_observed_turn (state : state) keeper_name =
+  if Option.is_some state.keeper_turns_error then None
+  else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if row.ktr_keeper_name <> keeper_name then None
+    else match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token = Some token; _ } ->
+        Some (started_at_unix, token)
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_observed_interrupt (state : state) keeper_name started_at =
+  List.find_opt (fun item -> item.oi_keeper = keeper_name && item.oi_started_at = started_at)
+    state.keeper_observed_interrupts
+;;
+
+let keeper_observed_interrupt_action (state : state) keeper_name =
+  let current_token = Option.map snd (keeper_observed_turn state keeper_name) in
+  let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
+    state.keeper_observed_interrupts
+    |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
+      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+  Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
+;;
+
+let keeper_observed_interrupt_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> keeper_name then None else
+      match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
+        (match keeper_observed_interrupt state keeper_name started_at_unix with
+         | Some item -> Some (match item.oi_status with
+           | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
+           | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
+           | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
+           | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
+         | None when Option.is_some interrupt_token ->
+           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+         | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7221,6 +7640,8 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   List.length state.msg_inflight
+  + List.length (keeper_message_activity_rows state)
+  + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0
@@ -7388,7 +7809,12 @@ let palette_entries (state : state) =
          Palette_gate_mode (lane, mode)))
         [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
       [Workspace_gate; External_gate]
+  (* Both halves, because they are one reading split in two: Task Review lists
+     what waits for a ruling and Task Verdicts what was ruled. They sit one [v]
+     apart under Planning, so offering a jump to one and not the other makes the
+     nearer half look like the only one there is. *)
   @ [ "go Task Review", Palette_goto Verification ]
+  @ [ "go Task Verdicts", Palette_goto Harness ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]

@@ -197,6 +197,33 @@ let test_render_memory_body () =
   check bool "memory body rendered" true (!count > 0 && !count <= 20)
 ;;
 
+(* An empty Memory page says what every empty page says for a read that failed
+   and one that has not come back. It had its own words for both, and the
+   failure was "server error -- waiting for retry" when no connection was made. *)
+let test_an_empty_memory_page_uses_the_shared_notes () =
+  let lines state =
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_body ~cols:120 ~budget:30 state
+      ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  let unread = make_state () in
+  check bool "an unread page says it is not loaded" true
+    (contains Types.page_unread_note (lines unread));
+  let failed = make_state () in
+  failed.Types.memory_health_error <- Some "GET failed: connection refused";
+  let failed_body = lines failed in
+  check bool "a failed page says the shared failure note" true
+    (contains Types.page_failed_note failed_body);
+  check bool "and not its own server-error words" false
+    (contains "server error" failed_body)
+;;
+
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
@@ -460,6 +487,45 @@ let stats_row lines =
   | [] -> fail "no row on the facts body names the sort"
   | _ :: _ -> fail "the sort is named on more than one row"
 
+let test_memory_search_uses_the_filter_text_and_query () =
+  let state = three_kinds_state () in
+  state.view <- Types.Memory;
+  state.memory_facts_keeper <- Some "alpha";
+  let snapshot = Option.get state.memory_facts in
+  let ordinary = match snapshot.mfs_ordinary with
+    | Decode.Memory_store_present store -> store
+    | _ -> fail "fixture ordinary store missing" in
+  let original = List.hd ordinary.mos_facts in
+  let fact = { original with mf_claim = "deploy"; mf_category = "note";
+                            mf_origin = "authored" } in
+  state.memory_facts <- Some { snapshot with mfs_ordinary =
+    Decode.Memory_store_present { ordinary with mos_facts = [fact] } };
+  let verify ~typing query expected =
+    state.search <- if typing then Some query else None;
+    state.search_last <- if typing then "unrelated committed query" else query;
+    let rows = Types.memory_fact_rows state in
+    check int "filter row count" expected (List.length rows);
+    check (option int) "marker agrees with filter" (Some expected)
+      (Types.surface_search_count state Types.Memory ~query);
+    let texts = Option.get (Types.surface_row_texts state Types.Memory) in
+    let effective = Types.surface_search_query Types.Memory query in
+    check int "cursor matcher reaches every filtered row" expected
+      (List.length (List.filter (Types.palette_contains ~needle:effective) texts))
+  in
+  List.iter (fun typing ->
+    List.iter (fun query -> verify ~typing query 1)
+      ["deploy note"; "  deploy note  "; "authored";
+       "runtime.toml config/rt.toml"; "superseded legacy_docs.md"];
+    verify ~typing "not-present" 0) [true; false];
+  state.search <- Some "   ";
+  check int "blank Memory query still shows all rows" 3
+    (List.length (Types.memory_fact_rows state));
+  check (option int) "blank query has no matches to jump" (Some 0)
+    (Types.surface_search_count state Types.Memory ~query:"   ");
+  check string "other surfaces retain literal whitespace" "  deploy note  "
+    (Types.surface_search_query Types.Board "  deploy note  ")
+;;
+
 (* What the facts title actually has to spend. A terminal is not a surface: the
    Activity pane keeps its own columns beside every surface that is not Activity,
    and the frame spends its border and its padding on what is left. Counting the
@@ -717,7 +783,7 @@ let test_render_memory_overflow_selection () =
   let layout = Option.get (Types.scrolled_surface state Types.Memory) in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4"]) (Types.surface_row_texts state Types.Memory);
+    (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;
@@ -745,9 +811,13 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "an empty memory page uses the shared notes" `Quick
+            test_an_empty_memory_page_uses_the_shared_notes
         ] )
     ; ( "one place per fact"
-      , [ test_case "the title and the row each say one fact" `Quick
+      , [ test_case "search count and cursor share Memory filter text and query" `Quick
+            test_memory_search_uses_the_filter_text_and_query
+        ; test_case "the title and the row each say one fact" `Quick
             test_the_title_and_the_row_each_say_one_fact
         ; test_case "a read in flight says so and keeps the clock" `Quick
             test_a_read_in_flight_says_so_and_keeps_the_clock

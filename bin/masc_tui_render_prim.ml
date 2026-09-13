@@ -221,32 +221,6 @@ let document_markdown ~width body =
   markdown_with_closing ~closing:Ansi.reset ~width body
 
 
-(* What a page says when it holds nothing, in one place.
-
-   These were spelled at every surface that draws a page -- nine copies of the
-   failure line and nine of the unread one -- and the unread copies said only
-   that nothing had loaded. [r] is what loads it, and the reader was left to
-   find that out somewhere else. Two surfaces did name the key, which is how a
-   reader on the others learned there was nothing to learn. *)
-let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
-
-let page_failed_note = "  (load failed; nothing here is a reading)"
-
-(* What a title says where its counts would go. A read nobody has asked for and a
-   read that failed both leave the snapshot empty, and the title is the row on
-   top, so it is the answer that gets read: "not loaded" after a failure sends
-   the operator to [r] while the server's reason sits in red two rows below.
-
-   The same distinction the body makes with {!page_unread_note} and
-   {!page_failed_note}, in the words a title has room for. The Memory header was
-   taught it in #35457; every other surface still said "not loaded" for both. *)
-let title_unread = "(not loaded)"
-let title_failed = "(load failed)"
-
-let title_missing_reading ~error =
-  if Option.is_some error then title_failed else title_unread
-
-
 (* A level meter, only while a capture is running.
 
    A dead input device and a quiet room both end the same way — an empty draft
@@ -317,18 +291,83 @@ let awaiting_approval_notice (state : state) =
    two places drifts in one of them, and a reader who has to scan the body
    for keys on one screen and the footer on another reports exactly
    "the key help keeps moving around" (2026-08-28). *)
+(* The query on screen and how many rows it reaches, or [None] when no query
+   is on screen.
+
+   Both states, not only the armed one. Enter used to take the query off the
+   footer while n and N went on stepping through its matches, so the keys
+   that hunt said nothing about what they were hunting for. The caret marks
+   the one still being typed; "n/N" marks the one those keys now step.
+
+   The count is what tells a query that matches nothing from a query whose
+   only match is already under the cursor -- both move no cursor and, without
+   a number, look the same.
+
+   The count follows the current row source. Code reuses a count only while
+   its immutable fetched rows and query are unchanged, so background repaints
+   do not flatten and scan the entire open file. List/detail transitions on
+   other surfaces continue to consult their live row projection.
+
+   "n/N" appears only where those keys do something. They ask
+   [surface_row_texts] the same question and return without moving when it
+   answers [None], so a detail pane or a cursorless surface that printed the
+   suffix would be naming keys that are not there. It is also a key hint, so
+   hints off drops it and keeps the query and its count.
+
+   One spelling, because three surfaces draw this: the footer every surface
+   carries, the Keepers heading, and the context inspector's own title. They
+   said three different things about the same pair of fields. *)
+let search_marker (state : state) =
+  let marker query ~settled =
+    let has_query = surface_search_query state.view query <> "" in
+    let reached = Masc_tui_types.surface_search_count state state.view ~query in
+    let found =
+      match reached with
+      | None -> ""
+      | Some _ when not has_query -> ""
+      | Some reached ->
+          if reached = 0 then " (none)" else Printf.sprintf " (%d)" reached
+    in
+    let tail =
+      if not settled then "\xe2\x96\x8c"
+      else if not state.hints_visible || not has_query then
+        (* "n/N" names keys, and hints off is the reader saying they know the
+           keys -- the setting leaves "?:help" as the only one and takes the
+           room back for status. The query and its count are status, so they
+           stay; naming two more keys next to them contradicted both halves of
+           that setting. *)
+        ""
+      else match reached with None -> "" | Some _ -> " n/N"
+    in
+    Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail
+  in
+  match state.search with
+  | Some query -> Some (marker query ~settled:false)
+  | None ->
+      if state.search_last = "" then None
+      else Some (marker state.search_last ~settled:true)
+
+(* The marker with the colour the two headings give it: accented while the
+   query is being typed, dim once it is settled. Empty when there is no
+   query. The footer takes the plain one because it dims its whole line. *)
+let search_marker_styled (state : state) =
+  match search_marker state with
+  | None -> ""
+  | Some marker ->
+      Printf.sprintf "  %s%s%s"
+        (match state.search with
+         | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
+         | None -> Ansi.dim)
+        marker Ansi.reset
+
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
   let hints = if state.hints_visible then hints else "?:help" in
-  (* An armed "/" search shows its query where every surface already looks
-     for its keys. One seam instead of a per-surface indicator. *)
-  let hints =
-    match state.search with
-    | Some query -> "/" ^ query ^ "  " ^ hints
-    | None -> hints
-  in
+  (* Search status is literal text, not key hints: runs of spaces belong
+     to the user's query and must survive compact hint-item fitting. *)
+  let literal_prefix = search_marker state in
   (* What the last keypress did, in front of the keys for the same reason the
      search query is: the status tail is dropped whole before a single hint
      is, so a fact placed there cannot be read on a surface whose own keys
@@ -458,7 +497,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line
+  Masc_tui_footer.line ?literal_prefix
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
@@ -810,29 +849,31 @@ let recent_chunk_projection (state : state) =
 
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
+  let pane_keeper (keeper : keeper) : Pane.keeper =
+    let reading = keeper_reading state keeper in
+    let health = Keeper_control.health reading in
+    let paused = reading.Keeper_control.paused in
+    let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
+    let mark_tone =
+      if paused then Pane.Dim
+      else
+        match reading_of_health with
+        | Some Tui_decode.Health_running -> Pane.Ok
+        | Some Tui_decode.Health_idle -> Pane.Dim
+        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
+        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | None -> Pane.Dim
+    in
+    { Pane.name = keeper.k_name
+    ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
+    ; mark_tone
+    ; health = reading_of_health
+    }
+  in
   let keepers =
-    List.map
-      (fun (keeper : keeper) ->
-        let reading = keeper_reading state keeper in
-        let health = Keeper_control.health reading in
-        let paused = reading.Keeper_control.paused in
-        let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
-        let mark_tone =
-          if paused then Pane.Dim
-          else
-            match reading_of_health with
-            | Some Tui_decode.Health_running -> Pane.Ok
-            | Some Tui_decode.Health_idle -> Pane.Dim
-            | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-            | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
-            | None -> Pane.Dim
-        in
-        { Pane.name = keeper.k_name
-        ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
-        ; mark_tone
-        ; health = reading_of_health
-        })
-      state.keepers
+    match state.local_workspace with
+    | Local_workspace_unread -> None
+    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with
@@ -863,6 +904,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
   ; approvals =
@@ -2518,13 +2560,15 @@ let help_lines (state : state) =
     ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
     :: List.map
          (fun (cmd : Masc_tui_command.command_help) ->
-           let text = Masc_tui_command.usage cmd in
-           let pad = String.make (max 2 (16 - String.length text)) ' ' in
+           (* The column and its width come from the command module, which the
+              [/help] list reads through the same two functions: the sheet
+              colours the halves, it does not size them. *)
+           let text = Masc_tui_command.help_usage cmd in
            Printf.sprintf "  %s%s%s%s%s"
              (Theme.warn ())
              text
              Ansi.reset
-             pad
+             (Masc_tui_command.help_summary_padding text)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]

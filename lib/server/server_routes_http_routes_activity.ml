@@ -1828,38 +1828,16 @@ let add_routes ~sw ~clock router =
                   ])
            | Ok override_request ->
              let key = Server_prompt_override_request.key override_request in
-             let result =
-               match override_request with
-               | Server_prompt_override_request.Clear _ ->
-                 (match
-                    Prompt_registry.clear_prompt_override_persisted
-                      ~base_path:
-                        (Mcp_server.workspace_config state).base_path
-                      key
-                  with
-                  | Ok () -> Ok "override cleared"
-                  | Error message -> Error (`Persistence message))
-               | Server_prompt_override_request.Set { value; _ } ->
-                 (match
-                    Prompt_registry.set_override_persisted
-                      ~base_path:
-                        (Mcp_server.workspace_config state).base_path
-                      key
-                      value
-                  with
-                  | Ok () -> Ok "override set"
-                  | Error (Prompt_registry.Validation_error message) ->
-                    Error (`Validation message)
-                  | Error (Prompt_registry.Persistence_error message) ->
-                    Error (`Persistence message))
-             in
+             let result = Server_prompt_override_mutation.apply
+               ~base_path:(Mcp_server.workspace_config state).base_path override_request in
              (match result with
-              | Ok message ->
+              | Ok applied ->
                 respond_json_value_with_cors request reqd
                   (`Assoc
                      [
                        ("ok", `Bool true);
-                       ("message", `String message);
+                       ("message", `String applied.message);
+                       ("curator_refresh", Server_prompt_override_mutation.refresh_json applied.curator_refresh);
                        ("key", `String key);
                        ( "source",
                          `String
@@ -1867,10 +1845,10 @@ let add_routes ~sw ~clock router =
                               (Prompt_registry.prompt_source key)) );
                        ("effective", `String (Prompt_registry.get_prompt key));
                      ])
-              | Error (`Validation message) ->
+              | Error (Server_prompt_override_mutation.Validation message) ->
                 respond_json_value_with_cors ~status:`Bad_request request reqd
                   (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
-              | Error (`Persistence message) ->
+              | Error (Server_prompt_override_mutation.Persistence message) ->
                 Log.Pages.error "prompt override persist failed: %s" message;
                 respond_json_value_with_cors ~status:`Internal_server_error
                   request

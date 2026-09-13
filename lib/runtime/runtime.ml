@@ -72,27 +72,34 @@ let validate_dispatch_credential
   | Runtime_execution.Antigravity_cli _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
-    let credential =
-      Runtime_adapter.effective_credential_reference
+    let requirement =
+      Runtime_adapter.credential_requirement
         ~provider_id:runtime.provider.id
         runtime.provider.credentials
     in
     if not (Llm_provider.Secret.is_empty provider_config.api_key)
     then Ok ()
     else
-      match credential with
-      | None -> Ok ()
-      | Some (Env env_key) ->
+      match requirement with
+      | Not_required -> Ok ()
+      (* An unknown provider is not turned away here. This is a pre-dispatch
+         check, and [Runtime_adapter.resolve_api_key] is where the absence is
+         answered with a refusal that names it; failing twice for one cause
+         would report the same thing in two vocabularies. What changed is that
+         the two absences are no longer one value, so this arm now says which
+         one it is letting through. *)
+      | Unknown_provider -> Ok ()
+      | Reference (Env env_key) ->
         Error
           (Required_env_credential_missing
              { provider_id = runtime.provider.id; env_key })
-      | Some (Inline _) ->
+      | Reference (Inline _) ->
         Error
           (Declared_credential_unavailable
              { provider_id = runtime.provider.id
              ; carrier = Agent_core.Error.InlineCredential
              })
-      | Some (File _) ->
+      | Reference (File _) ->
         Error
           (Declared_credential_unavailable
              { provider_id = runtime.provider.id
@@ -664,6 +671,12 @@ let validate_lanes
          })
 ;;
 
+let with_terminal_default ~default_runtime_id candidates =
+  if List.exists (String.equal default_runtime_id) candidates
+  then candidates
+  else candidates @ [ default_runtime_id ]
+;;
+
 let lanes_of_decls
     ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
     (runtimes : t list)
@@ -674,8 +687,7 @@ let lanes_of_decls
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id candidate_ids
-          |> Runtime_lane.with_terminal_default ~runtime_id:default_runtime_id)
+          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
        lane_decls)
 ;;
 
@@ -1014,14 +1026,16 @@ type exact_lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
+  | Workspace_curator
   | Verifier
 
-let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Verifier ]
+let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier ]
 
 let exact_lane_id = function
   | Librarian -> "librarian_exact"
   | Hitl_auto_judge -> "hitl_auto_judge"
   | Board_attention -> "board_attention_exact"
+  | Workspace_curator -> "workspace_curator_exact"
   | Verifier -> verifier_exact_lane_id
 ;;
 
@@ -1029,12 +1043,14 @@ let exact_lane_of_id = function
   | "librarian_exact" -> Some Librarian
   | "hitl_auto_judge" -> Some Hitl_auto_judge
   | "board_attention_exact" -> Some Board_attention
+  | "workspace_curator_exact" -> Some Workspace_curator
   | "verifier_exact" -> Some Verifier
   | _ -> None
 ;;
 
 let exact_lane_supports_cli_tail = function
   | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
+  | Workspace_curator -> false
 ;;
 
 let verifier_exact_slot_ids_of_lane_decls
@@ -1345,7 +1361,9 @@ let degrade_loaded_for_missing_catalog
              }
              :: dropped_lanes )
          | _ ->
-           ( Runtime_lane.filter_candidates (fun id -> not (is_missing id)) lane
+           ( Runtime_lane.make
+               ~id:(Runtime_lane.id lane)
+               kept_candidates
              :: kept
            , dropped_candidates
            , dropped_lanes ))
@@ -1757,6 +1775,32 @@ let dashboard_runtime_defaults_snapshot () =
    completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
+let verifier_runtime_admission (runtime : t) =
+  match runtime.execution with
+  | Runtime_execution.Agent_core _ -> Ok ()
+  | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
+  | Runtime_execution.Claude_code _ ->
+    Error (runtime.id ^ ": completion verifier requires model tools-support")
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
+    Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
+;;
+
+let verifier_cli_slot_admission ~runtime_id =
+  let state = runtime_state () in
+  (* Verifier slots name direct bindings even when ordinary Keeper routing
+     declares a same-named failover lane. Never resolve that lane here. *)
+  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  | None when List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes ->
+    Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
+  | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
+  | Some runtime ->
+    (match runtime.execution with
+     | Runtime_execution.Agent_core _ ->
+       Error (runtime_id ^ ": verifier CLI slot must name an official client")
+     | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
+;;
+
 let verifier_exact_lane_slot_ids () =
   match Runtime_exact_output_registry.current () with
   | Error error ->
@@ -1768,78 +1812,54 @@ let verifier_exact_lane_slot_ids () =
          ~lane_id:verifier_exact_lane_id
      with
      | Ok { selected_slots; cli_slots } ->
-       Ok (List.map
-         (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-         selected_slots @ cli_slots)
+       let rec admit = function
+         | [] -> Ok ()
+         | runtime_id :: rest ->
+           Result.bind (verifier_cli_slot_admission ~runtime_id) (fun () -> admit rest)
+       in
+       Result.map (fun () ->
+         List.map
+            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+            selected_slots
+          @ cli_slots) (admit cli_slots)
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
 
-(* Whether the lane can actually judge, asked of the runtime table instead of
-   the registry. The registry carries cli slot ids verbatim on purpose --
-   "whether an id resolves to a live official-client runtime is answered at
-   execution with a typed error" (runtime_exact_output_registry.mli) -- so a
-   lane can publish, resolve, and hand back an id that names nothing. The
-   failover walk meets that typed error per attempt and moves to the next
-   candidate, which is the intended shape. A readiness claim cannot: the server
-   reports [exact_output_authority_available] from this lane resolving, so a
-   typo in [verifier_exact.cli_slots] would report an authority that is ready
-   while every review failed with an unresolved runtime. The runtime table
-   lives here, so the claim is checked here. Admitted API slots are not
-   re-checked: publication already matched them against the frozen catalog. *)
+(* Readiness uses the same configured direct-runtime admission as dispatch. *)
 let verifier_cli_slot_rejection slot_id =
-    match
-      List.find_opt
-        (fun (runtime : t) -> String.equal runtime.id slot_id)
-        (get_runtimes ())
-    with
-    | None -> Some (Printf.sprintf "%S is not a materialized runtime" slot_id)
-    | Some runtime ->
-      (match runtime.execution with
-       | Runtime_execution.Agent_core _ ->
-         Some
-           (Printf.sprintf
-              "%S is an API runtime, so it cannot serve an official-client cli slot"
-              slot_id)
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ ->
-         if not (Runtime_execution.supports_native_none runtime.execution) then
-           Some (Printf.sprintf "%S cannot disable built-in native tools" slot_id)
-         else if not runtime.model.tools_support then
-           Some (Printf.sprintf "%S cannot supply the required verdict tool" slot_id)
-         else None)
+  match verifier_cli_slot_admission ~runtime_id:slot_id with
+  | Ok () -> None | Error detail -> Some detail
 ;;
 
-type verifier_slot_dispatch = Cli_runtime | Api_route
-
 let verifier_exact_slot_admission ~runtime_id =
-  (* The explicit single-runtime override need not be a registry lane member.
-     Only a declared CLI slot adds an execution-kind constraint; the driver
-     always enforces the actual candidate's required tools/native posture. *)
+  let direct () = match get_runtime_by_id runtime_id with
+    | Some runtime -> verifier_runtime_admission runtime
+    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
   match Runtime_exact_output_registry.current () with
-  | Error _ -> Ok Api_route
+  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
+  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
     (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots ->
-       (match verifier_cli_slot_rejection runtime_id with
-        | None -> Ok Cli_runtime
-        | Some detail -> Error detail)
-     | Ok _ | Error _ -> Ok Api_route)
+     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
+     | Ok _ | Error _ -> direct ())
 ;;
 
 let verifier_api_slot_ready slot_id =
   let state = runtime_state () in
-  let candidates = match find_declared_lane state.lanes slot_id with
-    | Some lane -> Runtime_lane.declared_candidates lane
-    | None -> [slot_id] in
+  let candidates = [slot_id] in
   List.exists (fun id ->
     match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
     | None -> false
     | Some runtime ->
       match runtime.execution with
       | Runtime_execution.Agent_core provider ->
+        (* The review always sends the managed verification.system prompt, and
+           an exact-output request carrying a system prompt to a model that
+           does not take one is refused as Unsupported_system_prompt. *)
         Provider_tool_support.provider_supports_inline_tools provider
+        && (Provider_tool_support.agent_core_capabilities_of_config provider)
+             .Llm_provider.Capabilities.supports_system_prompt
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
       | Runtime_execution.Antigravity_cli _ ->
@@ -1878,7 +1898,7 @@ let verifier_exact_lane_readiness () =
               "verifier_exact has no dispatchable slot: %s"
               (String.concat "; "
                 (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-                   Printf.sprintf "%S has no materialized candidate with required tools" slot.slot_id)
+                   Printf.sprintf "%S has no materialized candidate with required tools and a system prompt" slot.slot_id)
                    selected_slots @ List.rev rejected))))
 ;;
 
@@ -1945,14 +1965,13 @@ let resolve_assignment (assigned_id : string) =
   | None ->
     (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
      | Some runtime ->
-       let lane = Runtime_lane.make ~id:runtime.id [runtime.id] in
-       let lane =
+       let candidates =
          match state.default_runtime with
          | Some default ->
-           Runtime_lane.with_terminal_default ~runtime_id:default.id lane
-         | None -> lane
+           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
+         | None -> [ runtime.id ]
        in
-       `Lane lane
+       `Lane (Runtime_lane.make ~id:runtime.id candidates)
      | None ->
        (match Option.bind state.startup_degradation (fun degradation ->
           List.find_opt (fun (missing : missing_catalog_model) ->
@@ -2507,7 +2526,7 @@ let committed_receipt ~observation ~durability =
   }
 ;;
 
-let with_runtime_config_write_lock_using observe path f =
+let with_runtime_config_lock_using observe path f =
   let lock_path = path ^ ".lock" in
   match observe ~lock_path f with
   | File_lock_eio.Lock_not_acquired error ->
@@ -2524,6 +2543,19 @@ let with_runtime_config_write_lock_using observe path f =
       }
 ;;
 
+let with_runtime_config_write_lock_using
+    ?(require_resolved = Keeper_config_journal.require_resolved) observe path f =
+  let* locked = with_runtime_config_lock_using observe path (fun () ->
+    let* () = require_resolved ~runtime_config_path:path in
+    Ok (f ())) in
+  match locked.value with
+  | Ok value -> Ok { value; warnings = locked.warnings }
+  | Error detail ->
+    let warnings = List.map (function Config_lock_release_unconfirmed warning -> warning)
+      locked.warnings in
+    Error (String.concat "; " (detail :: warnings))
+;;
+
 let with_runtime_config_write_lock path f =
   with_runtime_config_write_lock_using
     File_lock_eio.with_durable_lock_observed path f
@@ -2538,6 +2570,19 @@ let with_config_lock ~runtime_config_path action =
   List.iter (function Config_lock_release_unconfirmed detail ->
     Log.Misc.warn "runtime activation lock release unconfirmed: %s" detail) locked.warnings;
   locked.value
+;;
+
+let with_manifest_config_lock ~runtime_config_path ~manifest_path action =
+  match File_lock_eio.with_durable_lock_observed
+          ~lock_path:(manifest_path ^ ".lock")
+          (fun () -> with_config_lock ~runtime_config_path action) with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    Option.iter (fun error ->
+      Log.Misc.warn "manifest activation lock release unconfirmed: %s"
+        (File_lock_eio.durable_lock_error_to_string error)) release_error;
+    value
 ;;
 
 let runtime_config_atomic_failure
@@ -2717,6 +2762,12 @@ module For_testing = struct
 
   let snapshot () = runtime_state ()
   let restore snapshot = Atomic.set loaded_state_ref snapshot
+  let with_config_lock_with_journal_sync_parent ~sync_parent ~runtime_config_path action =
+    with_runtime_config_write_lock_using
+      ~require_resolved:(Keeper_config_journal.For_testing.require_resolved_with_sync_parent ~sync_parent)
+      File_lock_eio.with_durable_lock_observed runtime_config_path action
+    |> Result.map (fun receipt -> receipt.value)
+  ;;
   (* TEL-OK: test-only alias of the pure reachability projection above. *)
   let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
   let save_config_text_with_sync_parent
@@ -2908,7 +2959,11 @@ let restore_keeper_assignment_transaction transaction =
 ;;
 
 let observe_keeper_assignment ?runtime_config_path ~keeper_name () =
-  with_keeper_assignment_transaction ?runtime_config_path ~keeper_name
+  (* Observation remains available for reconciliation diagnostics. Only the
+     mutation boundary rejects a journal; this callback cannot write. *)
+  with_keeper_assignment_transaction_using
+    ~with_lock:(with_runtime_config_lock_using File_lock_eio.with_durable_lock_observed)
+    ?runtime_config_path ~keeper_name
     keeper_assignment_revision
 ;;
 
@@ -3138,7 +3193,9 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            all_exact_lanes
+            (* Shared-memory curation is explicitly configured, not enabled by
+               provisioning a general-purpose runtime. *)
+            (List.filter (function Workspace_curator -> false | _ -> true) all_exact_lanes)
         in
         commit_runtime_config_text ~path next)
     in

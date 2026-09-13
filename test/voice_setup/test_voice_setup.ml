@@ -33,7 +33,7 @@ default_model = "eleven_multilingual_v2"
 default_voice = "SAz9YHcvj6GT2YYXdXww"
 
 [voice.tts.agent_voices]
-sangsu = "CwhRBWXzGAHq8TQ4Fs17"
+voice-setup-fixture = "CwhRBWXzGAHq8TQ4Fs17"
 
 # 2026-09-03: local whisper first. Measured 0.85 s on a real utterance.
 # Leaving api_key_env out is what keeps the Authorization header absent.
@@ -254,7 +254,7 @@ let test_an_agent_voice_is_set_and_cleared () =
     Alcotest.(check (option string))
       "the agent that was already mapped is left alone"
       (Some "CwhRBWXzGAHq8TQ4Fs17")
-      (List.assoc_opt "sangsu" (voices (read path))))
+      (List.assoc_opt "voice-setup-fixture" (voices (read path))))
 
 (* Moving an endpoint from a hosted provider to a local one has to drop
    api_key_env, or it sends an Authorization header the local server never
@@ -372,6 +372,64 @@ let test_removing_the_last_endpoint_is_refused () =
     | Ok () -> Alcotest.fail "an stt section with no endpoints must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
+(* Where a voice chosen for say is written depends on who owns the section's
+   default, not on whether a section exists.
+
+   The distinction is load-bearing: an endpoint voice outranks
+   [voice.tts.agent_voices], so one written where it is not needed retires
+   every per-keeper voice at that endpoint without saying so. Measured
+   2026-09-13 -- running the same `voice-local-setup --voice Yuna` twice on a
+   fresh workspace put the voice on the endpoint the second time, because a
+   section existed by then (the first run's), and a keeper mapped to Eddy then
+   spoke in Yuna. *)
+let tts_section_of toml =
+  match Voice_config.parse_runtime_toml_text toml with
+  | Ok (Some { Voice_config.tts = Some tts; _ }) -> tts
+  | Ok _ -> Alcotest.fail "the fixture must carry a [voice.tts] section"
+  | Error message -> Alcotest.failf "the fixture must parse: %s" message
+
+let say_only_section =
+  {|[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+|}
+
+let say_beside_another_provider =
+  {|[[voice.tts.endpoints]]
+id = "eleven"
+kind = "elevenlabs_direct"
+api_key_env = "ELEVENLABS_API_KEY"
+enabled = true
+
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_model = "eleven_multilingual_v2"
+default_voice = "SAz9YHcvj6GT2YYXdXww"
+|}
+
+let test_a_local_voice_goes_where_its_default_is_not_someone_elses () =
+  let placed section =
+    Voice_setup.voice_placement section = Voice_setup.On_the_section
+  in
+  Alcotest.(check bool) "no section yet: the section default" true (placed None);
+  Alcotest.(check bool)
+    "a section only say is in -- including one an earlier run wrote: the section default"
+    true
+    (placed (Some (tts_section_of say_only_section)));
+  Alcotest.(check bool)
+    "a section another provider shares: on the endpoint"
+    false
+    (placed (Some (tts_section_of say_beside_another_provider)))
+;;
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -396,6 +454,8 @@ let () =
             test_changes_that_depend_on_each_other_land_together
         ; Alcotest.test_case "an agent voice is set and cleared" `Quick
             test_an_agent_voice_is_set_and_cleared
+        ; Alcotest.test_case "a local voice goes where its default is not someone else's"
+            `Quick test_a_local_voice_goes_where_its_default_is_not_someone_elses
         ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
             test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick

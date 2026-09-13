@@ -22,6 +22,7 @@ type t =
   | Acting_pane_tab_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
+  | Run_next
   | Interrupt_turn
   | Interrupt_keeper_turn of string
   | Steer_turn of string
@@ -55,6 +56,7 @@ type t =
    cannot ship without its line. *)
 type command_help = {
   word : string;
+  aliases : string list;
   args : string;
   summary : string;
 }
@@ -65,123 +67,143 @@ type command_help = {
    reads first is whichever list nobody updated. *)
 let catalog =
   [ { word = "task"
+    ; aliases = []
     ; args = "<title>"
     ; summary = "create a task for this keeper (lines below become the body)"
     }
   ; { word = "keeper"
+    ; aliases = []
     ; args = "<name>"
     ; summary = "switch this pane to another keeper"
     }
   ; { word = "addons"
+    ; aliases = []
     ; args = "[inspect|attach JSON|observe ID|detach ID|slice JSON|evidence JSON]"
     ; summary = "open optional cross-lane observations and package actions"
     }
   ; { word = "settings"
+    ; aliases = []
     ; args = ""
     ; summary = "open type-aware runtime settings"
     }
   ; { word = "diff"
+    ; aliases = []
     ; args = ""
     ; summary = "open git changes and diff for the workspace"
     }
   ; { word = "patch"
-    ; args = ""
-    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
-    }
-  ; { word = "review"
+    ; aliases = [ "review" ]
     ; args = ""
     ; summary = "open 3D drop-shadow patch review modal for pending code changes"
     }
   ; { word = "burn"
-    ; args = ""
-    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
-    }
-  ; { word = "cost"
+    ; aliases = [ "cost" ]
     ; args = ""
     ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
     }
   ; { word = "changes"
+    ; aliases = []
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
     }
+  ; { word = "run-next"
+    ; aliases = []
+    ; args = ""
+    ; summary = "put my submitted message first, then stop the observed turn"
+    }
   ; { word = "interrupt"
+    ; aliases = []
     ; args = "[keeper]"
     ; summary = "signal a streaming turn to stop: this pane's, or the named keeper's"
     }
   ; { word = "steer"
+    ; aliases = []
     ; args = "<message>"
     ; summary = "interrupt, then run this before queued next turns"
     }
   ; { word = "thinking"
+    ; aliases = []
     ; args = "[hidden|folded|full]"
     ; summary = "set or cycle reasoning visibility"
     }
   ; { word = "tools"
+    ; aliases = []
     ; args = "[compact|full]"
     ; summary = "set or toggle tool-call detail"
     }
   ; { word = "memory"
+    ; aliases = []
     ; args = ""
     ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
     }
   ; { word = "fleet-memory"
+    ; aliases = []
     ; args = ""
     ; summary = "browse consolidated facts across the entire keeper fleet"
     }
   ; { word = "find"
+    ; aliases = []
     ; args = "[text]"
     ; summary = "go to the newest message holding text; again for the next"
     }
   ; { word = "context"
+    ; aliases = []
     ; args = ""
     ; summary = "inspect the last observed provider input"
     }
-  ; { word = "image"; args = "<path>"; summary = "draw an image file on the terminal" }
+  ; { word = "image"
+    ; aliases = []
+    ; args = "<path>"
+    ; summary = "draw an image file on the terminal"
+    }
   ; { word = "attach"
+    ; aliases = []
     ; args = "<path>"
     ; summary = "stage an image to send with the next keeper message"
     }
   ; { word = "ref"
+    ; aliases = []
     ; args = "<url|file_id>"
     ; summary = "stage an image reference; the provider fetches it"
     }
   ; { word = "preset"
+    ; aliases = []
     ; args = "[show <name> | save <name> [description] | restore <name>]"
-    ; summary =
-        "list prompt presets; show what one holds; save the live state; restore one \
+    ; summary = "list prompt presets; show what one holds; save the live state; restore one \
          (autosaves first)"
     }
-  ; { word = "help"; args = ""; summary = "this list" }
-  ; { word = "about"
+  ; { word = "help"
+    ; aliases = []
     ; args = ""
-    ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
+    ; summary = "this list"
     }
-  ; { word = "splash"
+  ; { word = "about"
+    ; aliases = [ "splash" ]
     ; args = ""
     ; summary = "display MASC Horned Reaper ASCII emblem and system telemetry"
     }
   ; { word = "metrics"
-    ; args = ""
-    ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
-    }
-  ; { word = "telemetry"
+    ; aliases = [ "telemetry" ]
     ; args = ""
     ; summary = "display multicore engine telemetry, scheduler latency, and fleet health"
     }
   ; { word = "activity"
+    ; aliases = []
     ; args = "[fleet|changes]"
-    ; summary =
-        "show or hide the Activity pane beside this surface, or show one of its tabs"
+    ; summary = "show or hide the Activity pane beside this surface, or show one of its tabs"
     }
   ; { word = "preview"
+    ; aliases = []
     ; args = "[url]"
     ; summary = "open 3D drop-shadow OpenGraph preview and rich embed modal for a web link"
     }
   ; { word = "links"
+    ; aliases = []
     ; args = ""
     ; summary = "browse and inspect all web links mentioned in the current conversation"
     }
   ; { word = "embeds"
+    ; aliases = []
     ; args = "[on|compact|off]"
     ; summary = "configure inline chat rich embed cards (on, compact, or off)"
     }
@@ -197,15 +219,46 @@ let usage entry =
    The value is the column the hand-written list already used. *)
 let help_summary_column = 16
 
+(* The usage column as both readers draw it. [help_lines] joins it to the
+   summary and the cheat sheet colours the two halves separately, so the column
+   and its width live here rather than once per reader. The other spellings
+   ride in the column instead of claiming a row of their own: a row apiece said
+   the same sentence twice and left a reader to guess whether the two words
+   differed. *)
+let help_usage entry =
+  match entry.aliases with
+  | [] -> usage entry
+  | aliases ->
+      usage entry
+      ^ " ("
+      ^ String.concat " " (List.map (fun word -> "/" ^ word) aliases)
+      ^ ")"
+
+let help_summary_padding text =
+  String.make (max 2 (help_summary_column - String.length text)) ' '
+
 let help_lines =
   List.map
     (fun entry ->
-       let text = usage entry in
-       let padding =
-         String.make (max 2 (help_summary_column - String.length text)) ' '
-       in
-       text ^ padding ^ entry.summary)
+       let text = help_usage entry in
+       text ^ help_summary_padding text ^ entry.summary)
     catalog
+
+(* Every spelling the parser answers to, one entry each. An alias is not a
+   second command: the parser folds the pair into a single arm
+   ("patch", _ | "review", _ -> Open_patch_modal), so the catalog describes the
+   command once and this projection spells it as many ways as the parser
+   accepts. The composer reads this list, the help row reads [catalog] -- which
+   is why a new alias cannot arrive with its summary copied beside it. *)
+let spelled_catalog =
+  List.concat_map
+    (fun entry ->
+       List.map
+         (fun word -> { entry with word; aliases = [] })
+         (entry.word :: entry.aliases))
+    catalog
+
+let spellings = List.map (fun entry -> entry.word) spelled_catalog
 
 let slash = '/'
 
@@ -260,6 +313,7 @@ let parse text =
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
+    | "run-next", "" -> Run_next
     | "interrupt", "" -> Interrupt_turn
     | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message
@@ -341,13 +395,15 @@ let hint text =
     let first, _ = split_first_line text in
     let line = String.sub first 1 (String.length first - 1) in
     let word, _ = split_word line in
-    match List.find_opt (fun entry -> String.equal entry.word word) catalog with
+    match
+      List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog
+    with
     | Some entry -> Chosen entry
     | None -> (
         match
           List.filter
             (fun entry -> String.starts_with ~prefix:word entry.word)
-            catalog
+            spelled_catalog
         with
         | [] -> Unknown_command word
         | entries -> Candidates { typed = word; entries })
@@ -541,11 +597,11 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
     if not (String.contains line ' ') then begin
       (* Command word completion *)
       let candidates =
-        if String.equal line "" then catalog
+        if String.equal line "" then spelled_catalog
         else
           List.filter
             (fun entry -> String.starts_with ~prefix:line entry.word)
-            catalog
+            spelled_catalog
       in
       match candidates with
       | [] -> None
@@ -620,11 +676,11 @@ let is_slash_navigable ?(keeper_names = []) text =
     let line = String.sub first 1 (String.length first - 1) in
     if not (String.contains line ' ') then
       let candidates =
-        if String.equal line "" then catalog
+        if String.equal line "" then spelled_catalog
         else
           List.filter
             (fun entry -> String.starts_with ~prefix:line entry.word)
-            catalog
+            spelled_catalog
       in
       match candidates with
       | [] -> false
@@ -646,7 +702,16 @@ let is_slash_navigable ?(keeper_names = []) text =
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
 
-let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
+(* Every value in the box is one the caller read. A row that said "Gates: All
+   Secure" sat beside the keeper count in the same frame and style, and nothing
+   here is given a gate to read -- it described a state no one had checked. *)
+let about_banner ?(theme_name = "default") ?active_keepers () =
+  let keepers =
+    match active_keepers with
+    | Some (Ok count) -> string_of_int count
+    | Some (Error _) -> "unavailable"
+    | None -> "not loaded"
+  in
   String.concat "\n"
     [ "   ___  ___  ___  _____ _____ "
     ; "  |   \\/   |/ _ \\/  ___/  __ \\"
@@ -656,7 +721,6 @@ let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
     ; "  \\_|   |_|_| |_\\____/ \\____/"
     ; " ╭────────────────────────────────────────────────────────╮"
     ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
-    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
-    ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
+    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13s │" theme_name keepers
     ; " ╰────────────────────────────────────────────────────────╯"
     ]

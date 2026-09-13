@@ -1,0 +1,4 @@
+test suite	Test	2026-09-12T15:42:08.4476875Z 96 |          Keeper_tool_call_index.by_execution_ids
+test suite	Test	2026-09-12T15:42:08.4477439Z               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test suite	Test	2026-09-12T15:42:08.4477987Z Error: Unbound module Keeper_tool_call_index
+test suite	Test	2026-09-12T15:42:11.1782273Z ##[error]Process completed with exit code 1.

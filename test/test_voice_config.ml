@@ -164,7 +164,7 @@ let test_load_error_to_string () =
     check bool "missing reported" true
       (Vc.load_error_to_string Vc.Not_configured
        |> String_util.string_contains_substring
-            ~needle:"voice config missing at"));
+            ~needle:"voice config missing:"));
   with_explicit_voice_config "{ this is not json" (fun () ->
     match Vc.load_detailed () with
     | Error (Vc.Invalid _ as error) ->
@@ -324,6 +324,62 @@ let test_endpoint_voice_overrides_the_workspace_default () =
       (String.equal
          (Vc.voice_for_agent_at_endpoint tts eleven "some-agent")
          (Vc.voice_for_agent_at_endpoint tts openai "some-agent"))
+;;
+
+(* The same two providers, with one keeper mapped to a voice. *)
+let two_provider_config_with_agent_voices =
+  {|{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "aEO01A4wXwd1O8GPgGlF",
+    "default_voice_settings": {},
+    "agent_voices": { "sangsu": "mapped-voice-id" },
+    "endpoints": [
+      { "id": "eleven", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true },
+      { "id": "openai", "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY", "enabled": true,
+        "default_voice": "alloy" }
+    ]
+  },
+  "stt": {
+    "default_model": "scribe_v1",
+    "endpoints": [
+      { "id": "eleven-stt", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true }
+    ]
+  },
+  "session": { "endpoints": [] }
+}|}
+;;
+
+(* An endpoint voice outranks a per-keeper assignment, not just the workspace
+   default. That ordering is what makes writing one a decision rather than a
+   detail: an endpoint that names a voice answers with it for every keeper,
+   including the ones [voice.tts.agent_voices] speaks for.
+
+   The reason the ordering is this way round is that a voice name is
+   provider-shaped -- say takes a label, ElevenLabs a 20-character id -- so an
+   agent mapping written for one provider cannot be sent to the other. The cost
+   is that an endpoint voice silently retires every mapping at that endpoint,
+   which is why `masc voice-local-setup` writes one only where a section
+   already exists to collide with. *)
+let test_endpoint_voice_outranks_a_per_agent_mapping () =
+  match parse two_provider_config_with_agent_voices with
+  | Error _ -> fail "the config must parse"
+  | Ok config ->
+    let tts = tts_of config in
+    let eleven = endpoint_named tts "eleven" in
+    let openai = endpoint_named tts "openai" in
+    check string
+      "an endpoint without a voice of its own honours the mapping"
+      "mapped-voice-id"
+      (Vc.voice_for_agent_at_endpoint tts eleven "sangsu");
+    check string
+      "an endpoint with one answers for itself instead"
+      "alloy"
+      (Vc.voice_for_agent_at_endpoint tts openai "sangsu")
 ;;
 
 let test_endpoint_voice_is_absent_when_not_declared () =
@@ -967,6 +1023,10 @@ let () =
             "endpoint voice overrides the workspace default"
             `Quick
             test_endpoint_voice_overrides_the_workspace_default
+        ; test_case
+            "endpoint voice outranks a per-agent mapping"
+            `Quick
+            test_endpoint_voice_outranks_a_per_agent_mapping
         ; test_case
             "absent endpoint voice keeps the workspace default"
             `Quick

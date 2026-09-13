@@ -1,0 +1,8 @@
+{
+  "README.md": "ad3878df56a913cbc56fdd96f8923de5ec7213d0020ed71f62ad5847be4b2ec0",
+  "checks.json": "5bb3cd4a6e7e277a437815f86bb07c5f16188055ec15a8baaa0000c0a2926f93",
+  "state-capture-review-before.json": "0e3086da6f127952681c7fa5a4924a58c37288a1c7e81f414136767273e89621",
+  "state-capture-review-fixed.json": "792b74e260c197058cbeec1920046b65d48fbf2483e74190b2e98da2e09ce9cc",
+  "validator-tests-fixed.txt": "b3abc27558ffe3b1eabf300ccd9ce37e776b72b81a3f5250d724acf89e945974",
+  "validator-tests.txt": "8e83c9e30711d3808140522c0a784c32a4a16bd2d9a482bfdc79f43bb50d7c5e"
+}

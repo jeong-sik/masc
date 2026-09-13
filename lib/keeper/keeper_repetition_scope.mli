@@ -32,5 +32,7 @@ module Execution : sig
       validation failures explicitly; [failure] must stop later provider calls.
       The owner serializes prepare/observe and terminates old attempt callbacks
       before preparing a new attempt. Context projection alone is not disk I/O. *)
+  val snapshot : t -> (Keeper_repetition_snapshot.t, Keeper_repetition_snapshot.error) result
+  val resume : t -> Keeper_repetition_snapshot.t -> (unit, Keeper_repetition_snapshot.error) result
   val failure : t -> Keeper_repetition_snapshot.error option
 end

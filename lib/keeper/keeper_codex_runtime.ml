@@ -248,6 +248,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
           Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
+            observation.tool_name;
+          Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
           Host.record_raw_native_tool
@@ -268,6 +271,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
                ; tool_name = observation.tool_name
                })
         | Runtime_codex_app_server.Native_tool_finished observation ->
+          Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
+            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -330,7 +336,7 @@ let codex_error_to_core_error = function
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
   | Runtime_codex_app_server.Spawn_failed detail
-  | Runtime_codex_app_server.Process_exited detail ->
+  | Runtime_codex_app_server.Process_exited { detail; turn_accepted = _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"; detail })
@@ -485,7 +491,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
+let run_without_lifecycle ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -568,6 +574,12 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
         ~native_posture
         tools
     in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Codex ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
     let claim_plan =
       Keeper_official_client_session_store.reconcile_tool_surface
         claim_plan
@@ -633,10 +645,37 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
     let developer_instructions =
       Some
         ((prepared.system_prompt :: native_posture_note native_posture)
-         @ developer_messages
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
+    in
+    (* Only a new thread receives developer items. A resumed vendor thread
+       retains its original ones, and updating thread/resume configuration
+       does not replace them -- which is the gap this adapter still has: a
+       Keeper whose instructions changed mid-thread is read by the model
+       under the instructions the thread started with.
+
+       Injecting them on a resume does not close it. thread/inject_items
+       persists what it is given and includes it in every later request
+       (OpenAI's app-server documentation says so), and [developer_messages]
+       carries the observation frame rebuilt every turn. Per-turn world state
+       in a persisted history is the feedback loop Keeper_unified_prompt
+       forbids by name: 943 of 945 user messages in one keeper's checkpoint
+       were byte-identical world-state frames, 59% of the payload (#25193,
+       operator decision 2026-07-20). The instructions alone would accumulate
+       the same way, one copy per turn, and the API has no receipt or
+       idempotency key, so a Retry_previous after a lost turn/start appends
+       what the previous attempt already wrote.
+
+       The durable form this needs is the one the session store already uses
+       for the tool surface: a digest whose change drops the settlement and
+       starts a fresh thread ([reconcile_tool_surface]). That wants the turn
+       intent separated from the identity half of [prepared.system_prompt]
+       first, or every turn would restart the thread. Tracked separately. *)
+    let developer_context =
+      match thread_mode with
+      | Runtime_codex_app_server.Start -> developer_messages
+      | Runtime_codex_app_server.Resume _ -> []
     in
     (* Reported from [prepared.messages], the post-window list, gated on the
        same [thread_mode] that decides whether [thread/inject_items] runs at
@@ -732,7 +771,7 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
        tokens; they bound the request, they do not price it. *)
     Log.Keeper.info
       ~keeper_name
-      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d \
+      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d developer_context_bytes=%d \
        history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
       runtime_label
       (match thread_mode with
@@ -740,6 +779,7 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
        | Runtime_codex_app_server.Resume _ -> "resume")
       (String.length prompt)
       (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
+      (List.fold_left (fun bytes text -> bytes + String.length text) 0 developer_context)
       (List.length history)
       (Runtime_codex_app_server.history_bytes history)
       (List.length dynamic_tools)
@@ -946,6 +986,7 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
          ?reasoning_effort:effective_reasoning_effort
          ~thread_mode
          ~history
+         ~developer_context
          ?on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
@@ -1139,10 +1180,12 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
    input rejection admits. [on_shrink_retry] fires only after the sequence
    verified the typed observation-free overflow and the strictly smaller
    next capacity, so consuming the just-written
-   [Input_rejected] recovery with an explicit [Restart_fresh] resolution
+   [Input_rejected] recovery with the applicable explicit resolution
    cannot bypass the fence. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)
-let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
+(* A Gate is bound to its previous settlement. An observation-free rejected
+   input may retry there, but may never discard that session for a fresh one. *)
+let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id
   ()
   =
   match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -1164,7 +1207,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:Keeper_official_client_session_store.Restart_fresh
+         ~resolution:(match official_client_continuation with
+           | Some _ -> Keeper_official_client_session_store.Retry_previous
+           | None -> Keeper_official_client_session_store.Restart_fresh)
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
@@ -1181,7 +1226,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?required_native_posture ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1238,7 +1283,7 @@ let run ?required_native_posture ~runtime_id ~keeper_name ~pre_tool_rejects ~bas
             ~capacity_bytes)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
-          resolve_input_rejected_for_shrink_retry
+          resolve_input_rejected_for_shrink_retry ~official_client_continuation
             ~base_path
             ~keeper_name
             ~runtime_id
@@ -1250,7 +1295,7 @@ let run ?required_native_posture ~runtime_id ~keeper_name ~pre_tool_rejects ~bas
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle
+        run_without_lifecycle ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~keeper_name

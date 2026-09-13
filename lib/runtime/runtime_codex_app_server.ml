@@ -207,7 +207,10 @@ type error =
   | Stopped_by_host of host_stop
   | Turn_interrupted
   | Runtime_shutting_down
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_accepted : bool
+      }
   | Timeout of
       { seconds : float
       ; turn_accepted : bool
@@ -271,7 +274,9 @@ let error_to_string = function
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Runtime_shutting_down ->
     "MASC runtime shutdown interrupted the active Codex turn"
-  | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
+  | Process_exited { detail; turn_accepted } ->
+    Printf.sprintf "Codex app-server exited before completion (turn_accepted=%b): %s"
+      turn_accepted detail
   | Timeout { seconds; turn_accepted } ->
     if turn_accepted
     then
@@ -1565,7 +1570,14 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
         then Error Runtime_shutting_down
         else
           let detail = String.trim !stderr_tail in
-          Error (Process_exited (if detail = "" then "stdout closed" else detail))
+          (* Same rule as the timeout above: the transport cannot know
+             whether turn/start was accepted, so it reports the conservative
+             answer and the entry point rewraps it with what it observed. *)
+          Error
+            (Process_exited
+               { detail = (if detail = "" then "stdout closed" else detail)
+               ; turn_accepted = false
+               })
       | Idle_timeout seconds ->
         (* The transport cannot know whether turn/start was already accepted;
            the entry points rewrap with the observed turn state. *)
@@ -1798,6 +1810,15 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
          Error
            (Timeout
               { seconds
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
+       (* A client that dies during initialize, account/read or thread/start
+          submitted no turn, so the next candidate may still be tried. Only
+          the entry point knows which of the two happened. *)
+       | Error (Process_exited { detail; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Process_exited
+              { detail
               ; turn_accepted = dispatch_ambiguous || !turn_accepted
               })
        | other -> other)

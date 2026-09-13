@@ -114,7 +114,7 @@ let test_calculate_kpis_populated () =
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
   state.keeper_turns <-
     [ { Decode.ktr_keeper_name = "running";
-        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; preview = None } };
+        ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = None; preview = None } };
       { Decode.ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
       { Decode.ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
@@ -229,13 +229,13 @@ let test_assignee_work_and_daily_flow () =
   let tasks =
     [ (* Two completions two and four hours wide: an even sample count has to
          average the middle pair rather than pick a side. *)
-      task "r1" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T02:00:00Z");
-      task "r2" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T04:00:00Z");
+      task "r1" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T02:00:00Z");
+      task "r2" "2026-09-10T00:00:00Z" (done_by "matrix-reader" "2026-09-10T04:00:00Z");
       (* The agent spelling of the same keeper. RFC-0393 removed the suffix
          strip, so this must stay its own row. *)
-      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-rondo-agent" "2026-09-11T06:00:00Z");
+      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-matrix-reader-agent" "2026-09-11T06:00:00Z");
       task "o1" "2026-09-11T00:00:00Z"
-        (Claimed { assignee = "rondo"; claimed_at = "2026-09-11T01:00:00Z" });
+        (Claimed { assignee = "matrix-reader"; claimed_at = "2026-09-11T01:00:00Z" });
       (* Todo carries no assignee and must not invent one. *)
       task "t1" "2026-09-11T00:00:00Z" Todo;
       (* [cancelled_by] answers who cancelled, not who held the task. *)
@@ -251,16 +251,16 @@ let test_assignee_work_and_daily_flow () =
   in
   check bool "a cancelled task does not attribute work to the canceller" false
     (List.exists (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = "polisher") rows);
-  let rondo = row "rondo" in
-  check int "completed tasks counted" 2 rondo.af_done;
-  check int "claimed work counted as open" 1 rondo.af_open;
+  let matrix_reader = row "matrix-reader" in
+  check int "completed tasks counted" 2 matrix_reader.af_done;
+  check int "claimed work counted as open" 1 matrix_reader.af_open;
   check (option (float 0.001)) "even sample count averages the middle pair"
-    (Some 3.0) rondo.af_median_lead_hours;
-  let agent = row "keeper-rondo-agent" in
+    (Some 3.0) matrix_reader.af_median_lead_hours;
+  let agent = row "keeper-matrix-reader-agent" in
   check int "the agent spelling keeps its own completions" 1 agent.af_done;
   check (option (float 0.001)) "a single sample is its own median"
     (Some 6.0) agent.af_median_lead_hours;
-  check string "the longer queue sorts first" "rondo"
+  check string "the longer queue sorts first" "matrix-reader"
     (List.hd rows).af_assignee;
   let days = flow.daily in
   check int "the span is the declared number of days" Masc_tui_task_flow.daily_days
@@ -281,9 +281,9 @@ let test_assignee_work_and_daily_flow () =
   state.task_flow <- Some flow;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
   check bool "the per-assignee table is drawn" true (contains output "median lead");
-  check bool "the keeper spelling is listed" true (contains output "rondo");
+  check bool "the keeper spelling is listed" true (contains output "matrix-reader");
   check bool "the agent spelling is listed beside it" true
-    (contains output "keeper-rondo-agent");
+    (contains output "keeper-matrix-reader-agent");
   check bool "the span names its last day" true (contains output "09-12");
   check bool "creations are a row of their own" true (contains output "created");
   check bool "cancellations are a row of their own" true (contains output "cancelled");
@@ -338,6 +338,22 @@ let test_overview_pulse_line () =
   check bool "pulse line not empty" true (String.length pulse > 0);
   let pulse_narrow = Render_metrics.overview_pulse_line ~cols:30 state in
   check bool "narrow pulse line bounded" true (Layout.display_width pulse_narrow <= 30)
+;;
+
+(* The keeper files are read only once the server vouches for this workspace,
+   and the roster is empty before that as well as after a read that found
+   none. The pulse counts it only once it was read (#35747). *)
+let test_pulse_roster_waits_for_the_local_read () =
+  let state = make_state () in
+  state.keepers <- [];
+  let pulse () = Render_metrics.overview_pulse_line ~cols:160 state in
+  check bool "an unread roster is unavailable" true
+    (contains (pulse ()) "roster unavailable");
+  check bool "and is not counted as none" false (contains (pulse ()) "0 configured");
+  state.local_workspace <- Types.Local_workspace_read;
+  state.keepers <- [ make_keeper "alpha"; make_keeper ~paused:true "beta" ];
+  check bool "a read roster is counted" true
+    (contains (pulse ()) "2 configured · 1 unpaused")
 ;;
 
 let test_section_pills_line () =
@@ -435,8 +451,8 @@ let test_section_tools_populated () =
 
 let test_approval_source_observations () =
   let state = make_state () in
-  (* A different successful refresh cannot establish approval source data. *)
-  state.last_refresh <- 100.;
+  (* A successful read of the workspace cannot establish approval source data. *)
+  state.local_workspace <- Types.Local_workspace_read;
   let kpis = Render_metrics.calculate_kpis state in
   check (option int) "unread Gate is not zero" None kpis.gate_pending_count;
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
@@ -575,6 +591,8 @@ let () =
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line
+        ; test_case "pulse roster waits for the local read" `Quick
+            test_pulse_roster_waits_for_the_local_read
         ; test_case "one name per observation state" `Quick
             test_one_name_per_observation_state
         ] )

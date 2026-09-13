@@ -328,13 +328,26 @@ let test_each_container_is_served_as_itself () =
   Alcotest.(check string) "MP3" "audio/mpeg"
     (Voice_bridge_core.clip_content_type Voice_bridge_core.Mp3)
 
-let test_a_clip_path_gives_its_token_back () =
-  Alcotest.(check (option string)) "a say clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.wav");
-  Alcotest.(check (option string)) "an HTTP clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.mp3");
-  Alcotest.(check (option string)) "and something that is not a clip" None
-    (Voice_bridge_core.clip_token_of_path "/x/audio/notes.txt")
+(* A clip path answers with both halves at once. The caller that announces a
+   spoken reply needs the token to build its URL and the type to say what the
+   bytes are, and getting only the first is what let it announce MP3 for every
+   clip -- including the WAVE one a fresh mac writes. *)
+let test_a_clip_path_gives_back_its_token_and_its_type () =
+  let announced path =
+    Option.map
+      (fun (token, format) -> token, Voice_bridge_core.clip_content_type format)
+      (Voice_bridge_core.clip_of_path path)
+  in
+  let clip = Alcotest.(option (pair string string)) in
+  Alcotest.check clip "a say clip is WAVE" (Some ("9f3c", "audio/wav"))
+    (announced "/x/audio/9f3c.wav");
+  Alcotest.check clip "an HTTP clip is MP3" (Some ("9f3c", "audio/mpeg"))
+    (announced "/x/audio/9f3c.mp3");
+  Alcotest.check clip "and something that is not a clip has neither" None
+    (announced "/x/audio/notes.txt");
+  (* A path with no extension at all used to raise here rather than answer. *)
+  Alcotest.check clip "nor does a name with no extension" None
+    (announced "/x/audio/9f3c")
 
 (* The end of a failed command's output, because that is where the reason is.
    Measured on this machine: whisper-cli says which Metal library it loaded
@@ -429,8 +442,8 @@ let () =
             test_a_token_is_found_in_whichever_container_holds_it
         ; Alcotest.test_case "each container is served as itself" `Quick
             test_each_container_is_served_as_itself
-        ; Alcotest.test_case "a clip path gives its token back" `Quick
-            test_a_clip_path_gives_its_token_back
+        ; Alcotest.test_case "a clip path gives back its token and its type" `Quick
+            test_a_clip_path_gives_back_its_token_and_its_type
         ; Alcotest.test_case "a failure reports its last line not its first" `Quick
             test_a_failure_reports_its_last_line_not_its_first
         ] )

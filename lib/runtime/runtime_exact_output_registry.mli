@@ -157,6 +157,10 @@ val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error)
     select provider targets; AGENT_CORE owns those operations while executing the
     exact flow. Slot declaration order is preserved. *)
 
+val catalog_generation_fingerprint : t -> string
+(** Opaque identity of the frozen catalog generation. This exposes neither
+    credentials nor serialized provider configuration. *)
+
 val publication_error_to_string : publication_error -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 

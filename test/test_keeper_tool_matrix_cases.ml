@@ -464,6 +464,21 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         [ ("speaker_id", `String "98791450001");
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
+  | "keeper_artifact_transfer" ->
+      `Assoc ["action", `String "export"; "path", `String "lib/sample.ml";
+        "purpose", `String "Inspect the matrix fixture source"]
+  | "keeper_constitution_write" ->
+      `Assoc ["text", `String "Record measured evidence with each result."]
+  | "keeper_constitution_remove" ->
+      let written = Masc.Keeper_tool_constitution_runtime.write_with_outcome
+        ~config:fixture.config ~meta:fixture.meta
+        ~args:(`Assoc ["text", `String "Fixture norm to remove."]) in
+      (match written.Masc.Keeper_tool_execution.data with
+       | Some (`Assoc fields) ->
+         (match List.assoc_opt "article_id" fields with
+          | Some (`String article_id) -> `Assoc ["article_id", `String article_id]
+          | _ -> failwith "constitution fixture did not return its article identity")
+       | _ -> failwith "constitution fixture could not seed an article")
   | "keeper_artifact_read" ->
       (* No artifact carries this digest in a fresh workspace, so the call
          refuses rather than reading one. *)
@@ -559,6 +574,7 @@ let keeper_expectation_for_name name =
   match name with
   | "keeper_analyze_image" -> Expect_refusal
   | "keeper_voice_listen" -> Expect_no_audio
+  | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"
   | "tool_execute" | "tool_search_files" | "tool_read_file"
   | "tool_write_file" | "keeper_ide_annotate" | "keeper_spawn" -> Expect_success
   | _ -> Expect_success_or_refusal

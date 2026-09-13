@@ -1,0 +1,18 @@
+[2026-09-13 11:45:44] [INFO] [MCP] Tag registry initialized: 174 tools registered
+[2026-09-13 11:45:44] [INFO] [Log] Restored 6761 log entries from disk
+[2026-09-13 11:45:44] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-09-13 11:45:44] [INFO] [Server] [auto 127.0.0.1:51982] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-09-13 11:45:44] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-09-13 11:45:44] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-09-13 11:45:44] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-09-13 11:45:44] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-09-13 11:45:44] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/config
+[2026-09-13 11:45:44] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-09-13 11:45:44] [INFO] [Misc] model_catalog: deployment overlay /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/config/agent-core-models-overlay.toml installed onto embedded catalog
+[2026-09-13 11:45:44] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":null,"source":"default"}}
+[2026-09-13 11:45:44] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-13 11:45:44] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-09-13 11:45:44] [INFO] [Backend] Board: JSONL default backend
+[2026-09-13 11:45:44] [INFO] [Board] Board flusher actor started
+[2026-09-13 11:45:44] [INFO] [Board] JSONL backend initialized
+[2026-09-13 11:45:44] [ERROR] [Server] [FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: runtime config observation failed: runtime configuration path changed during initial configuration admission

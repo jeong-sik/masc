@@ -5464,6 +5464,7 @@ let keeper_turns_json =
               ; ( "turn"
                 , `Assoc
                     [ ("lane", `String "autonomous")
+                    ; ("interrupt_token", `Null)
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -5516,6 +5517,7 @@ let test_decode_keeper_turns_reads_the_preview () =
                 ; ( "turn"
                   , `Assoc
                       [ ("lane", `String "autonomous")
+                      ; ("interrupt_token", `String "token")
                       ; ("started_at_unix", `Float 1.0)
                       ; ( "preview"
                         , `Assoc
@@ -5561,6 +5563,7 @@ let test_decode_keeper_turns_rejects_unknown_lane () =
                 ; ( "turn"
                   , `Assoc
                       [ ("lane", `String "warp")
+                      ; ("interrupt_token", `String "token")
                       ; ("started_at_unix", `Float 1.0)
                       ] )
                 ]

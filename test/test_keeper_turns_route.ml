@@ -41,16 +41,12 @@ let test_turns_route_is_registered () =
    Server_connection and collect the response bytes it writes. The write
    result is reported for the full iovec length, not 0 bytes — reporting
    zero would stall the connection's writer and hang the test. *)
-let turns_response ~state =
+let request_response ~handle ~request =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-        Server_routes_http_keeper_stream.handle_keeper_turns_list
-          state
-          (Httpun.Reqd.request reqd)
-          reqd)
+        handle (Httpun.Reqd.request reqd) reqd)
   in
-  let request = "GET /api/v1/keepers/turns HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
   ignore
     (Httpun.Server_connection.read_eof connection input ~off:0
@@ -72,6 +68,17 @@ let turns_response ~state =
   in
   drain ();
   Buffer.contents output
+;;
+
+let turns_response ~state =
+  request_response ~handle:(Server_routes_http_keeper_stream.handle_keeper_turns_list state)
+    ~request:"GET /api/v1/keepers/turns HTTP/1.1\r\nHost: x\r\n\r\n"
+;;
+
+let post_response ~handle body =
+  request_response ~handle
+    ~request:(Printf.sprintf "POST / HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+      (String.length body) body)
 ;;
 
 let body_of response =
@@ -185,10 +192,70 @@ let test_installed_keeper_rides_as_an_idle_row () =
       | _ -> Alcotest.fail "keepers field absent or mistyped")
 ;;
 
+let test_interrupt_rejects_invalid_or_conflicting_identity () =
+  with_test_state (fun ~sw:_ ~config:_ ~state ->
+    List.iter (fun body ->
+      let response = post_response
+        ~handle:(Server_routes_http_keeper_stream.handle_keeper_turn_interrupt state) body in
+      Alcotest.(check bool) "bad identity is rejected before any cancellation" true
+        (String_util.contains_substring response "400 Bad Request"))
+      [ "{"; {|{"name":"alpha","interrupt_token":null}|}
+      ; {|{"name":"alpha","interrupt_token":""}|}
+      ; {|{"name":"alpha","interrupt_token":4}|}
+      ; {|{"name":"alpha","request_id":"operation-1","interrupt_token":"bd985f83-b447-45ee-a638-2e2a71f4e144"}|} ])
+;;
+
+let test_run_next_ownership_and_started_boundary () =
+  with_test_state (fun ~sw ~config ~state ->
+    let name = "priority-route" in
+    let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name",`String name;"trace_id",`String "trace-priority-route";"activation_mode",`String "manual"]) with
+      | Ok meta -> meta | Error detail -> Alcotest.fail detail in
+    (match Keeper_meta_store.replace_snapshot config meta with Ok () -> () | Error e -> Alcotest.fail e);
+    (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+     | Ok _ -> () | Error e -> Alcotest.fail (Keeper_owner_registry.install_error_to_string e));
+    let operation_id raw = match Keeper_chat_operation.Operation_id.of_string raw with
+      | Ok id -> id | Error e -> Alcotest.fail e in
+    let submit actor raw =
+      let source = `Assoc
+        ["schema",`String "masc.keeper_chat_operation.source.v1";"submitted_by",`String actor
+        ;"thread_id",`String ("keeper:" ^ name)
+        ;"continuation_channel",`Assoc ["kind",`String "dashboard";"thread_id",`String ("keeper:" ^ name)]
+        ;"surface",`Assoc ["kind",`String "dashboard"]
+        ;"channel",`String "";"channel_user_id",`String "";"channel_user_name",`String "";"channel_workspace_id",`String ""
+        ;"conversation_id",`Null;"external_message_id",`Null;"workspace_id",`Null;"extra_mentions",`List []
+        ;"user_row_origin",`String "needs_append"] in
+      let input = Keeper_chat_operation_payload.input_to_json ~message:raw ~user_blocks:[]
+        ~turn_instructions:None ~surface_context:None ~attachments:[] in
+      match Keeper_owner_registry.submit_operation ~base_path:config.base_path ~keeper_name:name
+        ~operation_id:(operation_id raw) ~source ~input with
+      | Ok _ -> () | Error e -> Alcotest.fail (Keeper_owner_registry.command_error_to_string e) in
+    submit "other-keeper" "other-first";
+    submit "masc-tui" "mine";
+    let owner = match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+      | Ok owner -> owner | Error e -> Alcotest.fail (Keeper_owner_registry.lookup_error_to_string e) in
+    let order () = match Keeper_owner.list_queued_operations owner ~after_sequence:None ~limit:10 with
+      | Ok rows -> List.map (fun (row:Keeper_chat_operation.t) -> Keeper_chat_operation.Operation_id.to_string row.operation_id) rows
+      | Error e -> Alcotest.fail (Keeper_owner.error_to_string e) in
+    let request id = Yojson.Safe.to_string (`Assoc ["name",`String name;"request_id",`String id;"interrupt_token",`Null]) in
+    let post id = post_response ~handle:(Server_routes_http_keeper_stream.handle_keeper_run_next state ~actor:"masc-tui") (request id) in
+    Alcotest.(check bool) "other producer is forbidden" true (String_util.contains_substring (post "other-first") "403 Forbidden");
+    Alcotest.(check (list string)) "forbidden action changes nothing" ["other-first";"mine"] (order ());
+    Alcotest.(check bool) "own queued input is prioritized" true (String_util.contains_substring (post "mine") "200 OK");
+    Alcotest.(check (list string)) "only own input moves" ["mine";"other-first"] (order ());
+    ignore (post "mine");
+    Alcotest.(check (list string)) "replayed command has no duplicate" ["mine";"other-first"] (order ());
+    (match Keeper_owner.claim_next_operation owner with Ok (Some _) -> () | _ -> Alcotest.fail "claim failed");
+    Alcotest.(check bool) "running input is not replayed or interrupted" true
+      (String_util.contains_substring (post "mine") "409 Conflict"))
+;;
+
 let () =
   Alcotest.run "keeper_turns_route"
     [ ( "keeper-turns-route"
-      , [ Alcotest.test_case "route is registered" `Quick
+      , [ Alcotest.test_case "invalid or conflicting interrupt identity" `Quick test_interrupt_rejects_invalid_or_conflicting_identity
+        ; Alcotest.test_case "run-next ownership, idempotency, and started boundary" `Quick test_run_next_ownership_and_started_boundary
+        ; Alcotest.test_case "route is registered" `Quick
             test_turns_route_is_registered
         ; Alcotest.test_case "empty workspace answers an empty fleet" `Quick
             test_empty_workspace_answers_an_empty_fleet

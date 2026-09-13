@@ -1843,6 +1843,11 @@ def navigate_with_arrows_and_quit(
     _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The header is drawn before the asynchronous roster, and Down on a list
+    # that has not arrived moves nothing, so the wait for beta ran out on the
+    # Linux runner while a faster machine got the roster first. Start from a
+    # roster that exists; the arrows below are still what this scenario checks.
+    select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(
         process,
         master_fd,
@@ -1946,11 +1951,14 @@ def keeper_runtime_phase_and_identity_interaction(
         start=0,
         timeout=3.0,
     )
+    # The roster column, not the chat header: "configured: " is the header's
+    # label for the configured runtime (#35455), and the roster row draws the
+    # phase straight against the model name.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"paused configured: anthropic.claude-sonnet-4",
+        b"paused anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -1959,12 +1967,13 @@ def keeper_runtime_phase_and_identity_interaction(
     # toggle on purpose. The footer named no key for it, so the single action
     # that worked was the one the screen never mentioned. The needle carries the
     # reset that follows the key, which is what separates an offered hint from
-    # the dim `\x1b[2mx delete` an unavailable one would draw.
+    # the dim `\x1b[2mx:delete` an unavailable one would draw. The footer moved
+    # to the key table's key:label form, so the label follows a colon now.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"x\x1b[0m delete",
+        b"x\x1b[0m:delete",
         start=0,
         timeout=3.0,
     )
@@ -2036,6 +2045,10 @@ def wheel_scrolls_and_clicks_do_not(
     )
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The header is drawn before the asynchronous roster; a wheel report on a
+    # list that has not arrived moves nothing. Start from alpha's row, which
+    # presses nothing when alpha is already selected.
+    select_keeper_row(process, master_fd, output, b"alpha")
     # An SGR wheel report moves the cursor exactly as the arrow key does.
     send_and_wait(
         process,
@@ -2257,8 +2270,9 @@ def wheel_scrolls_and_clicks_do_not(
     # every surface shares (footer_line). What follows it is the surface's
     # own hint text -- Keepers spells its first hint "j/k move", and at 100
     # columns the strip is elided anyway. The prefix is what says the
-    # search is armed.
-    send_and_wait(process, master_fd, output, b"/", b"/  ")
+    # search is armed. An empty query draws the input cursor after the slash
+    # (#35410), so the armed prefix is "/" followed by that block.
+    send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  ")
     resize_and_wait(
         process,
         master_fd,
@@ -2306,31 +2320,41 @@ def select_keeper_row(
 
     The roster comes from the fixture plus whatever the live read added, so a
     scenario that presses Enter on the list's first row is asserting an order
-    nothing promises. Walking down until the row reports itself selected makes
-    the scenario say which keeper it means.
+    nothing promises. Read the current completed screen after draining pending
+    bytes: a roster refresh may have selected the target during that drain.
+    Historical highlights do not prove which row is selected now.
 
-    Each step waits for the band itself, not for a frame to end. A frame is not
-    the same fact: the cursor sitting on the last row redraws nothing, so the
-    press that cannot move it ends no frame and the step waited out its whole
-    timeout before looking. The band is what the step is after, and waiting for
-    it is indifferent to how many frames the surface drew on its own.
+    A boundary arrow can produce no frame. Poll without throwing in that case,
+    then reconstruct the current screen again before deciding on another key.
+    A band in an intermediate frame is not proof of the final selection.
     """
     needle = keeper_row_selected(name)
-    if find_needle(output, needle, 0) >= 0:
-        return
     for _ in range(KEEPER_ROW_SCAN_BOUND):
         read_available(master_fd, output)
-        start = len(output)
-        os.write(master_fd, b"\x1b[B")
-        if poll_for_output(
-            process,
-            master_fd,
-            output,
-            needle,
-            start=start,
-            timeout=KEEPER_ROW_STEP_TIMEOUT_S,
-        ):
+        last_end = output.rfind(FRAME_END)
+        completed_end = 0 if last_end < 0 else last_end + len(FRAME_END)
+        if output.rfind(FRAME_START) >= completed_end:
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        rows = screen_rows(bytes(output[:completed_end]), preserve_styles=True)
+        if any(find_needle(row, needle) >= 0 for row in rows.values()):
             return
+        selected = [row for row, text in rows.items() if b"\x1b[7m" in text]
+        if not selected:
+            # The list header can arrive before its asynchronous roster. A
+            # Down here would race the first selected row and overshoot it.
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        target = screen_row_of(rows, name)
+        key = b"\x1b[A" if 0 <= target < min(selected) else b"\x1b[B"
+        start = len(output)
+        os.write(master_fd, key)
+        poll_for_output(
+            process, master_fd, output, FRAME_END,
+            start=start, timeout=KEEPER_ROW_STEP_TIMEOUT_S,
+        )
     raise AssertionError(
         f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
     )
@@ -2475,13 +2499,9 @@ def keeper_selection_identity_interaction(
         timeout=3.0,
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"j",
-        keeper_row_selected(b"beta"),
-    )
+    # j on a roster that has not arrived moves nothing and redraws
+    # nothing, so the wait for beta's band times out. Ask for the row.
+    select_keeper_row(process, master_fd, output, b"beta")
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
@@ -2601,13 +2621,9 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
         base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # j on a roster that has not arrived moves nothing and redraws
+        # nothing, so the wait for beta's band times out. Ask for the row.
+        select_keeper_row(process, master_fd, output, b"beta")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
@@ -2705,13 +2721,9 @@ def keeper_message_unreliable_roster_interaction(
         base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # j on a roster that has not arrived moves nothing and redraws
+        # nothing, so the wait for beta's band times out. Ask for the row.
+        select_keeper_row(process, master_fd, output, b"beta")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
@@ -4239,11 +4251,21 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
                 ]
             },
         )
-        board = send_and_wait(
-            process, master_fd, output, b"s", b"post-trend"
+        sort_start = len(output)
+        send_and_wait(process, master_fd, output, b"s", b"post-trend")
+        # The header names the order by what it does, not by its key: the pane
+        # draws Board_trending as "Sort [s]: net votes / \u221aage-hours", and no
+        # screen has drawn "sort:trending". The header row and the reordered
+        # list need not arrive in one frame, so wait for the header from the
+        # press rather than reading it out of the frame that carried the rows.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            "Sort [s]: net votes / \u221aage-hours".encode(),
+            start=sort_start,
+            timeout=3.0,
         )
-        if b"sort:trending" not in board:
-            raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (
             200,
@@ -4545,7 +4567,7 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
-def screen_rows(drawn: bytes) -> dict[int, bytes]:
+def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, bytes]:
     """The screen the pane has painted, as row number to plain text.
 
     A frame is a set of (row, text) pairs, not a picture, so no single frame
@@ -4571,7 +4593,8 @@ def screen_rows(drawn: bytes) -> dict[int, bytes]:
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+        text = drawn[address.end() : end]
+        rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 
 
@@ -7281,16 +7304,19 @@ def chat_visibility_modes_interaction(
         initial += bytes(output[pane_start:])
         initial_frame = frame_containing(initial, b"ci-red-attribution")
         plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # The presenter may leave unchanged identity rows out of the frame
-        # that first draws attribution. Reconstruct the current terminal to
-        # check adjacency rather than requiring unrelated rows to be redrawn.
-        current_rows = screen_rows(bytes(output))
-        title_row = screen_row_of(
-            current_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # frame_row_of reads the absolute row addresses, which are CSI
+        # sequences -- strip them and there is no address left to read.
+        # Search the raw frame; the census showed both needles contiguous
+        # there, and the plain copy stays for the text assertions below.
+        # Each row comes from the frame that drew it. The pane redraws only what
+        # changed, so the frame carrying a new transcript row need not carry the
+        # header above it -- asking one frame for both fails on a screen showing
+        # both. The row addresses are still what the pane decided.
+        title = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        title_row = frame_row_of(frame_containing(initial, title), title)
+        identity_row = frame_row_of(
+            frame_containing(initial, b"gate:auto_judge"), b"gate:auto_judge"
         )
-        identity_row = screen_row_of(current_rows, b"gate:auto_judge")
-        if min(title_row, identity_row) < 0:
-            raise AssertionError(f"chat identity rows are missing: {current_rows!r}")
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
@@ -8370,6 +8396,15 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 def assert_runtime_row(
     frame: bytes, *, health: bytes, runtime: bytes, description: str
 ) -> None:
+    """Both halves of the runtime identity on one screen row.
+
+    The runtime half is the text the chat header draws around the model
+    name, not the model name alone: #35458 folded the turn gauge into one
+    line and the header now says "<state> configured: <model>", where it
+    used to say "<state> <model>". The two callers below kept the old
+    spelling and stopped matching any row, which reads as "the header lost
+    the health" rather than "the header renamed the field".
+    """
     rows = screen_rows(frame)
     row = screen_row_of(rows, runtime)
     if row < 0 or health not in rows[row]:
@@ -8626,6 +8661,9 @@ def keeper_calls_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        # The header is drawn before the asynchronous roster, so t can land
+        # while nothing is selected and open no keeper's log at all.
+        select_keeper_row(process, master_fd, output, b"alpha")
         pane_start = len(output)
         send_and_wait(
             process,
@@ -9370,6 +9408,9 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                # The decoder takes the registry's lane list as the wire contract
+                # and refuses a snapshot missing one (#35688 added this lane), so
+                # the fixture lists it where the server projection does.
                 standalone_lane_fixture(
                     "workspace_curator_exact", "Workspace Curator"
                 ),
@@ -9659,13 +9700,12 @@ def keeper_lanes_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # tab_until returns as soon as the title is on screen, and the roster is
+        # a live read that lands after that. Pressing j on the (0) list moves
+        # nothing and redraws nothing, so waiting for beta's band times out.
+        # select_keeper_row waits for the row to exist and is indifferent to how
+        # many frames the surface drew getting there.
+        select_keeper_row(process, master_fd, output, b"beta")
         unread = palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         # The body note is "(not loaded yet — press r)": #30945 added the
         # key hint without updating this needle.
@@ -10301,6 +10341,11 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
+        # tab_until returns as soon as the title is on screen, and the roster is
+        # a live read that lands after that. Pressing j on the (0) list moves
+        # nothing and redraws nothing, so waiting for beta's band times out.
+        # select_keeper_row waits for the row to exist and is indifferent to how
+        # many frames the surface drew getting there.
         select_keeper_row(process, master_fd, output, b"beta")
         if not wait_for_fixture_event(
             process, master_fd, output, gate.requested, timeout=10.0
@@ -10368,11 +10413,13 @@ def keeper_lanes_ia_interaction(
 
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
-        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        # The projection lists the workspace curator between Librarian and
+        # Verifier (#35688), so the walk to Verifier passes its row.
         send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
@@ -10667,6 +10714,8 @@ def open_changes(
     could not arrive however many presses they were given.
     """
     tab_until(process, master_fd, output, b"MASC Keepers")
+    # The header precedes the asynchronous roster. The fixture's alpha must
+    # actually be selected before f captures the Keeper for this reading.
     select_keeper_row(process, master_fd, output, b"alpha")
     return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
 
@@ -10796,26 +10845,66 @@ def changes_keeper_and_arrow_detail_interaction(
 
 
 def keeper_gate_mode_footer_interaction(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    _slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    footer = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=200,
-        needle=re.compile(rb"g\x1b\[0m auto"),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
-        raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
-    os.write(master_fd, b"q")
+    gate: GatedHttpResponse,
+) -> Interaction:
+    """The footer names the action `g` performs, so it must name only one.
 
+    The approval-mode override arrives over HTTP, and until it does the Keeper
+    is not known to be in YOLO, so the first footer legitimately offers
+    `g:yolo`. Holding the response makes that first frame certain instead of
+    timing-dependent: on a fast machine it was already gone by the time the
+    assertion looked, and on CI it was not.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        before = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=200,
+            needle=re.compile(rb"g\x1b\[0m:yolo"),
+            final_cursor=b"\x1b[?25l",
+        )
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
+            raise AssertionError("the approval-mode override never reached its fixture")
+        gate.release.set()
+        footer = wait_for_output(
+            process,
+            master_fd,
+            output,
+            re.compile(rb"g\x1b\[0m:auto"),
+            start=len(before),
+            timeout=10.0,
+        )
+        del footer
+        # Read the row, not the byte window. The window that carries the Auto
+        # footer also carries the YOLO one drawn before the override landed, so
+        # a substring check over it fails on a footer already replaced.
+        # screen_rows keys by cursor address, so the later write to a row wins.
+        drawn_rows = screen_rows(bytes(output))
+        footer_row = screen_row_of(drawn_rows, b"g:auto")
+        if footer_row < 0:
+            raise AssertionError(
+                f"no footer row offers Auto: {bytes(output[-2000:])!r}"
+            )
+        if b"g:yolo" in drawn_rows[footer_row]:
+            raise AssertionError(
+                "the footer offers Auto and YOLO on the same row: "
+                f"{drawn_rows[footer_row]!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
 
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
@@ -11111,12 +11200,14 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter keeps the query for n/N and closes the prompt; the redrawn
-    # footer (query gone, hints back at the front) is the needle, because
-    # the diff renderer resends only the rows that changed.
+    # Enter closes the prompt and keeps the query for n/N. The footer keeps
+    # saying so -- the query, how many rows it matched and the keys that walk
+    # them -- ahead of the surface's own hints (#35410); before, the query left
+    # the footer while n/N went on hunting it. The diff renderer resends only
+    # the rows that changed, so the redrawn footer row is the needle.
     send_and_wait(
         process, master_fd, output, b"\r",
-        b"\x1b[2m  j/k:scroll  h/l:pan",
+        b"\x1b[2m  /hi (1) n/N  j/k:scroll  h/l:pan",
     )
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
@@ -11184,6 +11275,11 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
+    # The palette footer is [key:label] items now, not a dotted row: #35585
+    # rewrote it so Masc_tui_footer could shed whole keys and keep Esc at
+    # narrow widths, and the action label came down to lower case with it
+    # ("[Enter] Ask" -> "Enter:ask", masc_tui_render.ml). The old needle
+    # matched no row, so this read as "D opened nothing".
     choices = send_and_wait(process, master_fd, output, b"D", b"Enter:ask")
     choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
     if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
@@ -12277,10 +12373,22 @@ def fusion_list_detail_interaction(
             output,
             b"masc://overview/tasks/task-linked-501",
         )
-        verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
+        verdict_start = len(output)
+        send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
+        # The pane opens on "HTTP [loading...]" and the linked goal lands in a
+        # later frame, so the frame that first carries the heading need not
+        # carry the goal. Wait for the slowest piece, then read every needle
+        # from this verdict's own frames rather than from the one that opened
+        # it.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc://planning/goal-ssim-501",
+            start=verdict_start,
+            timeout=10.0,
         )
-        verdict_plain = CSI_RE.sub(b"", verdict)
+        verdict_plain = CSI_RE.sub(b"", bytes(output[verdict_start:]))
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them
         # met on a screen, so a verdict said "approve" without saying what it
@@ -12293,8 +12401,7 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            # #35734 capitalized key names in hint rows to the key table's
-            # spelling; this needle kept the old lower-case form.
+            # #35734 spells hint keys the way the key table does: "Left", not "left".
             b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
@@ -12374,24 +12481,42 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
-        footer = (
+        # The default Activity pane reserves 56 columns: a 200-column
+        # terminal gives this footer 144 cells. Status yields before hints,
+        # then copy/search yield before pinned exits. A wider frame must still
+        # show those controls; check both states on the actual footer row.
+        footer_head = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
-            b"K:calling Keeper  B:Board evidence  Enter:open  "
-            b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+            b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
+            b"Enter:open"
         )
-        resize_and_wait(
-            process, master_fd, output, rows=30, columns=200,
-            needle=b"MASC Fusion", controls=(FULL_REDRAW,),
-        )
-        # The footer is one row and the resize repaints the list before it, so
-        # the frame that carries the title does not carry the hints. Wait for
-        # the frames to stop and read the screen.
-        drain_until_quiet(process, master_fd, output)
-        footer_frame = bytes(output)
-        if footer not in screen_text(footer_frame):
-            raise AssertionError(
-                f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
+        exits = (b"Esc:back", b"q:quit")
+        secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        for columns, required, omitted in (
+                (200, exits, secondary), (280, exits + secondary, ())):
+            resize_and_wait(
+                process, master_fd, output, rows=30, columns=columns,
+                needle=b"MASC Fusion", controls=(FULL_REDRAW,),
             )
+            # The title and footer can arrive in different frames.
+            drain_until_quiet(process, master_fd, output)
+            drawn_rows = screen_rows(bytes(output))
+            footer_row = screen_row_of(drawn_rows, footer_head)
+            if footer_row < 0:
+                raise AssertionError(
+                    f"Fusion footer at {columns} columns lost navigation: {drawn_rows!r}"
+                )
+            footer = drawn_rows[footer_row]
+            for control in required:
+                if control not in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns omitted {control!r}: {footer!r}"
+                    )
+            for control in omitted:
+                if control in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns retained dropped control {control!r}: {footer!r}"
+                    )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -13487,14 +13612,19 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=changes_navigation_fixtures,
     )
     gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = (
-        200,
-        {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+    gate_mode_gate = GatedHttpResponse(
+        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+        subsequent_response=(
+            200,
+            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+        ),
+        hold_seconds=15.0,
     )
+    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
     run_terminal_scenario(
         executable,
         description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction,
+        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
         http_fixtures=gate_mode_fixtures,
     )
     run_terminal_scenario(

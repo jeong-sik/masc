@@ -16,7 +16,7 @@ type direct_continuation =
   | Gate_continuation of Keeper_direct_gate_continuation.admission
 
 let direct_checkpoint = function
-  | Runtime_continuation admission -> Keeper_direct_runtime_continuation.checkpoint admission
+  | Runtime_continuation admission -> Some (Keeper_direct_runtime_continuation.checkpoint admission)
   | Gate_continuation admission -> Keeper_direct_gate_continuation.checkpoint admission
 
 let progress_keeper_tool_names_for_contract =
@@ -832,7 +832,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Keeper_registry.set_turn_switch ~base_path:config.base_path meta.name (Some turn_sw);
   Eio.Switch.on_release turn_sw (fun () ->
-    Keeper_registry.clear_turn_switch ~base_path:config.base_path meta.name);
+    Keeper_registry.clear_turn_switch_if_current ~base_path:config.base_path meta.name turn_sw);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
   (* The spawn registry is bound for the same span as the turn switch, and on
@@ -869,10 +869,9 @@ let run_turn
       ?shared_context
       ()
   in
-  let ctx = match direct_resume with
+  let ctx = match Option.bind direct_resume direct_checkpoint with
     | None -> ctx
-    | Some admission ->
-      let checkpoint = direct_checkpoint admission in
+    | Some checkpoint ->
       { ctx with Keeper_run_context.ctx_work =
           Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint
       ; resume_agent_core_checkpoint = Some checkpoint
@@ -961,8 +960,17 @@ let run_turn
       (fun (gate : Keeper_tool_approval_gate.t) -> gate.composition_plan_index)
       approval_gate
   in
-  let setup =
-    Keeper_run_tools.prepare_agent_setup
+    let official_client_continuation = match direct_resume with
+      | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
+      | Some (Runtime_continuation _) | None -> None in
+    let native_scope = match official_client_continuation, repetition_execution with
+      | Some checkpoint, Some execution -> Keeper_repetition_scope.Execution.resume execution checkpoint.frame
+        |> Result.map_error Keeper_repetition_snapshot.error_to_string
+      | Some _, None -> Error "native Gate resume has no original direct execution"
+      | None, _ -> Ok () in
+  let setup = match native_scope with
+    | Error detail -> Error (checkpoint_persistence_error ~keeper_name:meta.name ~detail)
+    | Ok () -> Keeper_run_tools.prepare_agent_setup
       ?repetition_execution
       ~config
       ~meta
@@ -1008,9 +1016,13 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
-    let user_message = s.Keeper_run_tools.user_message in
+    let original_gate_message = user_message in
+    let prepared_gate_input = s.Keeper_run_tools.model_message in
+    let user_message = prepared_gate_input.text in
     let user_blocks =
-      match user_blocks, s.Keeper_run_tools.gate_replay_evidence with
+      match user_blocks, prepared_gate_input.replay_evidence with
+      | Some blocks, _ when Option.is_some official_client_continuation ->
+        Some (blocks @ [Agent_core.Types.Text prepared_gate_input.text])
       | Some blocks, Some evidence ->
         Some (Keeper_gate_replay.append_model_evidence_block evidence blocks)
       | (Some _ as blocks), None -> blocks
@@ -1020,7 +1032,8 @@ let run_turn
       (* Explicit block inputs may carry new user media or instructions beyond
          the stored resolution. Preserve their existing input path until those
          blocks have their own durable admission identity. *)
-      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence, user_blocks with
+      if Option.is_some official_client_continuation then Ok None else
+      match hitl_resolution, prepared_gate_input.replay_evidence, user_blocks with
       | Some _, Some evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
@@ -1048,7 +1061,7 @@ let run_turn
     | Ok admitted_checkpoint ->
     let admitted_checkpoint = match admitted_checkpoint, direct_resume with
       | Some checkpoint, _ -> Some checkpoint
-      | None, Some admission -> Some (direct_checkpoint admission)
+      | None, Some admission -> direct_checkpoint admission
       | None, None -> None in
     let evidence_admission = match on_gate_evidence_admitted, admitted_checkpoint with
       | None, _ -> Ok ()
@@ -1259,6 +1272,14 @@ let run_turn
        attribution, so a reader can tell it from a turn that never
        dispatched. *)
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
+      let () = match direct_resume with
+        | Some (Gate_continuation admission) ->
+          (match Keeper_direct_gate_continuation.observe_native_input
+             ~prepared:prepared_gate_input ?blocks:user_blocks ~config
+             ~user_message:original_gate_message admission ~transmitted:user_message with
+           | Ok () -> ()
+           | Error detail -> failwith detail)
+        | Some (Runtime_continuation _) | None -> () in
       let prompt_context_present =
         Option.is_some acc.Keeper_run_tools.extra_system_context_size
       in
@@ -1448,6 +1469,7 @@ let run_turn
                       ~terminal_effect_state:s.terminal_effect_state
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
+                      ?official_client_continuation
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus

@@ -1716,6 +1716,7 @@ type keeper_turn_state =
   | Keeper_turn_running of {
       lane : keeper_turn_lane;
       started_at_unix : float;
+      interrupt_token : string option;
       preview : keeper_turn_preview option;
     }
       (** [started_at_unix] is the server owner clock's epoch reading; derive

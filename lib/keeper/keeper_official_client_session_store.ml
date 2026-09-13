@@ -1,4 +1,4 @@
-type client_kind =
+type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
@@ -826,6 +826,36 @@ let reconcile_tool_surface plan ~tool_surface_sha256 =
   | Some _ ->
     { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
 ;;
+
+let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint)
+    ~expected ~client_kind ~runtime_id ~tool_surface_sha256 =
+  match expected with
+  | Some {phase=Settled settled; client_kind=stored_kind; runtime_id=stored_runtime;
+      tool_surface_sha256=stored_surface; _}
+    when client_kind = checkpoint.client_kind && stored_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id && stored_runtime = checkpoint.runtime_id
+      (* The turn is compared, not only the session. A per-Keeper session
+         outlives the turn that opened the Gate, so a queued operation running
+         meanwhile can settle the same session on a later turn. Matching on
+         session_id alone admitted that state and appended the resumed work
+         after turns it never saw. *)
+      && settled.session_id = checkpoint.session_id
+      && settled.turn_id = checkpoint.turn_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256
+      && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some _ | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
+
+
+let validate_completed_continuation
+    ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint) ~expected =
+  match expected with
+  | Some {phase=Settled settled; client_kind; runtime_id; tool_surface_sha256; _}
+    when client_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id
+      && settled.session_id = checkpoint.session_id
+      && settled.turn_id <> checkpoint.turn_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some _ | None -> Error "official-client Gate input has not settled in a later turn of its original session"
 
 let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =

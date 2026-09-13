@@ -1068,6 +1068,87 @@ let fixture_tool ?(parameters = []) ~name ~description () =
     (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
 ;;
 
+(* A per-Keeper session outlives the turn that opened a Gate. A queued
+   operation running meanwhile settles that same session on a later turn, and
+   admitting the continuation on the session alone accepted that state -- the
+   resumed work was then appended after turns it never saw. *)
+let test_a_continuation_is_admitted_only_for_the_turn_it_left () =
+  with_workspace "masc-official-client-store-continuation-" (fun base_path ->
+    let keeper_name = "continuation" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex
+        ~runtime_id:"codex.default" ~owner_epoch ~at:1.0
+    in
+    let active =
+      mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"session-1" ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session-1" ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session-1" ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle ~base_path ~keeper_name ~expected:inflight
+        ~session_id:"session-1" ~turn_id:"turn-1" ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let checkpoint turn_id : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex
+      ; runtime_id = "codex.default"
+      ; session_id = "session-1"
+      ; turn_id
+      ; tool_surface_sha256 = empty_surface
+      ; frame = Keeper_repetition_snapshot.empty
+      }
+    in
+    let admit turn_id =
+      validate_continuation ~checkpoint:(checkpoint turn_id) ~expected:(Some settled)
+        ~client_kind:Codex ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+    in
+    check bool "the turn it left resumes" true (admit "turn-1" = Ok ());
+    check bool "the same session settled on a later turn does not" true
+      (Result.is_error (admit "turn-2"));
+    let captured = checkpoint "turn-1" in
+    let complete expected = validate_completed_continuation ~checkpoint:captured ~expected in
+    check bool "original settlement cannot prove delivery" true
+      (Result.is_error (complete (Some settled)));
+    let resumed = claim ~base_path ~keeper_name ~expected:(Some settled)
+      ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch:next_owner_epoch
+      ~tool_surface_sha256:empty_surface ~updated_at:6.0 |> Result.get_ok in
+    let resumed = mark_active ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:7.0 |> Result.get_ok in
+    let resumed = mark_turn_starting ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:8.0 |> Result.get_ok in
+    let resumed = mark_turn_started ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~turn_count:resumed.turn_count
+      ~updated_at:9.0 |> Result.get_ok in
+    check bool "inflight continuation cannot prove settlement" true
+      (Result.is_error (complete (Some resumed)));
+    let resumed = settle ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~updated_at:10.0 |> Result.get_ok in
+    check bool "later settled turn completes admitted continuation" true
+      (complete (Some resumed) = Ok ());
+    check bool "later settlement is not a fresh admission" true
+      (Result.is_error (validate_continuation ~checkpoint:captured ~expected:(Some resumed)
+        ~client_kind:Codex ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface));
+    List.iter (fun (label, changed) ->
+      check bool label true (Result.is_error (complete (Some changed))))
+      [ "changed session cannot complete", {resumed with phase=Settled {session_id="another-session"; turn_id="turn-2"}}
+      ; "changed runtime cannot complete", {resumed with runtime_id="another.runtime"}
+      ; "changed client cannot complete", {resumed with client_kind=Claude_code}
+      ; "changed tools cannot complete", {resumed with tool_surface_sha256=String.make 64 'f'} ];
+    check bool "missing binding cannot complete" true (Result.is_error (complete None)))
+;;
+
 let test_tool_surface_fingerprint_is_canonical () =
   let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
   let beta = fixture_tool ~name:"beta" ~description:"second" () in
@@ -1151,6 +1232,8 @@ let () =
             "input-rejected recovery is not auto-superseded"
             `Quick
             test_input_rejected_recovery_is_not_auto_superseded
+        ; test_case "a continuation is admitted only for the turn it left" `Quick
+            test_a_continuation_is_admitted_only_for_the_turn_it_left
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

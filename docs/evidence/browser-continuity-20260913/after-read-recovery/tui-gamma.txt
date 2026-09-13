@@ -1,0 +1,35 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane  live · Firefox  [HTTP read ok]                                                                              
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    coordinator HTTP [connected]  Scene 8.3 ms • 13 nodes                                                                         
+    Element 1/13: Channels • n/p:select • y:copy context                                                                          
+    [1/1] Gamma · Team Channels (active)  [ / ]:select tab                                                                        
+    Page content · viewport only · http://127.0.0.1:60737/gamma.html                                                              
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [>1] Channels                                                                                                                 
+    [2 button/link] Alpha                                                                                                         
+    [3 button/link] Beta                                                                                                          
+    [4 button/link] Gamma                                                                                                         
+    Gamma channel                                                                                                                 
+    Sora                                                                                                                          
+    2026-09-12 10:15                                                                                                              
+    Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in this    
+    channel.                                                                                                                      
+    [9 button/link] Message link                                                                                                  
+    Coverage: currently displayed messages only.                                                                                  
+    Navigation summary                                                                                                            
+    Old cached snippet: @Mina ship Cedar on Friday.                                                                               
+    This is not the channel message list.                                                                                         
+    Text 1/14 • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane                                                                   
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+
+  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image  | Port: 60724
+Browser Lane · live · Firefox page reader                                                                                         

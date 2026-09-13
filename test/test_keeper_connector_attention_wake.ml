@@ -157,7 +157,7 @@ let quiet_obs : WO.world_observation =
   ; connected_surface_failures = []
   ; own_recent_board_posts = []
   ; fleet_messages = []
-  ; own_recent_actions = []
+  ; own_recent_actions = Ok []
   }
 
 let reasons_of_verdict = function

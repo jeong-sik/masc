@@ -1357,7 +1357,10 @@ let test_keeper_tool_call_log_uses_cluster_root () =
                 (Sys.file_exists legacy_dir);
               Alcotest.(check int) "tool_call row readable from cluster store"
                 1
-                (List.length (Keeper_tool_call_log.read_recent ~n:10 ())))))
+                (match Keeper_tool_call_log.read_recent ~n:10 () with
+                 | Ok rows -> List.length rows
+                 | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+                   Alcotest.fail detail))))
 
 let test_workspace_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->

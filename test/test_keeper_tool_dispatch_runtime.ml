@@ -19,6 +19,14 @@ end
 module KTE = Masc.Keeper_tool_execution
 module KES = Masc.Keeper_tool_shared_runtime
 module KTD = Masc.Keeper_tool_descriptor
+
+(* [Masc.Keeper_tool_call_log.read_recent] answers [Error Index_unavailable]
+   when the read index cannot be read (audit F397); here the rows are the
+   subject, so that failure fails the case. *)
+let tool_call_rows ?keeper_name ?n () =
+  match Masc.Keeper_tool_call_log.read_recent ?keeper_name ?n () with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
 module Workspace = Masc.Workspace
 module Publication_availability =
   Masc.Keeper_publication_recovery_availability
@@ -1101,7 +1109,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                   (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
                      let execution_id = Ids.Execution_id.to_string execution_id in
                      let committed =
-                       Masc.Keeper_tool_call_log.read_recent
+                       tool_call_rows
                          ~keeper_name:meta.name
                          ~n:8
                          ()
@@ -1273,7 +1281,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               2
               (List.length (List.sort_uniq String.compare event_execution_ids));
             let log_rows =
-              Masc.Keeper_tool_call_log.read_recent
+              tool_call_rows
                 ~keeper_name:meta.name
                 ~n:2
                 ()
@@ -5840,7 +5848,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
               (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
               (String.length artifact);
             let durable_root_present =
-              Masc.Keeper_tool_call_log.read_recent
+              tool_call_rows
                 ~keeper_name:meta.name
                 ~n:10
                 ()
@@ -6318,7 +6326,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
              | Error error ->
                failf "materialized composition failed: %s" error.Agent_core.Types.message);
             let rows =
-              Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:2 ()
+              tool_call_rows ~keeper_name:meta.name ~n:2 ()
             in
             let committed_row =
               match

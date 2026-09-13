@@ -519,7 +519,7 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
        match
          Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
        with
-       | [ row ] ->
+       | Ok [ row ] ->
          Alcotest.(check int) "both snapshots survive into durable artifact references"
            2 (Json.member "artifact_refs" row |> Json.to_list |> List.length);
          let producer_refs =
@@ -563,8 +563,10 @@ let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
            0
            (Masc.Keeper_tool_call_log.pending_file_change_evidence_count_for_testing
               ())
-       | rows ->
-         Alcotest.failf "expected one exact file-change row, got %d" (List.length rows))
+       | Ok rows ->
+         Alcotest.failf "expected one exact file-change row, got %d" (List.length rows)
+       | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+         Alcotest.failf "tool-call read index unavailable: %s" detail)
 
 let test_patch_no_match_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->

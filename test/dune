@@ -5740,7 +5740,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -5827,8 +5827,9 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
- (deps ../addons/protocol.py ../addons/output-statistics/server.py)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py
+       ../addons/msx-observer/server.py ../addons/tests/test_packages.py)
+ (libraries masc_test_deps masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_reconcile)

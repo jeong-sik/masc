@@ -310,6 +310,45 @@ describe('PromptRegistryPanel', () => {
     })
   })
 
+  it('keeps curator and Librarian identities separate even when curator arrives first', async () => {
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [
+      makePrompt({ key: 'workspace_memory_curator', category: 'librarian', source: 'override',
+        effective: 'Curate {{workspace_memory_inventory}} with attribution',
+        file_path: 'fixture/config/prompts/workspace_memory_curator.md',
+        template_variables: ['workspace_memory_inventory'] }),
+      ...defaultPromptItems(),
+    ] })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+    const librarian = container.querySelector('[data-librarian-runtime-contract]')
+    expect(librarian?.textContent).toContain('fixture/config/prompts/librarian.md')
+    expect(librarian?.textContent).not.toContain('workspace_memory_curator')
+    const curator = container.querySelector('[data-workspace-curator-runtime-contract]')
+    for (const field of ['workspace_curator_exact', 'workspace_memory_inventory', 'sources',
+      'snapshots', 'gaps', 'model_proposed', 'keeper_workspace_memory_read', 'override']) {
+      expect(curator?.textContent).toContain(field)
+    }
+    const open = curator?.querySelector('button') as HTMLButtonElement
+    fireEvent.click(open)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value)
+      .toBe('Curate {{workspace_memory_inventory}} with attribution'))
+    expect(mocks.savePromptOverride).not.toHaveBeenCalled()
+  })
+
+  it('does not substitute a curator prompt for a missing Librarian prompt', async () => {
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: [
+      makePrompt({ key: 'workspace_memory_curator', category: 'librarian', effective: 'Curator body' }),
+    ] })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+    const librarian = container.querySelector('[data-librarian-runtime-contract]')
+    expect(librarian?.textContent).toContain('librarian prompt 누락')
+    expect(librarian?.querySelector('button')).toBeNull()
+    expect(container.querySelector('[data-workspace-curator-runtime-contract] button')).not.toBeNull()
+  })
+
   it('rebinds the clean editor draft to the first visible prompt when filters hide the selection', async () => {
     render(html`<${PromptRegistryPanel} />`, container)
     await flush()

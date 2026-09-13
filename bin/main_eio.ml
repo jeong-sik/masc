@@ -1990,7 +1990,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
           let endpoint_voice, section =
-            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            match Voice_setup.voice_placement tts with
             | Voice_setup.On_the_endpoint -> Some voice, []
             | Voice_setup.On_the_section ->
               None, [ Voice_setup.Set_tts_default_voice voice ]

@@ -1059,6 +1059,30 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertNotIn('Sys_error', result.stderr)
             self.assertEqual(list(base.iterdir()), [])
 
+    def test_setting_the_same_voice_again_keeps_per_keeper_voices_effective(self):
+        # The second run finds a [voice.tts] section -- the first run's -- and
+        # that section is say's own, so its default is the place for the voice.
+        # Measured before the placement asked who owns the default: the second
+        # run put default_voice on the endpoint and a keeper mapped to another
+        # voice spoke in this one. A workspace already left that way is
+        # repaired by the next run, because the endpoint is written whole.
+        import tomllib
+        with self.workspace() as (base, runtime):
+            for _ in range(2):
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+        stale = ('\n[[voice.tts.endpoints]]\nid = "macos-say"\nkind = "macos_say"\n'
+                 'enabled = true\ndefault_voice = "Yuna"\n\n[voice.tts]\ndefault_voice = "Yuna"\n')
+        with self.workspace(stale) as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):
             before = runtime.read_bytes()

@@ -30,6 +30,17 @@ let run_terminal = function
   | executable :: _ as argv ->
     try Unix.create_process executable (Array.of_list argv) Unix.stdin Unix.stderr Unix.stderr |> wait
     with Unix.Unix_error _ -> Error ()
+(* [run_terminal] for a catalog step, keeping which way it failed. Only the
+   kind crosses into the receipt; the child's own output went to the terminal
+   and stays there. [create_process] searches PATH and raises ENOENT when the
+   program is not on it, before anything runs. *)
+let run_catalog_step = function
+  | [] -> Error Prerequisites.Could_not_start
+  | executable :: _ as argv ->
+    (match Unix.create_process executable (Array.of_list argv) Unix.stdin Unix.stderr Unix.stderr with
+     | pid -> Result.map_error (fun () -> Prerequisites.Did_not_finish) (wait pid)
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error Prerequisites.Program_not_found
+     | exception Unix.Unix_error (_, _, _) -> Error Prerequisites.Could_not_start)
 let capture argv =
   match Process_eio.run_argv_with_status_split_or_refusal argv with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
@@ -81,7 +92,7 @@ let to_json actions =
   | json -> json
 let execute host = function
   | Standard action ->
-    Prerequisites.execute ~run:(fun argv -> run_terminal argv |> Result.map_error (fun () -> "Action failed")) action
+    Prerequisites.execute ~run:run_catalog_step action
   | Verified_apple_install ->
     prerr_endline "Downloading and verifying the official Apple Container package…";
     (match Apple.acquire ~host ~run:capture with

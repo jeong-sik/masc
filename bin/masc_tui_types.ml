@@ -4149,43 +4149,39 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
                left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
            | _ -> false)
       | _ -> false in
+    (* A group is the block fragment that opened it and the fragments joined
+       after it, newest first. The row closes at the block's last observed
+       fragment: everything up to it is one paragraph by the observed id, and
+       an inline fragment after it may belong to the next paragraph, so each of
+       those keeps its own row instead of being guessed into this one. A
+       paragraph with several inline elements repeats its id between each of
+       them, so the group keeps joining until a fragment cannot join. *)
     let flush current acc = match current with
       | None -> acc
-      | Some (members, (anchor : Masc.Browser_scene.node), texts) ->
-          let ordered_members = List.rev members in
-          let anchor_repeated = match ordered_members with
-            | [] -> false
-            | _ :: rest -> List.exists
-                (fun (node : Masc.Browser_scene.node) ->
-                   node.node_id = anchor.node_id) rest in
-          if anchor_repeated then
-            (ordered_members, anchor, String.concat "" (List.rev texts)) :: acc
-          else
-            (* Without a repeated observed container id, an inline node may
-               belong to the next paragraph. Keep this run as separate rows
-               instead of guessing its block ancestry. *)
-            List.rev_append
-              (List.map (fun (node : Masc.Browser_scene.node) ->
-                 ([node], node, node.text)) ordered_members)
-              acc in
+      | Some ((anchor : Masc.Browser_scene.node), later) ->
+          let rec close trailing = function
+            | [] -> [anchor], trailing
+            | (node : Masc.Browser_scene.node) :: older
+              when node.node_id = anchor.node_id ->
+                anchor :: List.rev (node :: older), trailing
+            | node :: older -> close (node :: trailing) older in
+          let joined, trailing = close [] later in
+          let row =
+            ( joined, anchor
+            , String.concat ""
+                (List.map (fun (node : Masc.Browser_scene.node) -> node.text) joined) ) in
+          List.rev_append
+            (List.map (fun (node : Masc.Browser_scene.node) ->
+               ([node], node, node.text)) trailing)
+            (row :: acc) in
     let rec loop current acc = function
       | [] -> List.rev (flush current acc)
-      | node :: rest ->
+      | (node : Masc.Browser_scene.node) :: rest ->
           (match current with
-           | Some (members, anchor, texts) when can_join anchor node ->
-               let anchor_count = List.fold_left
-                   (fun count (member : Masc.Browser_scene.node) ->
-                      if member.node_id = anchor.node_id then count + 1 else count)
-                   0 members in
-               let anchor_repeated = anchor_count > 1 in
-               if anchor_repeated then
-                 let acc = flush current acc in
-                 loop (Some ([node], node, [node.text])) acc rest
-               else
-                 loop (Some (node :: members, anchor, node.text :: texts)) acc rest
-           | _ ->
-               let acc = flush current acc in
-               loop (Some ([node], node, [node.text])) acc rest) in
+           | Some (anchor, later) when can_join anchor node ->
+               loop (Some (anchor, node :: later)) acc rest
+           | Some _ | None ->
+               loop (Some (node, [])) (flush current acc) rest) in
     loop None [] nodes in
   match view.scene with
   | Some scene ->

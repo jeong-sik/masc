@@ -29,18 +29,23 @@ type config =
     (** Finite bound for the post-spawn wait for the first [init] event and its
         admission callback. *)
   ; timeout_s : float option
-    (** [None] removes the deadline after the first valid [init] event and its
+    (** Maximum silence between valid stream-json messages while the model
+        turn is running. It is not a total turn-duration bound, and it is not
+        armed while the last step the CLI reported is a running tool step: the
+        CLI writes nothing between a tool step's [ACTIVE] update and its
+        [DONE] or [ERROR] update, so that silence is the protocol and only
+        [wall_clock_ceiling_s] bounds it.
+        [None] removes the deadline after the first valid [init] event and its
         admission callback: the spawned client decides when its own turn ends.
         The post-spawn pre-init phase remains bounded by [admission_timeout_s].
         Declared as [turn-timeout-s] in runtime config, where [0] selects
         [None]. *)
-    (** Maximum silence between valid stream-json messages. It is not a total
-        turn-duration bound. *)
   ; wall_clock_ceiling_s : float option
     (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
         shared hours-scale default). The idle timeout above resets on every
-        emitted line, so this is the only bound a turn of continuous thin
-        progress cannot outlive (#31242). *)
+        emitted line and is off inside a tool step, so this is the only bound
+        that a turn of continuous thin progress (#31242) or a tool step that
+        never ends cannot outlive. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema the CLI enforces on the turn's final answer
         ([--json-schema]). Validation with a re-prompt, not constrained

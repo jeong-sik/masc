@@ -736,7 +736,13 @@ let compact_lines ~width view =
         let gaps = List.filter_map (fun (coverage : Row.coverage) ->
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in
-        installations @ instances @ configurations @ observations @ gaps
+        let row_details = if view.focus <> Rows then [] else
+          List.concat_map (fun (row : Row.row) ->
+            ["  fields: " ^ Yojson.Safe.to_string (`Assoc row.fields)]
+            @ List.map (fun evidence -> "  evidence: " ^ evidence.uri) row.evidence
+            @ (if row.related_ids=[] then [] else ["  related: " ^ String.concat ", " row.related_ids])) snapshot.output.rows
+          @ Option.to_list (Option.map (fun value -> "Receipt: " ^ Yojson.Safe.to_string value) view.receipt) in
+        installations @ instances @ configurations @ observations @ row_details @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
    "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]

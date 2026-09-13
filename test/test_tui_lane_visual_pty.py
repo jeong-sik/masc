@@ -84,7 +84,7 @@ def main(executable: str, captures: Path | None) -> None:
         if b">" not in narrow:
             raise AssertionError("narrow timeline lost selection marker")
         capture("05-narrow-timeline", 24, 64)
-        key(b"3", b"No installations.")
+        key(b"3", b"No Add-ons installed.")
         os.write(master, b"d")
         if requests:
             raise AssertionError(f"browsing or hidden detach sent mutation: {requests!r}")

@@ -90,9 +90,9 @@ def main(executable: str) -> None:
 
             key(b":go lanes\r", b"MASC Lanes")
             key(b"A", b"MASC Lane Add-ons")
-            key(b"4", b"No instances.")
+            key(b"4", b"No Add-ons installed.")
             key(b"5", b"No observations.")
-            key(b"3", b"No installations.")
+            key(b"3", b"No Add-ons installed.")
             key(b"q", b"MASC Lanes")
             key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")

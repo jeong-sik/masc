@@ -322,7 +322,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P S   LAST LIFECYCLE / RUNTIME             TASK
+    HEALTH       KEEPER             A P S   TURN LIFECYCLE / RUNTIME             TASK
  >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
     ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
    OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
@@ -331,7 +331,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 `A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a
 letter — `D` docker, `M` microvm, `L` local — because a sandbox is a name, not
-an on/off. `LAST` is the time since the keeper's last turn (the lifetime turn
+an on/off. `TURN` is the time since the keeper's last turn (the lifetime turn
 count moved to the detail pane; a keeper that never turned shows a dash). The
 metadata list needs no server, so names, last-turn times, and tasks stay
 readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle

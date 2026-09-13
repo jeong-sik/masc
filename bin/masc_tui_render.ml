@@ -3875,7 +3875,10 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; (if columns.kcol_show_flags then
          " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "Mode S"
        else "")
-    ; Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "LAST"
+    ; (* TURN, not LAST: where the runtime column is hidden this heading and
+         TASK sit one cell apart, and "LAST TASK" read as one column over the
+         two cells under it. *)
+      Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "TURN"
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
@@ -3951,7 +3954,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   let task =
     fit_width
-      (Terminal_text.single_line_or ~default:"\xe2\x80\x93"
+      (Terminal_text.single_line_or ~default:"\xe2\x80\x94"
          keeper.k_current_task_id)
       columns.kcol_task
   in

@@ -215,7 +215,7 @@ let test_update_is_not_gated_by_b1 () =
         ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   (* B1 gates creation only: updating an existing row without re-stating the
      success condition is metadata maintenance, not a new declaration. *)

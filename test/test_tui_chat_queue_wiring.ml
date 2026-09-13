@@ -682,7 +682,12 @@ let test_late_interrupt_outcome_cannot_mark_newer_control () =
   check bool "resumed Enter excludes previous stop outcome" false
     (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
   let first = Tui_types.begin_keeper_chat_control state "alpha" in
-  ignore (Tui_types.begin_keeper_chat_control state "alpha");
+  let second = Tui_types.begin_keeper_chat_control state "alpha" in
+  let pending_started = List.assoc "alpha" state.keeper_chat_control_pending in
+  check bool "stale finish retains newer request clock" false
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:first);
+  check int64 "pending time belongs to newer control" pending_started
+    (List.assoc "alpha" state.keeper_chat_control_pending);
   check bool "second pending stop is not first receipt acknowledgement" false
     (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:first)
 ;;

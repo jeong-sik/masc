@@ -2917,7 +2917,12 @@ let render_keeper_message (state : state) =
        interrupt Esc will not spend itself on, nor say "interrupt sent" after
        the grace window when Esc would leave. *)
     let escape_hint =
-      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_interrupt_action state) with
+      let action = Option.bind state.msg_target_keeper_name (fun keeper_name ->
+        match Masc_tui_types.working_chat_for_keeper state keeper_name with
+        | Some entry -> Some (Masc_tui_types.working_chat_interrupt_action
+            ~now_ns:(Mtime_clock.elapsed_ns ()) state keeper_name entry)
+        | None -> Masc_tui_types.keeper_observed_interrupt_action state keeper_name) in
+      match action with
       | Some Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:stop current turn"
       | Some Swallow -> "Esc:interrupt requested"
       | Some Leave -> return_hint ()

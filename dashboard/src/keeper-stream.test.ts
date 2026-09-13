@@ -108,6 +108,39 @@ describe('Keeper operation stream projection', () => {
     ).toBeDefined()
   })
 
+  // An attempt failure is not the end of the turn. The bubble keeps streaming
+  // through it and the next attempt's answer renders in the same bubble; the
+  // protocol line stays in the entry's error until the terminal event clears it.
+  it('keeps the bubble streaming through a stream timeout and renders the next attempt', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-timed-out' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-timed-out', delta: 'half an' })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'sse_timeout', reason: 'no provider event within the liveness window' },
+    })).toBeNull()
+
+    const timedOut = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(timedOut?.delivery).toBe('streaming')
+    expect(timedOut?.rawText).toContain('[stream protocol] sse_timeout')
+    expect(typeof timedOut?.error).toBe('string')
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_RUNTIME_ATTEMPT_STARTED',
+      value: null,
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-answer' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-answer', delta: 'the answer' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END', messageId: 'm-answer' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+
+    const answered = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(answered?.text).toBe('the answer')
+    expect(answered?.delivery).not.toBe('error')
+  })
+
   const streamMessageOnce = (): void => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-1' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: '네.' })

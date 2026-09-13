@@ -232,6 +232,54 @@ def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
     ]
 
 
+def test_an_unpriced_ledger_row_is_counted_not_free(tmp_path, monkeypatch):
+    """A row the ledger could not price must not read as a free turn.
+
+    cost_ledger serializes cost_usd as null for a turn whose usage it never
+    resolved. Adding that as zero published a number the aggregate reads as
+    measured, and cost is the axis this arm is compared on: unknown keeper
+    spend looked like free keeper spend.
+    """
+    rows = [
+        '{"usage_projection": "resolved_delta", "input_tokens": 10,'
+        ' "output_tokens": 1, "cost_usd": 0.5}',
+        '{"usage_projection": "resolved_delta", "input_tokens": 20,'
+        ' "output_tokens": 2, "cost_usd": null, "usage_missing": true}',
+    ]
+
+    class LedgerEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            self.commands.append(command)
+
+            class R:
+                stdout = "\n".join(rows) if "costs" in command else ""
+                stderr = ""
+                returncode = 0
+                return_code = 0
+
+            return R()
+
+    async def fake_super_run(self, instruction, environment, context):
+        context.cost_usd = 0.0
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.run", fake_super_run
+    )
+    context = AgentContext()
+    asyncio.run(make_agent(tmp_path).run("solve the task", LedgerEnv(), context))
+    keeper = context.metadata["keeper_usage"]
+    assert keeper["rows"] == 2
+    # Only the priced row reaches the total.
+    assert keeper["cost_usd"] == pytest.approx(0.5)
+    assert context.cost_usd == pytest.approx(0.5)
+    # And the unpriced one is named, which is what aggregate.py puts in its own
+    # column next to the total.
+    assert keeper["cost_rows_unreported"] == 1
+    # The tokens that row did report are still counted: it is the price that is
+    # unknown, not the traffic.
+    assert keeper["input_tokens"] == 30
+
+
 def test_an_unreadable_ledger_is_a_failure_not_a_zero(tmp_path, monkeypatch):
     """A collection failure must not read as a run with no keeper spend."""
 

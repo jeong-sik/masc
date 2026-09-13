@@ -9839,8 +9839,8 @@ let render_runtime (state : state) =
         Printf.sprintf "%s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
           (tab_strip
-             [ ( Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count
-                   (List.length snapshot.rss_candidates)
+             [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
+                   (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
              ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
              ])
@@ -13250,8 +13250,8 @@ let render_patch_modal (state : state) =
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
     ~hints:
-      (Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
-         total scroll)
+      (Printf.sprintf "[%s, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+         (Masc_tui_message_layout.count_noun total "line") scroll)
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         "  old   new     diff preview (syntax colored)";

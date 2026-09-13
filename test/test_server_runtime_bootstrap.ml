@@ -4629,8 +4629,10 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
               "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
               (read_file secondary_log);
           let secondary_text = read_file secondary_log in
-          Alcotest.(check bool) "secondary log mentions base-path owner" true
-            (String_util.contains_substring secondary_text "already owns base path");
+          if not (String_util.contains_substring secondary_text "already owns base path") then
+            Alcotest.failf
+              "secondary exit did not report the base-path owner\nsecondary log:\n%s\nprimary log:\n%s"
+              secondary_text (read_file primary_log);
           Alcotest.(check bool) "secondary log mentions primary pid" true
             (String_util.contains_substring secondary_text (string_of_int primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true

@@ -1,0 +1,10 @@
+{
+  "commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+  "arch": "macos-arm64",
+  "sha256": {
+    "main_eio.exe": "67ccd4bba372202ba5f2ec30757158fdecb6cb3ae27fb1edeaf374d985460b05"
+  },
+  "origin": "locally assembled adapter manifest from verified published release assets",
+  "release_run": 34669420878,
+  "release_validated": true
+}

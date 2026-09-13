@@ -1,0 +1,48 @@
+[
+  {
+    "run": 34691086194,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/34691086194",
+    "head": "9a68af931ed3c8c64ccd3be8eb66ed368f647b72",
+    "conclusion": "success",
+    "log_sha256": "140ea565ff668a4137391ea13422c4b7c6b6bb45ec854b36bc2af627f8f6a7d5",
+    "suite_summaries": [
+      "Test Successful in 4.162s. 6 tests run."
+    ]
+  },
+  {
+    "run": 34691732224,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/34691732224",
+    "head": "e967bbeb8849b36a71c1a51987a83b49b0744c8a",
+    "conclusion": "success",
+    "log_sha256": "f38c92ed626d8c0c91b18fe8c5768289de273d2fa60e13e857060aeb94b0b2f0",
+    "suite_summaries": [
+      "Test Successful in 4.291s. 6 tests run.",
+      "Test Successful in 0.424s. 48 tests run.",
+      "Test Successful in 0.074s. 7 tests run.",
+      "Test Successful in 0.216s. 3 tests run.",
+      "Test Successful in 0.014s. 4 tests run.",
+      "Test Successful in 0.341s. 8 tests run.",
+      "Test Successful in 0.048s. 49 tests run.",
+      "Test Successful in 0.001s. 10 tests run.",
+      "Test Successful in 0.108s. 7 tests run.",
+      "Test Successful in 0.045s. 13 tests run.",
+      "Test Successful in 0.009s. 2 tests run."
+    ]
+  },
+  {
+    "run": 34693095605,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/34693095605",
+    "head": "3b794b7e9b914d9025bb96e1dd9cacd3c5766fcd",
+    "conclusion": "success",
+    "log_sha256": "601fad18feb0a68bf6512d3cb767149092110289ed6a4a46eaa8ee9d5fcc0201",
+    "suite_summaries": [
+      "Test Successful in 0.164s. 2 tests run.",
+      "Test Successful in 13.342s. 82 tests run.",
+      "Test Successful in 0.012s. 2 tests run.",
+      "Test Successful in 0.021s. 3 tests run.",
+      "Test Successful in 0.050s. 49 tests run.",
+      "Test Successful in 0.050s. 13 tests run.",
+      "Test Successful in 0.214s. 3 tests run."
+    ]
+  }
+]

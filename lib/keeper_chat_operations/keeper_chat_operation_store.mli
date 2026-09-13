@@ -73,6 +73,11 @@ val move_queued_to_end
   -> operation_id:Operation.Operation_id.t
   -> (Operation.t, error) result
 
+(** Put one queued operation first, preserving the relative order and
+    identity/input of every other operation in one transaction. *)
+val move_queued_to_front : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  (Operation.t, error) result
+
 val cancel_queued
   :  t
   -> now:float

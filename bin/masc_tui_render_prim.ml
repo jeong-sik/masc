@@ -2518,13 +2518,15 @@ let help_lines (state : state) =
     ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
     :: List.map
          (fun (cmd : Masc_tui_command.command_help) ->
-           let text = Masc_tui_command.usage cmd in
-           let pad = String.make (max 2 (16 - String.length text)) ' ' in
+           (* The column and its width come from the command module, which the
+              [/help] list reads through the same two functions: the sheet
+              colours the halves, it does not size them. *)
+           let text = Masc_tui_command.help_usage cmd in
            Printf.sprintf "  %s%s%s%s%s"
              (Theme.warn ())
              text
              Ansi.reset
-             pad
+             (Masc_tui_command.help_summary_padding text)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]

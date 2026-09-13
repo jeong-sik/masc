@@ -10,6 +10,12 @@
 
 (** {1 Trim / parse helpers} *)
 
+type agent_quota = Exempt_observation | Metered_operation
+val read_request_quota : Httpun.Method.t -> agent_quota
+(** For an already classified read endpoint, GET/HEAD use the ingress IP
+    limiter without consuming the agent operation bucket. Other methods stay
+    metered. This does not grant read authorization. *)
+
 val trim_opt : string option -> string option
 (** Trim a [string option]; collapses [Some ""] to [None]. *)
 

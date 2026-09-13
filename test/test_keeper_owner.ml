@@ -1559,6 +1559,65 @@ let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
   | _ -> fail "exact interrupt did not settle the replacement as cancelled"
 ;;
 
+let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 3 in
+  let persisted = ref None in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel ()
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun meta -> persisted := Some meta; Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some operation_executor) ~keeper_name:"chat-stop"
+    ~initial_meta:(Some (make_meta "chat-stop")) ()) in
+  let first = operation_id "stop-first" and second = operation_id "stop-second"
+  and third = operation_id "stop-third" in
+  List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first; second; third];
+  check bool "first started" true (Chat_operation.Operation_id.equal first (Eio.Stream.take started));
+  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
+  ignore (await_terminal owner first 1_000);
+  check bool "pause persisted before stopping" true
+    (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
+  check int "both successors remain queued" 2 (Owner.operation_projection owner).queued_count;
+  (match Owner.run_autonomous_if_idle owner (fun () -> fail "paused autonomy ran") with
+   | Ok (`Busy Owner.Admission_paused) -> () | _ -> fail "autonomy bypassed durable pause");
+  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "settled execution was signalled");
+  (match owner_ok (Owner.run_next_operation owner ~operation_id:third ~observed:None) with
+   | Owner.Run_next_applied { resumed; _ } -> check bool "run-next resumes its chat pause" true resumed
+   | Owner.Run_next_paused -> fail "chat pause was not resumable");
+  check bool "prioritized input starts first" true (Chat_operation.Operation_id.equal third (Eio.Stream.take started));
+  ignore (owner_ok (Owner.pause_and_interrupt owner (Direct_operation third)));
+  ignore (await_terminal owner third 1_000);
+  check int "remaining input stayed queued" 1 (Owner.operation_projection owner).queued_count;
+  ignore (owner_ok (Owner.apply_meta owner
+    (Pause { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }; updated_at = "manual" })));
+  (match Owner.run_next_operation owner ~operation_id:second ~observed:None with
+   | Ok Owner.Run_next_paused -> () | _ -> fail "run-next cleared an unrelated manual pause");
+  check int "manual pause preserves input" 1 (Owner.operation_projection owner).queued_count
+;;
+
+let test_stale_chat_interrupt_cannot_pause_successor () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> fail "stale token wrote metadata"); remove = (fun _ -> Ok ()) }
+    ~operation_executor:None ~keeper_name:"stale-chat-stop"
+    ~initial_meta:(Some (make_meta "stale-chat-stop")) ()) in
+  Eio.Switch.run @@ fun successor ->
+  let current = Atomic.make (Some { Keeper_registry_types.interrupt_token = "successor"; switch = successor }) in
+  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn { current; interrupt_token = "old" })) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "stale token was accepted");
+  check bool "successor remains unpaused" false
+    (Option.get (Owner.projection owner).meta).paused
+;;
+
 let test_is_operator_interrupt_unwraps_every_shape () =
   let interrupt = Keeper_registry_types.Operator_interrupt in
   let bt = Printexc.get_callstack 0 in
@@ -2170,7 +2229,7 @@ let test_owner_shutdown_linearizes_and_awaits_child () =
        "new turn sees typed shutdown owner"
        true
        (Keeper_shutdown_types.Operation_id.equal reserved shutdown_id)
-   | Ok (`Busy (Owner.Turn_busy _)) -> fail "shutdown was reported as ordinary busy"
+   | Ok (`Busy (Owner.Turn_busy _ | Owner.Admission_paused)) -> fail "shutdown was reported as ordinary busy"
    | Ok (`Ran _) -> fail "shutdown admitted a new turn"
    | Error error -> fail (Owner.error_to_string error));
   (match
@@ -3235,6 +3294,10 @@ let () =
             "stale exact interrupt cannot cancel replacement"
             `Quick
             test_exact_operation_interrupt_cannot_cancel_its_replacement
+        ; test_case "chat stop preserves queue; run-next resumes the intended input" `Quick
+            test_chat_interrupt_pauses_successors_and_run_next_prioritizes
+        ; test_case "stale chat stop cannot pause a successor" `Quick
+            test_stale_chat_interrupt_cannot_pause_successor
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick

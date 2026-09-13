@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.35.16] - 2026-09-14
+
+### Added
+
+- Browser Lane: observed landmarks carry a closed semantic role with unknown roles kept explicit, and scene nodes keep their nearest observed article or main ancestor, which the TUI draws as a compact `[article] Label` boundary and copies with the element context (#36013, #36045).
+- Browser Lane TUI: `N`/`P` move between observed article regions, from the regions scene and from the content scene through article ancestors, and boundaries show each article's ordinal (#36029, #36067, #36068).
+- Browser Lane TUI: `J`/`K` scroll the page from the text reader with URL and document identity checks, an observed tab can be opened directly instead of cycling, and a refreshed scene shows its scroll offset and what changed since the previous observation (#36016, #36069, #36070, #36071).
+- Browser Lane TUI: the scene text renders observed heading levels, keeps block spacing, joins inline fragments of one block into one row, keeps the selected region's role and label through scroll, click and copied context, and the status line counts articles, other regions, links, controls and images instead of raw nodes (#36040, #36042, #36044, #36061, #36036, #36038).
+- Lanes: the TUI guides subscribing a Keeper to retained output references and shows the output position each subscription has acknowledged (#36007).
+
+### Fixed
+
+- Sandbox: a declaration error says whether `imp.toml` could not be read or is invalid, with the underlying reason, instead of one of two fixed sentences; a microVM profile that names no backend is refused rather than given `Apple_container` because of the host (#36053).
+- Keeper: a lifecycle reservation that is gone when a removal releases it is reported as a removal conflict rather than as removed (#36033).
+- Capability vocabulary: the six single-value parsers refuse the empty string instead of reading it as a value (#36034).
+- TUI: tab strips keep the current entry on the row when entries overflow, and the Memory category row is drawn with the same strip (#36021, #36051).
+- TUI: control keys, the tool approval mode and a schedule's wake status and actor kind are spelled the way the key table and the server contracts spell them (#36037, #36031, #36008, #36004).
+- TUI: the Board draft footers come from the key table and its pane row stays on the draft; the Task Review title states a full page's count once; the Planning rollup counts only phases that have goals (#36049, #36047, #36015).
+- TUI: the Overview names its cluster and project without padding, the Config paths row keeps the binary age and the tail of each path, and the acting pane stays off both Activity tabs (#36012, #36025, #36018).
+
+### Documentation
+
+- Browser skills route read-only public social pages through TUI scenes and keep live region composition free of site-specific instructions (#36022, #36041).
+
 ## [0.35.15] - 2026-09-13
 
 ### Fixed

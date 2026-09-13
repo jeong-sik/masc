@@ -2229,6 +2229,27 @@ let test_a_count_takes_the_number_it_counts () =
   check string "and its singular" "1 entry"
     (Layout.count_noun ~plural:"entries" 1 "entry")
 
+
+(* The Board and Keeper roster ages are six cells. Days and hours from a
+   hundred days on drew seven, and the column cut the day count out. *)
+let test_a_span_fits_a_six_cell_column () =
+  let hour = 3600. in
+  let day = 24. *. hour in
+  check string "under a hundred days keeps the hours" "99d23h"
+    (Layout.span_text ((99. *. day) +. (23. *. hour)));
+  check string "a hundred days keeps only the days" "100d"
+    (Layout.span_text ((100. *. day) +. (5. *. hour)));
+  check string "a year is days alone" "365d"
+    (Layout.span_text ((365. *. day) +. (10. *. hour)));
+  List.iter
+    (fun seconds ->
+      let text = Layout.span_text seconds in
+      check bool
+        (Printf.sprintf "%s fits six cells" text)
+        true
+        (Layout.display_width text <= 6))
+    [ 59.; 3599.; day -. 1.; (100. *. day) -. 1.; 99_999. *. day ]
+
 let () =
   run "tui_message_layout"
     [
@@ -2410,5 +2431,7 @@ let () =
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ; test_case "a count takes the number it counts" `Quick
             test_a_count_takes_the_number_it_counts
+        ; test_case "a span fits a six-cell column" `Quick
+            test_a_span_fits_a_six_cell_column
         ] )
     ]

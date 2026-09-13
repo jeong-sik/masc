@@ -291,10 +291,13 @@ val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 val keeper_control_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
+  ?taken:string list ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The Keeper keys alone. The footer carries the armed or running action as a
-    status item ({!keeper_action_status}), so the fitter keeps that sentence
-    whole instead of treating it as a droppable key. *)
+(** The Keeper keys alone, less any whose single keys are in [taken] -- the
+    keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).
+    The footer carries the armed or running action as a status item
+    ({!keeper_action_status}), so the fitter keeps that sentence whole instead
+    of treating it as a droppable key. *)
 
 val keeper_action_status :
   Masc_tui_types.state -> Masc_tui_footer.status_item list

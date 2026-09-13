@@ -359,8 +359,7 @@ let keeper_status_width = 10
    flags first appear. *)
 let keeper_flags_width = 5
 
-(* Six cells fit [Message_layout.span_text]'s widest reading under a hundred
-   days ("99d23h"). *)
+(* Six cells fit [Message_layout.span_text]'s widest reading ("99d23h"). *)
 let keeper_last_turn_width = 6
 let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32

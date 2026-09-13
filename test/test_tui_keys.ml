@@ -1535,6 +1535,25 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_runs, []
   ]
 
+(* The table's own key notation, read as single keys. The Keeper detail
+   footer drops a control whose key a tab answers itself, so the Sandbox
+   tab's "d/m/s" has to be read as the [s] it takes from shutdown. *)
+let test_key_atoms_read_the_table_notation () =
+  let atoms = Masc_tui_keys.key_atoms in
+  Alcotest.(check (list string)) "alternatives" [ "d"; "m"; "s" ] (atoms "d/m/s");
+  Alcotest.(check (list string)) "spaced alternatives and a double press"
+    [ "b"; "e"; "u" ] (atoms "b / e / u u");
+  Alcotest.(check (list string)) "a chord" [ "arrows"; "enter" ] (atoms "arrows+enter");
+  Alcotest.(check (list string)) "a single key" [ "L" ] (atoms "L");
+  Alcotest.(check bool) "Sandbox takes s and o" true
+    (List.for_all
+       (fun key -> List.mem key (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_sandbox))
+       [ "s"; "o" ]);
+  Alcotest.(check bool) "Channels takes e" true
+    (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check (list string)) "Info takes nothing" []
+    (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
+
 let test_detail_tab_bindings_cover_the_live_keys () =
   List.iter
     (fun (tab, expected) ->
@@ -1912,6 +1931,8 @@ let () =
     [ ( "table"
       , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
             test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "key atoms read the table notation" `Quick
+            test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick

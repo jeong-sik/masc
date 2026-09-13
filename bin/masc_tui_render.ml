@@ -1768,19 +1768,21 @@ let render_board_compose (state : state) =
   let draft_chars = String.length draft_content in
   let raw_lines = String.split_on_char '\n' draft_content in
   let line_count = List.length raw_lines in
+  (* What the draft is and where it goes. The keys are the footer's: this
+     row carried "Enter: newline  Ctrl-E: $EDITOR" over a footer spelling
+     Ctrl-E its own way and not naming Enter at all. *)
   let kind_line =
     match state.board_compose_reply_to with
     | Some post_id ->
-        Printf.sprintf "  comment on %s  Enter: newline  Ctrl-E: $EDITOR"
-          (fit_width (Terminal_text.single_line post_id) 16)
+        Printf.sprintf "  comment on %s"
+          (Terminal_text.single_line post_id)
     | None ->
         let hearth_label =
           match state.board_compose_hearth with
           | Some h -> "#" ^ h
           | None -> "(default)"
         in
-        Printf.sprintf "  first line: title  rest: body  hearth: %s  Enter: newline  Ctrl-E: $EDITOR"
-          hearth_label
+        Printf.sprintf "  first line: title  rest: body  hearth: %s" hearth_label
   in
   let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%s, %s)%s"
     (screen_title " MASC Board")
@@ -1833,18 +1835,11 @@ let render_board_compose (state : state) =
   box_bottom buf cols;
   let prompt =
     if state.board_compose_armed then
-      let hearth_hint =
-        if Option.is_none state.board_compose_reply_to then "  h:cycle hearth"
-        else ""
-      in
-      Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  Esc:keep writing" hearth_hint
+      Masc_tui_keys.footer_hints_board_compose_armed
+        ~reply:(Option.is_some state.board_compose_reply_to)
     else
-      (* No [q] here. While the draft has the keys, [q] is a printable
-         scalar and goes into the draft like any other letter; the footer
-         offered it as quit, so the operator who took the offer got a [q]
-         in their post. Leaving the pane is [esc] and then [d], which the
-         armed footer above names. *)
-      "type to write  Ctrl-E:$EDITOR  Esc:menu  Tab:surfaces"
+      (* Projected from the key table; the table says why there is no [q]. *)
+      Masc_tui_keys.footer_hints_board_compose_writing
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =

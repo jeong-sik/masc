@@ -858,6 +858,7 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
     ; task_id = None
     ; continuation_channel = None
     ; sandbox_profile = None
+    ; network_mode = None
     }
   in
   (match
@@ -893,6 +894,142 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
       "a connector post was allowed without a judge through %s"
       (Keeper_gate.authorization_source_to_string source)
   | Keeper_gate.Unavailable _ -> fail "a connector post made the queue unavailable"
+;;
+
+(* Task-635 (#26058) narrow gap: an Observed_refused answer defers to the
+   judge unless the calling keeper's own [network_mode] is [Network_none],
+   in which case the sandbox's own network boundary — not the box's refused
+   write/socket policy — already ruled out every route the call could have
+   reached, so the Gate allows through [Network_isolated] without paying
+   the judge. [Observation_unavailable] always defers regardless of
+   [network_mode]: silence about what a box would have reached says
+   nothing about network reachability (a plain filesystem write inside the
+   keeper's own tree is untouched by network isolation). *)
+let observed_refused_once () =
+  Keeper_gate.Observed_refused
+    { status = Unix.WEXITED 1; stderr = "sandbox denied the write" }
+;;
+
+let observation_unavailable_once () =
+  Keeper_gate.Observation_unavailable "no box could be built for this profile"
+;;
+
+let network_probe_request ~network_mode base_path =
+  { Keeper_gate.keeper_name = "network-gate-keeper"
+  ; operation = Keeper_gate.tool_execute_gate_operation
+  ; input =
+      `Assoc
+        [ ( "input"
+          , `Assoc
+              [ ( "argv"
+                , `List [ `String "rm"; `String "-rf"; `String "/scratch/x" ] )
+              ] )
+        ]
+  ; call_summary = None
+  ; base_path
+  ; causal_context = None
+  ; task_id = None
+  ; continuation_channel = None
+  ; sandbox_profile = Some Keeper_types_profile_sandbox.Docker
+  ; network_mode
+  }
+;;
+
+let with_network_probe_workspace f =
+  let base_path = temp_dir "network-isolated-gate" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  select_workspace config Keeper_gate_mode.Auto_judge;
+  ignore (install_exn ~base_path);
+  f base_path
+;;
+
+let test_observed_refused_allows_without_a_judge_when_network_is_none () =
+  with_clean_gate_runtime @@ fun () ->
+  with_network_probe_workspace @@ fun base_path ->
+  let request =
+    network_probe_request
+      ~network_mode:(Some Keeper_types_profile_sandbox.Network_none)
+      base_path
+  in
+  (match
+     Keeper_gate.decide
+       ~keeper_always_allow:false
+       ~observe:observed_refused_once
+       request
+   with
+   | Keeper_gate.Allow { source = Keeper_gate.Network_isolated _; _ } -> ()
+   | Keeper_gate.Allow { source; _ } ->
+     failf
+       "expected Network_isolated, got %s"
+       (Keeper_gate.authorization_source_to_string source)
+   | Keeper_gate.Deferred _ ->
+     fail "network_mode=none still paid a judge turn on a refused observe"
+   | Keeper_gate.Unavailable _ -> fail "the queue was unavailable");
+  match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
+  | Ok [] -> ()
+  | Ok pending ->
+    failf
+      "network_mode=none left %d pending approval(s) behind"
+      (List.length pending)
+  | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+;;
+
+let test_observed_refused_still_defers_without_network_isolation () =
+  with_clean_gate_runtime @@ fun () ->
+  List.iter
+    (fun network_mode ->
+       with_network_probe_workspace @@ fun base_path ->
+       let request = network_probe_request ~network_mode base_path in
+       match
+         Keeper_gate.decide
+           ~keeper_always_allow:false
+           ~observe:observed_refused_once
+           request
+       with
+       | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
+       | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
+       | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
+         fail "a refused observe went to the human queue under auto_judge"
+       | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
+         fail ("refused observe: mode_state_invalid: " ^ detail)
+       | Keeper_gate.Allow { source; _ } ->
+         failf
+           "a network_mode other than Network_none bypassed the judge via %s"
+           (Keeper_gate.authorization_source_to_string source)
+       | Keeper_gate.Unavailable _ -> fail "the queue was unavailable")
+    [ None
+    ; Some Keeper_types_profile_sandbox.Network_inherit
+    ; Some Keeper_types_profile_sandbox.Network_policy
+    ]
+;;
+
+let test_observation_unavailable_always_defers_even_with_network_none () =
+  with_clean_gate_runtime @@ fun () ->
+  with_network_probe_workspace @@ fun base_path ->
+  let request =
+    network_probe_request
+      ~network_mode:(Some Keeper_types_profile_sandbox.Network_none)
+      base_path
+  in
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:observation_unavailable_once
+      request
+  with
+  | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
+  | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
+    fail "an unbuildable box went to the human queue under auto_judge"
+  | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
+    fail ("observation_unavailable: mode_state_invalid: " ^ detail)
+  | Keeper_gate.Allow { source; _ } ->
+    failf
+      "an unbuildable box was allowed through %s — network_mode=none proves \
+       nothing about what a box would have reached"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Unavailable _ -> fail "the queue was unavailable"
 ;;
 
 let () =
@@ -979,6 +1116,20 @@ let () =
             "auto_judge allows speak as local output without a judge"
             `Quick
             test_auto_judge_allows_speak_as_local_output_without_a_judge
+        ] )
+    ; ( "network_isolation (task-635, #26058)"
+      , [ test_case
+            "Observed_refused allows via Network_isolated when network_mode=none"
+            `Quick
+            test_observed_refused_allows_without_a_judge_when_network_is_none
+        ; test_case
+            "Observed_refused still defers without network isolation"
+            `Quick
+            test_observed_refused_still_defers_without_network_isolation
+        ; test_case
+            "Observation_unavailable always defers, even with network_mode=none"
+            `Quick
+            test_observation_unavailable_always_defers_even_with_network_none
         ] )
     ]
 ;;

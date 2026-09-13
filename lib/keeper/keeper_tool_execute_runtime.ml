@@ -142,6 +142,7 @@ let secret_files_for_source ~source ~observed ~prepare =
   | Keeper_gate.Keeper_always_allow
   | Keeper_gate.Workspace_always_allow
   | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Network_isolated _
   | Keeper_gate.Local_output -> prepare ()
 ;;
 
@@ -511,6 +512,7 @@ let handle_tool_execute_typed
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
           ; continuation_channel
           ; sandbox_profile = Some dispatch_bundle.sandbox_profile
+          ; network_mode = Some meta.network_mode
           }
         in
         (* RFC-0422: the box the gate may ask for, after every cheaper

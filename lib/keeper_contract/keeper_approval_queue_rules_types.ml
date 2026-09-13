@@ -149,6 +149,7 @@ type authorization_source =
   | Readonly_sandbox
   | Local_output
   | Observed_in_box
+  | Network_isolated
 
 type approval_rule =
   { id : string
@@ -218,6 +219,7 @@ let authorization_source_to_string = function
   | Readonly_sandbox -> "readonly_sandbox"
   | Local_output -> "local_output"
   | Observed_in_box -> "observed_in_box"
+  | Network_isolated -> "network_isolated"
 ;;
 
 let authorization_source_of_string = function
@@ -228,6 +230,7 @@ let authorization_source_of_string = function
   | "readonly_sandbox" -> Some Readonly_sandbox
   | "local_output" -> Some Local_output
   | "observed_in_box" -> Some Observed_in_box
+  | "network_isolated" -> Some Network_isolated
   | _ -> None
 ;;
 

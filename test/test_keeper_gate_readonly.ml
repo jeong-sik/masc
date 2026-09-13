@@ -215,6 +215,7 @@ let script_gate_request ?profile ?target ~sandbox_profile base_path script =
   ; input = script_gate_input ?profile ?target script
   ; base_path
   ; sandbox_profile
+  ; network_mode = None
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None
@@ -449,6 +450,7 @@ let gate_request ?profile ?target ~sandbox_profile base_path argv =
   ; input = gate_input ?profile ?target argv
   ; base_path
   ; sandbox_profile
+  ; network_mode = None
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None
@@ -467,6 +469,7 @@ let network_gate_request base_path ~capability =
         ]
   ; base_path
   ; sandbox_profile = None
+  ; network_mode = None
   ; causal_context = None
   ; task_id = None
   ; continuation_channel = None

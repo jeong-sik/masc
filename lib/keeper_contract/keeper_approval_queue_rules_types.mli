@@ -181,6 +181,11 @@ type authorization_source =
   | Observed_in_box
       (** The request ran once inside the executor's box and exited 0
           (RFC-0422); the kernel, not a table, said it had no effect. *)
+  | Network_isolated
+      (** The box's observation attempt was refused, but the requesting
+          keeper's own [network_mode] is [Network_none]: the sandbox's
+          network boundary, not the box, is what proved no route out
+          existed for this call (RFC-0415). *)
 
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;

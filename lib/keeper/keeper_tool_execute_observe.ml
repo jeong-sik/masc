@@ -76,5 +76,6 @@ let dispatch_authorized ~source ~on_output_chunk ~dispatch =
   | Keeper_gate.Keeper_always_allow
   | Keeper_gate.Workspace_always_allow
   | Keeper_gate.Readonly_sandbox
+  | Keeper_gate.Network_isolated _
   | Keeper_gate.Local_output -> dispatch ()
 ;;

@@ -223,6 +223,7 @@ let execute_through_gate
     ; task_id = None
     ; continuation_channel = None
     ; sandbox_profile = Some sandbox_profile
+    ; network_mode = None
     }
   in
   let decision = Gate.decide ~intent ?cycle_grant ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
@@ -422,6 +423,7 @@ let test_observed_capture_is_returned_without_second_child () =
     ; task_id = None
     ; continuation_channel = None
     ; sandbox_profile = Some Keeper_types_profile_sandbox.Remote_ssh
+    ; network_mode = None
     }
   in
   let decision = Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request in

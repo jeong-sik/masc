@@ -13,6 +13,7 @@ type request =
   ; task_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option
+  ; network_mode : Keeper_types_profile_sandbox.network_mode option
   }
 
 (* Gate operation vocabulary — the strings the approval store keys on and
@@ -76,6 +77,10 @@ type authorization_source =
   | Readonly_sandbox
   | Local_output
   | Observed_in_box of boxed_execution
+  | Network_isolated of
+      { status : Unix.process_status
+      ; stderr : string
+      }
 
 type observation =
   | Observed_result of boxed_execution
@@ -275,6 +280,12 @@ let rec take_matching_cycle_grant grant request =
     else take_matching_cycle_grant grant request
 ;;
 
+let status_label = function
+  | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
+;;
+
 let authorization_source_to_string = function
   | One_shot_resolution _ -> "one_shot_resolution"
   | Exact_always_rule _ -> "exact_always_rule"
@@ -283,6 +294,7 @@ let authorization_source_to_string = function
   | Readonly_sandbox -> "readonly_sandbox"
   | Local_output -> "local_output"
   | Observed_in_box _ -> "observed_in_box"
+  | Network_isolated _ -> "network_isolated"
 ;;
 
 let deferred_reason_to_string = function
@@ -327,6 +339,11 @@ let source_fields = function
     ; ( "observation_run"
       , `String (Keeper_types_profile_sandbox.observation_run_to_string run) )
     ]
+  | Network_isolated { status; stderr } ->
+    [ "authorization_source", `String "network_isolated"
+    ; "refused_status", `String (status_label status)
+    ; "refused_stderr", `String stderr
+    ]
 ;;
 
 let request_turn_id request =
@@ -346,7 +363,8 @@ let authorization_subject_id = function
   | Workspace_always_allow
   | Readonly_sandbox
   | Local_output
-  | Observed_in_box _ ->
+  | Observed_in_box _
+  | Network_isolated _ ->
     None
 ;;
 
@@ -478,6 +496,7 @@ let audit_authorization_source
   | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
   | Local_output -> Keeper_approval_queue_rules_types.Local_output
   | Observed_in_box _ -> Keeper_approval_queue_rules_types.Observed_in_box
+  | Network_isolated _ -> Keeper_approval_queue_rules_types.Network_isolated
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -493,7 +512,8 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
        | Workspace_always_allow
        | Readonly_sandbox
        | Local_output
-       | Observed_in_box _ ->
+       | Observed_in_box _
+       | Network_isolated _ ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -1990,12 +2010,6 @@ let observe_exact_rule_expired
        ())
 ;;
 
-let status_label = function
-  | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
-;;
-
 (* Sorted before the judge is paid. What the judge answers is whether an
    effect lands beyond the operator, and a speak lands none: the audio plays
    on the operator's own speakers (or a dashboard device the operator
@@ -2046,16 +2060,52 @@ let decide_after_observation request ~observe =
        in
        allow request source [ audit_receipt ]
      | Observed_refused { status; stderr } ->
-       Log.Keeper.info
-         ~keeper_name:request.keeper_name
-         "observe run refused operation=%s %s stderr_bytes=%d; the judge decides"
-         request.operation
-         (status_label status)
-         (String.length stderr);
-       (* The judge is shown what the box refused rather than left to guess
-          what the request would have done (RFC-0422 §3.3). *)
-       defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested
+       (match request.network_mode with
+        | Some Keeper_types_profile_sandbox.Network_none ->
+          (* The box's write/socket policy refused the attempt, but this
+             keeper's own sandbox already cuts every network route at its
+             boundary (RFC-0415) regardless of what that refused attempt
+             would have done — the judge exists to weigh reachable effect,
+             and Network_none removes the one this stage cannot otherwise
+             rule out. The refusal is not silently dropped: it travels as
+             the {!Network_isolated} audit source, and the caller still
+             dispatches the call for real (RFC-0422 §3.4's "no second
+             dispatch" applies only to {!Observed_in_box}, which this is
+             not — nothing ran yet). *)
+          Log.Keeper.info
+            ~keeper_name:request.keeper_name
+            "observe run refused operation=%s %s stderr_bytes=%d; \
+             network_mode=none reconfirmed, allowing without the judge"
+            request.operation
+            (status_label status)
+            (String.length stderr);
+          let source = Network_isolated { status; stderr } in
+          let audit_receipt =
+            audit_allow
+              request
+              ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+              source
+          in
+          allow request source [ audit_receipt ]
+        | Some (Keeper_types_profile_sandbox.Network_inherit | Keeper_types_profile_sandbox.Network_policy)
+        | None ->
+          Log.Keeper.info
+            ~keeper_name:request.keeper_name
+            "observe run refused operation=%s %s stderr_bytes=%d; the judge decides"
+            request.operation
+            (status_label status)
+            (String.length stderr);
+          (* The judge is shown what the box refused rather than left to
+             guess what the request would have done (RFC-0422 §3.3). *)
+          defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested)
      | Observation_unavailable reason ->
+       (* Unlike Observed_refused, no box could be built at all here — a
+          missing shim, an unadvertised box, a dispatch the typed gate
+          itself refused. That silence says nothing about what the request
+          would have reached: network_mode=none rules out one route, not
+          every one (a plain filesystem write inside the keeper's own tree
+          is untouched by network isolation), so this keeps the judge
+          exactly as before this stage existed regardless of network_mode. *)
        Log.Keeper.info
          ~keeper_name:request.keeper_name
          "observe run unavailable operation=%s reason=%s; the judge decides"

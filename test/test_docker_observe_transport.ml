@@ -57,7 +57,8 @@ let run ~base_path ~container ~missing_container ~receipt_path ~workdir =
       ; input = `Assoc ["input", `Assoc ["argv", `List (List.map (fun a -> `String a) argv)]]
       ; call_summary = None; base_path; causal_context = None; task_id = None
       ; continuation_channel = None
-      ; sandbox_profile = Some Keeper_types_profile_sandbox.Docker }
+      ; sandbox_profile = Some Keeper_types_profile_sandbox.Docker
+      ; network_mode = None }
     in
     let decision = Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request in
     let source = match decision with
@@ -123,7 +124,7 @@ let run ~base_path ~container ~missing_container ~receipt_path ~workdir =
     { keeper_name = "docker-probe"; operation = "tool_execute"
     ; input = `Assoc ["input", `Assoc ["argv", `List [`String "/bin/ls"]]]
     ; call_summary = None; base_path; causal_context = None; task_id = None
-    ; continuation_channel = None; sandbox_profile = Some Keeper_types_profile_sandbox.Docker } in
+    ; continuation_channel = None; sandbox_profile = Some Keeper_types_profile_sandbox.Docker; network_mode = None } in
   (match Gate.decide ~keeper_always_allow:false ~observe:(Stage.observe stage) request with
    | Gate.Deferred _ -> ()
    | Gate.Allow _ | Gate.Unavailable _ -> fail "missing shim did not retain ordinary permission handling");

@@ -36,7 +36,7 @@ val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
-val lines : width:int -> t -> string list
+val lines : ?height:int -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)
 

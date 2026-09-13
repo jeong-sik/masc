@@ -4500,11 +4500,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · a appends a failover slot"
+    | None -> "  Standalone LLM lanes · o:Lane Add-ons · a:append slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;

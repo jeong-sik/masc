@@ -21511,6 +21511,9 @@ and is loaded on demand through keeper_skill.
                           ~mailbox:async_messages;
                         launch_code_file_load state ~mailbox:async_messages
                           ~path)))
+       | Some "o" | Some "O" when state.view = Lanes ->
+           launch_lane_addons state ~mailbox:async_messages
+             Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which the arrow keys move. *)

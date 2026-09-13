@@ -474,7 +474,32 @@ let () =
   let no_articles = {view with scene = Some {scene with content =
     {content with nodes = [region "main" Masc.Browser_scene.Main "Timeline"]}}} in
   assert ((Lane.move_scene_article ~backwards:false no_articles).scene_cursor = no_articles.scene_cursor);
+  let article_a : Masc.Browser_scene.region_ref =
+    {node_id = "post-a"; role = Masc.Browser_scene.Article; label = "Post A"} in
+  let article_b : Masc.Browser_scene.region_ref =
+    {node_id = "post-b"; role = Masc.Browser_scene.Article; label = "Post B"} in
+  let content_node node_id text ancestor_region : Masc.Browser_scene.node =
+    {node_id; kind = Text; tag = "p"; text; heading_level = None;
+     ancestor_region;
+     rects = [{x = 0.; y = 0.; width = 10.; height = 10.}];
+     color = "rgb(0,0,0)"; font_size = 14.; font_weight = "400";
+     white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped}
+  in
   let content_scene = {view with scene = Some {scene with content =
-    {content with view = Content; nodes = [region "post-a" Masc.Browser_scene.Article "Post A"]}}} in
-  assert ((Lane.move_scene_article ~backwards:false content_scene).scene_cursor = content_scene.scene_cursor);
-  print_endline "PASS article navigation uses typed regions and skips non-article landmarks"
+    {content with view = Content; nodes = [
+      content_node "a-title" "Post A" (Some article_a);
+      content_node "a-body" "A body" (Some article_a);
+      content_node "navigation" "Suggestions" None;
+      content_node "b-title" "Post B" (Some article_b)]}}} in
+  assert (Lane.scene_has_articles content_scene);
+  let content_next = Lane.move_scene_article ~backwards:false
+    {content_scene with scene_cursor = 0} in
+  assert (content_next.scene_cursor = 3);
+  let content_previous = Lane.move_scene_article ~backwards:true content_next in
+  assert (content_previous.scene_cursor = 0);
+  let content_without_articles = {view with scene = Some {scene with content =
+    {content with view = Content; nodes = [content_node "plain" "Plain" None]}}} in
+  assert (not (Lane.scene_has_articles content_without_articles));
+  assert ((Lane.move_scene_article ~backwards:false content_without_articles).scene_cursor =
+    content_without_articles.scene_cursor);
+  print_endline "PASS article navigation uses typed regions and article ancestors"

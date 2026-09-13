@@ -2504,13 +2504,6 @@ let help_masthead (_state : state) =
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines (state : state) =
-  let format_key key =
-    let trimmed = String.trim key in
-    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
-      trimmed
-    else
-      "[" ^ trimmed ^ "]"
-  in
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2529,12 +2522,18 @@ let help_lines (state : state) =
       else
         Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
     in
+    (* The key as the table spells it, in its own column. Each key used to be
+       wrapped in brackets unless it already started and ended with one, so
+       [/] for find and [ / ] for previous / next -- the bracket keys
+       themselves -- sat on neighbouring rows looking like the same key. The
+       column already sets the key apart, and the footer and the slash
+       commands below draw theirs without brackets. *)
     header_line
     :: List.map
          (fun (key, action) ->
            Printf.sprintf "  %s%-16s%s %s"
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (format_key key)
+             (String.trim key)
              Ansi.reset
              action)
          entries

@@ -14841,7 +14841,7 @@ def run_theme_scheme_regression(executable: str) -> None:
         before = len(output)
         # The cursor opens on the first row, which the picker sorts to be a
         # native-pass scheme -- the case that used to send nothing.
-        send_and_wait(process, master_fd, output, b"\r", b"Enter picks another")
+        send_and_wait(process, master_fd, output, b"\r", b"Enter:pick another")
         sent = bytes(output[before:])
 
         if b"\x1b]4;" not in sent:

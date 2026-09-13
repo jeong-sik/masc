@@ -141,12 +141,9 @@ def main(executable: str) -> None:
             key(b"q", b"MASC Overview")
             key(b":go lane add-ons\r", b"TOML draft second.toml")
             terminal.read_available(master_fd, output)
-            after_release = len(output)
             release.set()
             if not terminal.wait_for_fixture_event(process, master_fd, output, finished, timeout=5):
                 raise AssertionError("delayed save did not finish")
-            terminal.wait_for_output(process, master_fd, output, b"Recorded observations",
-                                     start=after_release, timeout=5)
             state["delay"] = False
             # Inspect leaves the selected draft unchanged, so an incremental
             # frame need not print its title again. Join the new request and

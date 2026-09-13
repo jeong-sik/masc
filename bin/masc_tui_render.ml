@@ -6324,29 +6324,23 @@ let render_keeper_detail (state : state) =
       ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
-    let footer =
-      keeper_action_hints state (Some (keeper_reading state k))
+    (* The row the Keepers list draws, through the same [footer_line]: the
+       armed or running action as a status item, the keys as items the fitter
+       can drop whole, [Esc] and [q] kept whatever else goes. It was cut with
+       [fit_width] instead, which keeps the front and loses the back -- where
+       [Left / Esc] and [q] sit -- so at 80 columns the row ended "t:c…" and
+       named no way out. [key:label] for the roster pane's key too. *)
+    let hints = keeper_control_hints state (Some (keeper_reading state k)) in
+    let hints =
+      if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
+      else hints
     in
-    (* [key:label], the way every other hint on this row and on every other
-       footer is spelled. "h/l pane" was the one hint written as two words.
-       The two trailing cells are the separator: the hints no longer open with
-       one of their own. *)
     let footer =
-      if keeper_roster_pane_shown state ~cols then "  h/l:pane  " ^ footer
-      else footer
+      footer_line state ~status:(keeper_action_status state) ~max_cells:cols ~hints
     in
-    (* Cut to the terminal, the way every other footer is: [footer_line] takes
-       [~max_cells] and this one never did. The row is about 150 cells wide
-       across its fourteen hints, and the roster pane adds ten more in front,
-       so on any ordinary terminal the tail went past the edge. Autowrap is off
-       while a frame draws, so nothing moved -- the last hints were simply
-       dropped by the terminal, silently, with the keys still working.
-       [fit_width] counts cells rather than bytes and closes the style it cut
-       through. *)
-    let footer = Message_layout.fit_width footer (max 1 cols) in
     if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
-      Buffer.add_string buf (footer ^ "\n");
+      Buffer.add_string buf footer;
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
     end
@@ -6366,7 +6360,7 @@ let render_keeper_detail (state : state) =
       in
       write_two_panes buf ~left_cols:left_cols ~left:left_buf
         ~right:right_buf;
-      Buffer.add_string buf (footer ^ "\n");
+      Buffer.add_string buf footer;
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
     end

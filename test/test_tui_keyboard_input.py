@@ -7225,7 +7225,15 @@ def context_inspector_interaction() -> Interaction:
         )
         # The overlay is headed "MASC Cheat Sheet" now; "Slash commands" was a
         # section title it no longer carries.
-        send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        cheat_sheet = CSI_RE.sub(
+            b"", send_and_wait(process, master_fd, output, b"?", b"MASC Cheat Sheet")
+        )
+        # The keys that close and toggle the sheet are the footer's. The title
+        # used to spell them as well, so the frame said each of them twice.
+        if b"[Esc] close" in cheat_sheet or b"[h] toggle" in cheat_sheet:
+            raise AssertionError(f"Cheat sheet title spells footer keys: {cheat_sheet!r}")
+        if b"Esc:close" not in cheat_sheet:
+            raise AssertionError(f"Cheat sheet footer lost its way out: {cheat_sheet!r}")
         # The /context disclosure this step used to assert is not here any
         # more: the cheat sheet lists keys, and the slash commands announce
         # themselves in the composer's hint line as the word is typed

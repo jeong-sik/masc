@@ -2490,34 +2490,21 @@ let runtime_config_status_lines state ~cols =
     |> List.map (fun text -> tone, text)) lines
 
 
-(* The sheet's masthead. It carries no keys and no surface name: both scroll
-   away with it, and both are said by rows that do not. The overlay's own title
-   row is fixed chrome -- it draws "hints on/off . [h] toggle . [Esc] close" at
-   every width, above the divider -- and the sheet's first section names the
-   active surface two rows under this. *)
-let help_ascii_banner ~cols (_state : state) =
-  let inner_width = max 1 (framed_inner_width cols) in
-  let bar_char = "\xe2\x94\x80" in
-  let repeat_utf8 str count =
-    let buf = Buffer.create (String.length str * count) in
-    for _ = 1 to count do Buffer.add_string buf str done;
-    Buffer.contents buf
-  in
-  if inner_width >= 72 then
-    [ "  " ^ (Theme.info ()) ^ "\xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97\xe2\x95\x94\xe2\x95\x90\xe2\x95\x97" ^ Ansi.reset
-      ^ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "M A S C" ^ Ansi.reset
-      ^ "  \xc2\xb7  " ^ Ansi.bold ^ "Multi-Agent Shared Context" ^ Ansi.reset
-    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
-      ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
-    ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
-    ; ""
-    ]
-  else
-    [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent Shared Context ]" ^ Ansi.reset
-    ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
-    ; ""
-    ]
+(* The sheet's masthead: the product's name and a blank row. It carries no keys
+   and no surface name: both scroll away with it, and both are said by rows
+   that do not. The overlay's title row is fixed chrome that says whether hints
+   are on, the footer row under the frame draws h and Esc, and the sheet's
+   first section names the active surface two rows under this.
+
+   It was a three-row box-drawing logo with a tagline and a rule under it, five
+   rows at 72 columns and up. The title row above already says MASC Cheat
+   Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
+   opened to read. *)
+let help_masthead (_state : state) =
+  [ "  " ^ Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ "MASC"
+    ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
+  ; ""
+  ]
 
 
 (* The [?] help screen: every binding, grouped by the surface that answers

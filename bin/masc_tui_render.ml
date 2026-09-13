@@ -9346,9 +9346,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          let article_hint = match view.scene with
-            | Some scene when scene.content.view = Browser_lane.Regions -> "N/P:article  "
-            | Some _ | None -> "" in
+          let article_hint =
+            if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
           action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
           "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"

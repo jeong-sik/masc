@@ -3771,17 +3771,37 @@ module Browser_lane_view = struct
           ordered in
         { t with scene_cursor = Option.value ~default:first next }
 
-  (** Move between exact [article] regions in an observed region scene. *)
+  (* The first observed node for each article is enough for a fast jump. In a
+     regions scene the node itself is the article landmark; in a content scene
+     the browser observation carries the article's typed ancestor reference on
+     each text/control node. Unnamed or untyped nodes never become guesses. *)
+  let scene_article_target_indices t =
+    match t.scene with
+    | None -> []
+    | Some scene ->
+        let targets = scene_targets t |> List.mapi
+          (fun index (node : Masc.Browser_scene.node) -> index, node) in
+        match scene.content.view with
+         | Browser_lane.Regions ->
+             List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+               match node.kind with
+               | Region Masc.Browser_scene.Article -> Some index
+               | Region _ | Text | Raster | Control _ -> None) targets
+         | Browser_lane.Content ->
+             let seen = Hashtbl.create 16 in
+             List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+               match node.ancestor_region with
+               | Some {role = Masc.Browser_scene.Article; node_id; _}
+                 when not (Hashtbl.mem seen node_id) ->
+                   Hashtbl.add seen node_id ();
+                   Some index
+               | Some _ | None -> None) targets
+
+  let scene_has_articles t = scene_article_target_indices t <> []
+
+  (** Move between exact observed [article] landmarks or article ancestors. *)
   let move_scene_article ~backwards t =
-    let articles = match t.scene with
-      | Some scene when scene.content.view = Browser_lane.Regions ->
-          scene_targets t |> List.mapi (fun index node -> index, node)
-      | Some _ | None -> [] in
-    let articles = articles
-      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
-        match node.kind with
-        | Region Masc.Browser_scene.Article -> Some index
-        | Region _ | Text | Raster | Control _ -> None) in
+    let articles = scene_article_target_indices t in
     match articles with
     | [] -> t
     | first :: _ ->

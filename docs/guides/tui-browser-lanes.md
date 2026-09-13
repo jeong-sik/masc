@@ -22,7 +22,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
-| `N` / `P` | In a regions scene, select the next / previous observed `article` region |
+| `N` / `P` | Select the next / previous observed `article` region or article ancestor |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
@@ -212,10 +212,14 @@ region list. A stale reference is rejected once the region is replaced or the
 page reloads. A connector that does not support region reading and returns
 the whole page instead is not treated as success.
 
-In a regions scene, `N`/`P` move directly between observed `article` regions.
-They use the typed landmark role; navigation, suggestions and ordinary text
-remain available through `n`/`p` and `Tab`/`Shift-Tab`. If no article role was
-observed, the shortcut leaves the current selection unchanged.
+`N`/`P` move directly between observed `article` regions. In a content scene,
+they use the first node carrying each typed article ancestor, so a feed can
+jump between posts without opening the region picker first. They use observed
+landmark identity; navigation, suggestions and ordinary text remain available
+through `n`/`p` and `Tab`/`Shift-Tab`. If no article role or article ancestor was
+observed, the shortcut leaves the current selection unchanged. In a content
+scene this selects the first observed node; `Enter` still performs that node's
+observed action, while region scoping remains the explicit `v` → `Enter` path.
 
 Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
 observed from `BrowserRead mode=regions` as `scope`. This path selects an

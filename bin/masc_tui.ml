@@ -18167,9 +18167,8 @@ and is loaded on demand through keeper_skill.
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
-                 | "N" | "P" when (match view.scene with
-                     | Some scene -> scene.content.view = Browser_lane.Regions
-                     | None -> false) && not (busy view) ->
+                 | "N" | "P" when Option.is_some view.scene
+                                      && scene_has_articles view && not (busy view) ->
                      reveal_selection (move_scene_article ~backwards:(key = "P") view)
                  | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
                      reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)

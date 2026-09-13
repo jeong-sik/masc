@@ -1075,6 +1075,8 @@ let approval_outcome_to_string = function
 
 let phase_text ~now t =
   match t.phase with
+  | Waiting when awaiting_continuation t ->
+      "waiting for the Keeper to continue; this request is still open"
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
          the outside. Saying which of the two it is -- the keeper's queue, or a
@@ -1688,12 +1690,12 @@ let apply_delta ~now t (delta : Live.delta) =
       t.ended_at <- Some now;
       settle t ~now
   | Live.Run_finished ->
-      (match t.reply with
-       | Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } ->
+      (match t.phase, t.reply with
+       | (Waiting | Working), Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } ->
          t.phase <- Waiting;
          t.ended_at <- None;
          t.settled_at <- None
-       | Some _ | None ->
+       | _, (Some _ | None) ->
          t.phase <- Stream_ended;
          t.ended_at <- Some now;
          settle t ~now)

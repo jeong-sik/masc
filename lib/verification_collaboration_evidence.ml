@@ -40,9 +40,11 @@ let require_visible authority (post : Board.post) =
     Error (Access_denied
       "Direct discussion is outside this review authority; immutable target readership is not available")
 
+(* The canonical Board and Fusion handlers trim the id before an exact lookup;
+   an id this reader keeps untrimmed would miss the same source they find. *)
 let required_id args field =
-  match Json_util.get_string args field with
-  | Some value when String.trim value <> "" -> Ok value
+  match Option.map String.trim (Json_util.get_string args field) with
+  | Some value when value <> "" -> Ok value
   | Some _ | None -> Error (Invalid_request (field ^ " is required for an exact source lookup"))
 
 let optional_integer args field ~default =

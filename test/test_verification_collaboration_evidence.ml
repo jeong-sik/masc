@@ -93,6 +93,10 @@ let test_direct_authority_and_unknown () = with_fixture (fun _config task goal -
   let own = post ~author:"producer" ~visibility:Board.Direct "@peer private author-owned evidence" in
   let other = post ~author:"peer" ~visibility:Board.Direct "@producer mutable address is not a stored readership grant" in
   ignore (read task "masc_board_post_get" (post_args own));
+  check string "a padded post id reads the post the canonical handler reads" (Board.Post_id.to_string own.id)
+    Yojson.Safe.Util.(read task "masc_board_post_get"
+      (`Assoc ["post_id", `String (" " ^ Board.Post_id.to_string own.id ^ "\n")])
+      |> member "post" |> member "id" |> to_string);
   denied task "masc_board_post_get" (post_args other) "verification_source_access_denied";
   denied goal "masc_board_post_get" (post_args own) "verification_source_access_denied";
   denied goal "masc_board_post_get" (post_args other) "verification_source_access_denied";
@@ -171,7 +175,11 @@ let test_fusion_original_and_separate_decision () = with_fixture (fun config tas
     check string "same evidence hash as decision" (Fusion_decision.evidence_sha256 p)
       (wire |> member "evidence_sha256" |> to_string);
     check bool "actual Keeper choice is separately attributed" true
-      (wire |> member "keeper_decisions" = `List [recorded.event])) [task; goal];
+      (wire |> member "keeper_decisions" = `List [recorded.event]);
+    let padded = read surface "masc_fusion_status" (run_args (" " ^ id ^ "\n")) in
+    check string "a padded run id reads the run the canonical handler reads" (Board.Post_id.to_string p.id)
+      (padded |> member "post" |> member "id" |> to_string);
+    check string "the echoed run id is the exact one" id (padded |> member "run_id" |> to_string)) [task; goal];
   check int "reads do not adopt or duplicate choices" 1
     (List.length (Fusion_decision.read ~config ~run_id:id |> require "read decisions")))
 
@@ -189,7 +197,14 @@ let test_fusion_foreign_wrong_origin_and_no_write () = with_fixture (fun config 
   ignore (fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"not-fusion" "wrong-origin");
   denied task "masc_fusion_status" (run_args "wrong-origin") "verification_source_unavailable";
   denied goal "masc_fusion_status" (run_args "absent") "verification_source_unavailable";
-  denied goal "masc_fusion_status" (`Assoc []) "verification_source_invalid_request";
+  (* The verifier schema requires run_id, so {} is refused at the advertised
+     boundary; the reader's own parser refuses it and a blank id as well. *)
+  invalid_input goal "masc_fusion_status" (`Assoc []);
+  (match Verification_collaboration_evidence.read_fusion ~config
+     ~authority:Verification_collaboration_evidence.Goal_workspace ~args:(`Assoc []) with
+   | Error (Verification_collaboration_evidence.Invalid_request _) -> ()
+   | Error _ | Ok _ -> fail "reader accepted a Fusion lookup without run_id");
+  denied goal "masc_fusion_status" (run_args "  ") "verification_source_invalid_request";
   List.iter (fun name -> match call task name (`Assoc []) with
     | Tool_result.Failed _ -> () | _ -> fail "verifier gained a write or execution tool")
     ["Execute"; "Write"; "masc_board_post"; "masc_fusion"; "masc_fusion_decision"];

@@ -272,10 +272,25 @@ let test_schemas_are_the_descriptor_schemas () =
              (schema.name ^ " description is the descriptor's")
              expected
              schema.description;
-           Alcotest.(check bool)
-             (schema.name ^ " input schema is the descriptor's")
-             true
-             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+           (match schema.name with
+            | "masc_fusion_status" ->
+              (* The Keeper schema leaves run_id optional because an empty call
+                 lists runs; the verifier reads one exact run and has no
+                 listing. It requires that id and names no other parameter. *)
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string))
+                "masc_fusion_status requires the exact run_id"
+                [ "run_id" ]
+                (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+              Alcotest.(check (list string))
+                "masc_fusion_status names only the descriptor's parameters"
+                (descriptor.Descriptor.input_schema |> member "properties" |> keys)
+                (schema.input_schema |> member "properties" |> keys)
+            | _ ->
+              Alcotest.(check bool)
+                (schema.name ^ " input schema is the descriptor's")
+                true
+                (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema))
          | found ->
            Alcotest.failf
              "%s resolves to %d descriptors; the surface needs exactly one"

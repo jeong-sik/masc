@@ -33,9 +33,37 @@ and producer_scope =
   | Keeper_producer of Keeper_meta_contract.keeper_meta
   | Workspace_producer
 
+(* A Keeper's masc_fusion_status lists its tracked runs when run_id is omitted.
+   This reader has no listing: it reads one exact run. Reusing the Keeper schema
+   advertised {} as a valid call that the reader then refused, so the verifier
+   declares its own input. Dispatch validates against this same descriptor, so
+   the advertised schema is the accepted one. *)
+let exact_fusion_run_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "run_id"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String
+                      "Exact Fusion run id (the run_id returned by masc_fusion) \
+                       whose original durable evidence to read." )
+                ] )
+          ] )
+    ; "required", `List [ `String "run_id" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
-  | [ descriptor ] -> Ok (tool, descriptor)
+  | [ descriptor ] ->
+    (match tool with
+     | Fusion_source ->
+       Ok (tool, { descriptor with input_schema = exact_fusion_run_schema })
+     | Read_file | Search_files | Web_fetch | Board_source -> Ok (tool, descriptor))
   | [] ->
     Error
       (Printf.sprintf

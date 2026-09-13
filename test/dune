@@ -3373,7 +3373,13 @@
 (test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
- (libraries alcotest masc masc_tui_preset_text masc_tui_fetched))
+ (libraries
+  alcotest
+  masc
+  masc_tui_fetched
+  masc_tui_keys
+  masc_tui_preset_text
+  masc_tui_types))
 
 (test
  (name test_tui_surface_needs)

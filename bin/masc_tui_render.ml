@@ -114,7 +114,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
-  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  if modal
+     || Masc_tui_types.on_activity_screen state.view
+     || Option.is_some (browser_lane_on_screen state)
   then 0
   else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
   then Masc_tui_acting_pane.pane_cols
@@ -13899,8 +13901,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
-     over the whole terminal and the Activity feed already fills its own
-     screen, so neither reserves the columns. *)
+     over the whole terminal and the Activity screen, both its tabs,
+     already fills its own, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
      acting_pane_columns state ~terminal_cols);

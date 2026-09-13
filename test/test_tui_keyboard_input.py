@@ -10664,6 +10664,49 @@ def keeper_gate_mode_footer_interaction(
 
     return interact
 
+def run_activity_logs_tab_pane_regression(executable: str) -> None:
+    """The Logs tab is the Activity screen, so the acting pane stays off it.
+
+    The pane exempted the event feed's view alone. Pressing 2 on Activity
+    then opened the pane beside the log table and took 56 of its columns,
+    and 1 closed it again: one screen, two widths, a tab apart.
+    """
+
+    def pane_row(output: bytearray) -> int:
+        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
+        return screen_row_of(screen_rows(completed), b"[Recent]")
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        # Wide enough for the pane (its threshold is 132 columns), and the
+        # Overview shows it is there to be kept off: the tab strip is not
+        # the thing that hides it.
+        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        drain_until_quiet(process, master_fd, output)
+        if pane_row(output) < 0:
+            raise AssertionError(
+                f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
+            )
+        tab_until(process, master_fd, output, b"MASC Activity")
+        for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
+                         (b"2", b"\xe2\x96\xb8Logs")):
+            send_and_wait(process, master_fd, output, key, tab)
+            drain_until_quiet(process, master_fd, output)
+            if pane_row(output) >= 0:
+                raise AssertionError(
+                    f"the acting pane opened on the Activity tab {tab!r}: {screen_text(bytes(output))!r}"
+                )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Activity Logs tab keeps the acting pane off",
+        interact=interact,
+        http_fixtures=keeper_runtime_http_fixtures(),
+    )
+
+
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -13364,6 +13407,7 @@ def run_keyboard_regression(executable: str) -> None:
         interact=enter_outside_changes_interaction,
         http_fixtures=enter_split_fixtures,
     )
+    run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
     changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()

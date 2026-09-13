@@ -2568,7 +2568,7 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let title = planning_workspace_title state ~tab:Planning_goals ~window:"" in
+  let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" in
   let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
@@ -2885,7 +2885,7 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s%s%s  %s"
-    (planning_workspace_title state ~tab:Planning_goals ~window:"")
+    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:"")
     status_color (bracketed ~max_cells:planning_phase_column status_label) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -6326,23 +6326,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        underline, and from every text capture -- a frame dump, a screenshot
        pasted into an issue, the keyboard-input fixtures. Info's own body
        opens with a section called "Identity", which is also the name of
-       another tab, so a reader with no mark had a wrong guess waiting. *)
-    let tabs =
-      Masc_tui_types.keeper_detail_tabs
-      |> List.map (fun tab ->
-             let label = Masc_tui_types.keeper_detail_tab_label tab in
-             if tab = state.detail_tab then
-               Ansi.bold ^ Ansi.underline
-               ^ Masc_tui_theme.Glyph.current_entry
-               ^ label ^ Ansi.reset
-             else Ansi.dim ^ label ^ Ansi.reset)
-      |> String.concat "  "
-    in
-    let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
+       another tab, so a reader with no mark had a wrong guess waiting.
+
+       Drawn through [tab_strip] with the row's width: nine tabs are wider
+       than the row beside the roster pane, and cut from the right the mark
+       on Runs was the part that went. *)
+    let before =
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s%s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs
+        Ansi.reset tab_strip_gap
     in
+    let tabs =
+      tab_strip ~width:(tab_strip_width ~cols ~before)
+        (List.map
+           (fun tab ->
+             (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
+           Masc_tui_types.keeper_detail_tabs)
+    in
+    let title = before ^ tabs in
     box_line buf cols title;
 
     (* Divider *)
@@ -6693,18 +6694,20 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
-let activity_tab_strip ~on_logs =
-  tab_strip [ ("Events", not on_logs); ("Logs", on_logs) ]
+let activity_tab_strip ~cols ~on_logs =
+  tab_strip
+    ~width:(tab_strip_width ~cols ~before:(screen_title " MASC Activity" ^ tab_strip_gap))
+    [ ("Events", not on_logs); ("Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
    the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
    as that tab's count. It stays after the strip rather than moving before it,
    so the tabs do not shift sideways when the count grows a digit. *)
-let activity_title ~on_logs reading =
+let activity_title ~cols ~on_logs reading =
   Printf.sprintf "%s  %s  \xc2\xb7  %s"
     (screen_title " MASC Activity")
-    (activity_tab_strip ~on_logs)
+    (activity_tab_strip ~cols ~on_logs)
     reading
 
 let render_system_logs (state : state) =
@@ -6747,14 +6750,14 @@ let render_system_logs (state : state) =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  %s  %s"
-          (activity_title ~on_logs:true
+          (activity_title ~cols ~on_logs:true
              (title_missing_reading ~error:state.system_logs_error))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s  %s  %s"
-          (activity_title ~on_logs:true
+          (activity_title ~cols ~on_logs:true
              (Printf.sprintf "(%d of %d, seq %d)%s" total_entries
                 snapshot.sys_total snapshot.sys_latest_seq filter_note))
           timestamp (connection_badge state)
@@ -6882,13 +6885,13 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:"")
           (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review
+          (planning_workspace_title state ~cols ~tab:Planning_task_review
              ~window:
                (Printf.sprintf " (%d of %d)" shown
                   snapshot.Masc.Tui_decode.vs_total))
@@ -7142,7 +7145,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~tab:Planning_task_review ~window:""
+       (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
         ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
@@ -7310,7 +7313,7 @@ let render_harness_list (state : state) =
     match state.harness with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:"")
           (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
@@ -7330,7 +7333,7 @@ let render_harness_list (state : state) =
           else ""
         in
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts
+          (planning_workspace_title state ~cols ~tab:Planning_verdicts
              ~window:
                (Printf.sprintf " (%d%s%s)" shown of_total by_fallback))
           timestamp (connection_badge state)
@@ -7588,7 +7591,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (planning_workspace_title state ~tab:Planning_verdicts ~window:""
+       (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
         ^ " \xe2\x96\xb8 verdict")
        (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
        (connection_badge state));
@@ -9953,6 +9956,9 @@ let render_runtime (state : state) =
         Printf.sprintf "%s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
           (tab_strip
+             ~width:
+               (tab_strip_width ~cols
+                  ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap))
              [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
                    (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
@@ -10210,7 +10216,7 @@ let render_tools (state : state) =
   in
   box_top buf cols;
   box_line buf cols header;
-  box_line buf cols (" " ^ Render_tools.tools_pane_strip state);
+  box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()
@@ -10650,7 +10656,7 @@ let render_acting (state : state) =
      "scope turns · …", one line down. *)
   let header =
     Printf.sprintf "%s  %s  %s"
-      (activity_title ~on_logs:false
+      (activity_title ~cols ~on_logs:false
          (Printf.sprintf "(%s \xc2\xb7 %s held)"
             (Message_layout.count_noun shown "row")
             (Message_layout.count_noun held "event")))
@@ -11864,11 +11870,9 @@ let render_runtime_params (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
+  let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Config")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -12114,19 +12118,20 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s · %s%s%s  "
+      (screen_title " MASC 프롬프트")
+      Ansi.dim count_text
+      (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
+      Ansi.reset
+      (match held_back with
+       | [] -> ""
+       | entries ->
+         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+           (List.length entries) Ansi.reset)
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s · %s%s%s  %s  %s"
-       (screen_title " MASC 프롬프트")
-       Ansi.dim count_text
-       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
-       Ansi.reset
-       (match held_back with
-        | [] -> ""
-        | entries ->
-          Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-            (List.length entries) Ansi.reset)
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -12317,12 +12322,13 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view prompts ~count:(fun _ -> Printf.sprintf "%d개" total)
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s · 읽기 전용%s  "
+      (screen_title " MASC 런타임 프롬프트 자산")
+      Ansi.dim count_text Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s · 읽기 전용%s  %s  %s"
-       (screen_title " MASC 런타임 프롬프트 자산")
-       Ansi.dim count_text Ansi.reset
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
@@ -12455,12 +12461,12 @@ let render_presets (state : state) =
     | None -> title_missing_reading ~error:state.presets_error
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s%s  " (screen_title " MASC 프리셋") Ansi.dim count_text
+      Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s%s  %s  %s"
-       (screen_title " MASC 프리셋")
-       Ansi.dim count_text Ansi.reset
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
@@ -12589,13 +12595,14 @@ let render_themes (state : state) =
   let lift_on = Masc_tui_theme.lift_is_enabled () in
   let name_width = theme_name_width ~cols in
   box_top buf cols;
+  let before =
+    screen_title
+      (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
+         (List.length entries) native_count)
+    ^ tab_strip_gap
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title
-          (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
-             (List.length entries) native_count))
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
@@ -12610,6 +12617,7 @@ let render_themes (state : state) =
     let chip label active count = (label ^ " " ^ string_of_int count, active) in
     Ansi.dim ^ "f:filter  " ^ Ansi.reset
     ^ tab_strip
+        ~width:(tab_strip_width ~cols ~before:"  f:filter  ")
         [ chip "All" (state.theme_filter = `All) (List.length all_entries)
         ; chip "Dark" (state.theme_filter = `Dark) dark_count
         ; chip "Light" (state.theme_filter = `Light) light_count
@@ -12707,9 +12715,10 @@ let render_config_models (state : state) =
         ^ title_missing_reading ~error:state.runtime_config_view_error
         ^ Ansi.reset
   in
+  let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Models")
-       (config_pane_strip state) path_note (connection_badge state));
+    (Printf.sprintf "%s%s  %s  %s" before (config_pane_strip ~cols ~before state)
+       path_note (connection_badge state));
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -12900,11 +12909,9 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | None -> "?"
   in
   box_top head cols;
+  let before = screen_title " MASC Voice · setup" ^ tab_strip_gap in
   box_line head cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Voice · setup")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line buf cols "";
   box_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
@@ -13057,11 +13064,9 @@ let render_voice (state : state) =
     | lines -> List.iter (fun line -> box_line buf cols line) lines
   in
   box_top head cols;
+  let before = screen_title " MASC Voice" ^ tab_strip_gap in
   box_line head cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Voice")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -13152,9 +13157,10 @@ let render_config (state : state) =
         ^ title_missing_reading ~error:state.runtime_config_view_error
         ^ Ansi.reset
   in
+  let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
-    Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
-      (config_pane_strip state) path_note
+    Printf.sprintf "%s%s  %s  %s  %s" before
+      (config_pane_strip ~cols ~before state) path_note
       (Printf.sprintf "%s%s%s" Ansi.dim
          (let now = Unix.localtime (Unix.gettimeofday ()) in
           Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -13426,6 +13432,9 @@ let render_context_inspector state =
   in
   let tabs =
     tab_strip
+      ~width:
+        (tab_strip_width ~cols
+           ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  "))
       [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
       ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
       ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)

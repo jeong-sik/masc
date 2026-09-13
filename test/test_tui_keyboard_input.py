@@ -5975,6 +5975,45 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
     return interact
 
 
+def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
+    """A later Esc keeps earlier input local even after its own acknowledgement."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            os.write(master_fd, b"\x1b")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
+                raise AssertionError("initial stop never reached the server")
+            send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
+            send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
+            send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
+            if fixture.received:
+                raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")
+            fixture.release_interrupt.set()
+            wait_for_output(process, master_fd, output, b"Interrupt received", start=0, timeout=10)
+            # A completed queue read causes the generic drainer to run. It must
+            # still respect retention after the control callback has settled.
+            send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue snapshot")
+            if fixture.received:
+                raise AssertionError(f"stop acknowledgement dispatched retained input: {fixture.received!r}")
+            send_and_wait(process, master_fd, output, b"explicit-followup", composer_showing(b"explicit-followup"))
+            os.write(master_fd, b"\r")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
+            message = fixture.submitted[0]["message"]
+            if "retained-original" not in message or "explicit-followup" not in message:
+                raise AssertionError(f"fresh Enter lost the retained input: {message!r}")
+            if fixture.submitted[0]["admission_intent"]["control_token"] != "control-after-stop":
+                raise AssertionError("fresh Enter did not use the completed stop authority")
+            fixture.release.set()
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            fixture.release_interrupt.set()
+            fixture.release.set()
+    return interact
+
+
 def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
     calls = 0
@@ -13668,6 +13707,9 @@ def run_atomic_chat_regression(executable: str) -> None:
     run_terminal_scenario(executable, description="Pending stop leaves chat without another interrupt",
         interact=chat_pending_stop_leave_interaction(pending), http_fixtures=pending.fixtures, refresh=0.2)
     run_quit_waiting_regression(executable)
+    retained = AtomicChatFixture()
+    run_terminal_scenario(executable, description="Stopped input stays retained after ack until explicit Enter",
+        interact=chat_retained_stop_interaction(retained), http_fixtures=retained.fixtures, refresh=0.2)
 
 
 def run_ctrl_y_regression(executable: str) -> None:

@@ -69,6 +69,8 @@ type retention =
   (* Last to go. A footer with no room for the port still has room to say the
      screen is reading two different workspaces. *)
   | Workspace_conflict
+  | Build_conflict
+  | Worktree_conflict
 
 type projected_status =
   { text : string
@@ -113,7 +115,7 @@ let status_item_projection = function
   | Server_worktree_binary ->
     Some
       { text = "WORKTREE server (not the root build)"
-      ; retention = Workspace_conflict
+      ; retention = Worktree_conflict
       }
   | Tui_build_mismatch { tui; server; older } ->
     let action =
@@ -126,7 +128,7 @@ let status_item_projection = function
       { text =
           Printf.sprintf "TUI %s \xe2\x89\xa0 server %s (%s)"
             (short_commit tui) (short_commit server) action
-      ; retention = Workspace_conflict
+      ; retention = Build_conflict
       }
   | Keeper_answering { names = []; _ } -> None
   | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
@@ -191,8 +193,35 @@ let omission_order =
   ; Workspace_identity
   ; Live_activity
   ; Endpoint_identity
-  ; Workspace_conflict
   ]
+
+(* A conflict notice leads the row instead of riding its tail.
+
+   The tail is given up whole before a single hint is, so a notice left there
+   cannot be read on any surface whose own keys already fill the row. Measured
+   2026-09-12 with the server one commit behind the TUI: of seven surfaces at
+   150 columns only Activity drew the notice -- Memory, Overview, Board,
+   Keepers, Workspace and Planning all dropped it, and Memory was the screen
+   whose rows the older server had just made undecodable.
+
+   Leading notices stay structured while [drop_hint_items] gives up keys
+   before them; path spaces are data, never hint separators. The
+   keys it crowds out have [?] as a second way to be found. The notice has
+   none: nothing else on any surface says the server is not this build. *)
+let leads_the_row item =
+  match item.retention with
+  | Workspace_conflict | Build_conflict | Worktree_conflict -> true
+  | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
+  | Live_activity -> false
+
+(* Wrong-workspace reads come first, then the actionable binary disagreement.
+   The generic worktree provenance warning gives way before either diagnosis.
+   Caller list order does not establish conflict retention priority. *)
+let conflict_order = [ Workspace_conflict; Build_conflict; Worktree_conflict ]
+
+let ordered_conflicts items =
+  List.concat_map (fun retention ->
+    List.filter (fun item -> item.retention = retention) items) conflict_order
 
 (* What ends a row that had to give something up. The ellipsis says items
    were dropped; the key says where they went.
@@ -258,10 +287,11 @@ let item_is_pinned item =
   (* Items are [key:label]; the key is what the projection built the item
      from, and the first colon is where it ends. A label may hold colons of
      its own -- "Enter:edit / use" -- so only the first one splits. *)
-  match String.index_opt item ':' with
+  let plain = Masc_tui_theme.strip_sgr item in
+  match String.index_opt plain ':' with
   | None -> false
   | Some i ->
-    let key = String.trim (String.sub item 0 i) in
+    let key = String.trim (String.sub plain 0 i) in
     List.exists
       (fun pinned ->
         String.equal key pinned
@@ -272,13 +302,21 @@ let item_is_pinned item =
             && String.equal (String.sub key (String.length key - 4) 4) " Esc"))
       never_dropped_keys
 
-let drop_hint_items ?literal_prefix ~max_cells hints =
+type leading_item = Hint of string | Literal of string | Conflict of projected_status
+
+let leading_text = function Hint text | Literal text -> text | Conflict status -> status.text
+
+let drop_hint_items ?literal_prefix ~max_cells ~conflicts hints =
   let items =
-    split_on_double_space hints
-    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+    List.map (fun status -> Conflict status) conflicts
+    @ (match literal_prefix with Some text when text <> "" -> [ Literal text ] | _ -> [])
+    @ (split_on_double_space hints
+       |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+       |> List.map (fun hint -> Hint hint))
   in
+  let text kept = String.concat "  " (List.map leading_text kept) in
   let fits kept =
-    let candidate = "  " ^ with_literal_prefix literal_prefix (String.concat "  " kept) ^ "  " ^ cut_marker in
+    let candidate = "  " ^ text kept ^ "  " ^ cut_marker in
     Masc_tui_message_layout.display_width candidate <= max_cells
   in
   (* The last item that may be dropped, by index. [None] once only pinned
@@ -287,7 +325,8 @@ let drop_hint_items ?literal_prefix ~max_cells hints =
   let last_droppable kept =
     List.fold_left
       (fun (index, found) item ->
-        (index + 1, if item_is_pinned item then found else Some index))
+        let pinned = match item with Hint hint -> item_is_pinned hint | Literal _ -> true | Conflict _ -> false in
+        (index + 1, if pinned then found else Some index))
       (0, None)
       kept
     |> snd
@@ -295,7 +334,7 @@ let drop_hint_items ?literal_prefix ~max_cells hints =
   let rec fit kept =
     match kept with
     | [] -> None
-    | _ when fits kept -> Some ("  " ^ with_literal_prefix literal_prefix (String.concat "  " kept) ^ "  " ^ cut_marker)
+    | _ when fits kept -> Some ("  " ^ text kept ^ "  " ^ cut_marker)
     | _ ->
       (match last_droppable kept with
        | None -> None
@@ -303,8 +342,11 @@ let drop_hint_items ?literal_prefix ~max_cells hints =
   in
   fit items
 
-let rec fit_body ?literal_prefix ~max_cells ~hints ~omissions statuses =
-  let rendered = body (with_literal_prefix literal_prefix hints) statuses in
+let rec fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions statuses =
+  let leading =
+    String.concat "  " (List.map (fun item -> item.text) conflicts @ [ with_literal_prefix literal_prefix hints ])
+  in
+  let rendered = body leading statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then rendered
   else
     match statuses, omissions with
@@ -313,18 +355,21 @@ let rec fit_body ?literal_prefix ~max_cells ~hints ~omissions statuses =
          items go first ({!drop_hint_items}); cell truncation is what is left
          when even one item will not fit. Both end in {!cut_marker}, which
          says the row was cut and says where the rest is. *)
-      (match drop_hint_items ?literal_prefix ~max_cells hints with
+      (match drop_hint_items ?literal_prefix ~max_cells ~conflicts hints with
        | Some fitted -> fitted
        | None ->
+         (* Never cell-cut a conflict into a different path or diagnosis.
+            Only surface hints can use the last-resort text truncation. *)
+         let rendered = body (with_literal_prefix literal_prefix hints) [] in
          let room =
            max_cells - Masc_tui_message_layout.display_width more_key
          in
          if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
          else Masc_tui_message_layout.fit_width rendered room ^ more_key)
     | _, retention :: rest ->
-      fit_body ?literal_prefix ~max_cells ~hints ~omissions:rest
+      fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
-    | _, [] -> fit_body ?literal_prefix ~max_cells ~hints ~omissions:[] []
+    | _, [] -> fit_body ?literal_prefix ~max_cells ~conflicts ~hints ~omissions:[] []
 
 (** [line ~dim ~reset ~max_cells ~port ~hints] is one footer line, terminated by a
     newline. [Port] closes every footer and is appended here; [status] carries
@@ -334,15 +379,20 @@ let rec fit_body ?literal_prefix ~max_cells ~hints ~omissions statuses =
     are preserved while the separately supplied hints are split into items.
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
-    path, port, workspace mismatch. Only an overlong surface-owned hint uses
-    cell-safe truncation
-    as the final fallback. *)
+    path, live turn activity, port. Only an overlong surface-owned hint uses
+    cell-safe truncation as the final fallback.
+
+    A conflict notice is the exception: it is rendered in front of the hints
+    ({!leads_the_row}) rather than left in the tail, so it outlives the keys
+    instead of going before them. *)
 let line ?literal_prefix ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
   in
+  let conflicts, statuses = List.partition leads_the_row statuses in
+  let conflicts = ordered_conflicts conflicts in
   let fitted =
-    fit_body ?literal_prefix ~max_cells:(max 0 max_cells) ~hints ~omissions:omission_order
+    fit_body ?literal_prefix ~max_cells:(max 0 max_cells) ~conflicts ~hints ~omissions:omission_order
       statuses
   in
   Printf.sprintf "%s%s%s\n" dim fitted reset

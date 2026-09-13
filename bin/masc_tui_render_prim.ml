@@ -1849,6 +1849,9 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
    refused; without this the two are the same row. Idle is a blank rather than
    a glyph — most goals have never been asked, and a mark on all of them would
    carry no information. *)
+(* Colour here, the glyph in {!Masc_tui_planning_proof_mark}, which the legend
+   under the column reads from the same function. The two used to be separate
+   literals and the legend was a state short. *)
 let planning_proof_mark proof =
   let mark = Masc_tui_planning_proof_mark.glyph proof in
   match proof with
@@ -1896,12 +1899,12 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
   in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
-      Printf.sprintf "  %s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      Printf.sprintf "%s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
         (Keeper_control.action_gerund action)
         (Terminal_text.single_line keeper_name)
         Ansi.reset
   | None, Some pending ->
-      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
+      Printf.sprintf "%s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
         (Keeper_control.action_key pending.Keeper_control.pending_action)
         (Keeper_control.action_label pending.Keeper_control.pending_action)
         (Terminal_text.single_line pending.Keeper_control.pending_keeper)
@@ -1914,8 +1917,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
          item nothing could split -- at 60 columns the row cut mid-word and
          "q quit", last in the list, went first. The two keys the footer pins
          lead with a plain key so it can read them past the colour. *)
-      "  "
-      ^ String.concat "  "
+      String.concat "  "
           [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"

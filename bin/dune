@@ -862,7 +862,7 @@
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_board_selection)
@@ -1247,7 +1247,6 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
-  masc_tui_planning_proof_mark
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1258,6 +1257,7 @@
   masc_tui_context_bars
   masc.masc_types
   masc_tui_keys
+  masc_tui_planning_proof_mark
   masc_tui_runtime_config_view
   masc_tui_context_inspector
   masc_tui_command

@@ -21,6 +21,11 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
+  | Poppler_budget_spent of { program : string; budget_sec : float }
+      (** Every Poppler call of one inspection shares one wall-clock budget. A
+          document that hangs a tool, or that declares enough pages to spend
+          the budget across them, fails here rather than holding one of the
+          four global review slots. *)
   | Too_many_pages of { pages : int; limit : int }
       (** Raised from the page count, before any page is rendered. *)
   | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
@@ -55,8 +60,15 @@ val inspect :
 (** Requires installed pdftotext and pdftoppm. Missing dependencies are explicit
     failures; bundled release archives do not currently provide Poppler.
 
-    Each Poppler command runs under a fixed timeout, so a document that makes
-    one of them hang comes back as [Command_failed] instead of holding the
-    caller's verification slot. The budgets default to {!max_pages} and
+    Every Poppler command shares one inspection-wide wall-clock budget, so a
+    document that spends it comes back as [Poppler_budget_spent] instead of
+    holding the caller's verification slot. The size budgets default to {!max_pages} and
     {!max_total_image_bytes}; they are arguments so a test can reach the
     refusal with a document small enough to write inline. *)
+
+module For_testing : sig
+  val inspect_with_budget :
+    budget_sec:float -> base_path:string -> max_image_bytes:int -> bytes:string ->
+    unit -> (t, error) result
+  (** The real subprocess inspection with a short test-only shared deadline. *)
+end

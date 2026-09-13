@@ -2716,8 +2716,33 @@ let render_planning_list (state : state) =
            items bands
          |> String.concat backlog_sep
        in
+       (* Budget summary chrome against the actual header and divider rows.
+          Retained history and wrapped modes already occupy [buf]; preserve
+          a goal (or empty note), its selected detail and the footer before
+          adding optional trend/backlog rows. *)
+       let phase_width = planning_phase_column + 2 in
+       let title_width =
+         Render_schedule.planning_title_width
+           ~inner_width:(max 1 (framed_inner_width cols - 2))
+           ~phase_width
+       in
+       let list_header = Buffer.create 256 in
+       box_line_styled list_header cols ~style:(Theme.recede ())
+         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       let divider = Buffer.create 128 in
+       box_divider divider cols;
+       let selection_rows = if count = 0 then 0 else 1 in
+       let reserved_rows =
+         count_frame_lines list_header + (2 * count_frame_lines divider)
+         + 1 + selection_rows + tail_rows
+       in
+       let add_summary_if_fits summary =
+         if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
+         then Buffer.add_buffer buf summary
+       in
        box_line buf cols rollup;
-       box_line_styled buf cols ~style:(Theme.info ())
+       let trend = Buffer.create 256 in
+       box_line_styled trend cols ~style:(Theme.info ())
          (match state.planning_baseline with
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
@@ -2726,18 +2751,14 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       box_line buf cols
+       add_summary_if_fits trend;
+       let backlog_summary = Buffer.create 256 in
+       box_line backlog_summary cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       box_divider buf cols;
+       add_summary_if_fits backlog_summary;
+       Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
-       let phase_width = planning_phase_column + 2 in
-       let title_width =
-         Render_schedule.planning_title_width
-           ~inner_width:(max 1 (framed_inner_width cols - 2))
-           ~phase_width
-       in
-       box_line_styled buf cols ~style:(Theme.recede ())
-         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       Buffer.add_buffer buf list_header;
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next --
@@ -2749,7 +2770,6 @@ let render_planning_list (state : state) =
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
-       let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
          Masc_tui_planning_proof_mark.legend_rows
@@ -6351,7 +6371,7 @@ let render_keeper_detail (state : state) =
     (* [key:label], the way every other hint on this row and on every other
        footer is spelled. "h/l pane" was the one hint written as two words. *)
     let footer =
-      if keeper_roster_pane_shown state ~cols then "  h/l:pane" ^ footer
+      if keeper_roster_pane_shown state ~cols then "  h/l:pane  " ^ footer
       else footer
     in
     (* Cut to the terminal, the way every other footer is: [footer_line] takes

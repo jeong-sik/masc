@@ -14,21 +14,34 @@
 - Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
 - TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
 - TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
+- Agent core: use the same provider-turn ordinal in hooks, tracing and diagnostic logs, including resumed turns; avoid duplicate INFO completion records (#35348).
+- Keeper: treat inventory shutdown as a normal shutdown boundary, and describe scheduled verification retries accurately (#35347, #35352).
+- Keeper: preserve current context and the original official-client session during native resumption and Gate continuation; reject invalid incoming Gate bindings without disabling the Owner (#35419, #35444, #35449, #35459, #35516).
+- TUI: open the original page URL when an inline image cannot be drawn; retain cached input after converter failures and offer an explicit retry for refused previews (#35346, #35349, #35525).
+- TUI: finish known-lost-terminal cleanup without further terminal output, keep Git overlay scrolling within its geometry, and draw dividers using the terminal-aware palette (#35345, #35351, #35463).
+- TUI: show only applicable Config actions, preserve Activity's filter hint, retain Planning modes at narrow widths, wrap complete judge legends naming the marks the list draws, and keep conflict paths and actionable warnings intact alongside exit controls (#35401, #35418, #35445, #35467, #35475).
+- TUI: distinguish Memory loading failures from waiting and name fields rejected by strict response decoding (#35457, #35460).
+- Browser Lane: follow the current page and keep read-failure badges consistent with the surrounding surface (#35446, #35470).
+- Dashboard: keep authenticated read observations outside the per-agent operation quota while retaining the per-IP resource boundary (#35447).
+- Fusion: include the active Task contract and Goal criteria by default, and retrieve the original deliberation by canonical run ID. Missing Board reads preserve their error rather than inventing expiry (#35501, #35511, #35510).
+- Board: relay MSX events on media changes and include verification identity in verification post titles (#35350).
+- Keeper: attribute failed cycles to the dispatched runtime candidate and distinguish verification retry from terminal stop causes in logs and Board reports (#35353, #35354).
+- Schedules: reject due wakes whose owner is absent from the authoritative Keeper store (#35361).
+- TUI: share rendering primitives, tighten Config summaries, and render browser content without repeated DOM labels (#35393, #35508, #35533).
 
 ### Added
 
-- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
+- TUI: Resources search and navigation to the beginning/end of either pane (#35370).
+- Verification: support configured official clients and original PDF evidence inspection, with PDF installation prerequisites available through setup (#35372, #35398, #35409).
+- Media: carry image tool results through official clients and support declared official-client vision candidates (#35384, #35405).
 - Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
-- TUI: the turn dashboard folds to one line, which returns Ctrl-S to the surface (#35458).
+- Browser: compose navigation with landing-page region observations (#35513).
+- TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
+- Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
+- TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
+- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
 - TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
 - TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
-- TUI: the judge legend names the marks the list actually draws (#35467).
-- TUI: Resources search and navigation to the beginning/end of either pane (#35370).
-- TUI: Planning shows the name of a goal that has left (#35408).
-- TUI: task throughput and lead time are counted per assignee (#35357).
-- TUI: an open Browser Lane follows the current page, and browser text renders without repeating DOM labels (#35470, #35533).
-- Browser: navigation composes with landing-page regions (#35513).
-- Goals: a goal records when it was opened, and one that goals.json no longer holds is read back rather than treated as gone (#35375, #35388).
 - Skills: builtin packages refresh as complete packages (#35442).
 - TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
 - Voice: setup runs over HTTP and refuses unknown input by name, every endpoint is probed over HTTP rather than only from the CLI, and an endpoint can be asked which voices it has (#35431, #35609, #35629).
@@ -36,6 +49,12 @@
 - Browser: the navigate-content composition ships, and tool receipts retain the scenes a TUI review reads (#35620, #35546).
 - TUI: the Board column's marks carry names, and the help sheet holds the same words (#35528).
 - Benchmarks: arm K also runs on opencode, without Anthropic credentials (#35406).
+
+### Documentation
+
+- Align the benchmark's arm A description with its actual kimi-cli runner (#35395).
+- Update the G1 revision 2 contract and registration evidence, and document proposed typed Goal-store failures and explicit next-actor outcomes (#35485, #35524, #35479, #35480).
+- Align the documentation site's installation version with the published release, record browser composition measurements and shared-page limits, and document the proposed refusal of submissions without a contract (#35529, #35531, #35477).
 
 ## [0.35.14] - 2026-09-12
 

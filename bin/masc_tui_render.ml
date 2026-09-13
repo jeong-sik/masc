@@ -1916,20 +1916,29 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
+  let board_list_error =
+    Terminal_text.optional_single_line state.board_list_error
+  in
   (* No sort here. The row under this one says it in the words that answer
      what the order is -- "latest changed first" rather than "updated" -- and
      it is the row with space for them. "updated" is the token the board list
      is asked for (the request's sort_by) and the token the workspace config
-     keeps, so a title that spelled it showed the operator a protocol value. *)
-  let header = Printf.sprintf "%s (%d)%s  %s  %s"
+     keeps, so a title that spelled it showed the operator a protocol value.
+
+     A count only once a list has answered. Before that, or after a first
+     read that failed, "(0)" read as a board with nothing on it. A count
+     already on screen stays when a later refresh fails: those posts are
+     still the last reading. *)
+  let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
-    count hearth timestamp
+    (match state.board_posts, board_list_page state ~error:board_list_error with
+     | _ :: _, _ | [], Page_empty -> Printf.sprintf "(%d)" count
+     | [], (Page_unread | Page_failed) ->
+         title_missing_reading ~error:board_list_error)
+    hearth timestamp
     (connection_badge state) in
 
   let title_w = board_title_width ~cols in
-  let board_list_error =
-    Terminal_text.optional_single_line state.board_list_error
-  in
   (* The frame, its fill and the footer are the contract's: this surface
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
@@ -1973,9 +1982,11 @@ let render_board_list (state : state) =
       List.iter (fun draw -> draw ()) heading;
       let render_list_error err = c.push (data_unreliable_row ~cols err) in
       if count = 0 then
-        (match board_list_error with
-         | Some err -> render_list_error err
-         | None -> c.push (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset))
+        (match board_list_page state ~error:board_list_error with
+         | Page_failed -> Option.iter render_list_error board_list_error
+         | Page_unread -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
+         | Page_empty ->
+             c.push (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset))
       else begin
         Option.iter render_list_error board_list_error;
         let error_rows = if Option.is_some board_list_error then 1 else 0 in

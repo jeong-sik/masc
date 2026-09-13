@@ -8786,6 +8786,7 @@ let apply_board_hearths_load state = function
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
+      state.board_list_reading <- Board_list_read;
       (* A sorted/filtered page cannot establish that an exact-ID target
          disappeared. Its own detail request owns loading and failure, even
          when the recent page is empty or excludes this historical post. *)

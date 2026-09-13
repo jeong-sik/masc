@@ -3553,6 +3553,14 @@ type observed_interrupt =
   ; oi_sent_ns : int64
   ; oi_status : observed_interrupt_status }
 
+(* Whether a Board list request has answered. The posts are a plain list, and
+   an empty one is both "nothing asked yet" and "asked, and the board holds
+   nothing" -- the title said "(0)" for either, and for a failed first read
+   too. *)
+type board_list_reading =
+  | Board_list_unread
+  | Board_list_read
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -4073,6 +4081,7 @@ type state = {
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
+  mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
@@ -5605,6 +5614,7 @@ let create_state
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
+  board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
   msg_find_at = None;
@@ -5938,6 +5948,13 @@ let empty_page_of ~snapshot ~error =
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
+
+let board_list_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.board_list_reading with
+       | Board_list_unread -> None
+       | Board_list_read -> Some ())
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =

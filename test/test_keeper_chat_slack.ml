@@ -244,6 +244,8 @@ let run_adapter ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?slee
   Eio_main.run @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
   List.iter (Masc.Keeper_chat_events.publish stream) events;
+  (* The turn closes its bus when it returns; the adapter reads to that close. *)
+  Masc.Keeper_chat_events.close stream;
   let outcomes = ref [] in
   S.adapter_loop ~events:stream ~send_plain ~send_blocks
     ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
@@ -408,6 +410,46 @@ let test_protocol_diagnostic_cannot_mask_final_failure () =
   | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
     check string "final error wins" "final send failed" message
   | _ -> fail "only the terminal final-send failure settles the callback"
+
+let test_adapter_reads_past_the_terminal_until_the_bus_closes () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-late"; thread_id = "thread-late" }
+      ; Masc.Keeper_chat_events.Text_delta "final answer"
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-late" }
+      ; Masc.Keeper_chat_events.Text_delta "published after the terminal"
+      ; Masc.Keeper_chat_events.Event_error
+          { message = "published after the terminal" }
+      ]
+      ~send_plain:(fun ~content ->
+        sends := content :: !sends;
+        Ok ())
+      ~send_blocks:(fun ~content ~blocks:_ ->
+        sends := content :: !sends;
+        Ok ())
+  in
+  check int "delivery settles exactly once" 1 (List.length outcomes);
+  check bool "events after the terminal are read, not delivered" false
+    (List.exists (fun content -> contains content "published after the terminal") !sends)
+
+let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-cut"; thread_id = "thread-cut" }
+      ; Masc.Keeper_chat_events.Text_delta "half an "
+      ]
+      ~send_plain:(fun ~content:_ -> fail "no terminal event, no send")
+      ~send_blocks:(fun ~content:_ ~blocks:_ -> fail "no terminal event, no send")
+  in
+  match outcomes with
+  | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
+    check bool "the settlement names the missing terminal" true
+      (contains message "without a terminal event")
+  | _ -> fail "a closed bus must settle exactly once with an error"
 
 let test_adapter_empty_terminal_is_error () =
   let sends = ref 0 in
@@ -856,6 +898,10 @@ let () =
             test_unknown_outcome_post_retries_once_then_degrades
         ; test_case "native activity failure is isolated" `Quick
             test_native_activity_failure_does_not_affect_delivery
+        ; test_case "reads past the terminal until the bus closes" `Quick
+            test_adapter_reads_past_the_terminal_until_the_bus_closes
+        ; test_case "a bus closed without a terminal settles once" `Quick
+            test_adapter_settles_when_the_bus_closes_without_a_terminal
         ] )
     ; ( "thread-routing"
       , [ test_case "deferred reply keeps thread_ts" `Quick

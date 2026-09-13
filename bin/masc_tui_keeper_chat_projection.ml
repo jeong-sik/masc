@@ -233,8 +233,6 @@ let request_operation_input request =
     ~surface_context:None
     ~attachments:[]
 
-let request_execution_digest request =
-  Keeper_chat_operation.execution_digest (request_operation_input request)
 
 let compact_request_id value =
   let length = String.length value in
@@ -1409,7 +1407,7 @@ let decode_operation_reconciliation ~request json =
     validate_exact_fields ~surface
       ~allowed:
         ([ "schema"; "operation_id"; "sequence"; "created_at"
-         ; "execution_digest"; "source"; "input"; "state"
+         ; "admission_digest"; "execution_digest"; "source"; "input"; "state"
          ]
          @ batch_fields @ state_fields)
       fields
@@ -1436,16 +1434,19 @@ let decode_operation_reconciliation ~request json =
     required_finite_nonnegative_number ~surface "created_at" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
-  let* expected_execution_digest =
-    request_execution_digest request
-    |> Result.map_error (fun detail ->
-      Malformed_event (surface ^ ".expected input is not canonical: " ^ detail))
-  in
-  let* () =
-    validate_expected_string ~surface
-      ~field:(if batch_fields = [] then "execution_digest" else "batch_input_digest")
-      ~expected:expected_execution_digest fields
-  in
+  let* source = match List.assoc_opt "source" fields with
+    | Some (`Assoc _ as source) -> Ok source
+    | _ -> Error (Malformed_event (surface ^ ".source must be an object")) in
+  let* expected_admission_digest =
+    Keeper_chat_operation.admission_digest ~source ~input:(request_operation_input request)
+    |> Result.map_error (fun detail -> Malformed_event (surface ^ ".expected admission is not canonical: " ^ detail)) in
+  let* () = validate_expected_string ~surface ~field:"admission_digest"
+    ~expected:expected_admission_digest fields in
+  let* () = match List.assoc_opt "batch_input_digest" fields with
+    | None -> Ok ()
+    | Some (`String digest) when String.length digest = 64
+        && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) digest -> Ok ()
+    | _ -> Error (Malformed_event (surface ^ ".batch_input_digest must be lowercase SHA-256 hex")) in
   let* stored_execution_digest = required_string ~surface "execution_digest" fields
     |> Result.map_error (fun detail -> Malformed_event detail) in
   let* () = if String.length stored_execution_digest = 64

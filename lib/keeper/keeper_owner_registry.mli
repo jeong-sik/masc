@@ -171,9 +171,9 @@ val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
   (unit, command_error) result
 
 val pause_observed_turn : base_path:string -> keeper_name:string -> interrupt_token:string ->
-  (Keeper_owner.operation_interrupt_result * string, command_error) result
-val pause_running_operation : base_path:string -> keeper_name:string ->
-  Keeper_chat_operation.Operation_id.t -> (Keeper_owner.operation_interrupt_result * string, command_error) result
+  (Keeper_owner.pause_result * string, command_error) result
+val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
 val run_next_operation : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> interrupt_token:string option ->
   (Keeper_owner.run_next_result, command_error) result

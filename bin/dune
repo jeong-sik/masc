@@ -396,6 +396,7 @@
  (libraries
   masc
   masc.masc_types
+  masc.keeper_chat_operations
   masc_tui_credential
   masc_tui_keeper_chat_live
   yojson))

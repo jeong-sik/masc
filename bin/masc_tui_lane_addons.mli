@@ -22,10 +22,13 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  form : Masc_tui_schema_form.t option;
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  installer : Masc_tui_lane_installer.t option;
+  subscription_panel : Masc_tui_lane_subscriptions.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -43,6 +46,9 @@ val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
+val reconcile_snapshot : t -> snapshot -> t
+(** Preserve exact selected identities. A removed row, worker incarnation or
+    declaration requires explicit reselection before acting on a replacement. *)
 val move_lane : t -> int -> t
 val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
@@ -55,3 +61,11 @@ val open_actions : request_id:string -> t -> (t, string) result
 val move_action : t -> int -> t
 val submit_action : t -> (action_request, string) result
 val pending_action : t -> action_request option
+
+val paste_action : text:string -> t -> t
+val edit_action : key:string -> t -> (t * action_request option, string) result
+val can_observe : instance -> bool
+val overview_hints : t -> string
+val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
+val move_observation : t -> int -> t
+val evidence_request : t -> (request, string) result

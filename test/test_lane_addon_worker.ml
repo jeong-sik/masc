@@ -9,6 +9,14 @@ let docker_fixture = {|#!/usr/bin/env python3
 import base64, hashlib, json, os, pathlib, signal, sys
 root = pathlib.Path(__file__).parent
 argv = sys.argv[1:]
+if argv[:2] == ["image", "inspect"]:
+    if (root / "daemon-unavailable").exists():
+        print("fixture daemon unavailable", file=sys.stderr)
+        raise SystemExit(7)
+    if argv != ["image", "inspect", "--format", "{{.Id}}", "fixture/image"]:
+        raise SystemExit(2)
+    print("sha256:" + "a" * 64)
+    raise SystemExit(0)
 if not argv or argv[0] != "container":
     raise SystemExit(2)
 action, args = argv[1], argv[2:]
@@ -385,7 +393,17 @@ let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker 
   check bool "detach preserves retained artifact bytes" true
     (Masc.Lane_addon_store.read_blob store reference = Ok bytes))
 
+let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir docker ->
+  let inspect () = Worker.inspect_image ~mgr:(Eio.Stdenv.process_mgr env)
+      ~package:(package dir "good") ~docker_command:docker () in
+  check string "image identity is the engine reply" ("sha256:" ^ String.make 64 'a') (unwrap (inspect ()));
+  check bool "preview creates no container" false
+    (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
+  write (Filename.concat dir "daemon-unavailable") "offline";
+  check bool "daemon failure stays an error rather than absence" true (Result.is_error (inspect ())))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;

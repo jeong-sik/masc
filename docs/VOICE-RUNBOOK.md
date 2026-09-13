@@ -145,6 +145,109 @@ and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
 optional step cannot fail the thing it is optional to — and by this point the
 workspace and the model connection are already saved.
 
+### The whole loop, on a fresh workspace, with nothing running
+
+Walked end to end 2026-09-13 on M3 Max / macOS 26. No server was started, and
+nothing listened on a port at any point.
+
+```
+masc init --base-path /tmp/fresh                      0.79s   1,504 lines written
+masc voice-local-setup --base-path /tmp/fresh \
+     --list-voices                                    3.05s   184 voices, 9 Korean
+masc voice-local-setup --base-path /tmp/fresh \
+     --voice Yuna                                     0.59s   9 lines added
+masc voice-local-setup --base-path /tmp/fresh \
+     --model ~/models/whisper/ggml-large-v3-turbo.bin 0.37s   7 lines added
+```
+
+`voice-local-setup` added 16 lines in total and changed none of the 1,504 that
+`init` wrote. Then, with `alpha` mapped to a Korean voice by hand:
+
+```
+masc voice-verify --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
+
+tts
+  macos-say       macos_say     answered: 119044 bytes of audio in "Eddy (한국어(한국))"
+
+stt  (utterance.wav, 144,276 bytes)
+  whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
+```
+
+| Leg | Wall |
+|---|---|
+| speak only | 0.75s |
+| speak and hear | 3.79s |
+
+The sentence came back exactly as it was spoken, including the full stop. The
+transcript is whisper's own; masc passed `-l auto` and did not name a language.
+
+**What this does and does not prove.** It is the two halves a voice turn needs
+— a keeper's words become audio in that keeper's voice, and a recording becomes
+text a keeper can be sent. It is not a keeper turn: no model was called and no
+message was appended to a chat. The turn itself is the two HTTP calls under
+[External devices](#external-devices), and the reply comes back as a clip on
+the chat line, announced as whatever container it is (see [The announcement has
+to agree with it](#the-announcement-has-to-agree-with-it)).
+
+Two downloads stand between a new machine and the hearing half — the 8.9MB
+brew bottle and the 1.6GB model, both named by `masc prerequisite-actions
+whisper`. Speaking needs neither: every number in the `tts` row above came off
+a machine with nothing installed for it.
+
+### Where the chosen voice is written, and why it matters
+
+Walked on a fresh workspace 2026-09-13, `masc init` then
+`masc voice-local-setup --voice Yuna`, then one keeper mapped by hand:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+
+[voice.tts.agent_voices]
+alpha = "Eddy (한국어(한국))"
+```
+
+```
+masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+```
+
+The mapped keeper gets its own voice; an unmapped one gets the workspace
+default. That is the order a reader expects, and it is not free — it depends
+on the chosen voice being written to `[voice.tts]` and **not** to the
+endpoint.
+
+A voice on the endpoint outranks `agent_voices`. Measured on the same
+workspace with the one line `default_voice = "Yuna"` added under
+`[[voice.tts.endpoints]]`:
+
+| Endpoint line | keeper `alpha` (mapped to Eddy) | keeper `beta` (unmapped) |
+|---|---|---|
+| present | **Yuna**, 85,908 bytes — the mapping is ignored | Yuna |
+| absent | **Eddy**, 119,044 bytes | Yuna, 85,908 bytes |
+
+Nothing is logged in the first row. The keeper speaks, the bytes are real, and
+the voice is simply not the one that was assigned.
+
+The field exists for a reason and is not going away: a voice name is
+provider-shaped — `say` takes a label, ElevenLabs a 20-character `voice_id` —
+so a workspace that already has a `[voice.tts]` section has a default that
+belongs to the other provider, and adding `say` alongside it has to carry its
+own. So `voice-local-setup` writes the endpoint voice only in that case
+(`Voice_setup.voice_placement`), and a fresh mac — one provider, no section
+yet — gets the section default with per-keeper voices layered over it.
+
+The cost of the remaining case is worth stating plainly: on a workspace with
+two TTS providers, `agent_voices` does not reach the second one. There is no
+per-provider agent mapping. A keeper mapped to an ElevenLabs `voice_id` would
+otherwise have that id handed to `say`, which does not fail on a name it does
+not have — it speaks in the system voice.
+
 ### Outside the journey
 
 ```

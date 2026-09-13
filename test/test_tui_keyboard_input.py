@@ -2485,13 +2485,9 @@ def keeper_selection_identity_interaction(
         timeout=3.0,
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"j",
-        keeper_row_selected(b"beta"),
-    )
+    # j on a roster that has not arrived moves nothing and redraws
+    # nothing, so the wait for beta's band times out. Ask for the row.
+    select_keeper_row(process, master_fd, output, b"beta")
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
     keepers_path = Path(base_path) / ".masc" / "keepers"
@@ -2611,13 +2607,9 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
         base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # j on a roster that has not arrived moves nothing and redraws
+        # nothing, so the wait for beta's band times out. Ask for the row.
+        select_keeper_row(process, master_fd, output, b"beta")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
@@ -2715,13 +2707,9 @@ def keeper_message_unreliable_roster_interaction(
         base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # j on a roster that has not arrived moves nothing and redraws
+        # nothing, so the wait for beta's band times out. Ask for the row.
+        select_keeper_row(process, master_fd, output, b"beta")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, draft, composer_showing(draft))
@@ -8649,6 +8637,9 @@ def keeper_calls_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        # The header is drawn before the asynchronous roster, so t can land
+        # while nothing is selected and open no keeper's log at all.
+        select_keeper_row(process, master_fd, output, b"alpha")
         pane_start = len(output)
         send_and_wait(
             process,

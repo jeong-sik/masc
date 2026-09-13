@@ -449,6 +449,20 @@ let test_git_diff_footer_names_scroll_code_and_files () =
     "j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_diff
 
+(* The Board draft's footers were literals in the renderer, so the pane above
+   them spelled Ctrl-E a second way and named Enter where the footer did not.
+   Pinned as display data the way the other projected footers are. *)
+let test_board_compose_footers_are_projected () =
+  check str "writing names the letters' exceptions and no q"
+    "type to write  Enter:newline  Ctrl-E:$EDITOR  Esc:menu  Tab:surfaces"
+    Masc_tui_keys.footer_hints_board_compose_writing;
+  check str "a new post's menu cycles the hearth"
+    "s:send  e:edit in $EDITOR  h:cycle hearth  d:discard  Esc:keep writing"
+    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:false);
+  check str "a reply's menu has no hearth to cycle"
+    "s:send  e:edit in $EDITOR  d:discard  Esc:keep writing"
+    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:true)
+
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
@@ -2004,6 +2018,8 @@ let () =
     [ ( "table"
       , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
             test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "board compose footers are projected" `Quick
+            test_board_compose_footers_are_projected
         ; Alcotest.test_case "key atoms read the table notation" `Quick
             test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick

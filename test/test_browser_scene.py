@@ -136,15 +136,25 @@ try:
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
- js("document.body.innerHTML='<main aria-label=Timeline><article aria-label=\"Post A\">Post A</article><article aria-label=\"Post B\">Post B</article></main>';" )
+ js("document.body.innerHTML='<main aria-label=Timeline><article aria-label=\"Post A\">Post A</article><article aria-label=\"Post B\">Post B</article><article aria-label=\" \"><h2><span style=\"display:none\">SECRET HIDDEN HEADING</span><span>Post C</span></h2>Post C</article></main>';" )
  social_regions=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
  article_nodes=[n for n in social_regions['nodes'] if n['kind']=='region' and n['role']=='article']
- check('social feed outline exposes typed article regions',len(article_nodes)==2 and [n['text'] for n in article_nodes]==['Post A','Post B'])
+ check('social feed outline exposes typed article regions',len(article_nodes)==3 and [n['text'] for n in article_nodes]==['Post A','Post B','Post C'])
  check('social article regions retain one document identity',all(n['nodeId'] and social_regions['documentId']==regions['documentId'] for n in article_nodes))
+ social_content=observe()
+ check('social content carries its nearest observed article context',
+       any((n.get('ancestorRegion') or {}).get('role')=='article'
+           and (n.get('ancestorRegion') or {}).get('label') in ['Post A','Post B','Post C']
+           for n in social_content['nodes']))
+ check('hidden heading descendants do not pollute the observed article label',
+       all('SECRET HIDDEN HEADING' not in (n.get('ancestorRegion') or {}).get('label','')
+           for n in social_content['nodes']))
  # Landmark-free chat layout: only actual visible overflow panes are scopes.
- js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\">No overflow</div>';")
+ js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Unnamed body</div></div>';")
  fallback=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
- check('landmark-free outline returns only visible overflowing pane',len(fallback['nodes'])==1 and fallback['nodes'][0]['text']=='Messages')
+ check('landmark-free outline names visible overflowing panes',
+       len(fallback['nodes'])==2
+       and [n['text'] for n in fallback['nodes']]==['Messages','Vertical scroll area'])
  fallback_scope={'documentId':fallback['documentId'],'nodeId':fallback['nodes'][0]['nodeId']}
  selected=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':fallback_scope,'maxChars':5000}])
  check('scroll-area reference resolves to channel body',any(n['text']=='Channel body' for n in selected['nodes']))

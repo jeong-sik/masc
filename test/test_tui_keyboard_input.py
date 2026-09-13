@@ -9131,6 +9131,15 @@ def planning_review_hierarchy_interaction() -> Interaction:
         plain_review = CSI_RE.sub(b"", review)
         if b"MASC Planning" not in plain_review:
             raise AssertionError(f"Task Review lost its Planning parent: {plain_review!r}")
+        # The badge says the queue holds two; a page holding both says
+        # nothing more. It used to read "Task Review·2 (2 of 2)".
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        title = rows.get(screen_row_of(rows, b"\xe2\x96\xb8Task Review"), b"")
+        if b"\xe2\x96\xb8Task Review\xc2\xb72  Task Verdicts" not in title:
+            raise AssertionError(
+                f"the Task Review title repeats the badge's count: {title!r}"
+            )
         verdicts = send_and_wait(
             process,
             master_fd,

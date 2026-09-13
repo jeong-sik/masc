@@ -85,6 +85,14 @@ val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
+val footer_hints_board_compose_writing : string
+(** The Board draft while it takes letters: a literal "type to write" and the
+    keys that are not letters. *)
+
+val footer_hints_board_compose_armed : reply:bool -> string
+(** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
+    comment has no use for. *)
+
 val footer_hints_approval_detail : string
 (** The keys an open approval answers to. The decision keys are one item
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up

@@ -363,7 +363,7 @@ let open_actions ~request_id view =
     schema;choices;cursor=0}; technical_details=false;scroll=0;error=None}
 
 let move_action view delta =
-  {view with action_menu=Option.map (fun menu ->
+  {view with scroll=0;action_menu=Option.map (fun menu ->
     {menu with cursor=max 0 (min (List.length menu.choices - 1) (menu.cursor+delta))}) view.action_menu}
 
 let submit_action view =
@@ -392,13 +392,7 @@ let value_summary = function
       Option.map (fun value -> key ^ "=" ^ value) (scalar_text value)) |> String.concat " · "
   | value -> Option.value ~default:(Yojson.Safe.to_string value) (scalar_text value)
 
-let compact_lines view =
-  let action_lines = match view.action_menu with
-    | Some menu ->
-        ["Run action on " ^ menu.target_title; "Up/Down:choose  Enter:run once  Esc:cancel"]
-        @ List.mapi (fun index action ->
-            (if index=menu.cursor then "> " else "  ") ^ Yojson.Safe.to_string action) menu.choices
-    | None -> [] in
+let compact_lines ~width view =
   let outcome = match view.last_action,view.action_receipt with
     | None,_ -> []
     | Some request,None -> ["Action " ^ value_summary request.action ^ " · receipt unknown; t:check this request"]
@@ -448,13 +442,32 @@ let compact_lines view =
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
    "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  D:details  Esc:back"]
-  @ [if view.loading then "Updating… (previous observations retained)" else "Latest server observations"]
+  @ [Masc_tui_message_layout.fit_width
+       (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
-  @ action_lines @ outcome @ content
+  @ outcome @ content
+
+let rec action_fields prefix = function
+  | `Assoc fields -> List.concat_map (fun (key,value) ->
+      action_fields (if prefix="" then key else prefix ^ "." ^ key) value) fields
+  | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
 
 let lines ~width view =
-  if view.technical_details || Option.is_some view.document_key || Option.is_some view.draft
-  then technical_lines ~width view
-  else compact_lines view |> List.concat_map (fun line ->
-    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
-      (Masc.Tui_decode.sanitize_terminal_text line))
+  match view.action_menu with
+  | Some menu ->
+      (["Run action on " ^ menu.target_title;
+        Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
+          (menu.cursor+1) (List.length menu.choices);
+        "J/K:scroll action details"]
+       @ (match List.nth_opt menu.choices menu.cursor with
+          | Some action -> action_fields "" action
+          | None -> ["No selected action"]))
+      |> List.concat_map (fun line ->
+        Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+          (Masc.Tui_decode.sanitize_terminal_text line))
+  | None ->
+      if view.technical_details || Option.is_some view.document_key || Option.is_some view.draft
+      then technical_lines ~width view
+      else compact_lines ~width view |> List.concat_map (fun line ->
+        Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+          (Masc.Tui_decode.sanitize_terminal_text line))

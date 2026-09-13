@@ -219,9 +219,14 @@ let guided_actions () =
   let technical = UI.open_actions ~request_id:first.request_id
     {UI.initial with technical_details=true;snapshot=Some snapshot} |> ok in
   check bool "opening actions exposes the choice even from technical mode" false technical.technical_details;
-  check int "refresh does not move compact content"
-    (List.length (UI.lines ~width:100 {UI.initial with snapshot=Some snapshot}))
-    (List.length (UI.lines ~width:100 {UI.initial with loading=true;snapshot=Some snapshot}));
+  List.iter (fun width -> check int "refresh does not move compact content"
+    (List.length (UI.lines ~width {UI.initial with snapshot=Some snapshot}))
+    (List.length (UI.lines ~width {UI.initial with loading=true;snapshot=Some snapshot}))) [10;40;100];
+  let with_document = {technical with document_key=Some "draft.toml"} in
+  check bool "menu remains visible over an open document" true
+    (List.mem "operation: \"capture\"" (UI.lines ~width:100 with_document));
+  let moved = UI.move_action {view with scroll=100} 1 in
+  check int "next choice is brought back into view" 0 moved.scroll;
   let replace key value = function
     | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
     | _ -> fail "object fixture expected" in

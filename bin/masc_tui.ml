@@ -11436,7 +11436,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result, state.lane_addons with
        | Ok (_, _, Some {Masc.Lane_addon_action.state=
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
-         when view.generation=generation && not view.loading ->
+         when view.generation=generation && not view.loading
+              && Option.is_none view.draft && Option.is_none view.document_key
+              && Option.is_none view.action_menu ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -16455,6 +16457,10 @@ and is loaded on demand through keeper_skill.
                       | "esc" -> update {view with action_menu=None;scroll=0}
                       | "j" | "down" -> update (Addons.move_action view 1)
                       | "k" | "up" -> update (Addons.move_action view (-1))
+                      | "J" | "K" ->
+                          let _, cols = get_terminal_size () in
+                          let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
+                          update {view with scroll=max 0 (min last (view.scroll + (if key="J" then 1 else -1)))}
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_action view with
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)

@@ -865,6 +865,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
   ; approvals =

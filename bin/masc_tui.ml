@@ -8235,9 +8235,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
       let active_keepers =
-        match state.local_workspace with
-        | Local_workspace_unread -> None
-        | Local_workspace_read -> Some (List.length state.keepers)
+        match state.keepers_error, state.local_workspace with
+        | Some error, _ -> Some (Error error)
+        | None, Local_workspace_unread -> None
+        | None, Local_workspace_read -> Some (Ok (List.length state.keepers))
       in
       let theme_name =
         match state.theme_choice with

@@ -97,6 +97,7 @@ let fixture_entries =
 let fixture : Pane.input =
   { Pane.now
   ; tab = Pane.Tab_fleet
+  ; keepers_error = None
   ; scope = Pane.Whole_fleet
   ; feed = Pane.Feed_live 1_234
   ; keepers =
@@ -1136,6 +1137,16 @@ let test_an_unread_roster_is_not_counted_as_none () =
   check bool "says the roster is not loaded" true
     (contains "keepers not loaded" unread);
   check bool "does not count it as none" false (contains "0 keepers" unread);
+  let failed = header { fixture with Pane.keepers = Some [];
+    keepers_error = Some "keeper metadata unavailable"; selected = None } in
+  check bool "failed read says unavailable" true (contains "keepers unavailable" failed);
+  check bool "failed read never counts zero" false (contains "0 keepers" failed);
+  let cached = { fixture with keepers_error = Some "refresh failed" } in
+  check bool "cached rows do not establish a complete count" true
+    (contains "keepers unavailable" (header cached));
+  check bool "failed refresh preserves retained keeper rows" true
+    (List.exists (fun row -> contains "tester" (text row))
+       (Pane.lines ~rows ~cols ~scroll:0 cached).Pane.rows);
   let empty = header { fixture with Pane.keepers = Some []; selected = None } in
   check bool "a read roster with no keepers still counts them" true
     (contains "0 keepers" empty)

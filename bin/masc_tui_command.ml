@@ -705,7 +705,8 @@ let is_slash_navigable ?(keeper_names = []) text =
 let about_banner ?(theme_name = "default") ?active_keepers () =
   let keepers =
     match active_keepers with
-    | Some count -> string_of_int count
+    | Some (Ok count) -> string_of_int count
+    | Some (Error _) -> "unavailable"
     | None -> "not loaded"
   in
   String.concat "\n"

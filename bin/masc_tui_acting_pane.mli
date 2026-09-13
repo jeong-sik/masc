@@ -136,6 +136,9 @@ type input = {
   keepers : keeper list option;
       (** [None] until this workspace's keeper files have been read: the header
           says the roster is not loaded rather than counting no keepers *)
+  keepers_error : string option;
+      (** A failed read makes the count unavailable. Retained rows remain
+          usable for navigation; their presence does not prove a full count. *)
   selected : string option;
       (** the keeper the cursor is on; on the Recent tab the most recently
           observed keeper stands in when there is none *)

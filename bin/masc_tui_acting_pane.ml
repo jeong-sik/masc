@@ -113,6 +113,7 @@ type input = {
   scope : scope;
   feed : feed;
   keepers : keeper list option;
+  keepers_error : string option;
   selected : string option;
   approvals : approval list;
   chunks : Acting.chunk list;
@@ -446,9 +447,10 @@ let header_line ~cols input =
          A count of the whole fleet beside a shorter list reads as a drawing
          bug, and a count of the drawn rows alone hides that anything was
          dropped. *)
-      (match input.keepers with
-       | None -> "keepers not loaded"
-       | Some _ ->
+      (match input.keepers_error, input.keepers with
+       | Some _, _ -> "keepers unavailable"
+       | None, None -> "keepers not loaded"
+       | None, Some _ ->
          let hidden = offline_count input in
          plural (List.length (working_keepers input)) "keeper"
          ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden))

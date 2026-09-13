@@ -14,9 +14,10 @@ val load_profile_defaults :
   -> ( Keeper_types_profile.keeper_profile_defaults
      , Agent_core.Error.t )
      result
-(** Load one immutable profile snapshot at the pre-dispatch boundary. Invalid
-    child or inherited base TOML returns [Config InvalidConfig]; prompt-only
-    and genuinely absent profiles remain valid empty/default snapshots. *)
+(** Load one immutable profile snapshot at the pre-dispatch boundary. Every
+    load error returns [Config InvalidConfig] on field [keeper.profile]: a
+    keeper with no declaration, invalid child or inherited base TOML, and a
+    [tools.deny] entry that names no model-visible tool. *)
 
 val turn_profile_and_meta :
      base_path:string

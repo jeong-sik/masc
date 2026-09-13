@@ -533,6 +533,50 @@ let test_close_ends_the_read_after_every_earlier_event () =
     true
     (Option.is_none (Masc.Keeper_chat_events.take_nonblocking bus))
 
+(* A close that is cancelled while the bus is full must leave the bus
+   closable. The flag used to be set before the sentinel was added, so the
+   cancelled attempt left [closed = true] with no sentinel: every later close
+   was a no-op and a reader would park in [take] for good. *)
+let test_close_cancelled_on_a_full_bus_is_retried () =
+  Eio_main.run @@ fun _env ->
+  let bus = Masc.Keeper_chat_events.create () in
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
+    Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
+  done;
+  (* The close suspends on the full bus; the sibling wins and cancels it. *)
+  let attempt =
+    Eio.Fiber.first
+      (fun () ->
+         Masc.Keeper_chat_events.close bus;
+         `Delivered)
+      (fun () ->
+         Eio.Fiber.yield ();
+         `Cancelled)
+  in
+  Alcotest.(check bool)
+    "the first close was cancelled while the bus was full"
+    true
+    (attempt = `Cancelled);
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
+    ignore (Masc.Keeper_chat_events.take_nonblocking bus)
+  done;
+  Masc.Keeper_chat_events.close bus;
+  let read =
+    Eio.Fiber.first
+      (fun () ->
+         match Masc.Keeper_chat_events.subscribe bus with
+         | Masc.Keeper_chat_events.Closed -> `Closed
+         | Masc.Keeper_chat_events.Next _ -> `Event)
+      (fun () ->
+         Eio.Fiber.yield ();
+         Eio.Fiber.yield ();
+         `Parked)
+  in
+  Alcotest.(check bool)
+    "the retried close delivers the sentinel and the read ends"
+    true
+    (read = `Closed)
+
 let test_publish_after_close_is_a_publisher_defect () =
   let bus = Masc.Keeper_chat_events.create () in
   Masc.Keeper_chat_events.close bus;
@@ -550,11 +594,14 @@ let test_full_bus_hook_runs_before_add () =
         last_seq := seq)
       ()
   in
-  for _ = 1 to 512 do
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
     Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
   done;
-  Alcotest.(check int) "512 publishes reached the hook" 512 !hook_calls;
-  (* The 513th publish cannot complete normally: Eio.Stream.add on a full
+  Alcotest.(check int)
+    "every publish up to the capacity reached the hook"
+    Masc.Keeper_chat_events.bus_capacity
+    !hook_calls;
+  (* The publish past the capacity cannot complete normally: Eio.Stream.add on a full
      stream suspends the writer, and with no scheduler running (this test is
      a plain Alcotest function) the Suspend effect raises unhandled. Either
      way the hook has already run by then — that hook-before-add ordering is
@@ -562,8 +609,10 @@ let test_full_bus_hook_runs_before_add () =
   (match Masc.Keeper_chat_events.publish bus (E.Text_delta "overflow") with
    | () -> Alcotest.fail "publish on a full bus must not silently succeed"
    | exception _ -> ());
-  Alcotest.(check int) "hook observed the overflowing publish" 513 !hook_calls;
-  Alcotest.(check int) "hook saw seq = 512 for the overflowing publish" 512 !last_seq
+  Alcotest.(check int) "hook observed the overflowing publish"
+    (Masc.Keeper_chat_events.bus_capacity + 1) !hook_calls;
+  Alcotest.(check int) "hook saw seq = capacity for the overflowing publish"
+    Masc.Keeper_chat_events.bus_capacity !last_seq
 
 let test_bus_journal_integration_records_all_events () =
   let base_dir = temp_base_path "keeper-chat-event-log-bus" in
@@ -871,6 +920,10 @@ let () =
             "publish after close is a publisher defect"
             `Quick
             test_publish_after_close_is_a_publisher_defect
+        ; Alcotest.test_case
+            "a close cancelled on a full bus is retried"
+            `Quick
+            test_close_cancelled_on_a_full_bus_is_retried
         ] )
     ; ( "integration"
       , [ Alcotest.test_case

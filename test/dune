@@ -4162,6 +4162,54 @@
  (deps (alias runtest-test_tui_keyboard_input-cli-base-path)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-send-on-stop)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   send-on-stop)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-send-on-stop)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-quit-waiting)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   quit-waiting)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-quit-waiting)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-ctrl-y)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   ctrl-y)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-ctrl-y)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-held-back-override)
  (deps
   test_tui_keyboard_input.py
@@ -4868,6 +4916,9 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
+(include stanzas/test_tui_title_counts.inc)
+(include stanzas/test_tui_data_unreliable_row.inc)
+(include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
@@ -5150,6 +5201,12 @@
 (include stanzas/test_tui_ask_layout.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
+
+(include stanzas/test_tui_memory_back.inc)
+
+(include stanzas/test_tui_resources_empty_note.inc)
+
+(include stanzas/test_tui_keeper_runs_view.inc)
 
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 

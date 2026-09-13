@@ -1620,6 +1620,12 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
+  (* The roster pane's key on the detail footer is spelled like its
+     neighbours. It read "h/l pane" beside "j/k:move". *)
+  check int "keeper detail spells the pane key the footer way" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail" ~needle:"  h/l:pane");
   (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
      wait moved with it. The contract did not: whichever binding blocks for
      input owns the deadline, and EINTR has to come back as a retry rather
@@ -1947,17 +1953,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"apply_raw_mode"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
-  check int "raw mode reclaims the key the record cannot carry" 1
+  check int "raw mode reclaims the keys the record cannot carry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_literal_next");
-  check int "raw mode reclaims Ctrl-O from VDISCARD" 1
+       ~callee:"Masc_tui_termios.reclaim");
+  check int "the session reads the keys before it reclaims them" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_discard_output");
-  check int "terminal restoration returns the original discard key" 1
+       ~binding_name:"main"
+       ~callee:"Masc_tui_termios.snapshot");
+  check int "terminal restoration returns the original keys" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.set_discard_output");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.restore");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"restore_terminal_outcome" ~callee:"Frame_presenter.cleanup");
@@ -2550,6 +2556,44 @@ let test_the_board_list_frame_is_the_shared_contract () =
   check int "and no row is filled by hand" 0 (in_board "box_empty")
 ;;
 
+(* The runtime.toml pane's frame is the shared contract's too. It subtracted
+   a literal 7 for its fixed rows and drew six, so the footer stood a row above
+   the composer, and the cursor bound read the same 7. Its height is now the
+   contract's rows and the heading it draws, one function for both readers. *)
+let test_the_config_frame_is_the_shared_contract () =
+  let in_config callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_config" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (in_config "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
+  check int "and no row is filled by hand" 0 (in_config "box_empty");
+  check int "the source height is the one the cursor reads" 1
+    (in_config "config_content_height")
+;;
+
+(* Code and Resources open on a title row -- name, clock, connection badge --
+   like every other surface; they opened on a pane header, so nothing on them
+   said the server was gone. The panes' height gives that row up in one place:
+   Code's list and its key handlers read [code_pane_content_height]. *)
+let test_the_pane_surfaces_open_on_a_title_row () =
+  let calls binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " draws the title row once") 1
+        (calls binding_name "pane_surface_title"))
+    [ "render_code"; "render_resources" ];
+  check bool "Code's list reads the shared pane height" true
+    (calls "render_code" "code_pane_content_height" >= 1);
+  check bool "Code's pane height gives up the title row" true
+    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+  check bool "Resources gives up the same title row" true
+    (calls "render_resources" "pane_surface_content_height" >= 1)
+;;
+
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
    token carried syntax colour. Pin the shared document renderer at the
@@ -2686,6 +2730,14 @@ let () =
           "the board list frame is the shared contract"
           `Quick
           test_the_board_list_frame_is_the_shared_contract;
+        test_case
+          "the config frame is the shared contract"
+          `Quick
+          test_the_config_frame_is_the_shared_contract;
+        test_case
+          "the pane surfaces open on a title row"
+          `Quick
+          test_the_pane_surfaces_open_on_a_title_row;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

@@ -1,0 +1,69 @@
+{
+  "scope": "experimental Python BiDi Browser Lane live bridge; real fd441 MASC/TUI; no extension or Keeper",
+  "result": "failed",
+  "source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "session": {
+    "sessionId": "333c216a-67a6-4000-84f0-465847621e52",
+    "capabilities": {
+      "acceptInsecureCerts": false,
+      "browserName": "firefox",
+      "browserVersion": "155.0.1",
+      "platformName": "mac",
+      "setWindowRect": true,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:155.0) Gecko/20100101 Firefox/155.0",
+      "moz:buildID": "20260903215306",
+      "moz:headless": true,
+      "moz:platformVersion": "25.6.0",
+      "moz:processID": 76506,
+      "moz:profile": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/bidi-tui-evidence-1789270953381315000/profile",
+      "moz:shutdownTimeout": 60000
+    }
+  },
+  "mapping": {
+    "1": "7cce8422-2f89-4600-8d13-3f4382317ff8",
+    "2": "7c696a61-7790-46af-99a3-4b4bdd2e6275"
+  },
+  "before": {
+    "1": {
+      "url": "http://127.0.0.1:58894/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    },
+    "2": {
+      "url": "http://127.0.0.1:58894/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    }
+  },
+  "health_build": {
+    "release_version": "0.35.15",
+    "binary_version": "0.35.15",
+    "commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "commit_source": "embedded",
+    "binary_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+    "binary_commit_unix_ts": 1789266265.0,
+    "binary_commit_age_seconds": 4691,
+    "executable_path": "/private/tmp/browser-navigation-native-fd441/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-navigation-native-fd441/runtime",
+    "runtime_instance_id": "01a098dc-1603-7000-97ee-2dd3601690b6",
+    "started_at": "2026-09-13T03:42:35Z",
+    "uptime_seconds": 0
+  },
+  "client_id": "bb8a5710-6f9d-4dbe-92fa-2871a26b464a",
+  "error": "Traceback (most recent call last):\n  File \"/tmp/browser-bidi-tui-proof.py\", line 122, in <module>\n    report['gesture']=capture.run(repo=REPO,executable=DIST/'runtime/masc-tui-macos-arm64',base=ROOT,api_port=api_port,token=token,out=OUT,observe=obs,navigate=None)\n                      ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/bidi-tui-evidence-1789270953381315000/capture.py\", line 150, in run\n    confirm('drag-observed', 'Card moved; down trusted=true; up trusted=true')\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/bidi-tui-evidence-1789270953381315000/capture.py\", line 129, in confirm\n    value = observe(label)\n  File \"/tmp/browser-bidi-tui-proof.py\", line 110, in obs\n    def obs(label):return post('/api/v1/dashboard/browser-lane/scene',{'lane':'live','clientId':client,'tabId':1,'view':'content'},{'Authorization':'Bearer '+token})['data']\n                          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/browser-bidi-tui-proof.py\", line 24, in post\n    with opener.open(req,timeout=timeout) as r:return json.load(r)\n         ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py\", line 493, in open\n    response = meth(req, response)\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py\", line 602, in http_response\n    response = self.parent.error(\n        'http', request, response, code, msg, hdrs)\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py\", line 531, in error\n    return self._call_chain(*args)\n           ~~~~~~~~~~~~~~~~^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py\", line 464, in _call_chain\n    result = func(*args)\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py\", line 611, in http_error_default\n    raise HTTPError(req.full_url, code, msg, hdrs, fp)\nurllib.error.HTTPError: HTTP Error 400: Bad Request\n",
+  "cleanup": [
+    {
+      "name": "masc",
+      "pid": 76537,
+      "exit": 0
+    },
+    {
+      "name": "firefox",
+      "pid": 76506,
+      "exit": -15
+    }
+  ]
+}

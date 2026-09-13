@@ -6,41 +6,45 @@
     termios binding: the keys are taken at session start and returned at the
     end. *)
 
-val disable_literal_next : Unix.file_descr -> bool
-(** Turn off the literal-next key (VLNEXT, Ctrl-V by default) on [fd] so
-    Ctrl-V arrives as the byte [\x16] instead of being consumed by the tty
-    layer, which otherwise passes the byte *after* it through uninterpreted.
+(** A key the tty layer takes before a raw-mode reader sees it. *)
+type reclaimed_key =
+  | Literal_next
+      (** VLNEXT, Ctrl-V. Swallowed, and the byte after it passed through
+          uninterpreted. Ctrl-V is the paste key. *)
+  | Discard_output
+      (** VDISCARD, Ctrl-O, on BSD terminals. The Browser screenshot key. *)
+  | Delayed_suspend
+      (** VDSUSP, Ctrl-Y, on BSD terminals. Read with ISIG on, it suspends the
+          reader instead of arriving; on macOS it ended the TUI. Ctrl-Y is the
+          speak key. *)
 
-    [false] when [fd] is not a terminal or the kernel refused: the key stays
-    swallowed and nothing else about the terminal changes.
+val key_char : Unix.file_descr -> reclaimed_key -> int
+(** The key's current character as 0..255, or [-1] when [fd] is not a terminal
+    or this platform has no such key. *)
 
-    Call this after every [Unix.tcsetattr], not once at startup. OCaml's
-    [tcsetattr] writes a C-side termios buffer and overwrites only the fields
-    the record names, so a later call leaves c_cc holding whatever the kernel
-    has -- which, once raw mode is re-applied, is this key turned back on. *)
+val set_key_char : Unix.file_descr -> reclaimed_key -> int -> bool
+(** Put a character back. [false] when [fd] is not a terminal, the platform has
+    no such key, or the kernel refused. *)
 
-val literal_next : Unix.file_descr -> int
-(** The current literal-next character on [fd] as 0..255, or [-1] when [fd] is
-    not a terminal.
+val disable_key : Unix.file_descr -> reclaimed_key -> bool
+(** Turn the key off so its byte reaches the process. [false] when [fd] is not
+    a terminal, the platform has no such key, or the kernel refused: the key
+    stays with the tty and nothing else about the terminal changes. *)
 
-    Read this before {!disable_literal_next} and give it back with
-    {!set_literal_next} at exit. Restoring the [Unix.terminal_io] captured at
-    startup does not restore this character -- the record cannot carry it --
-    so a session that skipped the pair would hand the operator back a shell
-    with no literal-next key. *)
+type snapshot
+(** Every reclaimed key's character as a session found it. *)
 
-val set_literal_next : Unix.file_descr -> int -> bool
-(** Put the literal-next character back. [false] when [fd] is not a terminal
-    or the kernel refused. *)
+val snapshot : Unix.file_descr -> snapshot
+(** Read before the first {!reclaim}. Restoring the [Unix.terminal_io] captured
+    at startup does not restore these characters -- the record cannot carry
+    them -- so a session that skipped the pair would hand the operator back a
+    shell without them. *)
 
-val discard_output : Unix.file_descr -> int
-(** Current VDISCARD character, or [-1] if unavailable. Snapshot before raw
-    mode: Unix.terminal_io cannot preserve this character. *)
+val reclaim : Unix.file_descr -> unit
+(** Turn off every reclaimed key. Call after every [Unix.tcsetattr], not once:
+    OCaml's [tcsetattr] writes a C-side termios buffer and overwrites only the
+    fields the record names, so a later call leaves c_cc holding what the
+    kernel has. *)
 
-val set_discard_output : Unix.file_descr -> int -> bool
-(** Restore a previously captured VDISCARD character. *)
-
-val disable_discard_output : Unix.file_descr -> bool
-(** Disable VDISCARD so Ctrl-O reaches the Browser screenshot handler on BSD
-    terminals. Apply after every Unix.tcsetattr and restore at every release,
-    including suspend and editor handoff. Other extended tty keys stay intact. *)
+val restore : Unix.file_descr -> snapshot -> unit
+(** Give back what {!snapshot} read, skipping keys it could not read. *)

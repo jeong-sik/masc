@@ -1042,6 +1042,10 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+(* top + title + divider + bottom + footer: the rows [surface_chrome] draws
+   itself. Everything else is the body's budget. *)
+let surface_chrome_rows = 5
+
 let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1049,10 +1053,7 @@ let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
   box_top buf cols;
   box_line buf cols title;
   box_divider buf cols;
-  (* top + title + divider + bottom + footer: the five rows the contract
-     itself draws. Everything else is the body's budget. *)
-  let contract_rows = 5 in
-  let budget = max 1 (rows - contract_rows) in
+  let budget = max 1 (rows - surface_chrome_rows) in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
      shoves the bottom gap and the footer off screen, which breaks every
@@ -1322,10 +1323,18 @@ let data_unreliable_row ~cols err =
        - Message_layout.display_width data_unreliable_close)
   in
   (* Generic HTTP bodies and diagnostics carry their actionable prefix.
-     Transport failures put the request target before their verbose reason. *)
+     Transport failures put the request target before their verbose reason.
+
+     Cut only when the error is longer than the room. [fit_width] also pads a
+     shorter one out to the room, which is right for a column and wrong for a
+     sentence: the closing bracket stood at the right edge of the frame, a
+     screen's width away from the words it closes. *)
+  let shown =
+    if Message_layout.display_width err > room then fit_width err room else err
+  in
   (Theme.bad ())
   ^ data_unreliable_open
-  ^ fit_width err room
+  ^ shown
   ^ data_unreliable_close
   ^ Ansi.reset
 
@@ -1831,13 +1840,8 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
       ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
-  let draw stop label =
-    if stop = tab then
-      (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ label ^ Ansi.reset
-  in
-  String.concat "  "
-    (screen_title " MASC Planning" :: List.map2 draw stops labels)
+  screen_title " MASC Planning" ^ "  "
+  ^ tab_strip (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2447,21 +2451,17 @@ let tools_scrolled_for_lines state display_lines =
    no mark on it: it said the key exists and not where pressing it lands, and
    a reader on runtime.toml was told neither. *)
 let config_pane_strip (state : state) =
-  let name pane label =
-    if state.config_pane = pane then
-      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ " " ^ label ^ Ansi.reset
-  in
+  let name pane label = (label, state.config_pane = pane) in
   Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
-  ^ String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Config_runtime "runtime.toml"
-    ; name Config_models "models"
-    ; name Config_params "params"
-    ; name Config_prompts "prompts"
-    ; name Config_presets "presets"
-    ; name Config_themes "themes"
-    ; name Config_voice "voice"
-    ]
+  ^ tab_strip
+      [ name Config_runtime "runtime.toml"
+      ; name Config_models "models"
+      ; name Config_params "params"
+      ; name Config_prompts "prompts"
+      ; name Config_presets "presets"
+      ; name Config_themes "themes"
+      ; name Config_voice "voice"
+      ]
 
 
 let config_metadata_summary (state : state) =
@@ -2514,42 +2514,43 @@ let help_masthead (_state : state) =
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines (state : state) =
-  let format_key key =
-    let trimmed = String.trim key in
-    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
-      trimmed
-    else
-      "[" ^ trimmed ^ "]"
-  in
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
+    (* One heading style, named as the key table names the section. The
+       surface being read wears the filled mark; every other section the hollow
+       one. The current section used to read "ACTIVE: OVERVIEW" in capitals,
+       Global was renamed "GLOBAL NAVIGATION", and the rest were mixed case, so
+       three spellings sat on one sheet and the table's own names appeared on
+       only one of them. *)
     let header_line =
       if is_current then
         let marker_len = String.length Masc_tui_keys.here_marker in
         let base_title = String.sub title 0 (String.length title - marker_len) in
-        (Theme.warn ()) ^ "\xe2\x97\x88 " ^ Ansi.bold ^ (Theme.info ())
-        ^ "ACTIVE: " ^ String.uppercase_ascii base_title ^ Ansi.reset
-      else if String.equal title "Global" then
-        (Theme.info ()) ^ "\xe2\x97\x88 " ^ Ansi.bold
-        ^ "GLOBAL NAVIGATION" ^ Ansi.reset
+        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ base_title ^ Ansi.reset
       else
         Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
     in
+    (* The key as the table spells it, in its own column. Each key used to be
+       wrapped in brackets unless it already started and ended with one, so
+       [/] for find and [ / ] for previous / next -- the bracket keys
+       themselves -- sat on neighbouring rows looking like the same key. The
+       column already sets the key apart, and the footer and the slash
+       commands below draw theirs without brackets. *)
     header_line
     :: List.map
          (fun (key, action) ->
            Printf.sprintf "  %s%-16s%s %s"
              (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (format_key key)
+             (String.trim key)
              Ansi.reset
              action)
          entries
     @ [ "" ]
   in
   let slash_commands =
-    ((Theme.warn ()) ^ "\xe2\x9a\xa1 " ^ Ansi.bold ^ "SLASH COMMANDS & WORKFLOWS" ^ Ansi.reset)
+    (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the

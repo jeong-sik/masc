@@ -75,11 +75,19 @@ let compute_mosaic request ~compute url =
     Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
       let previous = Hashtbl.find_opt mosaic_cache url in
       match request, previous with
-      | Load_missing, None | Retry_refused, Some (Decided (Refused _)) ->
+      (* A retry also claims a URL nothing has decided. A direct image link is
+         never fetched as a page ([get_preview] skips the background fetch for
+         [Image_direct]), so no mosaic was ever computed for it and there was no
+         refusal to claim: the explicit retry did nothing at all and every later
+         view reused the body the first one cached -- across restarts, because
+         that body is a file on disk. A decided mosaic is still left alone,
+         there being nothing to retry, and so is pending work, which would
+         otherwise have two writers. *)
+      | Load_missing, None | Retry_refused, (None | Some (Decided (Refused _))) ->
         let pending = { discard_result = false } in
         Hashtbl.replace mosaic_cache url (Pending pending);
         Some (pending, previous)
-      | Load_missing, Some _ | Retry_refused, (None | Some (Decided (Mosaic _) | Pending _)) ->
+      | Load_missing, Some _ | Retry_refused, Some (Decided (Mosaic _) | Pending _) ->
         None)
   in
   match claimed with

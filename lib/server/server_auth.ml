@@ -906,7 +906,12 @@ let read_request_quota = function
     per-agent limit is exceeded.  Anonymous requests (no token, no agent
     header) are always allowed through — the per-IP limit in
     [bin/main_eio.ml:try_rate_limit_block] covers that case. *)
-let check_agent_rate_limit ?(quota = Metered_operation) request reqd =
+(* [~quota] has no default. With one, every wrapper that did not name a
+   classification took [Metered_operation] silently: after the read exemption
+   landed, three of the eight call sites passed the classifier and five used
+   the default, so the same observation GET was metered or not depending on
+   which wrapper its route happened to use. Each caller now says which it is. *)
+let check_agent_rate_limit ~quota request reqd =
   match quota, agent_rl_key_of_request request with
   | Exempt_observation, _ -> Ok ()
   | Metered_operation, None -> Ok ()  (* anonymous — covered by per-IP limit *)
@@ -1156,7 +1161,9 @@ and with_tool_auth ~tool_name handler request reqd =
            request
        with
       | Ok () ->
-          (match check_agent_rate_limit request reqd with
+          (* Metered whatever the method: a tool invocation is an operation
+             because of what it does, not because of how it was addressed. *)
+          (match check_agent_rate_limit ~quota:Metered_operation request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
@@ -1175,7 +1182,8 @@ and with_tool_actor_auth ~tool_name handler request reqd =
          request
      with
      | Ok agent_name ->
-       (match check_agent_rate_limit request reqd with
+       (* Metered for the same reason as [with_tool_auth]. *)
+       (match check_agent_rate_limit ~quota:Metered_operation request reqd with
         | Ok () -> handler state agent_name request reqd
         | Error () -> ())
      | Error err -> respond_auth_error request reqd err)

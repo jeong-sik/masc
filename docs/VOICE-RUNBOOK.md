@@ -288,7 +288,94 @@ and named no language.
 This is the two halves a voice turn needs — a keeper's words become audio in
 that keeper's voice, and a recording becomes text a keeper can be sent. It is
 not a keeper turn: no model was called and nothing was appended to a chat. The
-turn itself is the two HTTP calls under [External devices](#external-devices).
+turn follows.
+
+### Talking to imp, measured
+
+The same kind of workspace, with a model connection added and the server
+started. The model was `Qwen3.8-27B` (Q4, 35.5GB) on local Ollama, already in
+memory, on an M3 Max whose load average was 25.8 from other work. The wall
+times below are that machine under that load; they say nothing about an M1
+with a cloud model.
+
+**imp does not answer until it has a sandbox.** The journey prepares one at
+step 4. Before that, a message to imp answers
+`Keeper owner not found: imp`, and booting imp with no `docker` on `PATH`
+answers `400`:
+
+```
+docker_preflight_failed: docker info failed while validating sandbox runtime: process_eio_error: Eio.Io Process Executable "docker" not found; keeper sandbox image masc-sandbox:general is not available locally: …
+```
+
+With Docker reachable and the image present, `POST /api/v1/keepers/imp/boot`
+answered `200` in 0.12s.
+
+**The token for HTTP comes from `masc login`.** A server started without
+`MASC_ADMIN_TOKEN` mints one in memory and writes no file for it:
+
+```
+masc login --base-path <base> --client-env MASC_TOKEN
+  role: admin
+  raw_token_file: <base>/.masc/auth/local-admin.token
+```
+
+That file's token was accepted by `/voice/transcribe` on a server started
+afterwards.
+
+**A spoken question gets a written answer.** `question.wav` is `say -v Yuna`
+reading `안녕하세요. 한 문장으로 자기소개를 해 주세요.` (4.8s):
+
+| Step | Wall | What came back |
+|---|---|---|
+| `POST /api/v1/voice/transcribe` | 2.5s | `안녕하세요. 한 문장으로 자기소개를 해주세요.` |
+| `POST /api/v1/keepers/chat/stream`, the transcript | 188s | one sentence of text, no audio |
+
+Of the 188s, 167 went before the first event from the model. masc recorded
+16,863 prompt tokens, none read from a cache, and 4.5 tokens a second decoded.
+
+**imp speaks only when it calls `keeper_voice_speak`.** Nothing turns a reply
+into speech on its own. Asked `방금 한 자기소개를 소리 내어 말해 주세요.`, imp
+made three calls:
+
+| At | Call | Result |
+|---|---|---|
+| 45.7s | `keeper_tool_search` for `keeper_voice_speak` | `now callable: keeper_voice_speak` |
+| 259.6s | `keeper_skill` for a `voice-speak` skill | error — no such skill; the model guessed the name |
+| 290.1s | `keeper_voice_speak` with the sentence | a 14.2s clip in 3.2s |
+| 308.0s | reply | text |
+
+No approval was asked for; the log line is
+`external effect authorized operation=keeper_voice_speak source=local_output`.
+The model's first event came 29s after the question, 200s after the tool
+search, 13s after the skill call and 4.5s after the speak call.
+
+**The clip is made and nobody hears it.** The call wrote a 14.2s WAV and put it
+on the chat line:
+
+```json
+"audio":{"token":"124eb1c9…","mime":"audio/wav","audio_url":"/api/v1/voice/audio/124eb1c9…","duration_sec":14.242993}
+```
+
+`GET` on that URL with no token answered `200 audio/wav`, 632,212 bytes. The
+call's result says
+
+```
+"status":"synthesized","local_playback_status":"skipped","local_playback_reason":"local playback disabled for agent"
+```
+
+because `[voice.local_playback]` is absent and absent means off. `spoken` is
+the status only when this host played the clip. The TUI does not play clips at
+all. The dashboard's chat line for imp showed the clip as a card — a waveform,
+`0:14`, and the sentence — over an `<audio>` element with controls, no
+autoplay, and `paused` still true after the page had loaded. Until someone
+presses play there, the reply is silent.
+
+imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
+`keeper_voice_speak` at 168.9s and replied at 203.6s:
+
+```
+"오늘 음성 설정을 마쳤습니다"라는 음성을 합성해 채팅에 첨부했습니다. 다만 이 호스트에서는 에이전트의 로컬 재생이 꺼져 있어 실제로 소리 내어 재생되지는 않았으니, 첨부된 오디오 파일을 확인해 주세요.
+```
 
 ### What the commands cost
 
@@ -402,7 +489,21 @@ A configuring surface can set it, which is the point of it living here:
 ```
 
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
-other voice change goes through.
+other voice change goes through. The TUI reads it when it starts.
+
+It sends from whichever editor holds the draft. Measured with `masc_tui` on the
+workspace from [Talking to imp, measured](#talking-to-imp-measured), `imp`
+booted, the `rec` stand-in speaking `말을 마치면 바로 보내지는지 봅니다.`, keys
+`2`, Enter on `imp`, `m`, `Ctrl-Y`:
+
+| | |
+|---|---|
+| the transcript appears | 10.1s after `Ctrl-Y` |
+| `▶ YOU 말을 마치면 바로 보내지는지 봅니다.` in the chat | the same redraw — nothing pressed |
+| imp's first reply on screen | 41.3s after `Ctrl-Y` |
+
+From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
+same way, and the chat pane comes forward as it does for Enter.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
@@ -631,6 +732,31 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
+(`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
+terminal and gives it back on exit and around Ctrl-Z, the same way it takes
+Ctrl-V and Ctrl-O.
+
+### One sentence into the chat, measured
+
+`masc_tui` on a workspace whose only STT endpoint is `whisper_cli`, in a
+120×40 pty, with `rec` and `play` replaced by scripts. The `rec` stand-in wrote
+0.8s of room noise, then a 2.0s `say -v Yuna` sentence at real-time rate, then
+room noise until stopped, and `play` only recorded its arguments. Keys: `2`,
+Enter on `imp`, `m`, `Ctrl-Y`.
+
+| What happened | When |
+|---|---|
+| `play -qn synth 0.15 sine 880` | as `Ctrl-Y` landed |
+| `rec` started | same second |
+| the prompt's meter | `-63 dB` on room noise, `-26 dB` on the sentence, `^Y send · Esc discard` beside it |
+| `rec` stopped | after 5.1–5.2s of audio: the sentence ended at 2.8s and the trailing-silence wait is 2.0s |
+| `play -qn synth 0.15 sine 440` | as it stopped |
+| `> 마이크로 보낸 새 질문입니다.` in the draft, and `voice: 마이크로 보낸 새 질문입니다.` in the footer | 19.0s, 10.0s and 10.0s after `Ctrl-Y`, three runs |
+
+The sentence came back as spoken. It stays a draft until Enter, unless
+`send_on_stop` is on.
+
 ### Speaking without touching the keyboard
 
 `Ctrl-Y` records one sentence and appends the transcript to the draft. The
@@ -655,13 +781,42 @@ That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
 it: ending a capture hands the draft to the same send path Enter uses. Off by
 default, and described under Configuration above.
 
+### A conversation left running, measured
+
+`Ctrl-A` in imp's chat pane with `send_on_stop` on, the `rec` stand-in saying
+`연속 모드에서 두 번째 문장입니다.` (2.4s after 0.8s of room noise) every time it
+was started, for 60s, then `Ctrl-A` again:
+
+| | |
+|---|---|
+| the noise-floor probe | 0.5s, once, before the first capture |
+| captures in 60s | 6, each stopped after 5.5–5.6s of audio |
+| from one capture's start to the next | 10.5s, 11.6s, 11.3s, 12.9s, 11.5s |
+| the first sentence | sent at once; imp's turn took 32s |
+| the two sentences said during that turn | held in the TUI as one `NEXT 1`, joined by a newline, and sent as one message when the turn ended |
+| the three said during the next turn | held as `NEXT 1` behind it |
+| the second `Ctrl-A` | ended the mode after the capture in progress; no capture started after it |
+
+A message held behind a running turn is in the TUI, not at the server — the
+chat pane says `1 message waiting in this TUI; not sent to the server yet`.
+Closing the TUI drops it: the three sentences above were not sent and were not
+there when the TUI was opened again. The first `q` says so before the second
+one quits, count first:
+
+```
+q: 1 unsent message is dropped if you press again to quit, or any other key to stay
+```
+
 ## External devices
 
-Any device that can make two HTTP calls can speak to a keeper. No MASC change
-is needed; this was verified end to end on 2026-09-04.
+Any device that can make two HTTP calls can send speech to a keeper and read
+its answer. Hearing the answer is a third call, and only when the keeper spoke
+— see [Talking to imp, measured](#talking-to-imp-measured).
 
 ```sh
-TOKEN=$(cat "${MASC_BASE_PATH:?set it to the base path the server runs with}/.masc/auth/admin.token")
+BASE=~/work
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \
@@ -773,7 +928,8 @@ every line below copied from the terminal. The token is the workspace's own:
 
 ```sh
 MASC=http://127.0.0.1:8971
-TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 ```
 
 **1 — what is configured now.** A fresh workspace has nothing:
@@ -806,11 +962,7 @@ POST /api/v1/voice/setup
 → {"applied":true,"revision":"436a6857…"}
 ```
 
-No `default_model` anywhere, and the section loads. Against a build without
-that narrowing the same request answered
-`the edit does not load as a voice configuration, so it was not written:
-runtime.toml [voice]: tts.default_model is required` — measured on both, an
-hour apart.
+No `default_model` anywhere, and the section loads.
 
 **4 — make it speak, for real:**
 
@@ -923,6 +1075,21 @@ Chromium 149, with a synthesized sentence as the fake microphone and a
 A recording the browser cannot decode is not uploaded; the dashboard shows
 `녹음을 WAV 로 바꾸지 못했습니다: …` in an error toast. The upload is 32KB per
 second whatever is said — twice the WebM in the measurement above.
+
+The same, through the dashboard page itself: headless Chromium 149 opened
+`/dashboard?agent=admin&token=…#keepers?keeper=imp` on that workspace, with
+`question.wav` (4.8s) as the fake microphone.
+
+| Step | What the page did |
+|---|---|
+| the composer's `음성으로 입력` button, 0.6s after load | showed a recording bar with a `완료` button |
+| `완료` after 5.5s | `POST /api/v1/voice/transcribe` with `content-type: audio/wav` → `200 transcribed` |
+| 2.8s after `완료` | a `받아쓰기` card above the composer holding the transcript |
+
+The transcript was `안녕하세요 한 문장으로 자기소개 를 해주세요 안녕하세요 한 문장으로 자기`:
+Chromium loops a fake microphone file, so 5.5s of recording held the 4.8s
+sentence and the start of it again. The card is a draft. Nothing is sent to
+the keeper until `전송`.
 
 ### What each route refuses, measured
 

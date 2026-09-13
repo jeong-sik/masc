@@ -12435,6 +12435,12 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         ):
             if needle not in acting:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
+        # The count belongs to the open reading, not to the Logs tab it
+        # follows: a dot stands between the strip and the count.
+        if "Logs  \u00b7  (1 of 1 held, turns)".encode() not in CSI_RE.sub(b"", acting):
+            raise AssertionError(
+                f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
+            )
         # One f lands on the flat actions log, where the call is its own row
         # and carries the task.
         flat = send_and_wait(

@@ -109,21 +109,55 @@ let test_docker_second_keeper_contained () =
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
-  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
-  (* Sibling directory with a name that LOOKS like a prefix of the playground
-     path; must still be blocked (prevents the classic prefix-without-slash
-     containment bypass). *)
-  let bundle_normalized =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let sibling = bundle_normalized ^ "_evil/secret.txt" in
+  (* [check_target] with an explicit, synthetic root — not
+     [check_read_target]/[Keeper_alerting_path.sandbox_roots ~meta] —
+     because since task-634 / #26289 (operator: read_superset)
+     [check_read_target] also allows anything under [/tmp] and the
+     sandbox workspace root by design (Q1's whole point). A base built
+     under the system temp dir (as [with_tmp_base] does) would make a
+     "lookalike sibling of the bundle" trivially pass containment
+     through the WIDER /tmp root, testing nothing. The prefix-without-
+     slash bypass this test exists to catch belongs to one allowed
+     root's own boundary, which [check_target] exercises directly. *)
+  let root = "/nonexistent-masc-test-root/acme-sandbox" in
+  let sibling = root ^ "_evil/secret.txt" in
   Alcotest.(check bool) "lookalike sibling path is blocked"
     true
     (Result.is_error
+       (Keeper_alerting_path.resolve_keeper_target_path
+          ~config ~sandbox_roots:[ root ] ~raw_path:sibling))
+
+(* task-634 / #26289 (operator decision, ask938aaf519a5c543e: read_superset)
+   — [check_read_target] now allows a path anywhere under [/tmp], the same
+   objective scratch root the exec lane already judged. This is the
+   intentional widening: a Read of a path Execute is allowed to create
+   (e.g. a [git worktree add /tmp/...] destination) must not be refused
+   by a narrower Read jail. *)
+let test_tmp_scratch_allowed_for_read () =
+  with_tmp_base @@ fun base ->
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
+  let scratch = "/tmp/task-634-read-superset-probe/file.txt" in
+  Alcotest.(check bool) "an arbitrary /tmp path is allowed for read"
+    true
+    (Result.is_ok
        (Keeper_sandbox_containment.check_read_target
-          ~config ~meta ~target:sibling))
+          ~config ~meta ~target:scratch))
+
+(* The widening adds a literal root, [/tmp]; it must not also weaken the
+   component-based containment that root itself gets. A lookalike
+   SIBLING of [/tmp] (not a path under it) must stay blocked exactly
+   like any other root's lookalike sibling. *)
+let test_tmp_lookalike_sibling_still_blocked () =
+  with_tmp_base @@ fun base ->
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker () in
+  let lookalike = "/tmp_evil/secret.txt" in
+  Alcotest.(check bool) "a sibling of /tmp itself is still blocked"
+    true
+    (Result.is_error
+       (Keeper_sandbox_containment.check_read_target
+          ~config ~meta ~target:lookalike))
 
 let () =
   Alcotest.run "Keeper_sandbox_containment"
@@ -140,5 +174,9 @@ let () =
             test_docker_second_keeper_contained;
           Alcotest.test_case "lookalike sibling path blocked" `Quick
             test_path_just_outside_playground_blocked;
+          Alcotest.test_case "tmp scratch allowed for read" `Quick
+            test_tmp_scratch_allowed_for_read;
+          Alcotest.test_case "tmp lookalike sibling still blocked" `Quick
+            test_tmp_lookalike_sibling_still_blocked;
         ] );
     ]

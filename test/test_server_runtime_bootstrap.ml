@@ -4629,12 +4629,17 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
               "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
               (read_file secondary_log);
           let secondary_text = read_file secondary_log in
-          if not (String_util.contains_substring secondary_text "already owns base path") then
+          if not (String_util.contains_substring secondary_text
+              (Printf.sprintf "Base path %s is locked." dir)) then
             Alcotest.failf
               "secondary exit did not report the base-path owner\nsecondary log:\n%s\nprimary log:\n%s"
               secondary_text (read_file primary_log);
-          Alcotest.(check bool) "secondary log mentions primary pid" true
-            (String_util.contains_substring secondary_text (string_of_int primary_pid));
+          Alcotest.(check bool) "secondary log preserves recorded-owner uncertainty" true
+            (String_util.contains_substring secondary_text
+              "its namespace and current holder are unverified");
+          Alcotest.(check bool) "secondary log mentions recorded primary pid" true
+            (String_util.contains_substring secondary_text
+              (Printf.sprintf "The lease records PID %d;" primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true
             (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
 

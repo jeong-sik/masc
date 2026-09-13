@@ -27,8 +27,9 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
     can be replayed on a machine that has no say. *)
 val say_catalogue_of_output : string -> catalogue_voice list
 
-(** Ask one endpoint which voices it has. [Error] carries why there is nothing
-    to show, in words meant for a reader who will type the name instead. *)
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
 (** Whether a say catalogue has a voice. say does not fail on a name it does
@@ -117,6 +118,10 @@ val spoke_detail : bytes:int -> voice:string -> string
 (** What an answered TTS probe reports: the byte count and the voice it asked
     for. A blank voice reads as the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
+
+(** Parse what an ElevenLabs endpoint answers. Separate from the asking so a
+    recorded answer can be replayed without a network. *)
+val catalogue_voices_of_json : Yojson.Safe.t -> (catalogue_voice list, string) result
 
 val probe_tts
   :  ?agent_id:string

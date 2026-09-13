@@ -69,8 +69,8 @@ let test_narrow_terminal_draws_one_line_per_row () =
 
 let test_header_prepends_full_width_without_folding () =
   let header = [ "banner line 1"; "banner line 2" ] in
-  let sheet = Masc_tui_help.sheet ~header ~cols:120 (lines 76) in
-  check_int "header rows (2) + folded body (38) = 40 rows" 40 (List.length sheet);
+  let sheet = Masc_tui_help.sheet ~header ~cols:120 (sectioned ~sections:4 ~rows:18) in
+  check_int "header rows (2) + folded body (37) = 39 rows" 39 (List.length sheet);
   check_string "first row is banner line 1" "banner line 1" (List.hd sheet);
   check_string "second row is banner line 2" "banner line 2" (List.nth sheet 1)
 

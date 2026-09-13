@@ -100,11 +100,12 @@ let fixture : Pane.input =
   ; scope = Pane.Whole_fleet
   ; feed = Pane.Feed_live 1_234
   ; keepers =
-      [ keeper "quiet-one" ~tone:Pane.Dim
-      ; keeper "tester"
-      ; keeper "probe"
-      ; keeper "polisher"
-      ]
+      Some
+        [ keeper "quiet-one" ~tone:Pane.Dim
+        ; keeper "tester"
+        ; keeper "probe"
+        ; keeper "polisher"
+        ]
   ; selected = Some "tester"
   ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
   ; chunks = chunks [ "quiet-one"; "tester"; "probe"; "polisher" ] fixture_entries
@@ -231,11 +232,12 @@ let last_index_of name = last_index_of_in texts name
 let dead_fixture : Pane.input =
   { fixture with
     Pane.keepers =
-      keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+      Some
+      (keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
         ~health:(Some Masc.Tui_decode.Health_offline) "goner"
       :: keeper "bare"
       :: keeper "mute"
-      :: fixture.Pane.keepers
+      :: Option.value ~default:[] fixture.Pane.keepers)
   ; selected = Some "goner"
   ; chunks = chunks [ "goner"; "bare"; "mute"; "quiet-one"; "tester"; "probe"; "polisher" ]
       (fixture_entries
@@ -323,7 +325,7 @@ let test_a_gone_keepers_focus_header_says_unfinished () =
 let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper ~health:(Some Masc.Tui_decode.Health_idle) "tester" ]
+      Pane.keepers = Some [ keeper ~health:(Some Masc.Tui_decode.Health_idle) "tester" ]
     ; approvals = []
     }
   in
@@ -339,7 +341,7 @@ let test_idle_health_does_not_turn_an_open_record_into_current_work () =
 let test_event_age_uses_local_receipt_not_producer_time () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper "tester" ]; approvals = []
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
     ; chunks = chunks [ "tester" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:3 ~at:100.
             ~correlation:"trace-tester" lane ]
@@ -362,7 +364,7 @@ let test_settled_unknown_call_total_stays_unknown () =
   in
   let input =
     { fixture with
-      Pane.keepers = [ keeper "tester" ]; approvals = []
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
     ; chunks = chunks [ "tester" ] @@ entries [ 990., event ]
     }
   in
@@ -374,7 +376,7 @@ let test_settled_unknown_call_total_stays_unknown () =
 let test_earlier_unclosed_record_is_not_presented_as_settled () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper "tester" ]; approvals = []
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
     ; chunks = chunks [ "tester" ] @@ entries
         [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
             ~correlation:"trace-tester" lane
@@ -491,7 +493,7 @@ let test_narrow_budget_folds_the_fleet () =
 let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
   let name = "한e\204\129🙂" in
   let input = { fixture with
-    Pane.keepers = [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
+    Pane.keepers = Some [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
     selected = Some name;
     approvals = [ { Pane.approval_keeper = "approval"; approval_tool = "검토🙂" } ];
     chunks = chunks [ name; "quiet"; "second"; "approval" ] @@ entries
@@ -618,7 +620,7 @@ let test_legend_preserves_reachable_targets_in_small_windows () =
 let test_event_and_count_labels_fit_the_existing_width () =
   let input =
     { fixture with
-      Pane.keepers = [ keeper "sixteen-charname" ]; selected = Some "sixteen-charname";
+      Pane.keepers = Some [ keeper "sixteen-charname" ]; selected = Some "sixteen-charname";
       approvals = [];
       chunks = chunks [ "sixteen-charname" ] @@ entries
         [ 987.6, agent_core ~tool:"network_read" ~turn:3 ~tool_use_id:"width"
@@ -796,11 +798,11 @@ let test_reused_chunks_keep_presentation_inputs_live () =
   check bool "initial event age on the header" true
     (contains "last event 10.0s" (header_of "tester" initial));
   let changed = { input with Pane.now = now +. 20.; selected = Some "probe";
-    keepers = List.map (fun (keeper : Pane.keeper) ->
+    keepers = Option.map (List.map (fun (keeper : Pane.keeper) ->
       (* Zombie, not offline: both read as an unfinished record and give the
          row the same glyph, and an offline keeper has no fleet row to read. *)
       if keeper.name = "tester" then { keeper with health = Some Masc.Tui_decode.Health_zombie }
-      else keeper) input.keepers } in
+      else keeper)) input.keepers } in
   let later = Pane.lines ~rows ~cols ~scroll:0 changed in
   check bool "age advances independently of chunks" true
     (contains "last event 1m55s" (header_of "probe" later));
@@ -829,10 +831,10 @@ let test_hidden_rows_do_not_allocate_text_layout () =
   let label long i =
     Printf.sprintf "row-%03d%s" i (if long && i >= 2 then long_text else "")
   in
-  let empty = { fixture with Pane.keepers = []; selected = None;
+  let empty = { fixture with Pane.keepers = Some []; selected = None;
     approvals = []; chunks = [] } in
   let fleet long = { empty with Pane.keepers =
-    List.init count (fun i -> keeper (label long i)) } in
+    Some (List.init count (fun i -> keeper (label long i))) } in
   let focus long =
     let events = List.init count (fun i ->
       let at = 900. +. float_of_int i in
@@ -916,7 +918,7 @@ let test_widest_settled_reading_fits_whole () =
   in
   let input =
     { fixture with
-      Pane.keepers = [ keeper "tester" ]; approvals = []
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
     ; chunks = chunks [ "tester" ] @@ entries [ 990., event ]
     }
   in
@@ -947,7 +949,7 @@ let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.02
 
 let earlier_turn_input ?calls ?input ?output ?cost () =
   { fixture with
-    Pane.keepers = [ keeper "tester" ]; approvals = []
+    Pane.keepers = Some [ keeper "tester" ]; approvals = []
   ; chunks = chunks [ "tester" ] @@ entries
       [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
           ~correlation:"trace-tester" lane
@@ -1035,7 +1037,7 @@ let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
   in
   let input =
     { fixture with
-      Pane.keepers = [ keeper name ]; selected = Some name; approvals = []
+      Pane.keepers = Some [ keeper name ]; selected = Some name; approvals = []
     ; chunks = chunks [ name ] @@ entries [ 990., event ]
     }
   in
@@ -1054,7 +1056,7 @@ let test_beside_the_roster_a_long_record_folds_and_scrolls () =
   in
   let input =
     { fixture with
-      Pane.scope = Pane.Selected_only; keepers = [ keeper "tester" ]; approvals = []
+      Pane.scope = Pane.Selected_only; keepers = Some [ keeper "tester" ]; approvals = []
     ; chunks = chunks [ "tester" ] (entries events)
     }
   in
@@ -1090,12 +1092,13 @@ let test_an_earlier_turn_row_opens_the_keepers_calls () =
 let offline_fixture : Pane.input =
   { fixture with
     Pane.keepers =
-      [ keeper "quiet-one" ~tone:Pane.Dim
-      ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-one"
-      ; keeper "tester"
-      ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-two"
-      ; keeper "probe"
-      ]
+      Some
+        [ keeper "quiet-one" ~tone:Pane.Dim
+        ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-one"
+        ; keeper "tester"
+        ; keeper ~tone:Pane.Bad ~health:(Some Masc.Tui_decode.Health_offline) "gone-two"
+        ; keeper "probe"
+        ]
   ; selected = Some "tester"
   }
 
@@ -1122,6 +1125,21 @@ let test_the_header_names_what_it_left_out () =
   in
   check bool "no parenthetical when none are offline" false (contains "offline" clean)
 
+(* A roster nobody has read is as empty as a workspace with no keepers, and the
+   header is the one row that counts. Until the keeper files are read it says so
+   instead of "0 keepers" (#35747). *)
+let test_an_unread_roster_is_not_counted_as_none () =
+  let header input =
+    List.hd (List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows)
+  in
+  let unread = header { fixture with Pane.keepers = None; selected = None } in
+  check bool "says the roster is not loaded" true
+    (contains "keepers not loaded" unread);
+  check bool "does not count it as none" false (contains "0 keepers" unread);
+  let empty = header { fixture with Pane.keepers = Some []; selected = None } in
+  check bool "a read roster with no keepers still counts them" true
+    (contains "0 keepers" empty)
+
 (* Only Health_offline. A zombie is a keeper that should be running and is not,
    which is the reading an operator most needs; a filter that took it too would
    hide the fleet's problems. A keeper whose health did not read is not a keeper
@@ -1132,12 +1150,13 @@ let test_only_offline_is_dropped () =
   let input =
     { fixture with
       Pane.keepers =
-        [ with_health Masc.Tui_decode.Health_zombie "zombie-one"
-        ; with_health Masc.Tui_decode.Health_stale "stale-one"
-        ; with_health Masc.Tui_decode.Health_degraded "degraded-one"
-        ; keeper "unread-one"
-        ; with_health Masc.Tui_decode.Health_offline "gone-one"
-        ]
+        Some
+          [ with_health Masc.Tui_decode.Health_zombie "zombie-one"
+          ; with_health Masc.Tui_decode.Health_stale "stale-one"
+          ; with_health Masc.Tui_decode.Health_degraded "degraded-one"
+          ; keeper "unread-one"
+          ; with_health Masc.Tui_decode.Health_offline "gone-one"
+          ]
     ; selected = Some "zombie-one"
     }
   in
@@ -1248,6 +1267,8 @@ let () =
             test_offline_keepers_do_not_draw
         ; test_case "the header names what it left out" `Quick
             test_the_header_names_what_it_left_out
+        ; test_case "an unread roster is not counted as none" `Quick
+            test_an_unread_roster_is_not_counted_as_none
         ; test_case "only offline is dropped" `Quick
             test_only_offline_is_dropped
         ] )

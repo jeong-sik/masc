@@ -94,6 +94,15 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* Whether the rows kept from this workspace's own directory -- agents, tasks,
+   keepers, their logs -- were read from it. They are read only once the server
+   says it serves this workspace, and cleared again when it serves another, and
+   both leave the lists empty with no error beside them. An empty roster alone
+   therefore cannot say "no keepers"; this says whether it may. *)
+type local_workspace_reading =
+  | Local_workspace_unread
+  | Local_workspace_read
+
 let canonical_path path =
   if String.equal path ""
   then ""
@@ -3911,7 +3920,7 @@ type state = {
   mutable fleet_safety: fleet_safety option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
-  mutable last_refresh: float;
+  mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
@@ -5509,7 +5518,7 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
-  last_refresh = 0.0;
+  local_workspace = Local_workspace_unread;
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
@@ -5915,6 +5924,15 @@ let empty_page_of ~snapshot ~error =
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
+
+(* The page for a list kept from this workspace's directory, which carries no
+   snapshot of its own: the list is empty both before the read and after it. *)
+let local_rows_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.local_workspace with
+       | Local_workspace_unread -> None
+       | Local_workspace_read -> Some ())
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =

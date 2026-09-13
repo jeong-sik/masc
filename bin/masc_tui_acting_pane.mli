@@ -133,7 +133,9 @@ type input = {
   tab : tab;
   scope : scope;
   feed : feed;
-  keepers : keeper list;
+  keepers : keeper list option;
+      (** [None] until this workspace's keeper files have been read: the header
+          says the roster is not loaded rather than counting no keepers *)
   selected : string option;
       (** the keeper the cursor is on; on the Recent tab the most recently
           observed keeper stands in when there is none *)

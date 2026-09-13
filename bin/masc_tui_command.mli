@@ -216,7 +216,9 @@ val parse : string -> t
     slash is looked for: an operator who types a space first meant text. *)
 
 val about_banner : ?theme_name:string -> ?active_keepers:int -> unit -> string
-(** Horned Reaper ASCII splash emblem and live telemetry card. *)
+(** Horned Reaper ASCII splash emblem and live telemetry card. Without
+    [active_keepers] the card says the roster is not loaded rather than
+    counting none. *)
 
 val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in

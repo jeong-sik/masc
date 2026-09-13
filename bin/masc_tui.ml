@@ -8169,14 +8169,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      let active_keepers = List.length state.keepers in
+      let active_keepers =
+        match state.local_workspace with
+        | Local_workspace_unread -> None
+        | Local_workspace_read -> Some (List.length state.keepers)
+      in
       let theme_name =
         match state.theme_choice with
         | Some name -> name
         | None -> "default"
       in
       let banner =
-        Masc_tui_command.about_banner ~theme_name ~active_keepers ()
+        Masc_tui_command.about_banner ~theme_name ?active_keepers ()
       in
       notice ~role:Message_local banner
   | Masc_tui_command.Open_diff ->

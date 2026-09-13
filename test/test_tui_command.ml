@@ -214,7 +214,14 @@ let test_about_banner () =
   check bool "banner contains HORNED REAPER CORE" true
     (contains_sub banner "HORNED REAPER CORE");
   check bool "banner includes active theme" true
-    (contains_sub banner "dungeon-gold")
+    (contains_sub banner "dungeon-gold");
+  check bool "banner counts the keepers it was given" true
+    (contains_sub banner "Keepers: 3 ");
+  (* No count is not a count of none: the roster has not been read (#35747). *)
+  let unread = Command.about_banner () in
+  check bool "an unread roster says not loaded" true
+    (contains_sub unread "Keepers: not loaded");
+  check bool "and does not say zero" false (contains_sub unread "Keepers: 0")
 
 let test_preset_commands_parse_verb_name_and_description () =
   check (list string) "preset commands"

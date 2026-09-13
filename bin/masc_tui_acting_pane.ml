@@ -112,7 +112,7 @@ type input = {
   tab : tab;
   scope : scope;
   feed : feed;
-  keepers : keeper list;
+  keepers : keeper list option;
   selected : string option;
   approvals : approval list;
   chunks : Acting.chunk list;
@@ -429,8 +429,12 @@ let is_offline keeper =
       | Reading.Health_degraded | Reading.Health_zombie )
   | None -> false
 
-let working_keepers input = List.filter (fun k -> not (is_offline k)) input.keepers
-let offline_count input = List.length (List.filter is_offline input.keepers)
+(* A roster that was never read has no rows to draw, so the rows read it as
+   empty; only the header, which counts them, has to tell the two apart. *)
+let roster input = Option.value input.keepers ~default:[]
+
+let working_keepers input = List.filter (fun k -> not (is_offline k)) (roster input)
+let offline_count input = List.length (List.filter is_offline (roster input))
 
 let header_line ~cols input =
   (* Beside the roster the count is the roster's own title; the header then
@@ -442,9 +446,12 @@ let header_line ~cols input =
          A count of the whole fleet beside a shorter list reads as a drawing
          bug, and a count of the drawn rows alone hides that anything was
          dropped. *)
-      let hidden = offline_count input in
-      plural (List.length (working_keepers input)) "keeper"
-      ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden)
+      (match input.keepers with
+       | None -> "keepers not loaded"
+       | Some _ ->
+         let hidden = offline_count input in
+         plural (List.length (working_keepers input)) "keeper"
+         ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden))
       ^ middle_dot
     | Selected_only -> ""
   in
@@ -538,7 +545,7 @@ let focus_keeper input newest =
       |> Option.map fst
 
 let health_of input name =
-  match List.find_opt (fun keeper -> String.equal keeper.name name) input.keepers with
+  match List.find_opt (fun keeper -> String.equal keeper.name name) (roster input) with
   | Some keeper -> keeper.health
   | None -> None
 

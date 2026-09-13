@@ -69,10 +69,17 @@ let test_short_fields_take_one_row_each () =
   in
   check_int "one row per field" 4
     (List.length (Detail.of_fields ~width:100 fields));
-  (* The same fields on a pane too narrow to hold name and value together keep
-     the two-row shape rather than cutting the value. *)
-  check_int "and two each where they do not fit" 8
-    (List.length (Detail.of_fields ~width:24 fields))
+  (* On a pane too narrow to hold a name and its value together, the name is
+     alone on its row and the value is wrapped under it, rather than cut. *)
+  List.iter
+    (fun (line : Detail.line) ->
+      match line.Detail.label with
+      | Some name -> check_string "the name is alone on its row" name line.Detail.text
+      | None -> ())
+    (Detail.of_fields ~width:12 fields);
+  check_bool "and every value is still on the pane" true
+    (let all = joined (Detail.of_fields ~width:12 fields) in
+     List.for_all (fun (_, value) -> contains all (String.sub value 0 4)) fields)
 
 (* A value with its own line breaks keeps its name a row of its own: the
    wrapped lines start at the indent, not under the label column. *)

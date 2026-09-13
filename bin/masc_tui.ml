@@ -16594,6 +16594,7 @@ and is loaded on demand through keeper_skill.
                              the editable draft available on reopen. *)
                           state.lane_addons_cached <- view;
                           state.lane_addons <- None
+                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with

@@ -7099,16 +7099,27 @@ def memory_journal_timeline_interaction(
         )
 
         # Ctrl-N walks the same cycle without the composer: full -> hidden.
-        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
+        # Each check reads only the frame that drew the new mode. The bytes
+        # send_and_wait returns start at the key press, so a refresh frame the
+        # loop drew before it read the key -- still in the previous mode --
+        # can sit in front of it: under the full keyboard suite the hidden
+        # check once found the row in the frame before "journal:off".
+        hidden = frame_containing(
+            send_and_wait(process, master_fd, output, b"\x0e", b"journal:off"),
+            b"journal:off",
+        )
         if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         # ... and hidden -> summary, the resting default.
-        restored = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x0e",
+        restored = frame_containing(
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\x0e",
+                b"Librarian committed current memory revision 9",
+            ),
             b"Librarian committed current memory revision 9",
         )
         if b"journal:off" in restored:

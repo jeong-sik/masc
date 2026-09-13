@@ -9830,22 +9830,18 @@ let render_runtime (state : state) =
             (Theme.warn ()) ^ " / read failed" ^ Ansi.reset
           else ""
         in
-        let tab ~active label =
-          if active then
-            (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-          else Ansi.dim ^ label ^ Ansi.reset
-        in
         let all_count =
           List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
-        Printf.sprintf "%s  %s  %s  %s%s  %s  %s"
+        Printf.sprintf "%s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
-          (tab ~active:lanes_active
-             (Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count
-                 (List.length snapshot.rss_candidates)))
-          (tab ~active:(not lanes_active)
-             (Printf.sprintf "All runtimes (%d)" all_count))
+          (tab_strip
+             [ ( Printf.sprintf "Lanes (%d lanes, %d slots)" lane_count
+                   (List.length snapshot.rss_candidates)
+               , lanes_active )
+             ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
+             ])
           probe_status probe_read timestamp (connection_badge state)
   in
   let authority_line =

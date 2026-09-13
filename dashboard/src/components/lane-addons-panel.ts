@@ -160,6 +160,7 @@ export function LaneAddonsPanel() {
   const [until, setUntil] = useState('')
   const [instance, setInstance] = useState('')
   const [keeper, setKeeper] = useState('')
+  const [focusedRow, setFocusedRow] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const reads = useRef<AbortController | null>(null)
   const mounted = useRef(true)
@@ -220,6 +221,9 @@ export function LaneAddonsPanel() {
   }
   const configuration = snapshot?.configuration ?? null
   const rows = slice?.rows ?? snapshot?.rows ?? []
+  const selectionOwned = instance !== '' && selected.length > 0 && selected.every(id =>
+    rows.some(row => row.id === id && row.lane_id.startsWith(`${instance}/`)))
+  const focused = rows.find(row => row.id === focusedRow)
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
     <header class="flex items-center justify-between gap-4">
@@ -230,6 +234,29 @@ export function LaneAddonsPanel() {
     </header>
     ${reading && html`<p role="status">Reading retained observations…</p>`}
     ${error && html`<p role="alert" class="text-red-400">${error}</p>`}
+    ${slice && html`<p role="status">Frozen slice: Refresh updates installation status only. Use Slice to query again, or Clear slice to show the latest snapshot.</p>`}
+    ${error && snapshot && html`<p role="status">Showing retained data after a failed request; current state is unverified.</p>`}
+    <${LaneAddonsTimeline} rows=${rows} instances=${snapshot?.instances ?? []} selectedId=${focused?.id}
+      onSelect=${(row: { id: string }) => setFocusedRow(row.id)}
+      onWindow=${(from: number, to: number) => { setSince(String(from)); setUntil(String(to)) }} />
+    ${focused && html`<section class="border border-[var(--border)] rounded p-4 space-y-2" aria-label="Selected Lane event">
+      <h3 class="font-semibold">Selected: ${focused.title}</h3>
+      <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
+      <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
+      <pre class="whitespace-pre-wrap break-all">${JSON.stringify(focused.fields, null, 2)}</pre>
+      <h4>Original evidence</h4>
+      ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
+      ${focused.related_ids.length > 0 && html`<div>Recorded relationships: ${focused.related_ids.map(id => {
+        const related = rows.find(row => row.id === id)
+        return related ? html`<button type="button" class=${buttonClass} key=${id} onClick=${() => setFocusedRow(id)}>Inspect related: ${related.title}</button>`
+          : html`<span key=${id}>${id} (outside this view) </span>`
+      })}</div>`}
+      <button type="button" class=${buttonClass} onClick=${() => {
+        const owner = snapshot?.instances.find(item => focused.lane_id.startsWith(`${item.instance_id}/`))
+        if (owner) { setInstance(owner.instance_id); setSelected([focused.id]) }
+      }} disabled=${!snapshot?.instances.some(item => focused.lane_id.startsWith(`${item.instance_id}/`))}>Select this evidence and its instance</button>
+      <button type="button" class=${buttonClass} onClick=${() => setFocusedRow(null)}>Close event</button>
+    </section>`}
     ${snapshot && html`<section class="space-y-2" aria-label="TOML configuration">
       <h3 class="font-semibold">TOML configuration</h3>
       ${configuration === null
@@ -297,7 +324,6 @@ export function LaneAddonsPanel() {
     </tr>`)}</tbody></table></div>
     ${snapshot?.instances.length === 0 && html`<p>No attached packages.</p>`}
     <${LaneAddonActions} instances=${snapshot?.instances ?? []} />
-    <${LaneAddonsTimeline} rows=${rows} onWindow=${(from: number, to: number) => { setSince(String(from)); setUntil(String(to)) }} />
     <form class="flex flex-wrap gap-2" onSubmit=${(e: Event) => { e.preventDefault(); void query() }}>
       <label>Run filter <input class=${inputClass} value=${run} onInput=${(e: Event) => setRun((e.target as HTMLInputElement).value)} /></label>
       <label>Lane filter <input class=${inputClass} value=${lane} onInput=${(e: Event) => setLane((e.target as HTMLInputElement).value)} /></label>
@@ -321,9 +347,10 @@ export function LaneAddonsPanel() {
       </details>
     </article>`)}</div>
     <div class="flex flex-wrap gap-2"><label>Keeper (optional) <input class=${inputClass} value=${keeper} onInput=${(e: Event) => setKeeper((e.target as HTMLInputElement).value)} /></label>
-      <button class=${buttonClass} disabled=${!instance || selected.length === 0} onClick=${() => act(() => preserveLaneAddonEvidence(instance, selected, keeper || undefined))}>
+      <button class=${buttonClass} disabled=${!selectionOwned} onClick=${() => { if (selectionOwned) void act(() => preserveLaneAddonEvidence(instance, selected, keeper || undefined)) }}>
         ${keeper ? 'Preserve and send selected evidence' : 'Preserve selected evidence'}
       </button></div>
+    ${selected.length > 0 && !selectionOwned && html`<p role="status">Select evidence belonging to the selected instance. Mixed or unresolved owners cannot be preserved together.</p>`}
     ${receipt !== null && html`<details open><summary>Last action receipt</summary><pre class="whitespace-pre-wrap break-all">${JSON.stringify(receipt, null, 2)}</pre></details>`}
   </section>`
 }

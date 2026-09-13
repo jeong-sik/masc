@@ -49,6 +49,32 @@ const actionReceipt = {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('opens original evidence from horizontal lanes without filtering and includes empty workers', async () => {
+    const owned = { ...row, lane_id: 'instance-1/msx/frame' }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [owned],
+      instances: [...snapshot.instances, { ...snapshot.instances[0], instance_id: 'empty-worker',
+        title: 'Empty worker', phase: { kind: 'failed', message: 'Source unavailable' }, rows_count: 0 }] }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const event = await screen.findByRole('button', { name: `Inspect ${row.title} · ${row.id}` })
+    fireEvent.click(event)
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText(/artifact:\/\/source\/1/)).toBeTruthy()
+    expect((screen.getByLabelText('Since (Unix seconds)') as HTMLInputElement).value).toBe('')
+    expect(screen.getAllByText('Empty worker · failed').length).toBeGreaterThan(0)
+    fireEvent.click(detail.getByRole('button', { name: 'Select this evidence and its instance' }))
+    expect(screen.getByRole('button', { name: 'Preserve selected evidence' }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Preserve selected evidence' }))
+    await waitFor(() => expect(api.preserveLaneAddonEvidence).toHaveBeenCalledWith('instance-1', [row.id], undefined))
+  })
+  it('allows keyboard selection of simultaneous observations and exposes missing relationship targets', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [row, { ...row, id: 'overlap', title: 'Second event' }] }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'Inspect Second event · overlap' }), { key: 'Enter' })
+    const detail = within(screen.getByRole('region', { name: 'Selected Lane event' }))
+    expect(detail.getByText('Selected: Second event')).toBeTruthy()
+    expect(detail.getByText(/receipt-3 \(outside this view\)/)).toBeTruthy()
+    expect(detail.getByRole('button', { name: 'Select this evidence and its instance' }).hasAttribute('disabled')).toBe(true)
+  })
   it('projects an unknown package and its common evidence without a domain-specific renderer', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
     const screen = render(html`<${LaneAddonsPanel} />`)
@@ -175,8 +201,8 @@ describe('optional Lane Add-on surface', () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows:
       lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
     const screen = render(html`<${LaneAddonsPanel} />`)
-    const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
-    const labels = [...svg.querySelectorAll('g text')]
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text[aria-label]')].filter(label => lanes.includes(label.getAttribute('aria-label')!))
     expect(labels.map(label => label.lastChild?.textContent)).toEqual([
       'custom/browser · 5cca3312', 'custom/expectation · 5cca3312',
     ])
@@ -190,8 +216,8 @@ describe('optional Lane Add-on surface', () => {
       instances: instances.map(instance_id => ({ ...snapshot.instances[0], instance_id })), rows:
       lanes.map((lane_id, index) => ({ ...row, id: `row-${index}`, lane_id })) }))
     const screen = render(html`<${LaneAddonsPanel} />`)
-    const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
-    const labels = [...svg.querySelectorAll('g text')]
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
+    const labels = [...svg.querySelectorAll('g text[aria-label]')].filter(label => lanes.includes(label.getAttribute('aria-label')!))
     expect(labels.map(label => label.lastChild?.textContent)).toEqual([
       'custom/observation · 11111111', 'custom/observation · 22222222',
     ])
@@ -199,7 +225,7 @@ describe('optional Lane Add-on surface', () => {
   })
   it('queries the selected time and lane, showing partial coverage and explicit evidence action', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
-    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [row], coverage, complete: false }))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [{ ...row, lane_id: 'instance-1/unregistered-domain' }], coverage, complete: false }))
     api.preserveLaneAddonEvidence.mockResolvedValue({ retained: true })
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('User supplied layer')
@@ -244,7 +270,7 @@ describe('optional Lane Add-on surface', () => {
     ] }))
     api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [], coverage, complete: false }))
     const screen = render(html`<${LaneAddonsPanel} />`)
-    const svg = await screen.findByRole('img', { name: 'Parallel lanes with events and recorded relationships' })
+    const svg = await screen.findByRole('group', { name: 'Parallel lanes with events and recorded relationships' })
     vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 960, top: 0, height: 100,
       right: 960, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
     fireEvent.pointerDown(svg, { pointerId: 7, button: 0, isPrimary: true, clientX: 430 })
@@ -282,7 +308,7 @@ describe('optional Lane Add-on surface', () => {
   })
   it('submits an advertised package action with an exact binding while slice and other controls remain usable', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))
-    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [row], coverage, complete: false }))
+    api.fetchLaneAddonSlice.mockResolvedValue(parseLaneAddonSlice({ rows: [{ ...row, lane_id: 'instance-1/unregistered-domain' }], coverage, complete: false }))
     let accept: ((value: unknown) => void) | undefined
     api.requestLaneAddonAction.mockImplementation(() => new Promise(resolve => { accept = resolve }))
     const screen = render(html`<${LaneAddonsPanel} />`)

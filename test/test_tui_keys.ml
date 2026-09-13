@@ -1072,13 +1072,14 @@ let test_the_sheet_opens_on_the_current_surface () =
              (String.length title >= String.length expected
               && String.equal (String.sub title 0 (String.length expected))
                    expected);
-           (* The section has to be that surface's, not just titled like it. *)
+           (* The section has to be that surface's, not just titled like it:
+              its own keys, less the tail Global names. *)
            Alcotest.(check (list (pair string string)))
              (name ^ ": and carries its keys")
              (List.map
                 (fun (b : Masc_tui_keys.binding) ->
                    (b.key, Option.value b.help ~default:b.label))
-                (Masc_tui_keys.for_surface surface))
+                (Masc_tui_keys.sheet_bindings surface))
              keys
        | [] -> Alcotest.fail (name ^ ": no sections at all"))
     [ ("Overview", Overview, "Overview")

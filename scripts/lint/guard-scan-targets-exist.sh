@@ -66,19 +66,19 @@ command -v rg >/dev/null 2>&1 || {
 # it is skipped anyway rather than rely on that.
 scan_entries() {
   local tree="$1"
-  rg --line-number --no-heading \
+  rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
     '^[[:space:]]*"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
     -r '$1' \
     "$tree/scripts" 2>/dev/null || true
-  rg --line-number --no-heading \
+  rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
     '^[[:space:]]*((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)[[:space:]]*\\?[[:space:]]*$' \
     -r '$1' \
     "$tree/scripts" 2>/dev/null || true
-  rg --line-number --no-heading \
+  rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
     "(-g|--glob)[[:space:]]+'!((lib|dashboard|bin|test)/[A-Za-z0-9/_.-]+\.[a-z]+)'" \
@@ -91,12 +91,11 @@ report() {
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     file="${row%%:*}"
+    # Each arm prints only the path it captured. Without --only-matching, rg -r
+    # replaces the match and prints the rest of the line too, so an argument
+    # sitting before a quoted entry -- check "test/x.py" "bin/y.mli" -- was
+    # glued onto the path and reported as a file that does not exist.
     path="${row##*:}"
-    # rg -r replaces the match and keeps the rest of the line, so an entry
-    # arrives with whatever sat around it: indentation before, and for the
-    # exclusion-glob arm a line-continuation after.
-    path="${path#"${path%%[![:space:]]*}"}"
-    path="${path%"${path##*[![:space:]\\]}"}"
     # bin/*.exe is what dune produces, not a file a scanner reads: it is absent
     # from every clean checkout, so its absence says nothing about scope.
     case "$path" in *.exe) continue ;; esac
@@ -116,6 +115,8 @@ case "$MODE" in
     # Both spellings, so neither arm can be dropped without this failing.
     printf 'SCAN_FILES=(\n  "lib/present.ml"\n  "lib/absent.ml"\n)\nBARE=(\n  lib/bare_present.ml\n  lib/bare_absent.ml\n)\nrg -n \\\n  -g '"'"'!lib/glob_present.ml'"'"' \\\n  -g '"'"'!lib/glob_absent.ml'"'"' \\\n  pat lib\n' \
       >"$scratch/scripts/probe.sh"
+    # A quoted entry with another argument before it on the same line.
+    printf 'check "test/t.py" "lib/after_argument_absent.ml"\n' >>"$scratch/scripts/probe.sh"
     : >"$scratch/lib/present.ml"
     : >"$scratch/lib/bare_present.ml"
     : >"$scratch/lib/glob_present.ml"
@@ -124,14 +125,16 @@ case "$MODE" in
     printf 'check "test/scenario.py" "lib/present.ml"\n' \
       >>"$scratch/scripts/probe.sh"
     want="scripts/probe.sh|lib/absent.ml
+scripts/probe.sh|lib/after_argument_absent.ml
 scripts/probe.sh|lib/bare_absent.ml
 scripts/probe.sh|lib/glob_absent.ml"
     got="$(report "$scratch" | sort)"
     if [ "$got" != "$want" ]; then
-      echo "[guard-scan-targets-exist] self-test: expected the two absent entries, got '${got}'" >&2
+      echo "[guard-scan-targets-exist] self-test: expected exactly the absent entries, got '${got}'" >&2
       exit 1
     fi
     : >"$scratch/lib/absent.ml"
+    : >"$scratch/lib/after_argument_absent.ml"
     : >"$scratch/lib/bare_absent.ml"
     : >"$scratch/lib/glob_absent.ml"
     if [ -n "$(report "$scratch")" ]; then

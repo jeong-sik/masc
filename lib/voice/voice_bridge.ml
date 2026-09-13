@@ -341,7 +341,8 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
     | [] -> None
     | endpoint :: rest ->
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-      if Voice_runtime_overlay.transport_supports_http_tts adapter
+      if Voice_runtime_overlay.speaker_of_transport adapter.transport
+         = Voice_runtime_overlay.Over_http
       then (
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
@@ -811,51 +812,68 @@ let probe_tts ?(agent_id = "probe") ~message () =
          (List.map
             (fun (endpoint : Voice_config.endpoint) ->
               let outcome =
+                (* The voice is resolved per endpoint: an id is provider
+                   vocabulary, so the one that suits this endpoint is the one
+                   to ask it for (#24068). *)
+                let voice () =
+                  Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
+                in
+                (* The voice that was asked for, not only the bytes that came
+                   back. A say voice that is not installed was refused before
+                   the clip, so an answer here is in the voice it names. A
+                   blank one is the system voice, said as such rather than
+                   as "". *)
+                let answer = function
+                  | Ok detail -> Answered detail
+                  | Error reason -> Refused reason
+                in
+                (* The probe produces the audio the same ways the speak path
+                   does, so that what it reports is what a turn would get
+                   rather than a second opinion. *)
+                let clip speak =
+                  let voice = voice () in
+                  let output_file =
+                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                  in
+                  let spoken = speak ~voice ~output_file in
+                  remove_quietly output_file;
+                  answer (Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
+                in
                 if not endpoint.Voice_config.enabled
                 then Skipped "disabled in the configuration"
-                else if
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Whisper_cli -> true
-                  | Voice_config.Openai_compat
-                  | Voice_config.Elevenlabs_direct
-                  | Voice_config.Voice_mcp
-                  | Voice_config.Macos_say -> false
-                then Skipped "this endpoint kind does not synthesize"
-                else (
-                  (* The voice is resolved per endpoint: an id is provider
-                     vocabulary, so the one that suits this endpoint is the one
-                     to ask it for (#24068). *)
-                  let voice =
-                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
-                  in
-                  (* The probe produces the audio the same ways the speak path
-                     does, so that what it reports is what a turn would get
-                     rather than a second opinion. *)
-                  let result =
-                    match endpoint.Voice_config.kind with
-                    | Voice_config.Macos_say ->
-                      (* Checked here and not before every speak: listing
-                         took 0.56-0.59s per call on the mac that measured
-                         it, which a keeper's every sentence would wait for.
-                         This probe is where a mapping is confirmed. *)
-                      (match check_say_voice endpoint ~voice with
-                       | Error reason -> Error reason
-                       | Ok () ->
-                         let output_file =
-                           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
-                         in
-                         let spoken =
-                           Voice_bridge_transport.speak_via_command_to_file
-                             endpoint ~message ~voice ~output_file
-                         in
-                         remove_quietly output_file;
-                         Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
-                    (* Through agent_speak, the tool a turn calls. Skipping it
-                       reported a configuration whose only speaker is an MCP
-                       tool as nothing answering, and voice-verify exited 1 for
-                       a voice that worked. The call is bounded by the event
-                       loop's clock, as the speak path's is. *)
-                    | Voice_config.Voice_mcp ->
+                else
+                  match Voice_runtime_overlay.speaker_of_endpoint endpoint with
+                  | Voice_runtime_overlay.Does_not_speak ->
+                    Skipped "this endpoint kind does not synthesize"
+                  | Voice_runtime_overlay.By_command ->
+                    (* Checked here and not before every speak: listing
+                       took 0.56-0.59s per call on the mac that measured
+                       it, which a keeper's every sentence would wait for.
+                       This probe is where a mapping is confirmed. *)
+                    (match check_say_voice endpoint ~voice:(voice ()) with
+                     | Error reason -> Refused reason
+                     | Ok () ->
+                       clip (fun ~voice ~output_file ->
+                         Voice_bridge_transport.speak_via_command_to_file
+                           endpoint ~message ~voice ~output_file))
+                  | Voice_runtime_overlay.Over_http ->
+                    clip (fun ~voice ~output_file ->
+                      match tts.Voice_config.default_model with
+                      | None ->
+                        Error
+                          "this endpoint is asked for a model by name and [voice.tts] \
+                           names none"
+                      | Some model ->
+                        speak_via_http_tts_to_file
+                          endpoint ~agent_id ~message ~voice ~model ~output_file)
+                  (* Through agent_speak, the tool a turn calls. Skipping it
+                     reported a configuration whose only speaker is an MCP
+                     tool as nothing answering, and voice-verify exited 1 for
+                     a voice that worked. The call is bounded by the event
+                     loop's clock, as the speak path's is. *)
+                  | Voice_runtime_overlay.By_mcp_tool ->
+                    let voice = voice () in
+                    answer
                       (match Eio_context.get_clock_opt (), Eio_context.get_net_opt () with
                        | Some clock, Some net ->
                          with_voice_output_turn ~agent_id (fun () ->
@@ -881,33 +899,6 @@ let probe_tts ?(agent_id = "probe") ~message () =
                          Error
                            "no event loop is running in this process to bound the MCP \
                             call with")
-                    | Voice_config.Openai_compat
-                    | Voice_config.Elevenlabs_direct
-                    | Voice_config.Whisper_cli ->
-                      (match tts.Voice_config.default_model with
-                       | None ->
-                         Error
-                           "this endpoint is asked for a model by name and [voice.tts] \
-                            names none"
-                       | Some model ->
-                         let output_file =
-                           make_audio_file
-                             ~format:(clip_format_for_kind endpoint.Voice_config.kind)
-                         in
-                         let spoken =
-                           speak_via_http_tts_to_file
-                             endpoint ~agent_id ~message ~voice ~model ~output_file
-                         in
-                         remove_quietly output_file;
-                         Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
-                  in
-                  match result with
-                  (* The voice that was asked for, not only the bytes that came
-                     back. A say voice that is not installed was refused above,
-                     so an answer here is in the voice it names. A blank one is
-                     the system voice, said as such rather than as "". *)
-                  | Ok detail -> Answered detail
-                  | Error reason -> Refused reason)
               in
               { endpoint_id = endpoint.Voice_config.id
               ; kind = endpoint.Voice_config.kind
@@ -1126,7 +1117,11 @@ let try_http_tts_for_browser_audio
   | None -> None
   | Some model ->
   let http_endpoints =
-    List.filter Voice_runtime_overlay.endpoint_supports_http_tts endpoints
+    List.filter
+      (fun endpoint ->
+        Voice_runtime_overlay.speaker_of_endpoint endpoint
+        = Voice_runtime_overlay.Over_http)
+      endpoints
   in
   let rec try_endpoints = function
     | [] -> None

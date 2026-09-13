@@ -10,4 +10,5 @@
   masc.voice_wizard
   masc.voice_setup
   masc.voice_config
+  masc.voice_runtime_overlay
   unix))

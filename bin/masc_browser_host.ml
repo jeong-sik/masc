@@ -358,6 +358,7 @@ let run_bidi env config url =
         match read_token config.token_file with
         | Error _->()
         | Ok token->Eio.Fiber.first
+            (* fire-and-forget: teardown has no caller to report a failed disconnect to; the sleep bounds it. *)
             (fun ()->ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
             (fun ()->Eio.Time.sleep clock 0.25));
       let rec poll () =

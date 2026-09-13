@@ -12108,7 +12108,10 @@ let render_prompt_registry (state : state) =
        in
        let actual_input_lines =
          if not (String.equal row.pr_category "librarian") then []
-         else if state.prompts_librarian_input_loading then
+         else if state.prompts_librarian_input_loading
+                 && not (Option.exists
+                      (fun (key, _) -> String.equal key row.pr_key)
+                      state.prompts_librarian_input) then
            [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
          else
            match state.prompts_librarian_input_error with

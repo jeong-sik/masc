@@ -88,6 +88,13 @@ def main(executable: str) -> None:
             def key(value: bytes, needle: bytes):
                 return terminal.send_and_wait(process, master_fd, output, value, needle)
 
+            key(b":go lanes\r", b"MASC Lanes")
+            key(b"A", b"MASC Lane Add-ons")
+            key(b"\t", b"No instances.")
+            key(b"\t", b"No observations.")
+            key(b"\t", b"No installations.")
+            key(b"q", b"MASC Lanes")
+            key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
             key(b"n", b"New TOML filename:")
             key(b"terminal.toml\r", b"Draft edited; s saves")

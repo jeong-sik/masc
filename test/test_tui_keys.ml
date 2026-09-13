@@ -660,23 +660,11 @@ let test_keeper_operations_are_not_top_level_tabs () =
           | Detail_github | Detail_identity -> None)
        keeper_detail_tabs)
 
-(* Standalone Lanes is service-lane observation -- one more reading of "is
-   the substrate alive" -- so it hangs off Runtime as [p]'s third stop
-   instead of holding a Tab stop of its own. *)
-let test_lanes_is_a_runtime_child () =
-  Alcotest.(check bool) "Lanes is not a top-level ring entry" false
+let test_lanes_is_a_main_destination () =
+  Alcotest.(check bool) "Lanes is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  (* No ring assertion here on purpose. Runtime left the ring when it moved
-     under Config, so [surface_ring_index Runtime] and [surface_ring_index
-     Lanes] are now the same match arm resolving to Config -- comparing them
-     cannot fail, and would keep passing if Lanes were moved to hang off
-     Resources instead. What Lanes highlights is claimed with teeth in
-     [test_logs_is_an_activity_child], against Config's own index. The label
-     below is what still records whose child Lanes is. *)
-  Alcotest.(check bool) "and the help sheet files it under Runtime" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Config / Runtime / Lanes")
-       (Masc_tui_keys.help_sections ()));
+  Alcotest.(check bool) "Lanes has its own selection" true
+    (surface_ring_index Lanes <> surface_ring_index Config);
   let lanes_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -753,7 +741,7 @@ let test_logs_is_an_activity_child () =
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
         (surface_ring_index Config) (surface_ring_index surface))
-    [Runtime; Lanes; Clients];
+    [Runtime; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
@@ -1683,8 +1671,8 @@ let () =
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "Keeper operations are detail tabs" `Quick
             test_keeper_operations_are_not_top_level_tabs
-        ; Alcotest.test_case "Lanes is a Runtime child" `Quick
-            test_lanes_is_a_runtime_child
+        ; Alcotest.test_case "Lanes is a main destination" `Quick
+            test_lanes_is_a_main_destination
         ; Alcotest.test_case "Code is a Workspace child" `Quick
             test_code_is_a_workspace_child
         ; Alcotest.test_case "Resources is a Config child" `Quick

@@ -4541,11 +4541,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · a appends a failover slot"
+    | None -> "  Standalone LLM lanes · A:add-ons · a:failover slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · A:add-ons · a:failover slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -13515,9 +13515,14 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:"n:new TOML  E:edit TOML  s:save  Tab:focus  j/k:select  J/K:scroll  e:evidence  o:observe  d:detach  r:inspect  Esc:back"
     ~body:(fun ~budget c ->
-      Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
-      |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
-      |> List.iter c.push)
+      let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
+      let scroll = max 0 (min view.scroll (List.length lines - budget)) in
+      lines
+      |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
+      |> List.iteri (fun index line ->
+          if index=0 && scroll=0 then
+            c.push_styled ~style:(Ansi.bold ^ Theme.info ()) line
+          else c.push line))
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

@@ -9,6 +9,20 @@ assert r['health_build']['executable_sha256']==bundle['binaries']['masc-macos-ar
 assert t['tui_sha256']==bundle['binaries']['masc-tui-macos-arm64']
 a=[x for x in t['receipts'] if x['path'].endswith('/interact')];assert len(a)==1
 a=a[0];assert a['status']==200 and a['input']['action']=='drag' and a['input']['lane']=='live' and a['input']['clientId']==r['client_id']
+screenshots=[x for x in t['receipts'] if x['path'].endswith('/screenshot') and x['status']==200]
+initial=screenshots[0]['response']['data']
+assert initial['viewport']==a['input']['viewport'] and initial['url']==a['input']['expectedUrl']
+assert initial['clientId']==a['input']['clientId'] and initial['tabId']==a['input']['tabId']
+bidi_screens=[x for x in load('bidi.json') if x['request']['method']=='browsingContext.captureScreenshot']
+assert len(bidi_screens)==len(screenshots)
+for http,bidi in zip(screenshots,bidi_screens):
+ data=http['response']['data']
+ assert http['input']['clientId']==data['clientId']==r['client_id']
+ assert http['input']['tabId']==data['tabId']
+ assert bidi['request']['params']['context']==r['mapping'][str(data['tabId'])]
+ assert bidi['reply']['id']==bidi['request']['id'] and bidi['reply']['type']=='success'
+ captured=base64.b64decode(bidi['reply']['result']['data'],validate=True)
+ assert hashlib.sha256(captured).hexdigest()==data['data']['sha256'] and len(captured)==data['data']['bytes']
 transport=[x for x in load('transport.json') if x['request']['verb']=='page.interact'];assert len(transport)==1
 wire=transport[0];assert wire['request']['args']=={k:v for k,v in a['input'].items() if k not in ['lane','clientId']}
 assert wire['reply']['ok'] and wire['request']['id']==wire['reply']['id']

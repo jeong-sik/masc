@@ -4669,7 +4669,7 @@ let launch_browser_lane state ~mailbox operation =
          result; effects still use the observed document/URL checks. Failed
          refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }

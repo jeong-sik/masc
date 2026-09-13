@@ -781,7 +781,38 @@ let load_detailed () =
           | Error msg -> Error (Invalid msg))))
 
 let load_error_to_string = function
-  | Not_configured -> Printf.sprintf "voice config missing at %s" (config_path ())
+  (* Names both places a configuration is read from, and where runtime.toml
+     was looked for. Naming only the standalone JSON sent a reader whose voice
+     lives in runtime.toml to a file they never made, when what was missing was
+     the workspace the lookup ran against. *)
+  | Not_configured ->
+    let resolution = Config_dir_resolver.resolve () in
+    let root = resolution.Config_dir_resolver.config_root in
+    let runtime_toml =
+      Filename.concat root.Config_dir_resolver.path Config_dir_resolver.runtime_toml_filename
+    in
+    (* [exists] on the resolved root means "resolved", not "on disk": with no
+       MASC_BASE_PATH or MASC_CONFIG_DIR the resolver does not take the current
+       directory as a workspace, and reports a default path under it as
+       missing even when that directory is there. So the sentence follows the
+       source, not the flag. *)
+    let where =
+      match root.Config_dir_resolver.source with
+      | Config_dir_resolver.Missing ->
+        (match (Host_config.from_env ()).base_path with
+         | None ->
+           "no workspace is resolved (MASC_BASE_PATH and MASC_CONFIG_DIR are unset)"
+         | Some _ ->
+           Printf.sprintf "no masc configuration at %s" root.Config_dir_resolver.path)
+      | Config_dir_resolver.Invalid_env ->
+        Printf.sprintf "MASC_CONFIG_DIR does not point to a directory: %s"
+          root.Config_dir_resolver.path
+      | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+        if Sys.file_exists runtime_toml
+        then Printf.sprintf "no [voice] section in %s" runtime_toml
+        else Printf.sprintf "no %s" runtime_toml
+    in
+    Printf.sprintf "voice config missing: %s, and no %s" where (config_path ())
   | Invalid message -> message
 
 let enabled_endpoints (endpoints : endpoint list) =

@@ -16554,6 +16554,11 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
+                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
                      | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);scroll=0}
                      | "a" ->

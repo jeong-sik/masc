@@ -69,6 +69,8 @@ TUI의 `m`은 semantic shortcut이다. 처음에는 `regions`를 관측하고, �
 읽는다. role 문자열은 관측 경계에서 semantic variant로 분류하며, 알 수 없는 role은
 목록에 남겨도 primary로 추측하지 않는다. 여러 후보는 자동 선택하지 않고 `v` 영역 목록에서
 운영자가 고른다. 텍스트·URL·CSS selector 추측으로 primary 영역을 정하지 않는다.
+scene context row의 `page scroll x=… y=…`는 새로 관측한 실제 page offset이다. 이를
+pointer/nested pane 좌표나 문서 전체 길이, feed completeness로 해석하지 않는다.
 
 본문이 충분하면 그 결과로 다음 채널을 이어가거나 답한다. 보이는 내용·scope·truncated를
 확인해 실제 수집 범위와 근거 링크를 남긴다. 잘렸다면 더 작은 관측 영역, 지원되는

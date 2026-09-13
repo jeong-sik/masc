@@ -186,6 +186,11 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+val coordinator_status_row :
+  Masc_tui_types.state -> style:string -> string -> string
+(** The coordinator's {!connection_badge} and then [status] in [style]. The
+    style covers [status] alone; the badge keeps its own colour. *)
+
 val count_frame_lines : Buffer.t -> int
 
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool

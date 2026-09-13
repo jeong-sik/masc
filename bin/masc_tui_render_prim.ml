@@ -1152,6 +1152,14 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
+(* The coordinator's badge beside a reading of the surface's own. The badge
+   brings its colour and its reset, so a style laid over the whole row painted
+   only the words in front of it -- "coordinator HTTP" went red beside a green
+   [connected] when a browser read failed -- and the reset left the failure
+   itself uncoloured. Each part wears its colour where it stands. *)
+let coordinator_status_row (state : state) ~style status =
+  "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
+
 
 let count_frame_lines buf =
   let len = Buffer.length buf in

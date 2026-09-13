@@ -73,7 +73,7 @@ let test_goal_list_preserves_source_failure () =
     ~name:"masc_goal_list" ~args:(`Assoc []) in
   let _goal, _ = match Goal_store.upsert_goal config ~title:"Visible source"
       ~metric:"goals" ~target_value:"1" () with
-    | Ok value -> value | Error detail -> fail detail
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let path = Goal_store.goals_path config in
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
@@ -159,7 +159,7 @@ let test_goal_list_filters_by_phase () =
     match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
             ~phase () with
     | Ok _ -> ()
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   create ~title:"Executing goal" ~phase:"executing";
   create ~title:"Dropped goal" ~phase:"dropped";
@@ -188,11 +188,11 @@ let test_goal_list_includes_rollup () =
   (match Goal_store.upsert_goal config ~title:"Executing goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
            ~target_value:"1" ~phase:Goal_phase.Verifying () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -216,7 +216,7 @@ let test_goal_list_ignores_blank_optional_filters () =
   (match Goal_store.upsert_goal config ~title:"Blank filter goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -339,7 +339,7 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     match Goal_store.upsert_goal config ~title:"Existing goal" ~metric:"m"
             ~target_value:"1" () with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let rejected_status =
     Tool_workspace.dispatch
@@ -354,9 +354,10 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     "validation_error"
     (get_string_field status_error "error_code");
   let saved_goal =
-    match Goal_store.get_goal config ~goal_id:goal.id with
-    | Some goal -> goal
-    | None -> fail "goal missing after rejected upsert"
+    match Goal_store.find_goal config ~goal_id:goal.id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent -> fail "goal missing after rejected upsert"
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
   in
   check
     string
@@ -428,7 +429,7 @@ let test_goal_completion_accepts_goal_without_tasks () =
         ~target_value:"1" ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   check string "completion request enters verifying" "verifying"
     (transition_phase (request_complete config goal.id));
@@ -445,7 +446,7 @@ let test_goal_completion_ignores_open_task_count () =
         ~target_value:"1" ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   ignore
     (Workspace_task.add_task
@@ -473,7 +474,7 @@ let test_goal_completion_ignores_metric_text () =
         ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   check string "metric text does not gate the completion request" "verifying"
     (transition_phase (request_complete config goal.id));
@@ -503,7 +504,7 @@ let test_operator_confirmation_binds_current_proof () =
   with_workspace @@ fun config ->
   let goal, _ = match Goal_store.upsert_goal config ~title:"Human confirmed goal"
     ~metric:"observed artifacts" ~target_value:"1" () with
-    | Ok value -> value | Error detail -> fail detail in
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
   check string "verifier cannot complete" "awaiting_confirmation"
     (transition_phase (prove_complete config goal.id));
@@ -557,7 +558,7 @@ let test_operator_confirmation_binds_current_proof () =
   (match confirm () with Error _ -> () | Ok _ -> fail "new request accepted old confirmation binding");
   (match Goal_store.upsert_goal config ~id:goal.id ~title:"Changed criterion"
      ~metric:"observed artifacts" ~target_value:"2" () with
-   | Ok _ -> () | Error detail -> fail detail);
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
 ;;
 

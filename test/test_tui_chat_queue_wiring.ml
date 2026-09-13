@@ -670,6 +670,23 @@ let test_stop_ack_releases_only_input_after_that_stop () =
     (List.assoc_opt "beta" state.keeper_chat_control_tokens)
 ;;
 
+let test_late_interrupt_outcome_cannot_mark_newer_control () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "outcome without a token callback is current" true
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  check bool "outcome after its own callback is current" true
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  ignore (Tui_types.advance_keeper_chat_control state "alpha");
+  check bool "resumed Enter excludes previous stop outcome" false
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  let first = Tui_types.begin_keeper_chat_control state "alpha" in
+  ignore (Tui_types.begin_keeper_chat_control state "alpha");
+  check bool "second pending stop is not first receipt acknowledgement" false
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:first)
+;;
+
 let test_control_receipts_are_scoped_to_each_keeper () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   let alpha = Tui_types.begin_keeper_chat_control state "alpha" in
@@ -2514,6 +2531,8 @@ let () =
             test_pending_admission_pause_is_not_a_cancellation_claim
         ; test_case "stop acknowledgement releases only later input" `Quick
             test_stop_ack_releases_only_input_after_that_stop
+        ; test_case "late interrupt outcomes cannot mark newer controls" `Quick
+            test_late_interrupt_outcome_cannot_mark_newer_control
         ; test_case "control receipts are per Keeper" `Quick
             test_control_receipts_are_scoped_to_each_keeper
         ; test_case "Enter stages input before immediate submission" `Quick

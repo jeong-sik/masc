@@ -5398,6 +5398,13 @@ let promoted_inflight_for_keeper state keeper_name =
   | Some { origin = Direct_submission; _ } | None -> None
 ;;
 
+let working_chat_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && entry.phase = Turn_streaming
+    && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
+    state.msg_inflight
+
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
 
@@ -5426,6 +5433,15 @@ let finish_keeper_chat_control state keeper_name ~generation =
       else name, id, held, target) state.keeper_interactive_waiting;
     true
   end
+
+(* A receipt callback finishes control before its outcome arrives, advancing
+   once. A later control advances again; old outcomes cannot mark a resumed
+   request as stopped. Pending distinguishes that later control's first step. *)
+let keeper_chat_control_result_current state keeper_name ~generation =
+  let current = keeper_chat_control_generation state keeper_name in
+  current = generation
+  || (current = generation + 1
+      && not (List.mem keeper_name state.keeper_chat_control_pending))
 
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state

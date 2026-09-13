@@ -6788,7 +6788,10 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
-  let request_id = request.Keeper_chat.request_id in
+  let request_id = match inflight_entry_by_request_id state request.Keeper_chat.request_id with
+    | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
+      Keeper_chat_transcript.execution_id entry.log.tl_transcript
+    | Some _ | None -> request.Keeper_chat.request_id in
   let run () =
     let result =
       try
@@ -6843,7 +6846,25 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
       item.oi_keeper <> keeper_name || match item.oi_status with
         | Interrupt_failed _ | Interrupt_declined _ -> false
         | Interrupt_sending | Interrupt_signalled -> true) state.keeper_observed_interrupts;
-  match keeper_observed_interrupt_action state keeper_name with
+  match working_chat_for_keeper state keeper_name with
+  | Some entry ->
+    let held_input = List.exists (fun (name, _, _, _) -> name = keeper_name)
+      state.keeper_interactive_waiting in
+    let newer_input = held_input
+      || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
+         | Some latest -> latest.sent_request.request_id <> entry.sent_request.request_id
+         | None -> false in
+    let action =
+      if List.mem keeper_name state.keeper_chat_control_pending && not held_input
+      then Masc_tui_esc_interrupt.Swallow
+      else if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
+      else Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
+        (Keeper_chat_transcript.interrupt entry.log.tl_transcript) in
+    (match action with
+     | Launch_interrupt -> launch_keeper_interrupt state ~mailbox entry.sent_request; Some true
+     | Swallow -> Some true
+     | Leave -> Some false)
+  | None -> match keeper_observed_interrupt_action state keeper_name with
   | None -> None
   | Some Masc_tui_esc_interrupt.Swallow -> Some true
   | Some Leave -> Some false
@@ -7176,13 +7197,11 @@ let queue_keeper_steer state ~causal_parent_request_id request =
 ;;
 
 let interactive_target_for state keeper_name =
-  match keeper_observed_turn state keeper_name with
-  | Some (_, token) -> Some (Keeper_chat.Observed_turn_token token)
-  | None -> List.find_map (fun entry ->
-      if String.equal entry.sent_request.keeper_name keeper_name
-         && Keeper_chat_transcript.phase entry.log.tl_transcript = Working
-      then Some (Keeper_chat.Direct_operation_id entry.sent_request.request_id)
-      else None) state.msg_inflight
+  match working_chat_for_keeper state keeper_name with
+  | Some entry -> Some (Keeper_chat.Direct_operation_id
+      (Keeper_chat_transcript.execution_id entry.log.tl_transcript))
+  | None -> Option.map (fun (_, token) -> Keeper_chat.Observed_turn_token token)
+      (keeper_observed_turn state keeper_name)
 
 let launch_waiting_interactive state ~mailbox ~keeper_name =
   match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
@@ -7363,6 +7382,8 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            (match queued with
             | None -> add_event state "error" "Message staging changed before submission"
             | Some item ->
+              state.keeper_observed_interrupts <- List.filter (fun observed -> observed.oi_keeper <> target)
+                state.keeper_observed_interrupts;
               let request_id = item.Chat_queue.request.request_id in
               state.keeper_interactive_waiting <-
                 (target, request_id, keeper_chat_control_generation state target, observed_target) ::
@@ -13432,8 +13453,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
       end
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
+      let current = keeper_chat_control_result_current state keeper_name ~generation in
       if finish_keeper_chat_control state keeper_name ~generation then launch_keeper_turns_load state ~mailbox;
-      state.keeper_observed_interrupts <- List.map (fun item ->
+      if current then state.keeper_observed_interrupts <- List.map (fun item ->
         if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
         else { item with oi_status = match result with
           | Ok (Masc_tui_interrupt_signal.Signalled _) -> Interrupt_signalled
@@ -13442,9 +13464,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             Interrupt_declined (Option.value ~default:reason detail)
           | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
   | Keeper_chat_interrupt_done (request, generation, result) ->
-      if finish_keeper_chat_control state request.Keeper_chat.keeper_name ~generation then
+      let keeper_name = request.Keeper_chat.keeper_name in
+      let current = keeper_chat_control_result_current state keeper_name ~generation in
+      if finish_keeper_chat_control state keeper_name ~generation then
         launch_keeper_turns_load state ~mailbox;
-      (match
+      if current then (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
        with
        | Some entry

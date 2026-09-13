@@ -1791,7 +1791,11 @@ let test_pending_stop_cannot_pause_different_active_child () =
     (Direct_operation (operation_id "not-submitted"))) in
   (match result with Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "unknown request affected active successor");
   check string "active successor keeps control token" captured token;
-  check bool "active successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused
+  check bool "active successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
+  (* The refusal deliberately leaves this child working. End only that fixture
+     execution so the enclosing switch can finish after the assertions. *)
+  ignore (owner_ok (Owner.interrupt_running_operation owner (operation_id "active-other")));
+  ignore (await_terminal owner (operation_id "active-other") 1_000)
 ;;
 
 let test_stale_chat_interrupt_cannot_pause_successor () =

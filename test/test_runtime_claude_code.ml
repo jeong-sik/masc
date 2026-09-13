@@ -248,6 +248,43 @@ let test_subscription_turn_and_env_scrub () =
       check bool "no usage block yields none" true (Option.is_none turn.usage))
 ;;
 
+(* A turn that runs many built-in tools carries hundreds of tool_progress and
+   user frames. The runtime used to stop consuming them after 256 and report
+   the next one as an unsupported message type, turning a healthy long turn
+   into a protocol error. 300 is past that removed cap. *)
+let long_turn_progress_messages = 300
+
+let test_long_turn_with_many_progress_messages_completes () =
+  with_fixture
+    (List.init long_turn_progress_messages (fun _ -> Emit tool_progress)
+     @ [ Emit assistant; Emit result ])
+    (fun path ->
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
+(* Before the control response the runtime used to stop consuming system and
+   rate-limit frames after 32 and report the next one as unexpected. 40 is
+   past that removed cap; the admission deadline is the only bound. *)
+let pre_admission_frames_beyond_the_old_cap = 40
+
+let pre_admission_system_frame =
+  {|{"type":"system","subtype":"init","session_id":"__SESSION__"}|}
+;;
+
+let test_many_informational_frames_before_admission_complete () =
+  with_fixture
+    ~before_initialize_response:
+      (List.init pre_admission_frames_beyond_the_old_cap (fun _ ->
+         Emit pre_admission_system_frame))
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
+;;
+
 (* The stderr drain used to be an ordinary fiber of the process switch, so a
    served turn waited for a background child to release stderr: unbounded for
    an orphaned MCP server. The holder starts before the result so the race
@@ -2067,6 +2104,14 @@ let () =
             "subscription auth and env scrub"
             `Quick
             test_subscription_turn_and_env_scrub
+        ; test_case
+            "long turn with many progress messages completes"
+            `Quick
+            test_long_turn_with_many_progress_messages_completes
+        ; test_case
+            "many informational frames before admission complete"
+            `Quick
+            test_many_informational_frames_before_admission_complete
         ; test_case
             "result returns before a background child releases the pipes"
             `Quick

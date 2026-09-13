@@ -4653,7 +4653,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+       | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4671,7 +4671,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4711,6 +4711,14 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
+        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+            (generation, call (fun () ->
+              let* _ = Masc_tui_http.follow_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url in
+              Masc_tui_http.fetch_browser_scene ~expected_url ~host ~port ~view ~tab_id ()))
+        | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_lane_scene_loaded
+            (generation, call (fun () ->
+              Masc_tui_http.fetch_browser_scene ~scene_view ~expected_url:guard.expected_url
+                ~navigation_source:guard.navigation_source ~host ~port ~view ~tab_id ()))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -18045,6 +18053,9 @@ and is loaded on demand through keeper_skill.
                            | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
+                           | Some Follow_link -> launch_browser_lane state ~mailbox:async_messages
+                          (Scene_follow {tab_id=scene.tab_id;document_id=scene.content.document_id;
+                            node_id=node.node_id;expected_url=scene.content.url})
                            | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})

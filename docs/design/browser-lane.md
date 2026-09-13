@@ -219,3 +219,5 @@ Install the matching host and extension together. Extension 0.7.0 adds the
 
 References: [Firefox navigation events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/webNavigation),
 [document replacement during injection](https://bugzilla.mozilla.org/show_bug.cgi?id=2047009).
+
+Actual live viewport evidence: [owned Firefox click and nested scroll](../evidence/browser-live-viewport-20260913/README.md). Live drag is not covered.

@@ -278,12 +278,17 @@ let identity_pane_columns (state : state) =
    measured, and the step key and the jump keys were working that out
    differently -- the step recomputed, the landing did not. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
-  let scrolled =
-    if state.view = Memory && Option.is_none state.memory_facts_keeper then
-      memory_overview_scrolled ~cursor state
-    else scrolled
-  in
-  surface_body_height ~rows:(surface_rows state) scrolled
+  if state.view = Memory && Option.is_some state.memory_facts_keeper then
+    let _, cols = get_terminal_size () in
+    Masc_tui_render_memory.memory_facts_content_height ~cols
+      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+      ~cursor state
+  else
+    let scrolled =
+      if state.view = Memory then memory_overview_scrolled ~cursor state
+      else scrolled
+    in
+    surface_body_height ~rows:(surface_rows state) scrolled
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with

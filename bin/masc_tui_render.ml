@@ -442,12 +442,17 @@ let render_overview (state : state) =
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
+         (* Neither name is padded to a column. Both are fixed for the
+            session, so nothing to their right moves between frames, and
+            the 24 and 20 cells they used to be padded to were blank on
+            the live workspace ("default", "me") while the transport
+            tail behind them was cut to "ws …" beside the roster pane. *)
          let cluster_line =
            Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
              Ansi.dim
-             (fit_width (Terminal_text.single_line o.ov_cluster) 24)
+             (Terminal_text.single_line o.ov_cluster)
              Ansi.reset
-             (fit_width (Terminal_text.single_line o.ov_project) 20)
+             (Terminal_text.single_line o.ov_project)
              transport_summary observer_summary
        in
        box_line buf cols cluster_line);

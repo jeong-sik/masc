@@ -12586,6 +12586,15 @@ def run_observer_reconnect_regression(executable: str) -> None:
         try:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
             wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
+            # The cluster and project names sit two cells apart, not in
+            # 24- and 20-cell columns: the live names are "default" and
+            # "me", and the blank padding cut the transport tail to
+            # "ws …" beside the roster pane.
+            summary = screen_text(bytes(output))
+            if b"Cluster: cluster-a  Project: project-a  " not in summary:
+                raise AssertionError(
+                    f"the Overview pads its cluster and project names: {summary!r}"
+                )
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
             send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")

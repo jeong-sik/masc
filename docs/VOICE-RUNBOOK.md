@@ -718,6 +718,11 @@ same one the speak and transcribe paths would have refused with.
 Each TTS probe is a real synthesis request. On a metered provider that costs
 what one short sentence costs; the audio is discarded once its size is counted.
 
+A `voice_mcp` endpoint is asked through its `agent_speak` tool, the call a
+keeper turn makes, so the sentence is played wherever that MCP server plays
+audio. The tool hands back no file, and its answer reads
+`agent_speak answered in "<voice>"` without a byte count.
+
 ### Making an utterance to probe STT with
 
 macOS ships a Korean voice, so no recording is needed:

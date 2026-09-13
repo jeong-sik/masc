@@ -1808,13 +1808,29 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      and "does this keeper have the voice I gave it" are different questions
      -- and for say only the second one can catch a wrong name, because say
      speaks in the system voice rather than failing on one it does not have. *)
-  let tts =
-    match agent with
-    | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
-    | None -> Masc.Voice_bridge.probe_tts ~message ()
-  in
-  let stt =
-    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+  (* Under an event loop, because a voice_mcp endpoint is asked over the same
+     MCP HTTP client a turn uses, and that client needs a switch, a clock and
+     a connection pool. The HTTP and command kinds run a process and do not
+     depend on it. *)
+  let tts, stt =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.set_switch sw;
+        Eio_context.set_net (Eio.Stdenv.net env);
+        Eio_context.set_clock (Eio.Stdenv.clock env);
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+          let tts =
+            match agent with
+            | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+            | None -> Masc.Voice_bridge.probe_tts ~message ()
+          in
+          let stt =
+            Option.map
+              (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ())
+              audio
+          in
+          tts, stt)))
   in
   let section name = function
     | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)

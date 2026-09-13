@@ -105,6 +105,12 @@ val probe_tts
     each one did. The audio is discarded; what is being measured is whether the
     endpoint answers at all, and with how many bytes.
 
+    A voice_mcp endpoint is asked through its [agent_speak] tool, the call a
+    turn makes. That tool plays the sentence where its server plays audio and
+    returns no file, so its answer names the voice without a byte count. The
+    call needs the process's Eio clock and network in {!Eio_context}; without
+    them the endpoint is reported as refused, in those words.
+
     The voice is resolved per endpoint rather than once for the list: a voice id
     is provider vocabulary, so asking one endpoint for another's id probes a
     voice that does not exist there (#24068).

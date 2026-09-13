@@ -356,7 +356,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     ~selected_keeper:selected_keeper_name_after_refresh
   |> apply_keeper_log_snapshot state;
 
-  state.last_refresh <- Unix.gettimeofday ()
+  state.local_workspace <- Local_workspace_read
 
 let clear_local_workspace (state : state) =
   state.agents <- [];
@@ -370,7 +370,8 @@ let clear_local_workspace (state : state) =
   state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
-  state.live_context <- Context_state.empty
+  state.live_context <- Context_state.empty;
+  state.local_workspace <- Local_workspace_unread
 ;;
 
 (** Add event to the event log *)

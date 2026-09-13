@@ -1,0 +1,10 @@
+{
+  "source_commit": "c082d495b1edc03588142b310177712718c36b49",
+  "native_host_sha256": "bbcf1be0f2d1db1959187a1fbaf81cfce42ec29b009967cd45c804807f9c27e1",
+  "files": {
+    "connectors/browser/extension/manifest.json": "7d1789dd266527efe80a3d769666fb20f23c0f3cf74c66b75b7560637fce206c",
+    "connectors/browser/extension/background.js": "e95636f2d6df68f4316b44c466748380cd38f3cdfe99c32deb68ab332d4a9c6e"
+  },
+  "artifact_source_commit": "c082d495b1edc03588142b310177712718c36b49",
+  "scope": "Replacement native host and extension only. Baseline server, TUI, fixture, prompt source and binary-exported Skills are unchanged."
+}

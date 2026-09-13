@@ -4568,6 +4568,8 @@ let render_lanes_overview (state : state) =
   (* The standalone rows are drawn directly rather than through a row list
      because the selection band has to land on a lane row, not on the
      windowed/stale notes that follow them. *)
+  box_line_styled buf cols ~style:(Theme.recede ())
+    "  Lane Add-ons: No Add-ons installed. Press A to inspect installed add-ons";
   (match state.standalone_lanes with
    | Some snapshot ->
        List.iteri

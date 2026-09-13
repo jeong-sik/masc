@@ -56,7 +56,7 @@ def main(executable: str, captures: Path | None) -> None:
 
         key(b':go lane add-ons\r', b'Selected second producer')
         key(b'3', b'unapplied-installation')
-        frame = key(b'a', b'Error:')
+        frame = key(b'a', b'no available worker')
         if b'Run action on' in terminal.CSI_RE.sub(b'', frame):
             raise AssertionError('Unapplied installation opened unrelated worker actions')
         key(b'1', b'Selected second producer')

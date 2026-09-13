@@ -28,6 +28,26 @@ let transcriber_of_kind = function
      voice_mcp carries a tool call, not audio. *)
   | Voice_config.Voice_mcp | Voice_config.Macos_say -> Does_not_transcribe
 
+(* What an answered TTS probe says.
+
+   The voice, not only the bytes. say does not fail on a voice it does not
+   have -- it speaks in the system voice and exits 0 -- so a byte count alone
+   cannot tell a keeper's own voice from the fallback. Measured 2026-09-13 on
+   one workstation: a keeper mapped to a voice that exists answered 124,690
+   bytes, one mapped to a name that does not answered 79,758, and so did the
+   section default. Only the name separates them, and a reader can check that
+   name against the catalogue.
+
+   Quoted by hand rather than with %S: that escapes UTF-8 into byte numbers,
+   and a Korean voice name is then unreadable. A blank voice is the system
+   voice, said as such rather than as "". *)
+let spoke_detail ~bytes ~voice =
+  Printf.sprintf
+    "%d bytes of audio in %s"
+    bytes
+    (if String.trim voice = "" then "the system voice" else "\"" ^ voice ^ "\"")
+;;
+
 (* What an endpoint reached over HTTP answered. A body carrying no [text]
    string is not a silent microphone -- it is an answer this code does not
    read -- and the probe reports the empty transcript as having heard nothing.
@@ -120,8 +140,8 @@ let clip_format_for_kind (kind : Voice_config.endpoint_kind) =
 ;;
 
 let audio_url_of_file audio_file =
-  match Voice_bridge_core.clip_token_of_path audio_file with
-  | Some token -> Some (Masc_network_defaults.voice_audio_path token)
+  match Voice_bridge_core.clip_of_path audio_file with
+  | Some (token, _format) -> Some (Masc_network_defaults.voice_audio_path token)
   | None -> None
 ;;
 
@@ -376,7 +396,10 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   | Voice_config.Openai_compat
                   | Voice_config.Elevenlabs_direct
                   | Voice_config.Macos_say -> false
-                then Skipped "this endpoint kind does not synthesize"
+                then Skipped
+                  (if endpoint.Voice_config.kind = Voice_config.Voice_mcp
+                   then "this verifier does not probe the MCP synthesis transport"
+                   else "this endpoint kind does not synthesize")
                 else (
                   let output_file =
                     make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
@@ -410,7 +433,17 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   in
                   remove_quietly output_file;
                   match result with
-                  | Ok size -> Answered (Printf.sprintf "%d bytes of audio" size)
+                  (* The voice that was asked for, not only the bytes that came
+                     back. say does not fail on a voice it does not have -- it
+                     speaks in the system voice and exits 0 -- so the byte count
+                     alone cannot tell a keeper's own voice from the fallback.
+                     Measured: a keeper mapped to a voice that exists answered
+                     114,810 bytes and one mapped to a name that does not
+                     answered 73,614, the same as the section default. Naming
+                     the voice is what lets a reader check it against the
+                     catalogue. A blank one is the system voice, said as such
+                     rather than as "". *)
+                  | Ok size -> Answered (spoke_detail ~bytes:size ~voice)
                   | Error reason -> Refused reason)
               in
               { endpoint_id = endpoint.Voice_config.id

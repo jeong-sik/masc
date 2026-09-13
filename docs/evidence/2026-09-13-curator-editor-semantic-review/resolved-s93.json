@@ -1,0 +1,20 @@
+{
+  "added": [
+    {
+      "basis": {
+        "kind": "observed"
+      },
+      "category": "fact",
+      "claim": "**지식 라이브러리 임포트 완료 — 마지막 유보 항목 종결** Decision: 지식 라이브러리 임포트 조건부 재시도가 성공해 유보 항목을 종결했다(2026-09-13T09:0xZ). probe(masc_library_list)가 결함 대신 정상 빈 목록을 반환해 합의 조건(경로 해제 시 1회 재시도)을 만족했고, notes/library-drafts/korean-syllable-transport-corruption.md(2,980B·전 ASCII)를 masc_library_add로 가져갔다 — 문서 'Korean syllable transport corruption — shared field notes'(direct_experience, tags: korean·hangul·transport-corruption·verification·sha256·field-notes), 실제 경로 docs/library/korean-syllable-transport-corruption--shared-field-notes-20260913.md, masc_library_list로 착신 확인. 초안에서 임포트 지시 문장만 제외하고, 2026-09-12 task-004 검증 사이클에서 얻은 동일 계열 교훈(SHA 꼬리 전사 오손 → freeze_identity.py 기계 실측·programmatic 갱신·독립 재해시 mismatch=0, 값은 파일→파일로만 흐름)을 Extension 절로 추가했다.\nWhy: 어제의 라이브러리 경로 장애가 오늘 런타임 패치로 해제됐고, 검증된 현장 기록을 공유 기억으로 남기는 것이 원래 합의였다.\nHow to apply: (1) 이제 열린 조건부 작업 없음 — 세 골 사람 확인 대기·재요청 금지, pending 재생은 동결-안전화로 보호됨. (2) 초안 파일 notes/library-drafts/는 원본 그대로 보존(라이브러리가 사본 보관). (3) 새 패턴 발견 시 라이브러리 문서로 갱신해 공유.",
+      "first_seen": 1789233076.410271,
+      "last_seen": 1789233076.410271,
+      "origin": {
+        "kind": "authored",
+        "trace_id": "trace-1789042595401-00001"
+      }
+    }
+  ],
+  "invalidated": [],
+  "removed": [],
+  "retained": 79
+}

@@ -1,0 +1,587 @@
+{
+  "schema": "runtime-failover-audit.v1",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "scope": "Read-only saved live evidence; no model calls or mutations",
+  "turns": {
+    "404": {
+      "receipt": {
+        "recorded_at": "2026-09-12T12:46:08Z",
+        "turn_count": 404,
+        "agent_core_turn_count": 729,
+        "outcome": "receipt_done",
+        "operator_disposition": "pass_next_model",
+        "operator_disposition_reason": "runtime_fallback",
+        "runtime": {
+          "name": "glm-coding.glm-5.3",
+          "selected_model": "glm-5.3",
+          "attempt_count": 1,
+          "lane_attempt_count": 2,
+          "fallback_applied": true,
+          "outcome": "passed_to_next_model",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": false,
+          "degraded_retry_runtime": null,
+          "fallback_reason": null,
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T12:45:14Z",
+        "ended_at": "2026-09-12T12:46:08Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T12:45:14Z",
+          "keeper_turn_id": 404,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "07f0151737c1c9bfa4dfa8b54343c066",
+            "idx": 0,
+            "runtime_id": "kimi_coding.kimi-for-coding",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-404:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 3,
+              "logical_seq": 1
+            }
+          }
+        },
+        {
+          "ts": "2026-09-12T12:45:15Z",
+          "keeper_turn_id": 404,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "07f0151737c1c9bfa4dfa8b54343c066",
+            "idx": 1,
+            "runtime_id": "glm-coding.glm-5.3",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-404:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 1085,
+              "logical_seq": 4
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095a68e94-5f38-0001",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789217114705-5f38-000046.jsonl",
+        "start_seq": 5,
+        "end_seq": 16,
+        "agent_name": "agent_core-glm-coding.glm-5.3",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "9848dbb9a56535a7488ff11c776ebc9c62ba3be2026abfead2f0ab0cfd760e97",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789217114.713669,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095a68a59-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": "kimi-for-coding",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 4,
+          "ts": 1789217115.790708,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095a68a59-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": null,
+          "error": "Authorization error: You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+          "stop_reason": null
+        },
+        {
+          "seq": 5,
+          "ts": 1789217115.796212,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095a68e94-5f38-0001",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": "glm-5.3",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 16,
+          "ts": 1789217168.809826,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095a68e94-5f38-0001",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": null,
+          "error": null,
+          "stop_reason": "terminal_tool_completed"
+        }
+      ]
+    },
+    "405": {
+      "receipt": {
+        "recorded_at": "2026-09-12T12:51:31Z",
+        "turn_count": 405,
+        "agent_core_turn_count": 730,
+        "outcome": "receipt_done",
+        "operator_disposition": "pass",
+        "operator_disposition_reason": "healthy",
+        "runtime": {
+          "name": "glm-coding.glm-5.3",
+          "selected_model": "glm-5.3",
+          "attempt_count": 1,
+          "lane_attempt_count": 1,
+          "fallback_applied": false,
+          "outcome": "completed",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": false,
+          "degraded_retry_runtime": null,
+          "fallback_reason": null,
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T12:51:09Z",
+        "ended_at": "2026-09-12T12:51:31Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T12:51:10Z",
+          "keeper_turn_id": 405,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "d51b5aaa0a1e175bf15627ee3da3ea6b",
+            "idx": 0,
+            "runtime_id": "glm-coding.glm-5.3",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-405:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 5,
+              "logical_seq": 1
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095abf63c-5f38-0000",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789217469999-5f38-000048.jsonl",
+        "start_seq": 1,
+        "end_seq": 8,
+        "agent_name": "agent_core-glm-coding.glm-5.3",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "0b066be444b40a3b20c9e75961a0515b20320cf78438267968ece6bbbbe26a33",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789217470.012149,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095abf63c-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": "glm-5.3",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 8,
+          "ts": 1789217491.05789,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095abf63c-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": null,
+          "error": null,
+          "stop_reason": "Types.EndTurn"
+        }
+      ]
+    },
+    "406": {
+      "receipt": {
+        "recorded_at": "2026-09-12T12:57:27Z",
+        "turn_count": 406,
+        "agent_core_turn_count": null,
+        "outcome": "receipt_failed",
+        "operator_disposition": "fail_open_next_runtime",
+        "operator_disposition_reason": "degraded_retry",
+        "runtime": {
+          "name": "glm-coding.glm-5.3",
+          "selected_model": "glm-5.3",
+          "attempt_count": 1,
+          "lane_attempt_count": 1,
+          "fallback_applied": false,
+          "outcome": "failed",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": false,
+          "degraded_retry_runtime": "kimi_coding.kimi-for-coding",
+          "fallback_reason": "rate_limit",
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T12:56:33Z",
+        "ended_at": "2026-09-12T12:57:27Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T12:56:33Z",
+          "keeper_turn_id": 406,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "1a0e918ce7e006a6587efca316cce153",
+            "idx": 0,
+            "runtime_id": "glm-coding.glm-5.3",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-406:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 9,
+              "logical_seq": 1
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095b0e5ad-5f38-0000",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789217793432-5f38-000050.jsonl",
+        "start_seq": 1,
+        "end_seq": 34,
+        "agent_name": "agent_core-glm-coding.glm-5.3",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "668964a8d92617ca989b73ba4692b05178f109ea558cbdf4143f31c8e73eeea4",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789217793.453424,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095b0e5ad-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": "glm-5.3",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 34,
+          "ts": 1789217847.520835,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095b0e5ad-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": null,
+          "error": "Rate limited: Rate limit reached for requests",
+          "stop_reason": null
+        }
+      ]
+    },
+    "407": {
+      "receipt": {
+        "recorded_at": "2026-09-12T13:02:29Z",
+        "turn_count": 407,
+        "agent_core_turn_count": null,
+        "outcome": "receipt_failed",
+        "operator_disposition": "operator_action_required",
+        "operator_disposition_reason": "preflight_config_error",
+        "runtime": {
+          "name": "kimi_coding.kimi-for-coding",
+          "selected_model": "kimi-for-coding",
+          "attempt_count": 1,
+          "lane_attempt_count": 1,
+          "fallback_applied": false,
+          "outcome": "failed",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": true,
+          "degraded_retry_runtime": "kimi_coding.kimi-for-coding",
+          "fallback_reason": "rate_limit",
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T13:02:28Z",
+        "ended_at": "2026-09-12T13:02:29Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T13:02:28Z",
+          "keeper_turn_id": 407,
+          "runtime_id": "kimi_coding.kimi-for-coding",
+          "decision": {
+            "routing_run_id": "3552d2c0b28e34b49f08e8a71899d120",
+            "idx": 0,
+            "runtime_id": "kimi_coding.kimi-for-coding",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-407:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 3,
+              "logical_seq": 1
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095b65238-5f38-0000",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789218148908-5f38-000052.jsonl",
+        "start_seq": 1,
+        "end_seq": 4,
+        "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "d3c034e95e32fe11a6d73366c16fd65a6c7c0233a09fa9efd5fa04526796622b",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789218148.920804,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095b65238-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": "kimi-for-coding",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 4,
+          "ts": 1789218149.972325,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095b65238-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": null,
+          "error": "Authorization error: You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+          "stop_reason": null
+        }
+      ]
+    },
+    "408": {
+      "receipt": {
+        "recorded_at": "2026-09-12T13:09:49Z",
+        "turn_count": 408,
+        "agent_core_turn_count": 741,
+        "outcome": "receipt_done",
+        "operator_disposition": "pass_next_model",
+        "operator_disposition_reason": "runtime_fallback",
+        "runtime": {
+          "name": "glm-coding.glm-5.3",
+          "selected_model": "glm-5.3",
+          "attempt_count": 1,
+          "lane_attempt_count": 2,
+          "fallback_applied": true,
+          "outcome": "passed_to_next_model",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": false,
+          "degraded_retry_runtime": null,
+          "fallback_reason": null,
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T13:07:30Z",
+        "ended_at": "2026-09-12T13:09:49Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T13:07:31Z",
+          "keeper_turn_id": 408,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "605bea43b242fe63656bc648c9b1b1a1",
+            "idx": 0,
+            "runtime_id": "kimi_coding.kimi-for-coding",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-408:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 3,
+              "logical_seq": 1
+            }
+          }
+        },
+        {
+          "ts": "2026-09-12T13:07:32Z",
+          "keeper_turn_id": 408,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "605bea43b242fe63656bc648c9b1b1a1",
+            "idx": 1,
+            "runtime_id": "glm-coding.glm-5.3",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-408:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 1213,
+              "logical_seq": 4
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095baf310-5f38-0001",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789218451020-5f38-000054.jsonl",
+        "start_seq": 5,
+        "end_seq": 80,
+        "agent_name": "agent_core-glm-coding.glm-5.3",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "276261082290a13fc96d23dfeb43f9fa2d7a3b8ed32a790ad22f129d31e174de",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789218451.02899,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095baee54-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": "kimi-for-coding",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 4,
+          "ts": 1789218452.234326,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095baee54-5f38-0000",
+          "agent_name": "agent_core-kimi_coding.kimi-for-coding",
+          "model": null,
+          "error": "Authorization error: You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota",
+          "stop_reason": null
+        },
+        {
+          "seq": 5,
+          "ts": 1789218452.240582,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095baf310-5f38-0001",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": "glm-5.3",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 80,
+          "ts": 1789218589.794991,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095baf310-5f38-0001",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": null,
+          "error": null,
+          "stop_reason": "terminal_tool_completed"
+        }
+      ]
+    },
+    "409": {
+      "receipt": {
+        "recorded_at": "2026-09-12T13:14:00Z",
+        "turn_count": 409,
+        "agent_core_turn_count": 745,
+        "outcome": "receipt_done",
+        "operator_disposition": "pass",
+        "operator_disposition_reason": "healthy",
+        "runtime": {
+          "name": "glm-coding.glm-5.3",
+          "selected_model": "glm-5.3",
+          "attempt_count": 1,
+          "lane_attempt_count": 1,
+          "fallback_applied": false,
+          "outcome": "completed",
+          "agent_core_internal_runtime_allowed": false,
+          "degraded_retry_applied": false,
+          "degraded_retry_runtime": null,
+          "fallback_reason": null,
+          "rotation_attempts": []
+        },
+        "started_at": "2026-09-12T13:12:21Z",
+        "ended_at": "2026-09-12T13:14:00Z"
+      },
+      "candidate_events": [
+        {
+          "ts": "2026-09-12T13:12:22Z",
+          "keeper_turn_id": 409,
+          "runtime_id": "glm-coding.glm-5.3",
+          "decision": {
+            "routing_run_id": "4b0aa527cf79732484abab72767e6651",
+            "idx": 0,
+            "runtime_id": "glm-coding.glm-5.3",
+            "clock_refs": {
+              "edge_id": "trace-1789042595401-00001:keeper-409:runtime_routed",
+              "lane": "masc_policy_runtime",
+              "source_clock": "wall",
+              "elapsed_ms": 5,
+              "logical_seq": 1
+            }
+          }
+        }
+      ],
+      "selected_raw_trace_ref": {
+        "worker_run_id": "wr-1a095bf5f1a-5f38-0000",
+        "path": ".masc/keepers/exhibit-editor/raw-traces/turn-1789218742028-5f38-000057.jsonl",
+        "start_seq": 1,
+        "end_seq": 40,
+        "agent_name": "agent_core-glm-coding.glm-5.3",
+        "session_id": "trace-1789042595401-00001"
+      },
+      "raw_file_sha256": "3d222d7877eabcc8ea8b38995299e63e49ad53069c019b91470a11730228a704",
+      "raw_runs": [
+        {
+          "seq": 1,
+          "ts": 1789218742.043008,
+          "record_type": "run_started",
+          "worker_run_id": "wr-1a095bf5f1a-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": "glm-5.3",
+          "error": null,
+          "stop_reason": null
+        },
+        {
+          "seq": 40,
+          "ts": 1789218840.453841,
+          "record_type": "run_finished",
+          "worker_run_id": "wr-1a095bf5f1a-5f38-0000",
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "model": null,
+          "error": null,
+          "stop_reason": "terminal_tool_completed"
+        }
+      ]
+    }
+  },
+  "composite_126": {
+    "keeper": "exhibit-editor",
+    "ts": 1789218791.652816,
+    "correlation_id": "evt-4a90020800638c6021361c57e0aaa1f0",
+    "run_id": "r-1789212474-0",
+    "execution": {
+      "recorded_at": "2026-09-12T13:09:49Z",
+      "runtime": {
+        "name": "glm-coding.glm-5.3",
+        "selected_model": null,
+        "attempt_count": 1,
+        "fallback_applied": true,
+        "outcome": "passed_to_next_model",
+        "degraded_retry_applied": false,
+        "degraded_retry_runtime": null,
+        "fallback_reason": null
+      },
+      "operator_disposition": "pass_next_model",
+      "operator_disposition_reason": "runtime_fallback"
+    }
+  },
+  "current_config_observation": {
+    "default": "kimi_coding.kimi-for-coding",
+    "media_failover": [
+      "codex_subscription.gpt-5.6-sol"
+    ],
+    "lanes": {
+      "kimi_coding.kimi-for-coding": {
+        "candidates": [
+          "kimi_coding.kimi-for-coding"
+        ]
+      },
+      "glm-coding.glm-5.3": {
+        "candidates": [
+          "glm-coding.glm-5.3"
+        ]
+      },
+      "codex_subscription.gpt-5.6-sol": {
+        "candidates": [
+          "codex_subscription.gpt-5.6-sol"
+        ]
+      }
+    },
+    "assignments": {
+      "exhibit-designer": "codex_subscription.gpt-5.6-sol",
+      "exhibit-editor": "glm-coding.glm-5.3"
+    }
+  },
+  "source_explanation": [
+    "runtime.ml with_terminal_default appends fleet default even to declared singleton lanes.",
+    "405 selected GLM first and succeeded. 406 GLM returned RateLimited, then recorded deferred Kimi suffix. 407 consumed that suffix and Kimi returned AuthorizationError.",
+    "408 started a fresh GLM lane. Candidate backpressure demotes rate-limited GLM behind Kimi; AuthorizationError is not recorded as quota or rate-limit evidence. Candidate order and typed failures are observed; association with process-local backpressure follows source because no historic state snapshot exists.",
+    "408 GLM success clears candidate backpressure and records sticky success; 409 selects GLM first again.",
+    "No provider choice is inferred from checkpoint presence. Raw run_started plus manifest decision.runtime_id establishes actual candidate identities.",
+    "Composite omitted lane_attempt_count=2 while retaining winning-runtime internal attempt_count=1; fallback=true is correct."
+  ]
+}

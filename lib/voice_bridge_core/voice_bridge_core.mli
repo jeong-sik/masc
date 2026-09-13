@@ -151,9 +151,14 @@ val find_clip : dir:string -> token:string -> (string * clip_format) option
 (** The clip [token] names under [dir], and the format it is stored in.
     [None] when no format has it: never synthesized, or reaped. *)
 
-val clip_token_of_path : string -> string option
-(** The token a clip path carries, for building the URL the dashboard
-    fetches it by. [None] when the path is not a clip. *)
+val clip_of_path : string -> (string * clip_format) option
+(** The token a clip path carries and the format its extension names -- the
+    reverse of {!find_clip}. [None] when the path is not a clip.
+
+    Both halves come back together because a caller that has the token also
+    has to say what the bytes are, and the extension it just matched is the
+    answer. Handing back the token alone left that to a guess, and the guess
+    was wrong for every [say] clip. *)
 
 (** {1 Structured logging helpers} *)
 

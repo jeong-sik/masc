@@ -76,9 +76,23 @@ type base_path_lock_rejection =
       ; reason : string
       }
 
+(* Only the process-local table establishes ownership identity. The recorded
+   number is written after locking and may describe a previous owner or a
+   different PID namespace; local process liveness cannot verify it. *)
+type base_path_owner =
+  | Owner_this_process of int
+      (** This process already holds the lease. A second acquisition in the
+          same process would take the same kernel lock, which is why the
+          in-process table is consulted first. *)
+  | Owner_recorded of int
+      (** A number recorded in the lease, with no verified PID namespace or
+          current-holder identity. It may be stale or identify another process. *)
+  | Owner_unnamed
+      (** The lease file carried no readable number. *)
+
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { pid : int option }
+  | Base_path_already_owned of { owner : base_path_owner; lock_path : string }
   | Base_path_rejected of base_path_lock_rejection
 
 let base_path_lock_rejection_to_string = function
@@ -243,6 +257,40 @@ let pid_exists pid =
   with
   | Unix.Unix_error (Unix.ESRCH, _, _) -> false
   | Unix.Unix_error (Unix.EPERM, _, _) -> true
+;;
+
+let base_path_owner_pid = function
+  | Owner_this_process pid | Owner_recorded pid ->
+    Some pid
+  | Owner_unnamed -> None
+;;
+
+(* A shared lease can be written in another PID namespace. Local kill(pid, 0)
+   cannot establish anything about the recorded process or the lock holder. *)
+let base_path_owner_of_recorded = function
+  | None -> Owner_unnamed
+  | Some pid -> Owner_recorded pid
+;;
+
+let base_path_contention_message ~base_path ~lock_path owner =
+  let detail =
+    match owner with
+    | Owner_this_process pid ->
+      Printf.sprintf "This process (PID %d) already owns the lease" pid
+    | Owner_recorded pid ->
+      Printf.sprintf
+        "The lease records PID %d; its namespace and current holder are unverified"
+        pid
+    | Owner_unnamed -> "The lease has no readable recorded PID"
+  in
+  Printf.sprintf
+    "Base path %s is locked. %s. Lock file: %s. Inspect the services or \
+     containers configured to use this base path on the owning host and stop \
+     the confirmed owner there, or choose a different --base-path. Do not \
+     signal the recorded PID or delete the lock file to bypass ownership. \
+     If lsof is installed on the owning host, optional open-file evidence: \
+     lsof %s (open files alone do not prove lock ownership)."
+    base_path detail (Filename.quote lock_path) (Filename.quote lock_path)
 ;;
 
 let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seconds)
@@ -1197,7 +1245,8 @@ let acquire_base_path_lock_with
       match Hashtbl.find_opt base_path_leases prepared.path with
       | Some (Active_lease _) ->
         (* NDT-OK: the OS process id is the observed owner identity. *)
-        Base_path_already_owned { pid = Some (Unix.getpid ()) }
+        Base_path_already_owned
+          { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
       | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
       | None ->
         (match open_lease_file prepared with
@@ -1272,7 +1321,11 @@ let acquire_base_path_lock_with
                    ~context:"kernel lease is owned by another process"
                    fd
                with
-               | Ok () -> Base_path_already_owned { pid }
+               | Ok () ->
+                 Base_path_already_owned
+                   { owner = base_path_owner_of_recorded pid
+                   ; lock_path = prepared.path
+                   }
                | Error rejection -> Base_path_rejected rejection)
             | exn ->
               let commit_rejection =

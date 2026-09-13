@@ -45,6 +45,102 @@ downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an
 apt package would install something else or nothing.
 
+### Setup asks for a voice on the way past
+
+A fresh install does not have to be told about any of this. The journey asks
+as step 3, between the model connection and the sandbox. Walked on this
+machine 2026-09-13 in a `TERM=dumb` terminal, which is why the options are
+numbered; on a real terminal they are arrow keys:
+
+```
+3 · Give imp a voice (optional)
+  1) Eddy (한국어(한국)) — ko_KR
+  2) Flo (한국어(한국)) — ko_KR
+  3) Grandma (한국어(한국)) — ko_KR
+  4) Grandpa (한국어(한국)) — ko_KR
+  5) Reed (한국어(한국)) — ko_KR
+  6) Rocko (한국어(한국)) — ko_KR
+  7) Sandy (한국어(한국)) — ko_KR
+  8) Shelley (한국어(한국)) — ko_KR
+  9) Yuna — ko_KR
+  10) Show every voice on this computer (184)
+  11) Stay text only
+```
+
+Nine rows because the terminal says Korean — read from `LC_ALL`,
+`LC_MESSAGES`, `LANG` in that order. An English terminal leads with `en_*`
+and the other 175 are one keystroke away.
+
+Picking 2 wrote eight lines and nothing else:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Flo (한국어(한국))"
+```
+
+The parenthesis is part of the name, kept whole. `masc voice-verify` against
+that workspace answered `108466 bytes of audio`.
+
+The write goes through `masc voice-local-setup`, which is the same writer the
+HTTP route uses — the same revision guard, and the same refusal to publish a
+section the loader would reject.
+
+### Hearing is a second question
+
+It is the half that needs the 1.6GB download, so it is asked only after the
+first is answered:
+
+```
+Let imp hear you too? whisper-cli transcribes locally; the model it reads is 1.6GB.
+  1) Speak to imp as well
+  2) Speaking only for now
+```
+
+Saying yes opens the prerequisite menu — the same one `masc
+prerequisite-actions whisper` prints. Leaving it without downloading is not a
+failure:
+
+```
+Install or start the selected prerequisite
+  1) Install whisper.cpp with Homebrew
+  2) Download the whisper model masc asks for
+  3) Refresh detection
+  4) Back to setup choices
+
+→ The model file is not there yet, so imp will speak but not listen.
+  Run masc voice-local-setup --model <file> once it is downloaded.
+  voice is configured
+```
+
+Speaking stayed on. The model path is read from the action that downloads it
+rather than spelled here, so the section cannot name a file the download put
+somewhere else.
+
+### Cancelling here does not cancel setup
+
+`q` at the voice question prints
+
+```
+setup cancelled; existing connections were preserved
+Continuing without voice. Run masc voice-local-setup to turn it on later.
+```
+
+and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
+optional step cannot fail the thing it is optional to — and by this point the
+workspace and the model connection are already saved.
+
+### Outside the journey
+
+```
+masc voice-local-setup --list-voices
+masc voice-local-setup --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+```
+
 ### What the configuration then says
 
 ```toml
@@ -78,9 +174,12 @@ that is silently dropped reads as a setting that took.
 
 ### What it costs, measured
 
+The two commands masc runs, verbatim:
+
 ```
-say -v Yuna -o out.aiff "안녕하세요 키퍼입니다"        →  84KB, immediate
-whisper-cli -m ggml-large-v3-turbo -l auto -nt -f out.wav
+say -v Yuna --file-format=WAVE --data-format=LEI16@22050 -o clip.wav
+  "안녕하세요 키퍼입니다"                               →  111KB, immediate
+whisper-cli -m ggml-large-v3-turbo -l auto -nt -f clip.wav
   → auto-detected language: ko (p = 0.998641)
   → " 안녕하세요. 키퍼입니다."                          →  5.1s wall
 ```
@@ -88,6 +187,30 @@ whisper-cli -m ggml-large-v3-turbo -l auto -nt -f out.wav
 The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
 whisper.cpp requires, so nothing is converted between the microphone and the
 transcript. And `-l auto` detects Korean, so there is no language to configure.
+
+### Checking one keeper's voice
+
+The section default is not what a keeper speaks in — a keeper mapped under
+`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
+
+```
+masc voice-verify --agent sangsu --json
+```
+
+Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
+exists and `nowhere` to a name that does not:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
+
+All three say `answered`, because `say` answers a name it does not have by
+speaking in the system voice. The byte counts cannot separate them either —
+the third is the same 79,758 as the default. **The voice name in the report is
+what separates them**, and a name that is not in `say -v '?'` is a mapping
+that never took.
 
 ### The trap: a wrong voice name is silent
 
@@ -114,6 +237,40 @@ them selects a different language without saying so.
 Two shapes in that list will break a parser written from one example: the
 columns are space-padded rather than tabbed, and the locale is not always two
 letters and two letters — `ar_001` is in it.
+
+### The second trap: a wrong container is silent too
+
+`say` picks its encoder from the output file name, and it has no MP3 one. It
+does not say so:
+
+| Command | Result |
+|---|---|
+| `say -o clip.mp3 "..."` | **exits 0**, 16 bytes — an empty MP3 tag frame |
+| `say -o clip.wav "..."` | exits 1, `Opening output file failed: fmt?` |
+| `say --file-format=WAVE --data-format=LEI16@22050 -o clip.wav "..."` | 111KB of 16-bit mono WAVE |
+
+masc names every clip `<token>.<extension>` where the token is also the HTTP
+capability the dashboard fetches it by, so for a while the whole `macos_say`
+path wrote 16 bytes of silence and reported success. Fixed 2026-09-13: the
+container is named in the argv, `Voice_bridge_core.clip_format` carries which
+one a clip is in, and the serve route answers the content type of the format
+it found rather than `audio/mpeg` for everything.
+
+`masc voice-verify` catches this class on its own — it refuses any clip below
+a believable size rather than counting a 0 exit as success:
+
+```
+{"tts":[{"endpoint_id":"macos-say","kind":"macos_say",
+         "state":"answered","detail":"113528 bytes of audio"}],
+ "stt":[{"endpoint_id":"whisper-local","kind":"whisper_cli",
+         "state":"answered","detail":"heard 오늘 음성 설정을 마쳤습니다."}]}
+```
+
+3.7s wall for both halves on an M3 Max, 2026-09-13.
+
+A failed command reports the **end** of its output, not the start: whisper-cli
+prints nine lines about which Metal library it loaded before it says which
+model file it could not open.
 
 ## Configuration
 
@@ -374,6 +531,30 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+### Speaking without touching the keyboard
+
+`Ctrl-Y` records one sentence and appends the transcript to the draft. The
+mode that lets a conversation run is a different key:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
+| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
+| `Esc` | discard a running capture (the draft keeps what was there before) |
+
+Continuous mode measures the room's noise floor **once** when it turns on,
+which is what keeps the gap between sentences short enough to speak across; it
+measures again if the mode is turned off and on in a different room. Silence
+re-arms too, so a pause longer than the trailing-silence window does not end
+the mode. Only the key that started it ends it.
+
+Both are control codes rather than letters because every printable key in a
+focused composer row is draft text.
+
+That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
+it: ending a capture hands the draft to the same send path Enter uses. Off by
+default, and described under Configuration below.
+
 ## External devices
 
 Any device that can make two HTTP calls can speak to a keeper. No MASC change
@@ -589,6 +770,50 @@ This is the reading half of the container fix: for a while every clip was
 named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
 of silence) or would have been announced as MP3. A player told the wrong
 type either refuses or plays nothing, and neither says why.
+
+### The announcement has to agree with it
+
+The route above is what a clip is **served** as. What a keeper's spoken reply
+is **announced** as is a separate field, written when the reply is appended to
+the chat, and for a while it was the literal `audio/mpeg` for every clip:
+
+```json
+{ "audio": { "token": "9f3c…", "audio_url": "/api/v1/voice/audio/9f3c…",
+             "mime": "audio/mpeg" } }
+```
+
+A fresh mac speaks through `say`, which writes WAVE. So the route answered
+`audio/wav` for bytes the same chat line called MP3: two fields about one
+file, disagreeing.
+
+**What this did and did not break, traced 2026-09-13.** The dashboard's
+`<audio>` element is given `src` and no `type`, so the browser picks its
+decoder from the route's `content-type` and plays the clip correctly. The
+field is not decorative either: `normalizeAudioClip` drops a clip that has no
+`mime` at all, and the value it keeps is persisted on the chat line and
+emitted on the SSE payload. So the cost is not a silent player today — it is
+a wrong answer on the wire and in the history to anything that reads it
+instead of fetching: an external device following the SSE stream, an export,
+a player that picks a decoder from the field rather than the response.
+
+The cause is worth naming because it is not a typo. The path already knew the
+container: the helper that turned `…/9f3c.wav` into a token **matched that
+extension and then dropped it**, handing back the token alone. The caller,
+left holding half the answer, filled in the other half with a constant. Both
+halves now come back together (`clip_of_path`), and the record is built in one
+place (`Keeper_chat_store.audio_clip_of_synthesized_file`) rather than field
+by field at the call site.
+
+`test/voice_clip_announcement` writes a real file and checks that what the
+announcement says and what `find_clip` would serve are the same string —
+asserting the literal alone would pass again if only one side moved, which is
+how this started. Planting `mime = "audio/mpeg"` back turns that suite red on
+the WAVE case and nothing else.
+
+A clip under a container masc does not write (`.ogg`, say) is now announced as
+no clip at all, with a line in the log, because the serving route resolves a
+token by trying each container it knows and would answer `404` for it however
+it was labelled. The reply is still recorded as text.
 
 ### Speaking to a keeper, not just probing it
 

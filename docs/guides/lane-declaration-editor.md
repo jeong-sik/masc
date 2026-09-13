@@ -1,9 +1,37 @@
-# Dashboard와 Keeper에서 같은 Lane TOML 편집하기
+# TUI·Dashboard·Keeper에서 같은 Lane TOML 편집하기
 
 Lane 설치의 정본은 `<resolved-config-root>/lane-addons/*.toml`이다. Dashboard와
 Keeper의 선언 편집 경로도 이 파일을 읽고 저장한다. 패키지 구현은 `lane.toml`과
 그 패키지가 제공하는 Skills·scripts·실행 환경에 있고, 설치 선언은 사용할 패키지와
 MASC 원천·다른 Lane 출력 사이의 연결을 지정한다.
+
+## TUI
+
+`:go lane add-ons` 또는 `/addons`로 연다. TOML 설치 목록은 선언 경로와
+원하는 설정·실제 적용 revision, 설정 오류를 보여준다. Tab으로 설치·인스턴스·관측
+행 사이의 선택을 전환한다. 패키지의 named output, binding과 Skills 경로도 공통
+표현으로 표시하며, 기존 Timeline과 Slice 질의가 같은 관측을 가로지른다.
+
+- `n`: 파일 이름을 정하고 기존 `$EDITOR`/`$VISUAL`에서 `.toml` 초안을 작성한다.
+- `E`: 선택한 선언 원문을 읽어 편집하거나 열린 초안을 다시 편집한다.
+- `s`: 열린 초안을 공통 선언 API로 저장한다. 편집기 종료만으로 저장하지 않는다.
+- `l`: 서버의 현재 파일을 읽는다. 내 초안과 현재 원문을 함께 표시한다.
+- `u`: 내 초안을 유지하며 표시된 현재 revision을 다음 저장의 기준으로 선택한다.
+- `U`: 표시된 현재 원문으로 초안을 교체한다.
+- `r`: 실제 설치 적용 상태를 읽는다. `J/K`로 긴 내용과 관측을 스크롤한다.
+
+잘못된 TOML도 오류 항목에서 원문을 열어 고친다. 삭제되거나 다른 설치가 사용 중인
+과거 인스턴스의 경로는 현재 선언으로 간주하지 않는다. 실패한 저장과 편집기 취소,
+문서 전환·화면 닫기는 이미 작성한 초안을 버리지 않는다. 초안은 실행 중인 TUI의
+메모리에 보존하며, TUI 프로세스 종료를 넘어 영속화하지는 않는다.
+
+행동을 제공하는 인스턴스에는 패키지가 광고한 `action_schema`와 정확한 incarnation이
+표시된다. `:act {"instance_id":"…","expected_incarnation":"…","request_id":"…","action":{…}}`는
+공통 행동 경로로 명시적으로 제출한다. action 내용은 표시된 스키마를 따른다. `t`는
+마지막 요청의 상태만 읽고 실행을 반복하지 않는다. `:action`에 같은 요청 JSON을
+넣으면 TUI 재시작 후에도 해당 요청을 조회할 수 있다. queued·running·confirmed·
+failed_before_effect·outcome_unknown을 구분하며, 실제 executor가 없으면 unknown으로
+남긴다. 작업은 기존 owner와 lifecycle에서 이어지고 TUI 창을 닫는다고 취소하지 않는다.
 
 ## Dashboard
 

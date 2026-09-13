@@ -60,13 +60,6 @@ let apportion ~width ~weights =
     Array.to_list cells
   end
 
-let segment_glyph index =
-  match index mod 4 with
-  | 0 -> bar_full
-  | 1 -> bar_dark
-  | 2 -> bar_medium
-  | _ -> bar_light
-
 (* Three tiers, so the row is exactly [width] cells at every width the pane
    hands down. An overrun is not silent -- the frame truncates it and marks the
    cut with a tilde -- but a header ending in a tilde reads as a broken row, and
@@ -159,10 +152,11 @@ let reach_pointer ~width ~transmitted ~total =
   ^ Sgr.reset
 
 let stacked_bar ~width ~segments =
-  let cells = apportion ~width ~weights:(List.map snd segments) in
+  let cells =
+    apportion ~width ~weights:(List.map (fun (_, _, weight) -> weight) segments)
+  in
   (* [apportion] returns one count per weight, so the zip is total. *)
   String.concat ""
-    (List.mapi
-       (fun index ((style, _), count) ->
-         style ^ repeat (segment_glyph index) count ^ Sgr.reset)
+    (List.map
+       (fun ((style, glyph, _), count) -> style ^ repeat glyph count ^ Sgr.reset)
        (List.combine segments cells))

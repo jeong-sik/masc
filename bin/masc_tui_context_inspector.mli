@@ -150,6 +150,16 @@ val exact_input_category : exact_input_kind -> string
 
 val input_component_label : Turn_record.input_component_id -> string
 val exact_input_label : exact_input_kind -> string
+val input_source : Turn_record.input_component_id -> input_source
+(** Which producer a component entered the turn by. *)
+
+val exact_input_source : exact_input_kind -> input_source
+(** The same question for a retained provider item, so the request tab groups
+    and colours by the producer the composition tab names. *)
+
+val input_sources : input_source list
+(** The three producers in the order a turn assembles them. *)
+
 val input_source_label : input_source -> string
 val input_evidence_label : input_evidence -> string
 val input_evidence_badge_cells : input_evidence -> int

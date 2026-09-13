@@ -6,6 +6,10 @@ type activity = Tool_completed | Msx_changed | Browser_changed
 type refresh_interest
 val refresh_interest : Yojson.Safe.t -> (refresh_interest, string) result
 val interested : refresh_interest -> activity -> bool
+val activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity
+(** The activity a finished misc tool stands for. Exhaustive over the
+    operation type, so a new MSX or browser tool cannot be read as a generic
+    completion by omission. *)
 val snapshot_files_only : refresh_interest -> bool
 (** Automatic Tool completions are capture hints for explicitly bound files.
     Native MSX/browser sources additionally follow their own typed activity.

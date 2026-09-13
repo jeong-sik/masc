@@ -15032,21 +15032,25 @@ def run_schedule_source_status_regression(executable: str) -> None:
 # earlier scenario's exit step (#34125). This lane runs the one thing: the
 # footer's offer and what the key it offered actually does.
 def run_board_list_footer_regression(executable: str) -> None:
-    """Measure completed native frames, including the bottom of a long list."""
+    """Measure completed native frames, including the bottom of a long list.
+
+    Titles fit the Board column even when the acting pane opens at 140 columns.
+    A truncated title is valid rendering, so it cannot be a full-string barrier.
+    """
     for state in ("populated", "empty", "unread", "failed"):
         fixtures = overview_event_http_fixtures()
-        posts = [board_selection_post(str(i), f"footer-post-{i:02d}",
+        posts = [board_selection_post(str(i), f"board-{i:02d}",
                                       f"footer-body-{i:02d}") for i in range(70)]
         response: HttpResponse = (200, {"posts": posts if state == "populated" else []})
         gate = GatedHttpResponse(response, hold_seconds=60.0)
         fixtures["/api/v1/board?sort_by=hot"] = (
             gate if state == "unread" else
-            (503, {"error": "board-footer-unavailable"}) if state == "failed" else response
+            (503, {"error": "board-down"}) if state == "failed" else response
         )
         fixtures["/api/v1/board/post-69?format=flat"] = (
             200, {"post": posts[-1], "comments": []})
-        marker = {"populated": b"footer-post-00", "empty": b"(no board posts)",
-                  "unread": b"not loaded yet", "failed": b"board-footer-unavailable"}[state]
+        marker = {"populated": b"board-00", "empty": b"(no board posts)",
+                  "unread": b"not loaded yet", "failed": b"board-down"}[state]
 
         def interact(process: subprocess.Popen[bytes], master_fd: int,
                      _slave_fd: int, output: bytearray, _base_path: str) -> None:
@@ -15067,10 +15071,10 @@ def run_board_list_footer_regression(executable: str) -> None:
                     if screen_row_of(rows, marker) < 1:
                         raise AssertionError(f"Board {state} lost its current state: {rows!r}")
                     if state == "populated":
-                        send_and_wait(process, master_fd, output, b"j" * 69, b"footer-post-69")
+                        send_and_wait(process, master_fd, output, b"j" * 69, b"board-69")
                         send_and_wait(process, master_fd, output, b"\r", b"footer-body-69")
                         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
-                        send_and_wait(process, master_fd, output, b"k" * 69, b"footer-post-00")
+                        send_and_wait(process, master_fd, output, b"k" * 69, b"board-00")
                 os.write(master_fd, b"q")
             finally:
                 gate.release.set()

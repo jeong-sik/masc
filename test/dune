@@ -3577,6 +3577,7 @@
  (libraries
   alcotest
   masc_tui_footer
+  masc_tui_keys
   masc_tui_render_prim
   masc_tui_theme
   masc_tui_types))

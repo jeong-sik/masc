@@ -11176,6 +11176,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            taking the review step away costs an operator who works that way
            more than it saves the one who does not.
 
+           The section is [voice.stt], where the voice setup routes write and
+           GET /api/v1/voice/config publishes it.
+
            Sent by handing the composer the send key rather than calling the
            send path: that path decides what a draft is (a message, a slash
            command, a preset) and which surface comes forward, and a second

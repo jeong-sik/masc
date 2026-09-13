@@ -242,6 +242,30 @@ The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
 whisper.cpp requires, so nothing is converted between the microphone and the
 transcript. And `-l auto` detects Korean, so there is no language to configure.
 
+### Checking one keeper's voice
+
+The section default is not what a keeper speaks in — a keeper mapped under
+`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
+
+```
+masc voice-verify --agent sangsu --json
+```
+
+Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
+exists and `nowhere` to a name that does not:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
+
+All three say `answered`, because `say` answers a name it does not have by
+speaking in the system voice. The byte counts cannot separate them either —
+the third is the same 79,758 as the default. **The voice name in the report is
+what separates them**, and a name that is not in `say -v '?'` is a mapping
+that never took.
+
 ### The trap: a wrong voice name is silent
 
 `say` does not fail on a voice it does not have. It exits 0 and speaks in the
@@ -561,6 +585,30 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+### Speaking without touching the keyboard
+
+`Ctrl-Y` records one sentence and appends the transcript to the draft. The
+mode that lets a conversation run is a different key:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
+| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
+| `Esc` | discard a running capture (the draft keeps what was there before) |
+
+Continuous mode measures the room's noise floor **once** when it turns on,
+which is what keeps the gap between sentences short enough to speak across; it
+measures again if the mode is turned off and on in a different room. Silence
+re-arms too, so a pause longer than the trailing-silence window does not end
+the mode. Only the key that started it ends it.
+
+Both are control codes rather than letters because every printable key in a
+focused composer row is draft text.
+
+That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
+it: ending a capture hands the draft to the same send path Enter uses. Off by
+default, and described under Configuration below.
+
 ## External devices
 
 Any device that can make two HTTP calls can speak to a keeper. No MASC change
@@ -776,6 +824,50 @@ This is the reading half of the container fix: for a while every clip was
 named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
 of silence) or would have been announced as MP3. A player told the wrong
 type either refuses or plays nothing, and neither says why.
+
+### The announcement has to agree with it
+
+The route above is what a clip is **served** as. What a keeper's spoken reply
+is **announced** as is a separate field, written when the reply is appended to
+the chat, and for a while it was the literal `audio/mpeg` for every clip:
+
+```json
+{ "audio": { "token": "9f3c…", "audio_url": "/api/v1/voice/audio/9f3c…",
+             "mime": "audio/mpeg" } }
+```
+
+A fresh mac speaks through `say`, which writes WAVE. So the route answered
+`audio/wav` for bytes the same chat line called MP3: two fields about one
+file, disagreeing.
+
+**What this did and did not break, traced 2026-09-13.** The dashboard's
+`<audio>` element is given `src` and no `type`, so the browser picks its
+decoder from the route's `content-type` and plays the clip correctly. The
+field is not decorative either: `normalizeAudioClip` drops a clip that has no
+`mime` at all, and the value it keeps is persisted on the chat line and
+emitted on the SSE payload. So the cost is not a silent player today — it is
+a wrong answer on the wire and in the history to anything that reads it
+instead of fetching: an external device following the SSE stream, an export,
+a player that picks a decoder from the field rather than the response.
+
+The cause is worth naming because it is not a typo. The path already knew the
+container: the helper that turned `…/9f3c.wav` into a token **matched that
+extension and then dropped it**, handing back the token alone. The caller,
+left holding half the answer, filled in the other half with a constant. Both
+halves now come back together (`clip_of_path`), and the record is built in one
+place (`Keeper_chat_store.audio_clip_of_synthesized_file`) rather than field
+by field at the call site.
+
+`test/voice_clip_announcement` writes a real file and checks that what the
+announcement says and what `find_clip` would serve are the same string —
+asserting the literal alone would pass again if only one side moved, which is
+how this started. Planting `mime = "audio/mpeg"` back turns that suite red on
+the WAVE case and nothing else.
+
+A clip under a container masc does not write (`.ogg`, say) is now announced as
+no clip at all, with a line in the log, because the serving route resolves a
+token by trying each container it knows and would answer `404` for it however
+it was labelled. The reply is still recorded as text.
 
 ### Speaking to a keeper, not just probing it
 

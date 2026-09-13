@@ -12793,13 +12793,12 @@ let render_voice (state : state) =
                 | None -> None
                 | Some id ->
                     let kind = Option.value (string_of [ "kind" ] item) ~default:"?" in
+                    (* The server resolves it the way the transport does.
+                       Choosing between base_url and mcp_url here showed
+                       base_url for a voice_mcp endpoint that is called at
+                       its mcp_url. A command kind has no address. *)
                     let address =
-                      match
-                        (string_of [ "base_url" ] item, string_of [ "mcp_url" ] item)
-                      with
-                      | Some url, _ -> url
-                      | None, Some url -> url
-                      | None, None -> "—"
+                      Option.value (string_of [ "address" ] item) ~default:"—"
                     in
                     let off =
                       match member [ "enabled" ] item with
@@ -12888,10 +12887,20 @@ let render_voice (state : state) =
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");
   box_line buf cols "";
+  (* Where the endpoints above come from. With no [voice] section the loader
+     reads the standalone JSON, and naming runtime.toml there sent a reader to a
+     file that declares nothing. *)
+  let declared_by =
+    match Option.map (member [ "source" ]) state.voice_setup with
+    | Some (Some (`Assoc source)) -> (
+        match List.assoc_opt "path" source with
+        | Some (`String path) -> Terminal_text.single_line path
+        | Some _ | None -> "runtime.toml [voice]")
+    | Some (Some _ | None) | None -> "runtime.toml [voice]"
+  in
   box_line buf cols
-    (Printf.sprintf
-       "  %sruntime.toml [voice] declares this; the server says what loaded%s"
-       Ansi.dim Ansi.reset);
+    (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
+       Ansi.dim declared_by Ansi.reset);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh  e:set up");

@@ -57,6 +57,10 @@ val default_agent_voices : unit -> (string * string) list
 val default_session_url : path:string -> string
 val session_endpoint_result : Voice_config.t -> (Voice_config.endpoint, string) result
 val session_mcp_url_of_endpoint : Voice_config.endpoint -> (string, string) result
+val endpoint_address : Voice_config.endpoint -> string option
+(** Where a request to this endpoint goes, by the same resolution the transport
+    uses: [mcp_url] before [base_url] for voice_mcp, the provider default for
+    ElevenLabs, [base_url] for OpenAI-compatible. [None] for a command kind. *)
 val http_request_for_tts
   :  Voice_config.endpoint
   -> api_key:string

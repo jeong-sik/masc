@@ -21989,14 +21989,37 @@ and is loaded on demand through keeper_skill.
                     | Some (`Assoc fields) ->
                       (* No revision, no session: the save carries it, and a
                          wizard opened without one could only fail at the end. *)
-                      (match List.assoc_opt "revision" fields with
-                       | Some (`String revision) ->
+                      (match
+                         ( List.assoc_opt "revision" fields
+                         , Option.bind (List.assoc_opt "source" fields) (function
+                             | `Assoc source ->
+                               (match
+                                  ( List.assoc_opt "kind" source
+                                  , List.assoc_opt "path" source )
+                                with
+                                | Some (`String "standalone_json"), Some (`String path) ->
+                                  Some path
+                                | _ -> None)
+                             | _ -> None) )
+                       with
+                       (* Voice is read from the standalone JSON. The wizard
+                          writes runtime.toml, where a first section would
+                          replace everything that file sets; the server refuses
+                          that write, so the draft is not started only to be
+                          refused at the end. *)
+                       | Some (`String _), Some path ->
+                         add_event state "system"
+                           (Printf.sprintf
+                              "voice is read from %s; set it up in that file, or \
+                               move it into runtime.toml first"
+                              (Terminal_text.single_line path))
+                       | Some (`String revision), None ->
                          state.voice_wizard
                            <- Some
                                 (Masc_tui_types.voice_wizard_open
                                    ~section:Voice_setup.Tts
                                    ~provider:Voice_wizard.Elevenlabs ~revision)
-                       | Some _ | None -> ())
+                       | (Some _ | None), _ -> ())
                     | Some _ | None -> ()))
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()

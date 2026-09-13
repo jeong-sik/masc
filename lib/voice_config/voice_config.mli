@@ -255,6 +255,11 @@ val parse_runtime_toml_text : string -> (t option, string) result
     whether the edit is loadable, so a voice section cannot reach disk in a
     shape that only fails later, at the first speak or transcribe. *)
 
+val load_standalone_file : string -> (t, string) result
+(** Read and parse the standalone JSON source at [path] exactly as
+    {!load_detailed} does when runtime.toml has no [\[voice\]] section. The
+    error names the read or parse failure. *)
+
 val load_detailed : unit -> (t, load_error) result
 (** [load_detailed ()] distinguishes "voice is not configured"
     ({!Not_configured}) from "an explicit config exists but is

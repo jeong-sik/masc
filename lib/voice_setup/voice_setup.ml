@@ -16,6 +16,11 @@ type error =
   | Voice_section_invalid of string
   | Configuration_rejected of string
   | Endpoint_path_unusable of string
+  | Standalone_source_active of string
+
+type source =
+  | Runtime_toml
+  | Standalone_json of string
 
 let error_message = function
   | Configuration_unavailable detail -> "runtime.toml could not be read: " ^ detail
@@ -26,10 +31,18 @@ let error_message = function
   | Configuration_rejected detail -> "the commit was refused: " ^ detail
   | Endpoint_path_unusable detail ->
     "the endpoint list cannot be written where it would have to go: " ^ detail
+  | Standalone_source_active path ->
+    Printf.sprintf
+      "voice is read from %s because runtime.toml has no [voice] section; a \
+       section written there would replace every setting that file carries, so \
+       nothing was written. Configure voice in that file, or move it into \
+       runtime.toml first"
+      path
 ;;
 
 exception Revision_changed
 exception Voice_invalid of string
+exception Standalone_active of string
 
 let endpoints_path = function
   | Tts -> "voice.tts.endpoints"
@@ -143,36 +156,66 @@ let revision_of (observation : Runtime.config_observation) =
   Runtime.config_source_revision_to_string observation.source_revision
 ;;
 
-let observe ~runtime_config_path =
+(* runtime.toml has no [voice] section and the standalone file exists: the
+   loader reads that file, so it is the configuration in effect. *)
+let standalone_in_effect ~standalone_path config =
+  match config with
+  | Some _ -> false
+  | None -> Sys.file_exists standalone_path
+;;
+
+let observe ~runtime_config_path ~standalone_path =
   match Runtime.load_config_observation ~runtime_config_path () with
   | Error detail -> Error (Configuration_unavailable detail)
   | Ok observation ->
     (match Voice_config.parse_runtime_toml_text observation.source_text with
      | Error message -> Error (Voice_section_invalid message)
-     | Ok config -> Ok (revision_of observation, config))
+     | Ok (Some config) -> Ok (revision_of observation, Some (Runtime_toml, config))
+     | Ok None when Sys.file_exists standalone_path ->
+       (match Voice_config.load_standalone_file standalone_path with
+        | Ok config ->
+          Ok (revision_of observation, Some (Standalone_json standalone_path, config))
+        | Error message ->
+          Error (Voice_section_invalid (Printf.sprintf "%s: %s" standalone_path message)))
+     | Ok None -> Ok (revision_of observation, None))
 ;;
 
-let preview ~runtime_config_path ~expected_revision changes =
+(* Writing a first [voice] section while the standalone file is in effect would
+   switch the loader over to that section and drop everything the file set.
+   Checked against the text being edited, so apply decides it under the lock. *)
+let refuse_over_standalone ~standalone_path contents =
+  match Voice_config.parse_runtime_toml_text contents with
+  | Ok config when standalone_in_effect ~standalone_path config ->
+    raise (Standalone_active standalone_path)
+  | Ok _ | Error _ -> ()
+;;
+
+let preview ~runtime_config_path ~standalone_path ~expected_revision changes =
   match Runtime.load_config_observation ~runtime_config_path () with
   | Error detail -> Error (Configuration_unavailable detail)
   | Ok observation ->
     if not (String.equal (revision_of observation) expected_revision)
     then Error Configuration_changed
     else (
-      match checked observation.source_text changes with
+      match
+        refuse_over_standalone ~standalone_path observation.source_text;
+        checked observation.source_text changes
+      with
       | updated -> Ok updated
+      | exception Standalone_active path -> Error (Standalone_source_active path)
       | exception Voice_invalid message -> Error (Voice_section_invalid message)
       | exception Entry_refused error ->
         Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error)))
 ;;
 
-let apply ~runtime_config_path ~expected_revision changes =
+let apply ~runtime_config_path ~standalone_path ~expected_revision changes =
   (* The revision is checked again here, inside edit_config_text's lock, because
      preview read it outside one. *)
   let edit contents =
     let observation = Runtime.config_observation ~path:runtime_config_path contents in
     if not (String.equal (revision_of observation) expected_revision)
     then raise Revision_changed;
+    refuse_over_standalone ~standalone_path contents;
     checked contents changes
   in
   match Runtime.edit_config_text ~runtime_config_path edit with
@@ -184,6 +227,7 @@ let apply ~runtime_config_path ~expected_revision changes =
   | Ok receipt -> Ok (revision_of receipt.Runtime.observation)
   | Error detail -> Error (Configuration_rejected detail)
   | exception Revision_changed -> Error Configuration_changed
+  | exception Standalone_active path -> Error (Standalone_source_active path)
   | exception Voice_invalid message -> Error (Voice_section_invalid message)
   | exception Entry_refused error ->
     Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error))

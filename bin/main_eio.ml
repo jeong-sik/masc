@@ -1966,19 +1966,18 @@ let voice_local_setup_exit base_path speak_voice hear_model =
           first, then this again."
          base_path runtime_config_path (Filename.quote base_path))
   else
-  match Voice_setup.observe ~runtime_config_path with
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
   | Error error -> refuse (Voice_setup.error_message error)
-  | Ok (revision, existing) ->
-    let standalone_path = Voice_config.voice_config_file_in base_path in
+  (* The writer refuses this too, under its lock; said here first so nothing
+     below is decided against a configuration this command cannot write. *)
+  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
+    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
+  | Ok (revision, active) ->
+    let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
     let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
-    if Option.is_none existing && Sys.file_exists standalone_path then
-      refuse
-        (Printf.sprintf
-           "Voice settings are read from %s. Configure voice in that active file; \
-            local setup will not create a TOML section that overrides it."
-           standalone_path)
-    else if Option.is_some hear_model
+    if Option.is_some hear_model
       && Option.exists
            (fun (config : Voice_config.stt_config) -> List.exists
              (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
@@ -2031,7 +2030,10 @@ let voice_local_setup_exit base_path speak_voice hear_model =
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
           2
       | changes ->
-          match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
+          match
+            Voice_setup.apply ~runtime_config_path ~standalone_path
+              ~expected_revision:revision changes
+          with
           | Error error -> refuse (Voice_setup.error_message error)
           | Ok _revision ->
               print_endline "voice is configured";

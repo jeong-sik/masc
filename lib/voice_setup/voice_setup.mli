@@ -78,20 +78,38 @@ type error =
           load as a voice configuration and {!observe} refuses it first. It is
           here because the writer underneath can refuse, and swallowing that
           would be the silent failure this module exists to avoid. *)
+  | Standalone_source_active of string
+      (** runtime.toml has no [\[voice\]] section and voice is read from the
+          standalone JSON at this path instead. The first section written into
+          runtime.toml would become the configuration in effect and drop every
+          setting that file carries, so nothing was written. *)
 
 val error_message : error -> string
 
+(** Which file the configuration in effect was read from. The loader prefers
+    runtime.toml's [\[voice\]] section and reads the standalone JSON only
+    when that section is absent ({!Voice_config.load_detailed}). *)
+type source =
+  | Runtime_toml
+  | Standalone_json of string
+
 val observe
   :  runtime_config_path:string
-  -> (string * Voice_config.t option, error) result
-(** The current source revision and the voice configuration that revision
-    carries, from one observation so a caller cannot join a revision to a
-    different read. Hand the revision back as [expected_revision].
+  -> standalone_path:string
+  -> (string * (source * Voice_config.t) option, error) result
+(** The current runtime.toml revision and the voice configuration in effect,
+    from one observation so a caller cannot join a revision to a different
+    read. Hand the revision back as [expected_revision].
 
-    [Ok (revision, None)] means runtime.toml has no [\[voice\]] section yet. *)
+    [standalone_path] is the JSON the loader falls back to. Without it an
+    observation answered "not configured" for a workspace whose voice worked,
+    because only the TOML text was parsed.
+
+    [Ok (revision, None)] means neither source configures voice. *)
 
 val preview
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
   -> (string, error) result
@@ -105,6 +123,7 @@ val preview
 
 val apply
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
   -> (string, error) result

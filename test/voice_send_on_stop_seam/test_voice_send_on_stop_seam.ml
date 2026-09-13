@@ -61,10 +61,14 @@ let with_workspace f =
       f ~base ~path)
 
 let write ~path changes =
-  match Voice_setup.observe ~runtime_config_path:path with
+  let standalone_path = Filename.concat (Filename.dirname path) "voice_config.json" in
+  match Voice_setup.observe ~runtime_config_path:path ~standalone_path with
   | Error error -> Alcotest.fail (Voice_setup.error_message error)
   | Ok (revision, _) ->
-    (match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
+    (match
+       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+         ~expected_revision:revision changes
+     with
      | Error error -> Alcotest.fail (Voice_setup.error_message error)
      | Ok _revision -> ())
 

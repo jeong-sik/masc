@@ -130,6 +130,9 @@ If the destination read is still pending or fails, the footer exposes `r`/`s`/`v
 as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,
 and truncation flag, so a Keeper can preserve the same reading scope.
+The scene status line also reports the observed composition, such as
+`2 articles · 6 links · 1 image`; these are typed node counts, not guesses from
+page text. Use the article count to choose `N`/`P` before reading the full body.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 

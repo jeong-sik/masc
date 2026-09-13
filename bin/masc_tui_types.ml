@@ -3208,6 +3208,13 @@ module Browser_lane_view = struct
     role : Masc.Browser_scene.region_role;
     label : string;
   }
+  type scene_counts = {
+    article_count : int;
+    region_count : int;
+    link_count : int;
+    control_count : int;
+    raster_count : int;
+  }
   type navigation_guard = {
     expected_url : string;
     navigation_source : Masc.Browser_scene.navigation_source;
@@ -3516,6 +3523,40 @@ module Browser_lane_view = struct
              if Hashtbl.mem seen node.node_id then false
              else (Hashtbl.add seen node.node_id (); true))
           scene.content.nodes
+
+  let scene_counts (scene : scene) =
+    let seen = Hashtbl.create 64 in
+    List.fold_left (fun counts (node : Masc.Browser_scene.node) ->
+      if Hashtbl.mem seen node.node_id then counts
+      else (
+        Hashtbl.add seen node.node_id ();
+        match node.kind with
+        | Region Masc.Browser_scene.Article ->
+            {counts with article_count = counts.article_count + 1}
+        | Region _ -> {counts with region_count = counts.region_count + 1}
+        | Control {href = Some _; _} -> {counts with link_count = counts.link_count + 1}
+        | Control _ -> {counts with control_count = counts.control_count + 1}
+        | Raster -> {counts with raster_count = counts.raster_count + 1}
+        | Text -> counts))
+      {article_count = 0; region_count = 0; link_count = 0;
+       control_count = 0; raster_count = 0}
+      scene.content.nodes
+
+  let scene_summary scene =
+    let counts = scene_counts scene in
+    let add count noun parts =
+      if count = 0 then parts
+      else parts @ [Masc_tui_message_layout.count_noun count noun]
+    in
+    let parts = [] in
+    let parts = add counts.article_count "article" parts in
+    let parts = add counts.region_count "region" parts in
+    let parts = add counts.link_count "link" parts in
+    let parts = add counts.control_count "control" parts in
+    let parts = add counts.raster_count "image" parts in
+    match parts with
+    | [] -> None
+    | _ -> Some (String.concat " · " parts)
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 

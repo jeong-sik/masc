@@ -66,3 +66,8 @@ came from [native CI](https://github.com/jeong-sik/masc/actions/runs/34699594706
 and [Dashboard CI](https://github.com/jeong-sik/masc/actions/runs/34698924065).
 This qualifies the connection and its coverage behavior; the capture fixture
 does not establish real MSX gameplay, Keeper reasoning or production deployment.
+
+The [DOS value metric evidence](../evidence/lane-dos-value-difference-2026-09-13/README.md)
+records a separate actual DOS → value-difference → statistics run. Its portable
+reader checks original numeric endpoints and guest artifacts, continued DOS
+actions after removing each consumer, and the retained selected evidence.

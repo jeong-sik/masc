@@ -474,10 +474,8 @@ model_id = "verifier-fixture"
   check int "each tool result observed" (if mode = "missing" then 1 else if mode = "duplicate" || mode = "image-read" then 3 else 2)
     (List.length !calls);
   if mode = "valid" then (
-    (* A second independent review of the same workspace/runtime must start a
-       new client thread, not resume the previous review's persisted session. *)
     let second = review () in
-    check bool "second review has its own successful session" true
+    check bool "second independent review succeeds" true
       (second.verdict = Some (AR.Approve "read-only fixture receipt"));
     let rows = records capture in
     let launches = launches rows in
@@ -487,6 +485,57 @@ model_id = "verifier-fixture"
       check bool "every completed review session root is removed" false (Sys.file_exists cwd))
       launches))
 
+
+let test_unsafe_slots_refused_before_spawn () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let saved = Runtime.For_testing.snapshot () in
+  let root = Filename.temp_file "verifier-refusal-" "" in
+  Unix.unlink root; Unix.mkdir root 0o700;
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
+  let command, capture = fixture_script root ~mode:"must-not-run" in
+  let config_path = Filename.concat root "runtime.toml" in
+  let replace needle replacement text =
+    let length = String.length needle in
+    let rec scan offset =
+      if offset + length > String.length text then text
+      else if String.sub text offset length = needle then
+        String.sub text 0 offset ^ replacement
+        ^ String.sub text (offset + length) (String.length text - offset - length)
+      else scan (offset + 1)
+    in scan 0 in
+  let credential_path = Filename.concat root "fixture-oauth.json" in
+  write credential_path "{}";
+  let antigravity_config =
+    replace "command =" "timeout-s = 30.0\ncommand ="
+      (replace "claude-code" "antigravity-cli" (runtime_config command))
+    ^ Printf.sprintf "\n[providers.official.credentials]\ntype = \"file\"\npath = %S\n" credential_path
+  in
+  let cases =
+    [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
+    ; "Antigravity", antigravity_config, "official.verifier"
+    ; "disabled tools", replace "tools-support = true" "tools-support = false" (runtime_config command), "official.verifier"
+    ; "unsupported media", replace "supports-image-input = true" "supports-image-input = false" (runtime_config command), "official.verifier"
+    ; "missing runtime", runtime_config command, "missing.runtime"
+    ; "lane", runtime_config command ^ "\n[runtime.lanes.verifier_lane]\ncandidates = [\"official.verifier\"]\n", "verifier_lane"
+    ] in
+  List.iter (fun (label,text,slot) ->
+    write config_path text;
+    (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
+    check bool (label ^ " CLI admission") (label <> "unsupported media")
+      (Result.is_error (Runtime.verifier_cli_slot_admission ~runtime_id:slot));
+    let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
+      ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
+      ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
+      ~goal_blocks:[Agent_core.Types.Image
+        { media_type="image/png"; data=png; source_type=Base64 }]
+      ~lookup:AR.No_lookup_surface ~base_path:root () in
+    check bool (label ^ " explicit override cannot bypass admission") true
+      (result.verdict = None && result.gate = AR.Evaluator_unavailable);
+    check bool (label ^ " no client invocation") false (Sys.file_exists capture)) cases
 
 let () =
   Prompt_registry.set_markdown_dir
@@ -498,4 +547,6 @@ let () =
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
        "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read"; "image-read";
        "api-lane"; "api-tools-disabled"; "api-lane-exhausted";
-       "api-lane-explicit-default"; "api-lane-tools-disabled"; "api-lane-uncertain-cli"]]
+       "api-lane-explicit-default"; "api-lane-tools-disabled"; "api-lane-uncertain-cli"];
+     "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
+       test_unsafe_slots_refused_before_spawn]]

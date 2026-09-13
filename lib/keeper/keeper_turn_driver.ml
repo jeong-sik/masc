@@ -1015,9 +1015,20 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  let tool_requirement = match output_contract with
+    | Tool_verdict -> Keeper_required_tools.Required
+    | Provider_default -> tool_requirement in
+  (* Two refusals, one shape. A named exact runtime and a verdict contract each
+     say the caller already chose the slot, and a lane is the opposite claim --
+     it asks the registry to choose. They are separate conditions because a
+     verdict can be asked of a resolved assignment and an exact runtime can be
+     asked for ordinary output. *)
   if runtime_selection <> Resolve_assignment && Option.is_some deferred_runtime_lane then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
       {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
+  else if output_contract = Tool_verdict && Option.is_some (Runtime.get_lane_by_id runtime_id) then
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      { field = "verifier.runtime"; detail = "A verifier slot must name a direct runtime, not a lane" }))
   else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
@@ -1169,10 +1180,13 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
-    match runtime_selection with
-    | Exact_runtime | Exact_route -> []
-    | Resolve_assignment ->
-    modality_reroute_candidates
+    (* Either claim pins the runtime: a verdict must stay with its explicitly
+       admitted slot, and an exact runtime was named rather than resolved.
+       Rerouting would answer from a runtime the caller did not choose. *)
+    match runtime_selection, output_contract with
+    | (Exact_runtime | Exact_route), _ -> []
+    | Resolve_assignment, Tool_verdict -> []
+    | Resolve_assignment, Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
@@ -1343,10 +1357,22 @@ let run_named
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      (match Result.bind source_reader_ready (fun () ->
+      let verifier_ready = match output_contract with
+        | Provider_default -> Ok ()
+        | Tool_verdict ->
+          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
+            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+              current_goal_blocks with
+            | Runtime_agent.No_reroute_needed -> Ok ()
+            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
+          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
+      (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
-          |> Result.map_error Keeper_required_tools.to_core_error) with
+          |> Result.map_error Keeper_required_tools.to_core_error)) with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,

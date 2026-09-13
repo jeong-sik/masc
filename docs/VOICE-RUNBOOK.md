@@ -321,13 +321,16 @@ workspace with the one line `default_voice = "Yuna"` added under
 Nothing is logged in the first row. The keeper speaks, the bytes are real, and
 the voice is simply not the one that was assigned.
 
-The field exists for a reason and is not going away: a voice name is
-provider-shaped — `say` takes a label, ElevenLabs a 20-character `voice_id` —
-so a workspace that already has a `[voice.tts]` section has a default that
-belongs to the other provider, and adding `say` alongside it has to carry its
-own. So `voice-local-setup` writes the endpoint voice only in that case
-(`Voice_setup.voice_placement`), and a fresh mac — one provider, no section
-yet — gets the section default with per-keeper voices layered over it.
+The field exists for a reason: a voice name is provider-shaped — `say` takes a
+label, ElevenLabs a 20-character `voice_id` — so when another provider shares
+the `[voice.tts]` section, the section default is that provider's and `say` has
+to carry its own. `voice-local-setup` writes the endpoint voice only then
+(`Voice_setup.voice_placement`). A section whose endpoints are all `say` is
+`say`'s, however it got there, so its default takes the voice and per-keeper
+voices layer over it. Running `voice-local-setup --voice Yuna` twice on a fresh
+workspace leaves the endpoint without a voice both times; a workspace whose
+`say` endpoint already carries one has it removed by the next run, because the
+endpoint is written whole.
 
 The cost of the remaining case is worth stating plainly: on a workspace with
 two TTS providers, `agent_voices` does not reach the second one. There is no

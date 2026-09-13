@@ -484,7 +484,8 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
     | Ok items -> result.success, items
     | Error detail -> false,
         [ `Assoc [ "type", `String "inputText"; "text", `String detail ]
-        ; `Assoc [ "type", `String "inputText"; "text", `String result.content ] ]
+        ; `Assoc [ "type", `String "inputText"; "text",
+            `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
   in
   io.send
     (`Assoc

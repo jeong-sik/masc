@@ -837,8 +837,8 @@ class LocalVoice(unittest.TestCase):
     Speaking needs nothing downloaded -- say is in the base system -- so the
     step exists to pick a name from a list rather than to install anything.
     A name is picked rather than typed because say does not fail on one it
-    does not have: it exits 0 in the system voice, and the reader hears a
-    different voice with no error anywhere.
+    does not have: it exits 0 speaking in another voice, and the reader hears
+    a different voice with no error anywhere.
     """
 
     def test_a_voice_is_saved_by_the_name_the_listing_printed(self):

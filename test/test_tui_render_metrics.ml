@@ -461,6 +461,28 @@ let test_section_tools_populated () =
   List.iter (fun l -> check bool "tool line bounded" true (Layout.display_width l <= 90)) lines
 ;;
 
+(* Arriving on Metrics already asks for memory health. The block said "not
+   loaded -- visit Memory surface to fetch" before the answer, after a failed
+   answer, and beside a stale one alike. *)
+let test_memory_block_names_its_reading () =
+  let state = make_state () in
+  let section () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
+  check bool "unread says so" true (contains (section ()) "Memory health: not observed");
+  check bool "and sends nobody elsewhere" false (contains (section ()) "visit Memory");
+  state.memory_health_error <- Some "memory health load failed: HTTP 503";
+  check bool "a failed read carries its reason" true
+    (contains (section ()) "Memory health: unavailable: memory health load failed: HTTP 503");
+  let kh = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
+  state.memory_health <- Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
+  check bool "a failed refresh over a reading is stale" true
+    (contains (section ()) "Memory health: stale: previous reading, refresh failed");
+  check bool "and keeps the reading" true (contains (section ()) "Ordinary facts: 25");
+  state.memory_health_error <- None;
+  check bool "a current reading draws no status row" false
+    (contains (section ()) "Memory health:");
+  check bool "only the reading" true (contains (section ()) "Ordinary facts: 25")
+;;
+
 let test_approval_source_observations () =
   let state = make_state () in
   (* A successful read of the workspace cannot establish approval source data. *)
@@ -619,6 +641,7 @@ let () =
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated
         ; test_case "approval source observations" `Quick test_approval_source_observations
+        ; test_case "memory block names its reading" `Quick test_memory_block_names_its_reading
         ] )
     ; ( "responsiveness"
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )

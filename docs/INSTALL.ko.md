@@ -301,6 +301,43 @@ TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세�
 도구 승인을 기다리면 채팅이나 **Approvals**에서 해당 요청을 확인하세요.
 승인 대기나 HTTP 서버 응답만으로 모델 응답·도구 실행 성공을 판단하지 마세요.
 
+### 목소리로 `imp`와 대화하기 (macOS)
+
+setup 여정은 모델 연결과 샌드박스 사이에서 **3 · Give imp a voice (optional)** 를 묻습니다.
+말하기는 모든 Mac에 있는 `say`를 쓰므로 내려받을 것이 없습니다. 듣기는 따로 묻고,
+`whisper-cli`, 1.6GB 모델 파일, 마이크 녹음용 `sox`가 필요합니다. 여정이 셋 다 설치를
+안내합니다. **Stay text only**나 `q`를 고르면 음성 설정은 바뀌지 않습니다.
+
+여정 밖에서는 `say`가 보여 주는 목록에서 목소리를 고르세요. 목록에 없는 이름은
+거부되고 아무것도 쓰지 않습니다.
+
+```bash
+masc voice-local-setup --base-path "$HOME/masc-workspace" --list-voices
+masc voice-local-setup --base-path "$HOME/masc-workspace" --voice "Yuna" \
+  --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utterance.wav
+```
+
+`voice-verify`는 문장 하나를 합성하고 오디오 파일을 받아써서, 엔드포인트마다
+`answered`나 `refused`와 그 이유를 알려 줍니다.
+
+TUI에서 imp 채팅을 여세요. 입력이 비어 있으면 `(^Y to speak, ^A to keep listening)`이 보입니다.
+
+| 키 | 하는 일 |
+|---|---|
+| `Ctrl-Y` | 한 문장을 녹음해 입력에 넣음. 다시 누르면 멈추고 들은 내용을 남김 |
+| `Enter` | 입력을 보냄 |
+| `Ctrl-A` | 계속 듣기: 한 문장을 받으면 다음 녹음을 시작 |
+| `Esc` | 녹음 중인 내용을 버림 |
+
+`[voice.stt] send_on_stop = true`로 두면 녹음이 끝날 때 바로 보내서 Enter가 필요 없습니다.
+
+imp는 글로 답합니다. 음성 도구를 부를 때만 말하고, 그 클립은 채팅 줄에 붙습니다.
+대시보드는 직접 누르는 플레이어로 보여 주고, TUI는 재생하지 않습니다.
+`[voice.local_playback]`이 없으면 이 컴퓨터에서 소리가 나지 않습니다.
+
+단계마다 잰 결과는 [VOICE-RUNBOOK.md](VOICE-RUNBOOK.md)에 있습니다.
+
 MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 사용하고 [클라이언트 설정](../README.md#mcp-client-setup)을 따르세요.
 
 ## 이미지와 Linux/microVM의 경계

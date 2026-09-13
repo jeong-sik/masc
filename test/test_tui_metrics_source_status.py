@@ -38,6 +38,7 @@ def run(executable: str) -> None:
                 "approval_rules_state": {"state": "unavailable", "error": "rule-store-offline"}}
     phase = "initial"
     requests: list[tuple[str, str]] = []
+    sources = ("gate", "held", "modes")
 
     def response(source: str):
         requested_phase = phase
@@ -73,12 +74,31 @@ def run(executable: str) -> None:
                 if process.poll() is not None:
                     break
                 select.select([master], [], [], 0.05)
-            raise AssertionError(f"Metrics phase {phase}: required={required!r} absent={absent!r}: {screen!r}")
+            raise AssertionError(f"Metrics phase {phase}: required={required!r} absent={absent!r} requests={requests!r}: {screen!r}")
+
+        # A phase's screen can already hold what it requires before that phase
+        # has been asked for: "YOLO Keepers: 1" is the queue-unavailable reading
+        # as well as the rules-unavailable one. Moving on at that point retags
+        # the request still on its way, and the final ownership check then
+        # finds the phase without it. Each phase waits for its own three.
+        def await_requests(expected: str) -> None:
+            deadline = time.monotonic() + 5.0
+            missing = list(sources)
+            while time.monotonic() < deadline:
+                h.read_available(master, output)
+                missing = [source for source in sources if (expected, source) not in requests]
+                if not missing:
+                    return
+                if process.poll() is not None:
+                    break
+                select.select([master], [], [], 0.05)
+            raise AssertionError(f"Metrics phase {expected}: no request for {missing!r}: requests={requests!r}")
 
         def refresh(next_phase: str) -> None:
             nonlocal phase
             phase = next_phase
             os.write(master, b"r")
+            await_requests(next_phase)
 
         def evidence() -> None:
             captured = bytes(output)
@@ -96,6 +116,7 @@ def run(executable: str) -> None:
 
         h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
         h.send_and_wait(process, master, output, b"3", b"Gate Governance")
+        await_requests("initial")
         await_screen("Gate unavailable", "Tool holds unavailable", "YOLO Keepers: unavailable",
                      "Pending Gate Calls: unavailable", "Standing Rules: unavailable",
                      absent=("no active pending", "Pending Gate Calls: 0", "Tool holds 0"))
@@ -122,7 +143,7 @@ def run(executable: str) -> None:
                      absent=("previous reading", "partial coverage", "keeper_skill"))
         evidence()
         for expected in ("initial", "ready", "stale", "queue-unavailable", "rules-unavailable", "zero"):
-            for source in ("gate", "held", "modes"):
+            for source in sources:
                 if (expected, source) not in requests:
                     raise AssertionError(f"No real HTTP response for {expected}/{source}")
         os.write(master, b"q")

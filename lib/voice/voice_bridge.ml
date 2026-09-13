@@ -30,13 +30,8 @@ let transcriber_of_kind = function
 
 (* What an answered TTS probe says.
 
-   The voice, not only the bytes. say does not fail on a voice it does not
-   have -- it speaks in the system voice and exits 0 -- so a byte count alone
-   cannot tell a keeper's own voice from the fallback. Measured 2026-09-13 on
-   one workstation: a keeper mapped to a voice that exists answered 124,690
-   bytes, one mapped to a name that does not answered 79,758, and so did the
-   section default. Only the name separates them, and a reader can check that
-   name against the catalogue.
+   The voice, not only the bytes: the answer is read by someone confirming
+   which voice a keeper got, and two voices can come back the same size.
 
    Quoted by hand rather than with %S: that escapes UTF-8 into byte numbers,
    and a Korean voice name is then unreadable. A blank voice is the system
@@ -116,13 +111,59 @@ let say_catalogue_of_output output =
           | [ _ ] | [] -> None))
 ;;
 
-(* Which voices an endpoint has. Only the kinds that publish a catalogue
-   answer; the rest say why there is nothing to ask, because the reader is
-   about to type the name instead. *)
-let list_voices endpoint =
+let list_voices_via_command_endpoint endpoint =
   match Voice_bridge_transport.list_voices_via_command endpoint with
   | Error message -> Error message
   | Ok output -> Ok (say_catalogue_of_output output)
+;;
+
+(* Whether say has a voice by this name. say does not refuse one it does not
+   have: it exits 0 and speaks in another voice. Measured 2026-09-13 on macOS 26
+   whose first language is Korean, writing WAVE files only: [-v NoSuchVoice]
+   wrote the same bytes as [-v Yuna] for a Korean sentence and for an English
+   one, and neither matched the voice say uses with no [-v]. So the audio cannot
+   tell a mapping that took from one that did not; the catalogue can.
+
+   say matched [yuna] and [YUNA] to Yuna, so the comparison ignores ASCII case.
+   A bare name say prints only with a language is not one of its labels: [-v
+   Eddy] read a Korean sentence in an English voice, 4.8KB against 147KB for
+   [-v "Eddy (한국어(한국))"]. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }
+
+let say_voice_in_catalogue voices ~voice =
+  let wanted = String.lowercase_ascii (String.trim voice) in
+  if
+    List.exists
+      (fun (listed : catalogue_voice) ->
+        String.equal (String.lowercase_ascii listed.voice_id) wanted)
+      voices
+  then Say_has_it
+  else Say_lacks_it { installed = List.length voices }
+;;
+
+(* A blank voice asks for no name, and say then uses its own; there is nothing
+   to look up. *)
+let check_say_voice endpoint ~voice =
+  let voice = String.trim voice in
+  if String.equal voice ""
+  then Ok ()
+  else (
+    match list_voices_via_command_endpoint endpoint with
+    | Error message ->
+      Error
+        (Printf.sprintf "the voices say has could not be listed to check \"%s\": %s"
+           voice message)
+    | Ok voices ->
+      (match say_voice_in_catalogue voices ~voice with
+       | Say_has_it -> Ok ()
+       | Say_lacks_it { installed } ->
+         Error
+           (Printf.sprintf
+              "say has no voice named \"%s\", and would speak in another one without \
+               failing; masc voice-local-setup --list-voices prints the %d it has"
+              voice installed)))
 ;;
 
 (* The container each kind writes. say encodes WAVE and cannot encode MP3
@@ -373,84 +414,85 @@ let probe_attempt_json attempt =
 
 let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
 
-let probe_tts ?(agent_id = "probe") ~message () =
-  match Voice_config.load_detailed () with
-  | Error error -> Error (Voice_config.load_error_to_string error)
-  | Ok config ->
-    (match config.Voice_config.tts with
-     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
-     | Some tts ->
+let string_member key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+(* The shape ElevenLabs answers with, measured 2026-09-12 against
+   /v2/voices: an object carrying [voices], each with [voice_id], [name] and a
+   [labels] object whose [language] is the only field worth showing beside the
+   name. A row without an id is dropped rather than shown: it cannot be chosen,
+   and a list that offers unchoosable rows is worse than a shorter one. *)
+let catalogue_voices_of_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "voices" fields with
+     | Some (`List items) ->
        Ok
-         (List.map
-            (fun (endpoint : Voice_config.endpoint) ->
-              let outcome =
-                if not endpoint.Voice_config.enabled
-                then Skipped "disabled in the configuration"
-                else if
-                  (* say synthesizes without HTTP, so the question is whether
-                     this kind speaks at all, not whether it speaks over a
-                     wire. Asking the second one reported the kind a fresh mac
-                     actually has as not asked. *)
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Voice_mcp | Voice_config.Whisper_cli -> true
-                  | Voice_config.Openai_compat
-                  | Voice_config.Elevenlabs_direct
-                  | Voice_config.Macos_say -> false
-                then Skipped
-                  (if endpoint.Voice_config.kind = Voice_config.Voice_mcp
-                   then "this verifier does not probe the MCP synthesis transport"
-                   else "this endpoint kind does not synthesize")
-                else (
-                  let output_file =
-                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
-                  in
-                  (* The voice is resolved per endpoint: an id is provider
-                     vocabulary, so the one that suits this endpoint is the one
-                     to ask it for (#24068). *)
-                  let voice =
-                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
-                  in
-                  (* The probe produces the audio the same two ways the speak
-                     path does, so that what it reports is what a turn would
-                     get rather than a second opinion. *)
-                  let result =
-                    match endpoint.Voice_config.kind with
-                    | Voice_config.Macos_say ->
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file
-                    | Voice_config.Openai_compat
-                    | Voice_config.Elevenlabs_direct
-                    | Voice_config.Voice_mcp
-                    | Voice_config.Whisper_cli ->
-                      (match tts.Voice_config.default_model with
-                       | None ->
-                         Error
-                           "this endpoint is asked for a model by name and [voice.tts] \
-                            names none"
-                       | Some model ->
-                         speak_via_http_tts_to_file
-                           endpoint ~agent_id ~message ~voice ~model ~output_file)
-                  in
-                  remove_quietly output_file;
-                  match result with
-                  (* The voice that was asked for, not only the bytes that came
-                     back. say does not fail on a voice it does not have -- it
-                     speaks in the system voice and exits 0 -- so the byte count
-                     alone cannot tell a keeper's own voice from the fallback.
-                     Measured: a keeper mapped to a voice that exists answered
-                     114,810 bytes and one mapped to a name that does not
-                     answered 73,614, the same as the section default. Naming
-                     the voice is what lets a reader check it against the
-                     catalogue. A blank one is the system voice, said as such
-                     rather than as "". *)
-                  | Ok size -> Answered (spoke_detail ~bytes:size ~voice)
-                  | Error reason -> Refused reason)
-              in
-              { endpoint_id = endpoint.Voice_config.id
-              ; kind = endpoint.Voice_config.kind
-              ; outcome
-              })
-            tts.Voice_config.endpoints))
+         (List.filter_map
+            (fun item ->
+              match string_member "voice_id" item with
+              | None -> None
+              | Some id ->
+                let language =
+                  match item with
+                  | `Assoc entry ->
+                    (match List.assoc_opt "labels" entry with
+                     | Some labels -> string_member "language" labels
+                     | None -> None)
+                  | _ -> None
+                in
+                Some
+                  { voice_id = id
+                  ; voice_name = string_member "name" item
+                  ; voice_language = language
+                  })
+            items)
+     | Some _ | None -> Error "the endpoint answered without a voices list")
+  | _ -> Error "the endpoint answered with something other than an object"
+;;
+
+let list_voices_via_http_endpoint endpoint =
+  match Voice_bridge_transport.list_voices_via_http endpoint with
+  | Error message -> Error message
+  | Ok json -> catalogue_voices_of_json json
+;;
+
+(* Which voices an endpoint has. Two kinds publish a catalogue and they publish
+   it differently -- ElevenLabs answers a URL, say answers a command -- so the
+   resolved endpoint adapter picks which is asked rather than trying the other
+   when one fails. A kind with no catalogue says so in words, because the
+   reader is about to type the name instead.
+
+   Saying it matters most for say, which does not fail on a voice it does not
+   have: it speaks in the system voice instead, so a name typed from memory is
+   wrong silently. *)
+let list_voices (endpoint : Voice_config.endpoint) =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Voice_runtime_overlay.Elevenlabs_direct -> list_voices_via_http_endpoint endpoint
+  | Voice_runtime_overlay.Macos_say -> list_voices_via_command_endpoint endpoint
+  | Voice_runtime_overlay.Openai_compat ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s speaks the OpenAI shape, which has no voice list to \
+          ask for: type the voice name the server expects"
+         endpoint.Voice_config.id)
+  | Voice_runtime_overlay.Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached through a tool, which is asked to speak \
+          rather than asked what it can speak with"
+         endpoint.Voice_config.id)
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
+         endpoint.Voice_config.id)
+;;
 
 let probe_stt ~audio_file () =
   match Voice_config.load_detailed () with
@@ -748,6 +790,130 @@ let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
   in
   operation ()
 ;;
+
+(* What a voice_mcp endpoint answered, said the way the other answers are:
+   the voice that was asked for. The tool plays the sentence where that server
+   plays audio and hands back no file, so there is no byte count to report. *)
+let mcp_spoke_detail ~voice =
+  Printf.sprintf
+    "agent_speak answered in %s"
+    (if String.trim voice = "" then "the system voice" else "\"" ^ voice ^ "\"")
+;;
+
+let probe_tts ?(agent_id = "probe") ~message () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.tts with
+     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
+     | Some tts ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else if
+                  match endpoint.Voice_config.kind with
+                  | Voice_config.Whisper_cli -> true
+                  | Voice_config.Openai_compat
+                  | Voice_config.Elevenlabs_direct
+                  | Voice_config.Voice_mcp
+                  | Voice_config.Macos_say -> false
+                then Skipped "this endpoint kind does not synthesize"
+                else (
+                  (* The voice is resolved per endpoint: an id is provider
+                     vocabulary, so the one that suits this endpoint is the one
+                     to ask it for (#24068). *)
+                  let voice =
+                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
+                  in
+                  (* The probe produces the audio the same ways the speak path
+                     does, so that what it reports is what a turn would get
+                     rather than a second opinion. *)
+                  let result =
+                    match endpoint.Voice_config.kind with
+                    | Voice_config.Macos_say ->
+                      (* Checked here and not before every speak: listing
+                         took 0.56-0.59s per call on the mac that measured
+                         it, which a keeper's every sentence would wait for.
+                         This probe is where a mapping is confirmed. *)
+                      (match check_say_voice endpoint ~voice with
+                       | Error reason -> Error reason
+                       | Ok () ->
+                         let output_file =
+                           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                         in
+                         let spoken =
+                           Voice_bridge_transport.speak_via_command_to_file
+                             endpoint ~message ~voice ~output_file
+                         in
+                         remove_quietly output_file;
+                         Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
+                    (* Through agent_speak, the tool a turn calls. Skipping it
+                       reported a configuration whose only speaker is an MCP
+                       tool as nothing answering, and voice-verify exited 1 for
+                       a voice that worked. The call is bounded by the event
+                       loop's clock, as the speak path's is. *)
+                    | Voice_config.Voice_mcp ->
+                      (match Eio_context.get_clock_opt (), Eio_context.get_net_opt () with
+                       | Some clock, Some net ->
+                         with_voice_output_turn ~agent_id (fun () ->
+                           match
+                             call_voice_mcp_endpoint
+                               ~clock
+                               ~net
+                               ~endpoint
+                               ~tool_name:"agent_speak"
+                               ~arguments:
+                                 (`Assoc
+                                   [ "agent_id", `String agent_id
+                                   ; "message", `String message
+                                   ; "voice", `String voice
+                                   ; "priority", `Int 1
+                                   ])
+                           with
+                           | Error error -> Error (mcp_call_error_to_string error)
+                           | Ok json ->
+                             Result.map (fun _ -> mcp_spoke_detail ~voice)
+                               (extract_mcp_result json))
+                       | None, _ | _, None ->
+                         Error
+                           "no event loop is running in this process to bound the MCP \
+                            call with")
+                    | Voice_config.Openai_compat
+                    | Voice_config.Elevenlabs_direct
+                    | Voice_config.Whisper_cli ->
+                      (match tts.Voice_config.default_model with
+                       | None ->
+                         Error
+                           "this endpoint is asked for a model by name and [voice.tts] \
+                            names none"
+                       | Some model ->
+                         let output_file =
+                           make_audio_file
+                             ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                         in
+                         let spoken =
+                           speak_via_http_tts_to_file
+                             endpoint ~agent_id ~message ~voice ~model ~output_file
+                         in
+                         remove_quietly output_file;
+                         Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
+                  in
+                  match result with
+                  (* The voice that was asked for, not only the bytes that came
+                     back. A say voice that is not installed was refused above,
+                     so an answer here is in the voice it names. A blank one is
+                     the system voice, said as such rather than as "". *)
+                  | Ok detail -> Answered detail
+                  | Error reason -> Refused reason)
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            tts.Voice_config.endpoints))
 
 let attempt_tts_endpoint
       ~sw

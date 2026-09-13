@@ -49,6 +49,16 @@ let keeper_chat_timeout_sec = 180.0
    lose the only report that says what landed. *)
 let preset_restore_timeout_sec = 120.0
 
+(* The server asks every declared endpoint in turn, and a provider that is
+   simply slow can hold one of them for tens of seconds. The ordinary 10s
+   deadline gave up while the scan was still running and the pane reported a
+   probe failure for endpoints that were about to answer. This is patience for
+   the whole scan, not a bound on it: the scan is bounded by the server's
+   per-endpoint budget times however many endpoints are declared, and a scan
+   that outlasts this is reported as the probe failing rather than as an
+   endpoint refusing. *)
+let voice_probe_timeout_sec = 120.0
+
 (* One name for the send target. The buffered send and the streaming send are
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)
@@ -247,14 +257,24 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
    is the one place that knows what was presented. Other statuses keep the
    server's own words: those are about the request, and the surface is right to
    show them. *)
-let decode_json ~allow_empty ~status_code ~body =
+let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 ->
-      Error
-        (Masc_tui_credential.refusal
-           ~credential_sent:(operator_token_present ()))
-  | _ ->
-      Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+      Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+  | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
+
+let decode_json ~allow_empty ~status_code ~body =
+  if Masc.Tui_decode.is_success_http_status status_code then
+    Masc.Tui_decode.decode_json_response_body ~allow_empty ~status_code ~body
+  else Error (refusal ~status_code ~body)
+
+(* A refused read that does not go through [decode_json], named so the
+   operator knows which one it was: "tool calls: HTTP 503: <the server's
+   sentence>". These reads used to write "<name> returned <status>: <body>"
+   themselves, and the body went to the screen as it came -- a JSON envelope
+   whose sentence the server had already written, an error page at full
+   length, and for a 401 the auth JSON [refusal] exists to replace. *)
+let named_refusal what ~status ~body = what ^ ": " ^ refusal ~status_code:status ~body
 
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
@@ -280,6 +300,29 @@ let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
   with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* A POST whose effect matters, told apart by what is known about that effect.
+   [post_json] folds a dropped connection and a server's refusal into one
+   string, and a caller that cannot tell them apart treats a write that may have
+   landed as one that did not. A 4xx is the server declining in its own words.
+   Everything else -- no response, a deadline, a 5xx, a success whose body does
+   not read -- leaves the effect unknown. *)
+type post_outcome =
+  | Post_answered of Yojson.Safe.t
+  | Post_refused of string
+  | Post_unanswered of string
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
+    (match decode_json ~allow_empty:true ~status_code ~body:response with
+     | Error message -> Post_refused message
+     | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
+  | Ok (status_code, response) ->
+    (match decode_json ~allow_empty:false ~status_code ~body:response with
+     | Ok json -> Post_answered json
+     | Error message -> Post_unanswered message)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -471,7 +514,7 @@ let fetch_verification_evidence ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "evidence returned %d: %s" status body)
+      Error (named_refusal "evidence" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_verification_evidence json
@@ -492,7 +535,7 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "goal detail returned %d: %s" status body)
+      Error (named_refusal "goal detail" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_goal_detail_timeline json
@@ -511,7 +554,7 @@ let fetch_task_history ~(host : string) ~(port : int) ~(task_id : string) :
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "task history returned %d: %s" status body)
+      Error (named_refusal "task history" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_task_history json
@@ -531,7 +574,7 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "tool calls returned %d: %s" status body)
+      Error (named_refusal "tool calls" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json ->
@@ -545,7 +588,7 @@ let fetch_browser_observation ~host ~port (reference : Tool_output.artifact_ref)
   match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "Retained observation returned %d: %s" status body)
+      Error (named_refusal "Retained observation" ~status ~body)
   | Ok (_, body) ->
       (match Yojson.Safe.from_string body with
        | json -> Masc_tui_types.Browser_history.decode_artifact reference json
@@ -595,7 +638,7 @@ let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "workspace entries returned %d: %s" status body)
+      Error (named_refusal "workspace entries" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error detail ->
@@ -615,7 +658,7 @@ let fetch_workspace_file ?keeper ?repo ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "workspace file returned %d: %s" status body)
+      Error (named_refusal "workspace file" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error detail ->
@@ -637,7 +680,7 @@ let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "git log returned %d: %s" status body)
+      Error (named_refusal "git log" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error detail ->
@@ -660,7 +703,7 @@ let fetch_git_blame ?keeper ?repo ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "git blame returned %d: %s" status body)
+      Error (named_refusal "git blame" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error detail ->
@@ -687,7 +730,7 @@ let fetch_ide_file_activity ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "file activity returned %d: %s" status body)
+      Error (named_refusal "file activity" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | `Assoc fields -> (
@@ -726,14 +769,14 @@ let fetch_lsp_question ?keeper ?repo ~(host : string) ~(port : int)
          reason itself to the pane rather than a status line. *)
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error _ ->
-          Error (Printf.sprintf "lsp question returned %d: %s" status body)
+          Error (named_refusal "lsp question" ~status ~body)
       | `Assoc fields -> (
           match List.assoc_opt "error" fields with
           | Some (`String e) -> Error e
           | Some _ | None ->
-              Error (Printf.sprintf "lsp question returned %d: %s" status body))
+              Error (named_refusal "lsp question" ~status ~body))
       | _ ->
-          Error (Printf.sprintf "lsp question returned %d: %s" status body))
+          Error (named_refusal "lsp question" ~status ~body))
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | exception Yojson.Json_error detail ->
@@ -752,7 +795,7 @@ let fetch_keeper_file_changes ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "file changes returned %d: %s" status body)
+      Error (named_refusal "file changes" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_file_change_snapshot json
@@ -779,7 +822,7 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
   | Error detail -> Error (report_err "MCP initialize failed" detail)
   | Ok { Masc_http_client.status; body; _ }
     when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "MCP initialize returned %d: %s" status body)
+      Error (named_refusal "MCP initialize" ~status ~body)
   | Ok { Masc_http_client.headers; _ } ->
       Masc_tui_observer.session_id_of_headers headers
 
@@ -830,7 +873,7 @@ let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "tools/call returned %d: %s" status body)
+      Error (named_refusal "tools/call" ~status ~body)
   | Ok (_, body) -> Masc_tui_mcp.outcome_of_body ~request_id body
 
 (** Fetch a keeper's durable chat transcript.
@@ -847,7 +890,7 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "chat history returned %d: %s" status body)
+      Error (named_refusal "chat history" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.rows_of_json json
@@ -864,7 +907,7 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "memory journal returned %d: %s" status body)
+      Error (named_refusal "memory journal" ~status ~body)
   | Ok (_, body) ->
       (match Yojson.Safe.from_string body with
        | json -> Masc_tui_keeper_chat_history.memory_rows_of_json json
@@ -882,7 +925,7 @@ let fetch_latest_librarian_input ~(host : string) ~(port : int) :
     match http_get ~host ~port ~path with
     | Error detail -> Error (label ^ " request failed: " ^ detail)
     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-        Error (Printf.sprintf "%s returned %d: %s" label status body)
+        Error (named_refusal label ~status ~body)
     | Ok (_, body) ->
         (match Yojson.Safe.from_string body with
          | json -> Ok json
@@ -948,7 +991,7 @@ let fetch_lane_run_detail ~(host : string) ~(port : int) ~(run_id : string) :
   with
   | Error detail -> Error ("lane run detail request failed: " ^ detail)
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "lane run detail returned %d: %s" status body)
+      Error (named_refusal "lane run detail" ~status ~body)
   | Ok (_, body) ->
       if String.length body > lane_run_detail_max_body_bytes then
         Error
@@ -1031,7 +1074,7 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "chat history page returned %d: %s" status body)
+      Error (named_refusal "chat history page" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.page_of_json json
@@ -1048,7 +1091,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     match http_get ~host ~port ~path with
     | Error detail -> Error (label ^ " request failed: " ^ detail)
     | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-        Error (Printf.sprintf "%s returned %d: %s" label status body)
+        Error (named_refusal label ~status ~body)
     | Ok (_, body) ->
         (match Yojson.Safe.from_string body with
          | json -> decode json
@@ -1830,7 +1873,7 @@ let keeper_config_post_error_to_string = function
   | Keeper_config_runtime_sync_failed _ ->
     "keeper config applied but runtime sync failed; authoritative reload required"
   | Keeper_config_http_error { status; body } ->
-    Printf.sprintf "keeper config returned %d: %s" status body
+    named_refusal "keeper config" ~status ~body
 
 let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
     ~(patch_json : string) : (Yojson.Safe.t, keeper_config_post_error) result =
@@ -2448,7 +2491,7 @@ let call_mcp_resources_list ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "resources/list returned %d: %s" status body)
+      Error (named_refusal "resources/list" ~status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resources_of_body ~request_id body
 
 (** One [resources/read] over the MCP endpoint, on an open session. *)
@@ -2466,7 +2509,7 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "resources/read returned %d: %s" status body)
+      Error (named_refusal "resources/read" ~status ~body)
   | Ok (_, body) -> Masc_tui_mcp.resource_contents_of_body ~request_id body
 
 (** POST /api/v1/keepers/:name/github-login — the device-flow login as the
@@ -2491,7 +2534,7 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
   with
   | Error detail -> Error detail
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
-      Error (Printf.sprintf "github-login returned %d: %s" status body)
+      Error (named_refusal "github-login" ~status ~body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** Fetch what the working tree holds for one file ([GET /api/v1/git/diff]).
@@ -2526,7 +2569,7 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
-      Error (Printf.sprintf "git diff returned %d: %s" status body)
+      Error (named_refusal "git diff" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_git_diff json
@@ -2553,7 +2596,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (Printf.sprintf "asks returned %d: %s" status body)
+      Error (named_refusal "asks" ~status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_asks_snapshot json
@@ -2599,9 +2642,9 @@ let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : stri
       let (_ : string) = response_body in
       Ok ()
   | Ok (409, response_body) ->
-      Error (Printf.sprintf "another surface answered first: %s" response_body)
+      Error (named_refusal "another surface answered first" ~status:409 ~body:response_body)
   | Ok (status, response_body) ->
-      Error (Printf.sprintf "answer returned %d: %s" status response_body)
+      Error (named_refusal "answer" ~status ~body:response_body)
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
     selecting the Firefox tab belongs to the request body. *)

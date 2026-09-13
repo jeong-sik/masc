@@ -7,6 +7,10 @@ let column_gutter_cols = 6
 
 let column_width ~cols = (cols - column_gutter_cols) / 2
 
+let line_cells ~cols =
+  if cols < two_column_minimum_cols then Masc_tui_frame.inner_width ~cols
+  else column_width ~cols
+
 let rec zip left right =
   match left, right with
   | [], [] -> []

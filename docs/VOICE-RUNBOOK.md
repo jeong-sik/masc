@@ -171,6 +171,22 @@ base path:
 The writer is the one the HTTP setup route uses: the same revision guard, and
 the same refusal to publish a section the loader would reject.
 
+`--voice` is looked up in the list `--list-voices` prints before anything is
+written, ignoring ASCII case as `say` does. `say` would speak a name it does not
+print in another voice and exit 0, so a name that is not in the list is
+refused, exit 1, with `runtime.toml` left as it was. Measured 2026-09-13 on an initialized workspace:
+
+| `--voice` | exit | `runtime.toml` | stderr |
+|---|---|---|---|
+| `NoSuchVoice` | 1 | unchanged | `say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has. Nothing was written.` |
+| `Eddy` | 1 | unchanged | `say has no voice named "Eddy", …` |
+| `eddy (한국어(한국))` | 0 | written | |
+| `Yuna` | 0 | written | |
+| `Yuna`, with no `say` on `PATH` | 1 | unchanged | `the voices say has could not be listed to check "Yuna": say is not installed. Nothing was written.` |
+
+Before the lookup, `--voice NoSuchVoice` exited 0 and wrote
+`default_voice = "NoSuchVoice"`.
+
 ### What the configuration says
 
 After a voice, a model, and one keeper mapped by hand:
@@ -236,17 +252,41 @@ On a section shared by two providers, `agent_voices` therefore does not reach
 the `say` endpoint. There is no per-provider keeper mapping.
 
 `--agent` is the check for a mapping. `say` answers a name it does not have by
-speaking in the system voice, so a mapping to a missing voice still reads
-`answered`, with the same byte count as the default. The voice name in the
-report is what tells them apart:
+speaking in another voice and exiting 0, so the audio cannot show that a
+mapping never took. The probe looks the name up in `say -v '?'` first, ignoring
+ASCII case as `say` does, and refuses a name that is not there without asking
+`say` to speak. Measured 2026-09-13 on a workspace set up with
+`voice-local-setup --voice Yuna` and these mappings:
 
-| Probe | Answer |
-|---|---|
-| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
-| `--agent sangsu` (mapped to an installed voice) | `124690 bytes of audio in "Flo (한국어(한국))"` |
-| `--agent nowhere` (mapped to `NoSuchVoice`) | `79758 bytes of audio in "NoSuchVoice"` |
+```toml
+[voice.tts.agent_voices]
+sangsu = "Flo (한국어(한국))"
+nowhere = "NoSuchVoice"
+lower = "yuna"
+bare = "Eddy"
+```
 
-A name that is not in `say -v '?'` is a mapping that never took.
+| Probe | Answer | Exit |
+|---|---|---|
+| (no `--agent`) | `answered: 79758 bytes of audio in "Yuna"` | 0 |
+| `--agent sangsu` | `answered: 124690 bytes of audio in "Flo (한국어(한국))"` | 0 |
+| `--agent lower` | `answered: 79758 bytes of audio in "yuna"` | 0 |
+| `--agent nowhere` | `refused: say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has` | 1 |
+| `--agent bare` | `refused: say has no voice named "Eddy", …` | 1 |
+
+Before the lookup, the same binary without it answered `nowhere` with
+`79758 bytes of audio in "NoSuchVoice"` — Yuna's size — and `bare` with
+`4800 bytes of audio in "Eddy"`, an English voice reading the Korean sentence.
+Both exited 0.
+
+`say -v Eddy` picks one of the fourteen `Eddy (…)` voices. Only the whole label
+is in the list, so only the whole label passes.
+
+The lookup runs in this probe and in `voice-local-setup --voice`, not when a
+keeper speaks. Listing took 0.56–0.59 s per call, and a keeper would wait that
+long before every sentence. A keeper mapped
+to a missing voice still speaks, in another voice, with nothing logged, until
+`voice-verify --agent` is run for it.
 
 ### The whole loop, measured
 
@@ -364,9 +404,11 @@ call's result says
 ```
 
 because `[voice.local_playback]` is absent and absent means off. `spoken` is
-the status only when this host played the clip. The dashboard draws the clip
-as `<audio controls>` with no autoplay, and the TUI does not play clips at all,
-so until someone presses play in the dashboard the reply is silent.
+the status only when this host played the clip. The TUI does not play clips at
+all. The dashboard's chat line for imp showed the clip as a card — a waveform,
+`0:14`, and the sentence — over an `<audio>` element with controls, no
+autoplay, and `paused` still true after the page had loaded. Until someone
+presses play there, the reply is silent.
 
 imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
 `keeper_voice_speak` at 168.9s and replied at 203.6s:
@@ -395,14 +437,21 @@ between transcripts.
 ### The traps
 
 **A wrong voice name is silent.** `say` exits 0 on a voice it does not have
-and speaks in the system voice. A name that exists in several languages picks
-one of them without saying which:
+and speaks in another voice. A name that exists in several languages picks one
+of them without saying which. Measured 2026-09-13 on macOS 26 whose first
+language is Korean, each written to a WAVE file:
 
-| Command | Result on a Korean sentence |
-|---|---|
-| `say -v NoSuchVoice` | exits 0, 91,028 bytes in the system voice |
-| `say -v Eddy` | 4.7KB — an English voice reading Korean |
-| `say -v "Eddy (한국어(한국))"` | 72KB — the Korean voice |
+| Command | `안녕하세요, 목소리 확인입니다.` | `Hello, this is a voice check.` |
+|---|---|---|
+| `say -v NoSuchVoice` | exit 0, 108,948 bytes, the same bytes as `-v Yuna` | exit 0, 112,404 bytes, the same bytes as `-v Yuna` |
+| `say` with no `-v` | 109,522 bytes, not Yuna | 120,560 bytes, not Yuna |
+| `say -v yuna` | the same bytes as `-v Yuna` | |
+| `say -v Eddy` | 4,800 bytes — an English voice reading Korean | |
+| `say -v "Eddy (한국어(한국))"` | 147,268 bytes — the Korean voice | |
+
+So the voice a missing name falls back to is not the one `say` uses when given
+no name. `masc voice-verify --agent` refuses a mapped name that is not in
+`say -v '?'` — see [Which voice a keeper speaks in](#which-voice-a-keeper-speaks-in).
 
 Take the name from `say -v '?'`. Its columns are space-padded, and the locale
 is not always two letters and two letters — `ar_001` is in the list.
@@ -487,7 +536,21 @@ A configuring surface can set it, which is the point of it living here:
 ```
 
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
-other voice change goes through.
+other voice change goes through. The TUI reads it when it starts.
+
+It sends from whichever editor holds the draft. Measured with `masc_tui` on the
+workspace from [Talking to imp, measured](#talking-to-imp-measured), `imp`
+booted, the `rec` stand-in speaking `말을 마치면 바로 보내지는지 봅니다.`, keys
+`2`, Enter on `imp`, `m`, `Ctrl-Y`:
+
+| | |
+|---|---|
+| the transcript appears | 10.1s after `Ctrl-Y` |
+| `▶ YOU 말을 마치면 바로 보내지는지 봅니다.` in the chat | the same redraw — nothing pressed |
+| imp's first reply on screen | 41.3s after `Ctrl-Y` |
+
+From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
+same way, and the chat pane comes forward as it does for Enter.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
@@ -716,6 +779,46 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+The chat pane binds the same keys, and an empty draft there names them the way
+the composer row does. Measured 2026-09-13 on imp's chat in a 120-column pty,
+the last rows of the pane, with the footer's build-location notice left out:
+
+```
+    >   (^Y to speak, ^A to keep listening)
+
+  Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail  …?
+```
+
+The hint goes once a character is typed, and while a capture or continuous mode
+runs, when the footer shows the meter instead. The footer's own key list has no
+room for the voice keys; the help sheet for the chat names `Ctrl-Y` and
+`Ctrl-A`.
+
+On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
+(`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
+terminal and gives it back on exit and around Ctrl-Z, the same way it takes
+Ctrl-V and Ctrl-O.
+
+### One sentence into the chat, measured
+
+`masc_tui` on a workspace whose only STT endpoint is `whisper_cli`, in a
+120×40 pty, with `rec` and `play` replaced by scripts. The `rec` stand-in wrote
+0.8s of room noise, then a 2.0s `say -v Yuna` sentence at real-time rate, then
+room noise until stopped, and `play` only recorded its arguments. Keys: `2`,
+Enter on `imp`, `m`, `Ctrl-Y`.
+
+| What happened | When |
+|---|---|
+| `play -qn synth 0.15 sine 880` | as `Ctrl-Y` landed |
+| `rec` started | same second |
+| the prompt's meter | `-63 dB` on room noise, `-26 dB` on the sentence, `^Y send · Esc discard` beside it |
+| `rec` stopped | after 5.1–5.2s of audio: the sentence ended at 2.8s and the trailing-silence wait is 2.0s |
+| `play -qn synth 0.15 sine 440` | as it stopped |
+| `> 마이크로 보낸 새 질문입니다.` in the draft, and `voice: 마이크로 보낸 새 질문입니다.` in the footer | 19.0s, 10.0s and 10.0s after `Ctrl-Y`, three runs |
+
+The sentence came back as spoken. It stays a draft until Enter, unless
+`send_on_stop` is on.
+
 ### Speaking without touching the keyboard
 
 `Ctrl-Y` records one sentence and appends the transcript to the draft. The
@@ -739,6 +842,32 @@ focused composer row is draft text.
 That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
 it: ending a capture hands the draft to the same send path Enter uses. Off by
 default, and described under Configuration above.
+
+### A conversation left running, measured
+
+`Ctrl-A` in imp's chat pane with `send_on_stop` on, the `rec` stand-in saying
+`연속 모드에서 두 번째 문장입니다.` (2.4s after 0.8s of room noise) every time it
+was started, for 60s, then `Ctrl-A` again:
+
+| | |
+|---|---|
+| the noise-floor probe | 0.5s, once, before the first capture |
+| captures in 60s | 6, each stopped after 5.5–5.6s of audio |
+| from one capture's start to the next | 10.5s, 11.6s, 11.3s, 12.9s, 11.5s |
+| the first sentence | sent at once; imp's turn took 32s |
+| the two sentences said during that turn | held in the TUI as one `NEXT 1`, joined by a newline, and sent as one message when the turn ended |
+| the three said during the next turn | held as `NEXT 1` behind it |
+| the second `Ctrl-A` | ended the mode after the capture in progress; no capture started after it |
+
+A message held behind a running turn is in the TUI, not at the server — the
+chat pane says `1 message waiting in this TUI; not sent to the server yet`.
+Closing the TUI drops it: the three sentences above were not sent and were not
+there when the TUI was opened again. The first `q` says so before the second
+one quits, count first:
+
+```
+q: 1 unsent message is dropped if you press again to quit, or any other key to stay
+```
 
 ## External devices
 
@@ -806,6 +935,11 @@ same one the speak and transcribe paths would have refused with.
 Each TTS probe is a real synthesis request. On a metered provider that costs
 what one short sentence costs; the audio is discarded once its size is counted.
 
+A `voice_mcp` endpoint is asked through its `agent_speak` tool, the call a
+keeper turn makes, so the sentence is played wherever that MCP server plays
+audio. The tool hands back no file, and its answer reads
+`agent_speak answered in "<voice>"` without a byte count.
+
 ### Making an utterance to probe STT with
 
 macOS ships a Korean voice, so no recording is needed:
@@ -861,7 +995,8 @@ every line below copied from the terminal. The token is the workspace's own:
 
 ```sh
 MASC=http://127.0.0.1:8971
-TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 ```
 
 **1 — what is configured now.** A fresh workspace has nothing:
@@ -894,11 +1029,7 @@ POST /api/v1/voice/setup
 → {"applied":true,"revision":"436a6857…"}
 ```
 
-No `default_model` anywhere, and the section loads. Against a build without
-that narrowing the same request answered
-`the edit does not load as a voice configuration, so it was not written:
-runtime.toml [voice]: tts.default_model is required` — measured on both, an
-hour apart.
+No `default_model` anywhere, and the section loads.
 
 **4 — make it speak, for real:**
 
@@ -1012,6 +1143,21 @@ A recording the browser cannot decode is not uploaded; the dashboard shows
 `녹음을 WAV 로 바꾸지 못했습니다: …` in an error toast. The upload is 32KB per
 second whatever is said — twice the WebM in the measurement above.
 
+The same, through the dashboard page itself: headless Chromium 149 opened
+`/dashboard?agent=admin&token=…#keepers?keeper=imp` on that workspace, with
+`question.wav` (4.8s) as the fake microphone.
+
+| Step | What the page did |
+|---|---|
+| the composer's `음성으로 입력` button, 0.6s after load | showed a recording bar with a `완료` button |
+| `완료` after 5.5s | `POST /api/v1/voice/transcribe` with `content-type: audio/wav` → `200 transcribed` |
+| 2.8s after `완료` | a `받아쓰기` card above the composer holding the transcript |
+
+The transcript was `안녕하세요 한 문장으로 자기소개 를 해주세요 안녕하세요 한 문장으로 자기`:
+Chromium loops a fake microphone file, so 5.5s of recording held the 4.8s
+sentence and the start of it again. The card is a draft. Nothing is sent to
+the keeper until `전송`.
+
 ### What each route refuses, measured
 
 | Request | Answer |
@@ -1042,3 +1188,92 @@ A catalogue request carries the kind and, at most, the **name** of the
 variable holding the provider's key — never a value, because `runtime.toml`
 is committed. It carries no address and no command path: a route cannot check
 where one points, so the read uses the kind's own destination.
+
+## Setting voice up from the TUI
+
+`p` until the pane strip reaches voice, then `e`.
+
+The pane itself reads two routes. `/api/v1/voice/config` is public and answers
+whether things load; `/api/v1/voice/setup` is admin-gated and names each
+endpoint, so the pane lists them by id, kind and address. A chain that has
+quietly gone dead looks healthy in the first and is visible in the second.
+
+### The questions
+
+| Step | Asked when |
+|---|---|
+| side | always — speech out or speech in |
+| provider | always |
+| name | always — how the entry is addressed later |
+| address | not for ElevenLabs, which carries its own |
+| credential variable | not for an MCP tool |
+| model | always |
+| voice | speech out only |
+| review | always |
+
+`enter` moves forward, `up` moves back, `esc` leaves without writing. The side
+and the provider walk on `←` / `→` / space, because both are closed sets;
+everything else is typed. `ctrl-u` clears a field.
+
+Two blanks are real answers rather than unfinished ones:
+
+- **a blank credential variable** sends no Authorization header, which is what a
+  local server that never asked for one answers 200 to;
+- **a blank address** offers the addresses a local server usually listens on, as
+  starting points. The wizard cannot tell what is running on a port — the probe
+  decides that.
+
+### What saving does
+
+The save carries the revision the pane read. A wizard left open while something
+else wrote is told its read went stale rather than overwriting that writer.
+
+On success the pane reloads, and for speech out every configured endpoint is
+asked to say one sentence. Each answer is shown, **including the refusals** —
+that is the part a fallback chain hides by stopping at the first endpoint that
+answers.
+
+Speech in is not probed there: transcription needs audio the pane does not have.
+Use `masc voice-verify --audio FILE`, and see above for making a file.
+
+### What it will not do
+
+The wizard does not install or start anything. It registers an address and
+checks whether something answers on it. Starting a local server is still
+`scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
+command is.
+
+### How much of this was measured
+
+The CLI numbers above came from real runs against the real endpoints. The
+screen did not: nobody has opened this wizard in a terminal yet, because doing
+so needs a server booted from this branch and a stray `--base-path` boot has
+rewritten the recorded default workspace before (#35101).
+
+What stands in for that, and what it is worth:
+
+| Claim | Held by | What it cannot tell you |
+|---|---|---|
+| the questions, their order, and when a draft is enough | `test/voice_wizard` | nothing about the terminal |
+| step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
+| the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
+| the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
+| the wizard drawn and walked in a real terminal, and what it puts on the wire | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server accepts it |
+
+The last row is the one that found something. Everything above it was green
+while typing an endpoint name containing `i` put the `i` into a keeper message
+and sent the rest of the word after it: the composer sees every key before the
+field does, and the list of places it must not do that named six fields by hand
+and did not name this one. `whisper` reached the screen as `wh`.
+
+That scenario now walks to the end and presses save, and reads the request the
+wizard posts: the revision the pane was showing, a `put_endpoint` carrying the
+name that was typed, the default model, the default voice — and the **name** of
+the credential variable, never a value, which is asserted rather than assumed
+because `runtime.toml` is committed. The other half, that such a request
+actually writes a loadable `[voice]` section, is `save_request` → `apply` →
+loader in `test/voice_wizard`.
+
+So both ends of the wire are measured against the same shape. What nobody has
+done is run the two against each other with a real server on the other side.
+

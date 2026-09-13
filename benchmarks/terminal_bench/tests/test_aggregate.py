@@ -48,7 +48,7 @@ def test_aggregate_rows(tmp_path, monkeypatch, capsys):
     row1 = lines[1].split(",")
     assert row1[:5] == ["arm-b-20260910-1200", "fix-git", "fix-git__Abc123", "1", "1234"]
     assert row1[5:9] == ["100", "50", "10", "0.01"]
-    assert row1[9:] == ["17", "2", "Succeeded"]
+    assert row1[9:] == ["17", "2", "Succeeded", ""]
     row2 = lines[2].split(",")
     assert row2[2] == "fix-git__Def456" and row2[3] == "0"
 
@@ -103,7 +103,51 @@ def test_a_missing_measurement_stays_blank(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
     aggregate.main()
     row = capsys.readouterr().out.strip().splitlines()[1].split(",")
-    assert row[4:] == ["", "", "", "", "", "", "", ""]
+    assert row[4:] == ["", "", "", "", "", "", "", "", ""]
+
+
+def test_unpriced_keeper_rows_reach_the_table(tmp_path, monkeypatch, capsys):
+    # cost_usd is the axis the keeper arm is compared on, and the sidecar adds
+    # keeper spend into it. A ledger row it could not price arrives as null and
+    # contributes nothing, so the total reads as measured. The count of those
+    # rows lived only in metadata.keeper_usage, which this table did not read,
+    # and unknown keeper spend was indistinguishable from free.
+    jobs = tmp_path / "jobs"
+    make_trial(
+        jobs, "arm-k-20260913-0900/fix-git__Unpriced",
+        trial_name="fix-git__Unpriced",
+        agent_result={
+            "metadata": {"duration_ms": 10, "tool_calls": 1,
+                         "duplicate_tool_calls": 0, "masc_state": "Succeeded",
+                         "keeper_usage": {"rows": 5, "cost_usd": 0.02,
+                                          "cost_rows_unreported": 2}},
+            "n_input_tokens": 1, "n_output_tokens": 1,
+            "n_cache_tokens": 0, "cost_usd": 0.02,
+        },
+    )
+    make_trial(
+        jobs, "arm-k-20260913-0900/fix-git__Priced",
+        trial_name="fix-git__Priced",
+        agent_result={
+            "metadata": {"duration_ms": 10, "tool_calls": 1,
+                         "duplicate_tool_calls": 0, "masc_state": "Succeeded",
+                         "keeper_usage": {"rows": 5, "cost_usd": 0.02,
+                                          "cost_rows_unreported": 0}},
+            "n_input_tokens": 1, "n_output_tokens": 1,
+            "n_cache_tokens": 0, "cost_usd": 0.02,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+
+    import csv as _csv
+    import io
+    rows = list(_csv.reader(io.StringIO(capsys.readouterr().out)))
+    assert rows[0][-1] == "keeper_cost_unreported_rows"
+    by_trial = {row[2]: row[-1] for row in rows[1:]}
+    assert by_trial["fix-git__Unpriced"] == "2"
+    # Zero is a measurement here too: this arm priced every keeper row.
+    assert by_trial["fix-git__Priced"] == "0"
 
 
 def test_a_comma_in_a_field_does_not_shift_the_columns(tmp_path, monkeypatch, capsys):
@@ -121,5 +165,7 @@ def test_a_comma_in_a_field_does_not_shift_the_columns(tmp_path, monkeypatch, ca
 
     rows = list(_csv.reader(io.StringIO(capsys.readouterr().out)))
     assert rows[1][1] == "fix,git"
-    assert rows[1][-1] == "Failed, no runtime"
+    # masc_state is second from the end now that the keeper cost count is
+    # appended after it.
+    assert rows[1][-2] == "Failed, no runtime"
     assert len(rows[1]) == len(rows[0])

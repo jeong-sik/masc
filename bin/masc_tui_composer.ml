@@ -28,9 +28,10 @@ let focus_key = "i"
 let release_key = "esc"
 
 (* Ctrl-Y. Every printable key in a focused row is draft text, so a voice
-   binding cannot be a letter without taking it from typing. Ctrl-Y is the one
-   control code this TUI does not already spend: A is line-start by convention,
-   L is redraw, and C/D/H/I/J/M/Q/S/Z never reach the application. *)
+   binding cannot be a letter without taking it from typing. A is line-start by
+   convention, L is redraw, and C/D/H/I/J/M/Q/S/Z never reach the application.
+   On BSD terminals the tty takes Ctrl-Y too, as VDSUSP, until
+   [Masc_tui_termios.reclaim] turns that off. *)
 let listen_key = "\025"
 
 (* Ctrl-A. The same reasoning as [listen_key]: a focused row spends every
@@ -39,6 +40,11 @@ let listen_key = "\025"
    nowhere in this TUI, and the composer binds no line-editing shortcuts that
    would claim it by convention. *)
 let continuous_key = "\001"
+
+(* The two keys above, named for a reader looking at an empty draft. One
+   spelling for every row that takes a draft, so the composer row and the chat
+   pane cannot come to describe the same keys two ways. *)
+let voice_keys_hint = "(^Y to speak, ^A to keep listening)"
 
 let prompt composer =
   match composer.target with

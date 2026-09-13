@@ -14,14 +14,15 @@ let counts (m : D.preset_manifest) =
     m.D.pm_lane_count
 ;;
 
+let unreadable_only_line = "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다"
+
 let listing_lines (snapshot : D.presets_snapshot) =
   let presets =
     match snapshot.D.pss_presets with
     (* Presets whose manifest did not read are still presets; saying "no
        presets yet" beside their rows would send the operator to save one
        when the fix is to look at why the manifest is unreadable. *)
-    | [] when snapshot.D.pss_unreadable <> [] ->
-      [ "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다" ]
+    | [] when snapshot.D.pss_unreadable <> [] -> [ unreadable_only_line ]
     | [] ->
       [ "no presets yet — /preset save <name> [description] snapshots the live state" ]
     | presets ->
@@ -78,6 +79,17 @@ let restore_lines (report : D.preset_restore_report) =
 
 (* One list row in the Config pane: the name, then the counts, then when it
    was saved. The description is detail, not a row. *)
+(* The row the Config pane draws where its list would be, for a read that
+   came back with no preset to list. It said "s 로 지금 상태를 저장하세요", but
+   on Config [s] opens Resources: the pane's save key is [n], the one its
+   footer names. And it said so beside the unreadable rows the chat listing
+   already refuses to call an empty store. *)
+let pane_empty_line (snapshot : D.presets_snapshot) =
+  match snapshot.D.pss_presets, snapshot.D.pss_unreadable with
+  | _ :: _, _ -> None
+  | [], _ :: _ -> Some unreadable_only_line
+  | [], [] -> Some "아직 프리셋이 없습니다 · n 으로 지금 상태를 저장하세요"
+
 let pane_row (m : D.preset_manifest) =
   Printf.sprintf "%-28s %s  %s" m.D.pm_name (counts m) m.D.pm_created_at
 ;;

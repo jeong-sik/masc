@@ -359,8 +359,7 @@ let keeper_status_width = 10
    flags first appear. *)
 let keeper_flags_width = 5
 
-(* Six cells fit [Message_layout.span_text]'s widest reading under a hundred
-   days ("99d23h"). *)
+(* Six cells fit [Message_layout.span_text]'s widest reading ("99d23h"). *)
 let keeper_last_turn_width = 6
 let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
@@ -1201,6 +1200,12 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
   ; Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
       ~width:board_replies_width values.brow_replies
   ]
+
+(* How long ago the post last moved, or a dash when the post carried no time to
+   measure from. *)
+let board_age_text ~now = function
+  | Some updated_at -> Masc_tui_message_layout.span_text (now -. updated_at)
+  | None -> "\xe2\x80\x94"
 
 let board_title_width ~inner_width =
   let named = Table.used_width (board_cells ~title_width:0 board_no_values) in

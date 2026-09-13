@@ -60,6 +60,21 @@ val spawn_detached_devnull :
     retaining stdout/stderr pipes would either leak descriptors or backpressure
     the child. *)
 
+val spawn_detached_writing_to :
+  argv:string list ->
+  env:string array ->
+  cwd:string ->
+  output:Unix.file_descr ->
+  (detached_devnull_handle, string) result
+(** Like {!spawn_detached_devnull}, but the child's stdout and stderr both go
+    to [output], so what a child says before it exits can be read after it
+    is gone. stdin still reads [/dev/null], and no pipe is retained, so a
+    child that outlives its parent is never blocked or broken by a reader
+    that went away.
+
+    The caller owns [output] and closes its copy once this returns. Open it
+    with [O_CLOEXEC]: the child receives it as fds 1 and 2 only. *)
+
 val tree_kill :
   pgid:int ->
   signal:int ->

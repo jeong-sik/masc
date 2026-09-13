@@ -59,7 +59,7 @@ let test_say_writes_audio_that_can_be_played () =
           (Sys.file_exists output_file))
 
 (* A voice name that does not exist does NOT fail. Measured 2026-09-12: say
-   exits 0 and writes 91,028 bytes in the system voice. A neighbouring
+   exits 0 and writes 91,028 bytes in another voice. A neighbouring
    measurement is worse -- "Eddy" names voices in several languages, and
    [say -v Eddy] on this Korean sentence wrote 4.7KB of an English voice
    mangling it, where [say -v "Eddy (한국어(한국))"] wrote 72KB of the Korean one.

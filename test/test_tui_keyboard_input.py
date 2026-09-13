@@ -4941,6 +4941,35 @@ def screen_text(drawn: bytes) -> bytes:
     return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
 
 
+def assert_pane_surface_title_over_gap(
+    drawn: bytes, title: bytes, heading: bytes
+) -> None:
+    """A pane surface puts its gap row above its title, as every screen does.
+
+    Code and Resources drew the title straight under the strip and left the
+    gap to the pane, so alone on the surface the blank row fell between the
+    title and the pane's own heading. On the screen that reads as the title
+    one row higher than everywhere else and the heading as a detached block.
+    """
+    rows = screen_rows(drawn)
+    title_row = screen_row_of(rows, title)
+    if title_row < 3:
+        raise AssertionError(
+            f"{title!r} is at row {title_row}, not under the strip and a gap: "
+            f"{rows!r}"
+        )
+    if rows.get(title_row - 1, b"").strip():
+        raise AssertionError(
+            f"the row above {title!r} is not the gap: {rows.get(title_row - 1)!r}"
+        )
+    heading_row = screen_row_of(rows, heading)
+    if heading_row != title_row + 1:
+        raise AssertionError(
+            f"{heading!r} is at row {heading_row}, not under {title!r} at "
+            f"{title_row}: {rows!r}"
+        )
+
+
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
@@ -11028,6 +11057,10 @@ def code_lane_interaction(
     for needle in ("lib", "README.md"):
         if needle not in plain:
             raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
+    drain_until_quiet(process, master_fd, output)
+    assert_pane_surface_title_over_gap(
+        bytes(output), b"MASC Workspace / Code", b"\xe2\x96\xb8 / (2)"
+    )
     send_and_wait(process, master_fd, output, b"\r", b"a.ml")
     # Which colour a keyword wears belongs to the theme, and the theme moves:
     # #30723 turned it bright magenta and this waited out its timeout on the
@@ -15653,6 +15686,12 @@ def resources_detail_interaction() -> Interaction:
         # the surface arrived loaded through the hop.
         tab_until(process, master_fd, output, b"MASC Config")
         send_and_wait(process, master_fd, output, b"s", b"Event Log (JSON)")
+        drain_until_quiet(process, master_fd, output)
+        assert_pane_surface_title_over_gap(
+            bytes(output),
+            b"MASC Config / Resources",
+            b"\xe2\x96\xb8 Resources",
+        )
         detail = send_and_wait(
             process, master_fd, output, b"\r", b'"status"'
         )

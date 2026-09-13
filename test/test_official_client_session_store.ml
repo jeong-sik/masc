@@ -1259,8 +1259,8 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
       | _ -> fail "binding encoding is not an object" in
     match of_yojson unbound_json with
-    | Ok binding -> check bool "absent frontier never fabricates import proof" true
-        (binding.context_frontier = None)
+    | Ok binding -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = settled.phase)
     | Error detail -> fail detail)
 ;;
 

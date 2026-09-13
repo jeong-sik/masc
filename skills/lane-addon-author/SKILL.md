@@ -42,7 +42,8 @@ A historical export cannot establish production freshness or current revenue.
 Provide worker source, manifest, image build recipe, behavior tests and the exact
 source revision. Run image builds through the permitted CI path. Record the image
 identity separately from source tests. An existing runtime image may be reused
-only with an explicit command and a verified compatible protocol; report that
+only with an explicit command, a verified compatible protocol, and the intended
+worker code and dependencies present in the image or explicitly supplied; report that
 identity instead of claiming a new image was built.
 
 Declare input and presentation metadata so the generic UI can render project

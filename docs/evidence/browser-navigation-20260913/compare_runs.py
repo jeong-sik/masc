@@ -5,6 +5,49 @@ import json
 from pathlib import Path
 
 
+decoder = json.JSONDecoder()
+
+def raw_value(text, path):
+    if not path:
+        start = len(text) - len(text.lstrip())
+        _, end = decoder.raw_decode(text, start)
+        return text[start:end]
+    value = json.loads(text)
+    index = len(text) - len(text.lstrip()) + 1
+    wanted, *remaining = path
+    def skip(i):
+        while i < len(text) and text[i] in ' \n\r\t':
+            i += 1
+        return i
+    if isinstance(value, dict):
+        while True:
+            index = skip(index)
+            if text[index] == '}':
+                raise KeyError(wanted)
+            key, index = decoder.raw_decode(text, index)
+            index = skip(index)
+            assert text[index] == ':'
+            start = skip(index + 1)
+            _, end = decoder.raw_decode(text, start)
+            if key == wanted:
+                return raw_value(text[start:end], remaining)
+            index = skip(end)
+            if text[index] == ',':
+                index += 1
+    elif isinstance(value, list):
+        for item_index in range(len(value)):
+            start = skip(index)
+            _, end = decoder.raw_decode(text, start)
+            if item_index == wanted:
+                return raw_value(text[start:end], remaining)
+            index = skip(end)
+            if text[index] == ',':
+                index += 1
+        raise IndexError(wanted)
+    else:
+        raise TypeError('JSON path crosses a scalar')
+
+
 def load(root, name):
     return json.loads((root / name).read_text())
 
@@ -52,7 +95,17 @@ def summarize(root):
     fixtures = load(root, 'fixture-pages.json')
     fixture_digest = hashlib.sha256(json.dumps(fixtures, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     bundle = load(root, 'bundle.json')
+    components = report.get('component_sources', {
+        'server_and_tui': report['composition_source_commit'],
+        'native_host_and_extension': report['live_extension']['source_commit']})
+    binaries = report.get('actual_binary_sha256', bundle['binaries'])
+    assert components['server_and_tui'] == report['composition_source_commit']
+    assert components['native_host_and_extension'] == report['live_extension']['source_commit']
+    assert binaries['masc-macos-arm64'] == bundle['binaries']['masc-macos-arm64']
+    assert binaries['masc-tui-macos-arm64'] == bundle['binaries']['masc-tui-macos-arm64']
+    assert binaries['masc-browser-host-macos-arm64'] == report['live_extension']['native_host_sha256']
     return {'source_commit': report['composition_source_commit'],
+        'component_sources': components, 'actual_binary_sha256': binaries,
         'operation_id': report['operation_id'], 'state': report['operation_state'],
         'runtime_id': report['runtime_id'], 'fixture_sha256': fixture_digest,
         'request_sha256': hashlib.sha256(request.encode()).hexdigest(),

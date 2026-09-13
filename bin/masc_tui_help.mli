@@ -11,6 +11,11 @@
 
     Both sides ask this module now, so they answer with the same number. *)
 
+val line_cells : cols:int -> int
+(** The cells one sheet line has at this width: the frame's inner width while
+    the sheet is one column, a column's width once it is two. Lines wider than
+    this are cut where they are drawn, so the lines are wrapped to it first. *)
+
 val sheet : ?header:string list -> cols:int -> string list -> string list
 (** The rows drawn at this width: optional full-width header rows, followed by
     the lines as written, or -- once a terminal is wide enough to hold two

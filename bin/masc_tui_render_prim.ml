@@ -2616,11 +2616,41 @@ let help_masthead (_state : state) =
   ]
 
 
+(* The rows one help entry takes in [width] cells: [lead] (its key or usage,
+   [lead_cells] wide) with the start of [text], and the rest of [text] on rows
+   that start at [column], where every entry's text starts.
+
+   The sheet cut each entry to its column. Two columns at 120 cells are 57
+   each, and 23 of the 29 slash-command rows and 16 of the 20 Config rows ran
+   past that, so a summary ended in an ellipsis where it said what the key
+   does. A usage too long to leave [help_text_minimum_cells] beside it puts the
+   text on the rows under it, rather than one word to a row. *)
+let help_text_minimum_cells = 20
+
+(* The key column: two cells of indent, the key padded to this, and a space. *)
+let help_key_cells = 16
+
+let help_entry_rows ~width ~lead ~lead_cells ~column text =
+  let indent = String.make column ' ' in
+  let under words =
+    List.map
+      (fun piece -> indent ^ piece)
+      (Message_layout.wrap_words ~max_cells:(max 1 (width - column)) words)
+  in
+  let beside = width - lead_cells in
+  if lead_cells > column && beside < help_text_minimum_cells then
+    lead :: under text
+  else
+    match Message_layout.wrap_words ~max_cells:(max 1 beside) text with
+    | [] -> [ lead ]
+    | [ first ] -> [ lead ^ first ]
+    | first :: rest -> (lead ^ first) :: under (String.concat " " rest)
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_lines (state : state) =
+let help_lines ~width (state : state) =
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2646,29 +2676,31 @@ let help_lines (state : state) =
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
     header_line
-    :: List.map
+    :: List.concat_map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-16s%s %s"
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (String.trim key)
-             Ansi.reset
-             action)
+           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           help_entry_rows ~width
+             ~lead:
+               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  key_cell Ansi.reset)
+             ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
+             ~column:(2 + help_key_cells + 1) action)
          entries
     @ [ "" ]
   in
   let slash_commands =
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
-    :: List.map
+    :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           Printf.sprintf "  %s%s%s%s%s"
-             (Theme.warn ())
-             text
-             Ansi.reset
-             (Masc_tui_command.help_summary_padding text)
+           let padding = Masc_tui_command.help_summary_padding text in
+           help_entry_rows ~width
+             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
+             ~column:(2 + Masc_tui_command.help_summary_column)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]

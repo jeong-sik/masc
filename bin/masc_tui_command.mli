@@ -155,6 +155,9 @@ val help_usage : command_help -> string
 (** {!usage} plus the command's other spellings in parentheses. The column both
     the [/help] list and the cheat sheet draw. *)
 
+val help_summary_column : int
+(** Where a help row's summary starts, counted from the usage's first cell. *)
+
 val help_summary_padding : string -> string
 (** The spaces between a {!help_usage} column and its summary, so the two
     readers of that row do not each carry the column width. *)

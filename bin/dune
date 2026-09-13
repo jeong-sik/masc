@@ -814,7 +814,7 @@
  (name masc_tui_help)
  (wrapped false)
  (modules masc_tui_help)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_frame masc_tui_message_layout))
 
 (library
  (name masc_tui_roster_pane)

@@ -11198,12 +11198,16 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter keeps the query for n/N and closes the prompt; the redrawn
-    # footer (query gone, hints back at the front) is the needle, because
-    # the diff renderer resends only the rows that changed.
+    # Enter closes the prompt and keeps the query for n/N. Since #35410 the
+    # query stays on the footer after Enter with its match count, so "query
+    # gone, hints back at the front" is no longer what closing looks like --
+    # the old needle waited for a footer this surface stopped drawing. What
+    # separates closed from typing is the input cursor: "/hi (1)" followed by
+    # the block while typing, by the n/N hint once Enter lands. The footer
+    # row is resent whole, so the needle is taken from it.
     send_and_wait(
         process, master_fd, output, b"\r",
-        b"\x1b[2m  j/k:scroll  h/l:pan",
+        b"/hi (1) n/N",
     )
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.

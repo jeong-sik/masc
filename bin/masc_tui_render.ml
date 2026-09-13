@@ -5305,14 +5305,6 @@ let render_clients (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
-  (* The wire carries RFC3339; the roster only needs the clock, the same
-     reading the header's own timestamp gives it a distance to. *)
-  let clock_of_iso value =
-    match String.index_opt value 'T' with
-    | Some at when String.length value - at >= 9 ->
-        String.sub value (at + 1) 8
-    | _ -> value
-  in
   if shown = 0 then begin
     let empty =
       match state.clients_surface_error with
@@ -5349,7 +5341,12 @@ let render_clients (state : state) =
               (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
               (fit_width keeper 16)
               (fit_width task 9)
-              (clock_of_iso row.cr_last_seen)
+              (* The clock alone, which the header's own clock gives a
+                 distance to -- so in the header's zone. The clock was cut
+                 out of the RFC3339 text, which is UTC, and printed unread:
+                 a client seen at 10:20 in Seoul read 01:20 under a 19:18
+                 header. *)
+              (Terminal_text.clock_timestamp row.cr_last_seen)
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)

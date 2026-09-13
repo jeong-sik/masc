@@ -753,7 +753,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
   | None ->
-      if view.technical_details || Option.is_some view.document_key || Option.is_some view.draft
+      if view.presentation <> Summary || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~height ~failed_note ~width view
       else if view.focus = Timeline || view.focus = Connections then visual_text_lines ~height ~failed_note ~width view
       else compact_lines ~width view |>  List.concat_map (fun line ->

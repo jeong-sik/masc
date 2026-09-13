@@ -10595,6 +10595,49 @@ def keeper_gate_mode_footer_interaction(
 
     return interact
 
+def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
+    """Beside the acting pane the row is 92 cells; a strip wider than that
+    used to be cut from the right, so the Keeper detail's Runs tab and
+    Config's voice pane drew with no mark on the row at all. The strip now
+    cuts around the current entry."""
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        drain_until_quiet(process, master_fd, output)
+        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
+        if screen_row_of(screen_rows(completed), b"[Recent]") < 0:
+            raise AssertionError(
+                f"the acting pane did not open at 150 columns: {screen_text(completed)!r}"
+            )
+        # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        title = rows[screen_row_of(rows, b"\xe2\x96\xb8Runs")]
+        if b"\xe2\x80\xa6" not in title or b"Info" in title:
+            raise AssertionError(
+                f"the Keeper detail strip did not cut its far end to keep Runs: {title!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        # Config: p walks the panes; voice is the seventh and was the one cut.
+        tab_until(process, master_fd, output, b"MASC Config")
+        for pane in (b"models", b"params", b"prompts", b"presets", b"themes", b"voice"):
+            send_and_wait(process, master_fd, output, b"p", b"\xe2\x96\xb8" + pane)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="A tab strip keeps its current entry on the row",
+        interact=interact,
+        http_fixtures=keeper_runtime_http_fixtures(),
+    )
+
+
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
     """The Logs tab is the Activity screen, so the acting pane stays off it.
 
@@ -13391,6 +13434,7 @@ def run_keyboard_regression(executable: str) -> None:
         interact=enter_outside_changes_interaction,
         http_fixtures=enter_split_fixtures,
     )
+    run_tab_strip_keeps_current_entry_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

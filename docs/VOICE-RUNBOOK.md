@@ -271,9 +271,21 @@ not have — it speaks in the system voice.
 ### Outside the journey
 
 ```
-masc voice-local-setup --list-voices
-masc voice-local-setup --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc init --base-path ~/work                      # once; voice is a section of what this writes
+masc voice-local-setup --list-voices              # needs no workspace
+masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
 ```
+
+On a directory that was never initialized, measured 2026-09-13:
+
+| Build | `voice-local-setup --voice Yuna` answered |
+|---|---|
+| before | exit 1, `runtime.toml could not be read: … Sys_error("…/runtime.toml: No such file or directory")` |
+| after | exit 1, `No masc workspace at …: …/runtime.toml does not exist. Run masc init --base-path '…' first, then this again.` |
+
+Either way nothing is created. Following the second message — `masc init`, then
+the same command — answered `voice is configured`, exit 0. `--list-voices`
+reads `say` and not the workspace, so it answers before `init` too.
 
 ### What the configuration then says
 

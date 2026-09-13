@@ -10933,10 +10933,10 @@ def enter_outside_changes_interaction(
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
-    send_and_wait(process, master_fd, output, b"l", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"1", b"[1 Events* | 2 Logs]")
-    send_and_wait(process, master_fd, output, b"2", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"\x1b", b"[1 Events* | 2 Logs]")
+    send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")

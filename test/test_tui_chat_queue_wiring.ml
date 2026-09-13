@@ -703,7 +703,9 @@ let test_late_interrupt_outcome_cannot_mark_newer_control () =
   check int64 "pending time belongs to newer control" pending_started
     (List.assoc "alpha" state.keeper_chat_control_pending);
   check bool "second pending stop is not first receipt acknowledgement" false
-    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:first)
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:first);
+  check bool "the newer request clock is the one a finish settles" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:second)
 ;;
 
 let test_control_receipts_are_scoped_to_each_keeper () =

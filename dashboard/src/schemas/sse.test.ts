@@ -522,6 +522,20 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts a shared execution binding and rejects unknown fields', () => {
+    const binding = { operation_id: 'member-1', execution_id: 'leader-1' }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', binding)).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', { ...binding, guessed: true })).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', { operation_id: 'member-1' })).success).toBe(false)
+  })
+
+  it('retains interactive acceptance facts without inventing effects', () => {
+    const accepted = { operation_id: 'member-1', state: 'Queued', queued_count: 2 }
+    const interactive = { outcome: 'stale_control', chat_control_token: 'fresh-control', signalled: false, resumed: false, interrupt_error: null }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive })).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive: { ...interactive, resumed: true } })).success).toBe(false)
+  })
+
   it('accepts a durable chat operation acceptance', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', {

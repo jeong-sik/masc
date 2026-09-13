@@ -2563,6 +2563,30 @@ let test_the_config_frame_is_the_shared_contract () =
     (in_config "config_content_height")
 ;;
 
+(* The patch review and link preview overlays are the shared contract's as
+   well. Each drew its own frame with a block shadow down the right edge and a
+   key row inside the box that the footer repeated, counting its rows by hand
+   (9 and 7). The shadow frame is not theirs to draw any more. *)
+let test_the_patch_and_link_overlays_are_the_shared_contract () =
+  List.iter
+    (fun binding_name ->
+      let calls callee =
+        Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+          ~binding_name ~callee
+      in
+      check bool (binding_name ^ " draws through the contract") true
+        (calls "surface_chrome" >= 1);
+      check int (binding_name ^ " finishes no frame by hand") 0
+        (calls "finish_surface");
+      List.iter
+        (fun shadow ->
+          check int (Printf.sprintf "%s draws no %s" binding_name shadow) 0
+            (calls shadow))
+        [ "framed_shadow_top"; "framed_shadow_line"; "framed_shadow_line_styled"
+        ; "framed_shadow_divider"; "framed_shadow_empty"; "framed_shadow_bottom" ])
+    [ "render_patch_modal"; "render_link_preview_modal" ]
+;;
+
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
    token carried syntax colour. Pin the shared document renderer at the
@@ -2703,6 +2727,10 @@ let () =
           "the config frame is the shared contract"
           `Quick
           test_the_config_frame_is_the_shared_contract;
+        test_case
+          "the patch and link overlays are the shared contract"
+          `Quick
+          test_the_patch_and_link_overlays_are_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

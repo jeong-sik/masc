@@ -330,7 +330,7 @@ let codex_error_to_core_error = function
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
   | Runtime_codex_app_server.Spawn_failed detail
-  | Runtime_codex_app_server.Process_exited detail ->
+  | Runtime_codex_app_server.Process_exited { detail; turn_accepted = _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"; detail })

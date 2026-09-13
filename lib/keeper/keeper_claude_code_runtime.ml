@@ -286,7 +286,7 @@ let claude_error_to_core_error = function
          ; phase = None
          })
   | Runtime_claude_code.Spawn_failed detail
-  | Runtime_claude_code.Process_exited detail ->
+  | Runtime_claude_code.Process_exited { detail; turn_admitted = _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"; detail })

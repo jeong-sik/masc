@@ -6031,6 +6031,17 @@ let local_rows_page (state : state) ~error =
        | Local_workspace_unread -> None
        | Local_workspace_read -> Some ())
 
+(* What the Resources pane says under its header when no error is showing and
+   there is no row to draw, and [None] when there is one. The pane flattened
+   the list to [] before asking, so a read that answered with no resources and
+   a read not answered yet were the same empty list, and both said
+   "(loading...)" -- for good, on a server that exposes no resources. *)
+let resources_empty_note (list : Masc_tui_mcp.resource list option) =
+  match list with
+  | None -> Some " (loading\xe2\x80\xa6)"
+  | Some [] -> Some " (no resources)"
+  | Some (_ :: _) -> None
+
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =
   let not_promoted row =

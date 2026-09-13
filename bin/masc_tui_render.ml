@@ -11570,12 +11570,11 @@ let render_resources (state : state) =
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           1
       | None ->
-          if total = 0 then begin
-            framed_line pane_buf pane_cols
-              (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset);
-            1
-          end
-          else 0
+          (match resources_empty_note state.resources_list with
+           | Some note ->
+               framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
+               1
+           | None -> 0)
     in
     let list_rows_budget = max 0 (list_rows_budget - status_rows) in
     let first =

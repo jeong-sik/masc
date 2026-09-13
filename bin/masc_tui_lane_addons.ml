@@ -537,7 +537,14 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
           (List.length (List.sort_uniq String.compare (List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows)))
           (List.length snapshot.output.rows) (List.length view.selected)] in
         let content = match view.focus with
-        | Timeline | Connections -> []
+        | Timeline | Connections ->
+            if view.presentation = Technical then
+              List.concat_map (fun (row : Row.row) ->
+                [row.title; "Row " ^ row.id]
+                @ String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))
+                @ List.map (fun (e : Row.evidence) -> "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256) row.evidence)
+                snapshot.output.rows
+            else []
         | Configurations ->
             (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
@@ -546,7 +553,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                    Option.value ~default:"unresolved installation" d.installation_id ^ " · " ^
                    (if d.issues <> [] then "needs attention" else if d.applied = d.desired then "applied" else "pending") ^
                    " · " ^ Filename.basename d.source_path) config.declarations
-                 @ (if config.declarations=[] then ["No installations. Press n to create a TOML declaration."] else [])
+                 @ (if config.declarations=[] then ["No Add-ons installed. No installations. Press n to create a TOML declaration."] else [])
                  @ [""; "Installation details"]
                  @ configuration_lines {view with configuration_cursor=0}
                      {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}}
@@ -565,7 +572,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
             @ (match selected_instance view with
-               | None -> ["No instances. Tab to Installations to create or repair a declaration.";
+               | None -> ["No Add-ons installed. No instances. Tab to Installations to create or repair a declaration.";
                           "Manual attachment: :attach {manifest_path,run_id,binding}"]
                | Some item -> [""; "Instance details"]
                    @ instance_lines {view with instance_cursor=0} [item])

@@ -1252,8 +1252,9 @@ let post_keeper_run_next ~host ~port ~keeper_name ~request_id ~interrupt_token =
   | Error detail -> Error detail
   | Ok (`Assoc fields) ->
     (match List.assoc_opt "request_id" fields, List.assoc_opt "prioritized" fields,
-      List.assoc_opt "detail" fields with
-     | Some (`String echoed), Some (`Bool true), Some (`String detail) when echoed = request_id -> Ok detail
+      List.assoc_opt "signalled" fields, List.assoc_opt "detail" fields with
+     | Some (`String echoed), Some (`Bool true), Some (`Bool signalled), Some (`String detail) when echoed = request_id ->
+       Ok (if signalled then detail else detail ^ "; the current turn was not stopped")
      | _ -> Error "run-next response does not confirm this message's queue position")
   | Ok _ -> Error "run-next response must be an object"
 ;;

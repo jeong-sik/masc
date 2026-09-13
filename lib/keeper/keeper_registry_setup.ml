@@ -1361,12 +1361,13 @@ let interrupt_observed_turn ~base_path name ~interrupt_token =
     let observed = Atomic.get entry.current_turn_switch in
     (match observed with
      | Some turn when String.equal turn.interrupt_token interrupt_token ->
-       if Atomic.compare_and_set entry.current_turn_switch observed None then
-         (try Eio.Switch.fail turn.switch Operator_interrupt; Observed_turn_signalled
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Observed_turn_signal_failed (Printexc.to_string exn))
-       else Observed_turn_changed
+       (* The switch owns this token until its finalizer runs. A signal is
+          not settlement; retaining it keeps cancellation and progress visible
+          while resources unwind. The captured switch can never name a successor. *)
+       (try Eio.Switch.fail turn.switch Operator_interrupt; Observed_turn_signalled
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Observed_turn_signal_failed (Printexc.to_string exn))
      | Some _ | None -> Observed_turn_changed)
 ;;
 

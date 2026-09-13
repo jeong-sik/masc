@@ -9,6 +9,7 @@ type t = Operator_paused of { operator_actor : operator_actor }
 and operator_actor =
   | Grpc_directive
   | Keeper_down
+  | Chat_interrupt
 
 val to_wire : t -> string
 val of_wire : string -> (t, string) result

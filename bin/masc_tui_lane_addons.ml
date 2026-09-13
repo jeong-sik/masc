@@ -24,14 +24,14 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type t = {
-  technical_details : bool; action_menu : action_menu option;
+  presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { technical_details=false; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Timeline; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -638,7 +638,7 @@ let open_actions ~request_id view =
   if choices=[] then Error "The advertised schema has no valid preset action. D shows details."
   else Ok {view with action_menu=Some {
     target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
-    schema;choices;cursor=0}; technical_details=false;scroll=0;error=None}
+    schema;choices;cursor=0}; presentation=Summary;scroll=0;error=None}
 
 let move_action view delta =
   {view with scroll=0;action_menu=Option.map (fun menu ->
@@ -727,7 +727,7 @@ let compact_lines ~width view =
         installations @ instances @ configurations @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  D:details  Esc:back"]
+   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)

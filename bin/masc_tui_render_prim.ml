@@ -2012,24 +2012,6 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
 
-(* What the footer says about the Keeper actions: the armed or running sentence
-   when there is one, otherwise the keys. The sentence's words come from
-   {!Masc_tui_footer}, which is also where the Keepers list reads them as a
-   status item, so the two footers cannot word the same state differently. *)
-let keeper_action_state_text (state : state) =
-  match keeper_action_status state with
-  | item :: _ ->
-    Option.map
-      (fun (projected : Masc_tui_footer.projected_status) ->
-        Ansi.bold ^ (Theme.warn ()) ^ projected.text ^ Ansi.reset)
-      (Masc_tui_footer.status_item_projection item)
-  | [] -> None
-
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
-  match keeper_action_state_text state with
-  | Some text -> text
-  | None -> keeper_control_hints ~offers_chat ~offers_back state reading
-
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
   | System_info -> Ansi.reset

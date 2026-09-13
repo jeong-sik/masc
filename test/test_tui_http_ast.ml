@@ -1622,7 +1622,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "keeper detail spells the pane key the footer way" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail" ~needle:"  h/l:pane  ");
+       ~binding_name:"render_keeper_detail" ~needle:"h/l:pane  ");
+  (* And the row goes through the footer the Keepers list uses. Cut with
+     [fit_width] it kept the front and lost [Left / Esc] and [q] at the back:
+     at 80 columns it ended "t:c…". *)
+  let in_detail callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_detail" ~callee
+  in
+  check int "keeper detail draws its row through footer_line" 1
+    (in_detail "footer_line");
+  check int "and does not cut it by hand" 0 (in_detail "Message_layout.fit_width");
   (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
      wait moved with it. The contract did not: whichever binding blocks for
      input owns the deadline, and EINTR has to come back as a retry rather

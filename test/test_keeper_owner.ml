@@ -1725,7 +1725,8 @@ let test_pending_stop_cannot_pause_different_active_child () =
   let started = Eio.Stream.create 1 in
   let owner = owner_ok (start_owner_with_executor ~sw
     ~store:{replace = (fun _ -> fail "pending stop mutated a different active turn"); remove = (fun _ -> Ok ())}
-    ~operation_executor:(Some (fun _ -> Eio.Stream.add started (); Eio.Fiber.await_cancel ()))
+    ~operation_executor:(Some (fun ~sw:_ ~keeper_name:_ ~claim ->
+      ignore (owner_ok (claim ())); Eio.Stream.add started (); Eio.Fiber.await_cancel ()))
     ~keeper_name:"different-active-admission" ~initial_meta:(Some (make_meta "different-active-admission")) ()) in
   ignore (owner_ok (Owner.submit_operation owner ~operation_id:(operation_id "active-other")
     ~source:operation_source ~input:(operation_input "working")));

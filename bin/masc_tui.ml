@@ -4539,9 +4539,10 @@ let launch_lane_addons state ~mailbox request =
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
   let last_action, action_receipt = match request with
-    | Addons.Act action | Addons.Action_status action -> Some action, None
+    | Addons.Act action -> Some action, None
+    | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;last_action;action_receipt };
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt };
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
@@ -11431,7 +11432,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error detail -> {view with loading=false;error=Some detail}
         | Ok (snapshot, receipt, action) -> {view with loading=false;error=None;snapshot=(match snapshot with None -> view.snapshot | Some _ -> snapshot);
             action_receipt=(match action with None -> view.action_receipt | Some _ -> action);
-            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)})
+            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)});
+      (match result, state.lane_addons with
+       | Ok (_, _, Some {Masc.Lane_addon_action.state=
+           (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
+         when view.generation=generation && not view.loading ->
+           launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+       | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
@@ -16442,8 +16449,18 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                (match view.draft with
-                 | Some draft ->
+                (match view.action_menu, view.draft with
+                 | Some _, _ ->
+                     (match key with
+                      | "esc" -> update {view with action_menu=None;scroll=0}
+                      | "j" | "down" -> update (Addons.move_action view 1)
+                      | "k" | "up" -> update (Addons.move_action view (-1))
+                      | "\r" | "\n" | "enter" ->
+                          (match Addons.submit_action view with
+                           | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                           | Error detail -> update {view with action_menu=None;error=Some detail})
+                      | _ -> ())
+                 | None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
@@ -16462,7 +16479,7 @@ and is loaded on demand through keeper_skill.
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
-                 | None ->
+                 | None, None ->
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -16494,12 +16511,19 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "D" -> update {view with technical_details=not view.technical_details;scroll=0}
+                     | "a" ->
+                         if view.loading || Option.is_some (Addons.pending_action view)
+                         then update {view with error=Some "An action or read is pending; t checks its status."}
+                         else (match Addons.open_actions ~request_id:(Random_id.uuid_v7 ()) view with
+                           | Ok next -> update next
+                           | Error detail -> update {view with error=Some detail})
                      | "t" ->
                          (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -22322,6 +22346,16 @@ and is loaded on demand through keeper_skill.
            change; opening the tab or moving the cursor loads it too. What
            this line added was coverage for a change with no feed event, and
            that is not worth a seconds-long scan on a timer. *)
+        (* The visible Add-ons pane follows the existing refresh cadence.
+           Status reads reuse the accepted request; they never submit it again. *)
+        (match state.lane_addons with
+         | Some view when not view.loading && Option.is_none view.draft
+              && Option.is_none view.document_key && Option.is_none view.action_menu ->
+             let request = match Masc_tui_lane_addons.pending_action view with
+               | Some action -> Masc_tui_lane_addons.Action_status action
+               | None -> Masc_tui_lane_addons.Inspect in
+             launch_lane_addons state ~mailbox:async_messages request
+         | _ -> ());
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

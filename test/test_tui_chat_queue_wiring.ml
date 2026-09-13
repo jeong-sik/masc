@@ -771,6 +771,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
     ({ Tui_types.sent_request
      ; submitted_at = 1.0
      ; sent_at = 1.0
+     ; control_generation = 0
      ; origin = Tui_types.Direct_submission
      ; phase = Tui_types.Turn_streaming
      ; log =
@@ -825,6 +826,7 @@ let test_live_transcripts_are_kept_per_keeper () =
     ({ Tui_types.sent_request = sent_request
      ; submitted_at = started_at
      ; sent_at = started_at
+     ; control_generation = 0
      ; origin = Tui_types.Direct_submission
      (* A request that has just been POSTed is streaming; reconciling is what
         it becomes after the stream settles. *)
@@ -906,6 +908,7 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   { Tui_types.sent_request
   ; submitted_at = started_at
   ; sent_at = started_at
+     ; control_generation = 0
   ; origin = Tui_types.Direct_submission
   ; phase = Tui_types.Turn_streaming
   ; log
@@ -1502,6 +1505,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
     [ { Tui_types.sent_request = request
       ; submitted_at = 42.0
       ; sent_at = 43.0
+     ; control_generation = 0
       ; origin =
           Tui_types.Promoted_queue
             { submission_seq = 7
@@ -2462,7 +2466,7 @@ let test_checkpoint_watcher_allows_new_input () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original" () in
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
-  state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.;
+  state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.; control_generation=0;
     origin=Tui_types.Direct_submission; phase=Tui_types.Turn_streaming; log}];
   List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
     [Masc_tui_keeper_chat_live.Run_started;
@@ -2471,6 +2475,24 @@ let test_checkpoint_watcher_allows_new_input () =
   check bool "watcher remains attached" true (Option.is_some (Tui_types.inflight_for_keeper state "alpha"));
   check bool "new operator input can be sent" true
     (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends)
+;;
+
+let test_old_queued_watcher_does_not_rearm_esc () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let working = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
+  let queued = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
+  state.msg_inflight <- [queued; working];
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  Masc_tui_keeper_chat_transcript.note_interrupt working.log.tl_transcript
+    (Signal_sent {turn_id=None;signalled_at_ns=0L});
+  let now_ns = Int64.succ Masc_tui_esc_interrupt.grace_window_ns in
+  check bool "old queued watcher cannot keep signalling after stop acknowledgement" true
+    (Tui_types.working_chat_interrupt_action ~now_ns state "alpha" working = Masc_tui_esc_interrupt.Leave);
+  let generation = Tui_types.advance_keeper_chat_control state "alpha" in
+  state.msg_inflight <- [{queued with control_generation=generation}; working];
+  check bool "a fresh input epoch can request another exact stop" true
+    (Tui_types.working_chat_interrupt_action ~now_ns state "alpha" working = Masc_tui_esc_interrupt.Launch_interrupt)
 ;;
 
 let test_batch_watchers_render_one_shared_settled_turn () =
@@ -2506,6 +2528,8 @@ let () =
     "tui_chat_queue_wiring"
     [ ( "wiring"
       , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
+        ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
+            test_old_queued_watcher_does_not_rearm_esc
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names

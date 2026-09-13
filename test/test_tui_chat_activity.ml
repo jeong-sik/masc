@@ -24,7 +24,7 @@ let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
       (Live.Accepted { admission; queue_length = 3; interactive = None })) admission;
   state.Tui.msg_live <- Some live;
   state.msg_inflight <- [{ Tui.sent_request = { Chat.request_id; keeper_name; message = "request"; attachments = []; references = [] };
-    submitted_at = 2.; sent_at = 2.; origin = Tui.Direct_submission; phase = Tui.Turn_streaming; log = live }];
+    submitted_at = 2.; sent_at = 2.; control_generation = 0; origin = Tui.Direct_submission; phase = Tui.Turn_streaming; log = live }];
   live
 
 let last rows = match List.rev rows with

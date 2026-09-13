@@ -2526,6 +2526,7 @@ type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
+  ; control_generation : int
   ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; log : turn_log
@@ -5435,6 +5436,8 @@ let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name 
   let newer_input = held_input
     || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
        | Some latest -> latest.sent_request.request_id <> entry.sent_request.request_id
+         && latest.control_generation = Option.value ~default:0
+              (List.assoc_opt keeper_name state.keeper_chat_control_generations)
        | None -> false in
   match List.assoc_opt keeper_name state.keeper_chat_control_pending, held_input with
   | Some requested_at_ns, false -> Masc_tui_esc_interrupt.pending_action ~now_ns ~requested_at_ns
@@ -8198,7 +8201,7 @@ let keeper_message_activity_rows (state : state) =
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
     activity @ submitted @ (if retained then
-      ["Input retained after Esc; /queue resume releases it, or Enter joins a new update"]
+      ["Input retained after Esc; /queue resume sends it"]
       else []) @ (if local_count > 0 then
       [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
         local_count (if local_count = 1 then "message" else "messages")]

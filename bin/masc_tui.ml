@@ -7066,6 +7066,7 @@ let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only)
     { sent_request = request
     ; submitted_at
     ; sent_at = Unix.gettimeofday ()
+    ; control_generation
     ; origin
     ; phase = Turn_streaming
     ; log

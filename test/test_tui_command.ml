@@ -28,6 +28,7 @@ let describe = function
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
+  | Command.Queue input -> "queue:" ^ input
   | Command.Run_next -> "run-next"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
@@ -124,6 +125,8 @@ let test_pane_commands_parse_by_word () =
     ; "acting-pane-tab-unknown:code"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
+    ; "queue:"
+    ; "queue:pause"
     ; "run-next"
     ; "interrupt"
     ; "interrupt:tester"
@@ -170,6 +173,8 @@ let test_pane_commands_parse_by_word () =
        ; "/activity code"
        ; "/keeper orbiter"
        ; "/keeper   "
+       ; "/queue"
+       ; "/queue pause"
        ; "/run-next"
        ; "/interrupt"
        ; "/interrupt tester"

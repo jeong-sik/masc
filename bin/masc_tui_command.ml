@@ -22,6 +22,7 @@ type t =
   | Acting_pane_tab_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
+  | Queue of string
   | Run_next
   | Interrupt_turn
   | Interrupt_keeper_turn of string
@@ -106,6 +107,7 @@ let catalog =
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
     }
+  ; { word = "queue"; aliases = []; args = "[pause|resume|cancel ID|last ID|edit ID message]"; summary = "inspect local/server waiting work and manage queued messages" }
   ; { word = "run-next"
     ; aliases = []
     ; args = ""
@@ -313,6 +315,7 @@ let parse text =
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
+    | "queue", args -> Queue (if body = "" then args else args ^ "\n" ^ body)
     | "run-next", "" -> Run_next
     | "interrupt", "" -> Interrupt_turn
     | "interrupt", name -> Interrupt_keeper_turn name

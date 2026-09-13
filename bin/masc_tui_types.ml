@@ -3895,6 +3895,7 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable keeper_queue_inflight : string list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5727,6 +5728,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  keeper_queue_inflight = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;

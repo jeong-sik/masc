@@ -1782,6 +1782,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
+  | Keeper_queue_loaded of string * (string list, string) result
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -7492,6 +7493,92 @@ let chat_notice state ~keeper_name ~role text =
         (match role with Message_error -> "error" | _ -> "system")
         text
 
+let launch_keeper_queue state ~mailbox ~keeper_name action =
+  let module Inbox = Masc_tui_queue_inspection in
+  if List.mem keeper_name state.keeper_queue_inflight then
+    chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
+      "A queue request is pending; wait for its result before the next change"
+  else begin
+  state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+  let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
+  let host = server_peer_host and port = state.port in
+  let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
+  let local_lines () =
+    let pending = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name in
+    (Printf.sprintf "Local unsent messages: %d (same Keeper input joins: %s)"
+       (List.length pending) (if state.coalesce_queued_input then "on" else "off"))
+    :: List.map (fun (item : Chat_queue.item) ->
+         Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
+  let perform () =
+    let ( let* ) = Result.bind in
+    let* receipt = match action with
+      | Inbox.Inspect -> Ok []
+      | Inbox.Pause | Inbox.Resume ->
+        let verb = if action = Inbox.Pause then "pause" else "resume" in
+        let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+          ~action:verb ~operator_operation_id in
+        (match Keeper_control.classify_response ~status ~body with
+         | Keeper_control.Accepted _ -> Ok ["Server confirmed queue " ^ verb]
+         | Keeper_control.Rejected {detail;_} | Keeper_control.Paused_owner_conflict detail -> Error detail
+         | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
+      | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
+        let fields = ["schema", `String "keeper_event_queue.operator.request.v2";
+          "source_ref", `String reference; "source_incarnation", `String (Int64.to_string incarnation)] in
+        let fields = match action with
+          | Inbox.Cancel_event (_, _, reason) ->
+            ("action", `String "cancel") :: ("reason", `String reason)
+            :: ("operator_operation_id", `String operator_operation_id) :: fields
+          | Inbox.Prioritize_event (_, _, urgency) ->
+            ("action", `String "reprioritize") :: ("urgency", `String (Masc.Keeper_event_queue.urgency_to_string urgency)) :: fields
+          | Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ -> assert false in
+        let* _ = Masc_tui_http.post_json ~host ~port ~path:(root ^ "/events/operator")
+          ~body:(Yojson.Safe.to_string (`Assoc fields)) in
+        Ok ["Server confirmed event update: " ^ reference]
+      | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
+        let path = root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
+        let* suffix, body = match action with
+          | Inbox.Cancel _ -> Ok ("cancel", `Assoc [])
+          | Inbox.Move_to_end _ -> Ok ("move-to-end", `Assoc [])
+          | Inbox.Edit (_, message) ->
+            let* operation = Masc_tui_http.get_json ~host ~port ~path in
+            let* input = Inbox.edited_input ~message operation in
+            Ok ("edit", `Assoc ["input", input])
+          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
+        let* _ = Masc_tui_http.post_json ~host ~port ~path:(path ^ "/" ^ suffix)
+          ~body:(Yojson.Safe.to_string body) in
+        Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
+    (* Keep each failed read visible beside any successful mutation receipt. *)
+    let waiting = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/waiting-inventory")
+      |> fun result -> Result.bind result Inbox.waiting_lines in
+    let rec read_messages after_sequence reversed_pages =
+      let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
+      let* page = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
+      let* next = Inbox.next_sequence page in
+      match next, after_sequence with
+      | Some next, Some previous when Int64.of_string next <= Int64.of_string previous ->
+        Error "Queue pagination did not advance"
+      | Some next, _ -> read_messages (Some next) (page :: reversed_pages)
+      | None, _ ->
+        let operations = List.concat_map (function
+          | `Assoc fields -> (match List.assoc_opt "operations" fields with Some (`List values) -> values | _ -> [])
+          | _ -> []) (List.rev reversed_pages) in
+        Inbox.operation_lines (`Assoc ["operations", `List operations]) in
+    let operations = read_messages None [] in
+    let lines = function Ok lines -> lines | Error detail -> ["Read unavailable: " ^ detail] in
+    Ok (receipt @ lines waiting @ lines operations) in
+  let run () =
+    let result = try perform () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn) in
+    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, result)) in
+  chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
+    (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, Error "Eio switch is unavailable"))
+  end
+;;
+
 (* Ctrl-V. A terminal never delivers a pasted image: bracketed paste carries
    text, and a clipboard holding a screenshot has no text form to send. So the
    bytes are fetched from the clipboard itself and staged the way a dropped
@@ -8636,6 +8723,39 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Masc_tui_command.Keeper_unknown ->
           notice ~role:Message_error
             (Printf.sprintf "no keeper named %S on the roster" name))
+  | Masc_tui_command.Queue input ->
+      Buffer.clear state.msg_input;
+      (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
+       | None, _ -> notice ~role:Message_error "Select a Keeper first"
+       | _, Error detail -> notice ~role:Message_error detail
+       | Some keeper_name, Ok action ->
+         let local_id = match action with
+           | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
+           | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> None in
+         match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
+         | Some item when item.request.keeper_name <> keeper_name ->
+           notice ~role:Message_error "That message belongs to another Keeper"
+         | Some item ->
+           (match action with
+            | Masc_tui_queue_inspection.Cancel id ->
+              (match Chat_queue.take state.msg_queued ~request_id:id with
+               | Some (_, rest) -> state.msg_queued <- rest;
+                   forget_queued_history state item.request;
+                   (match state.msg_recall_replaces with
+                    | Some editing when editing.Chat_queue.request.request_id = id ->
+                      state.msg_recall_replaces <- None; clear_staged_attachments state
+                    | Some _ | None -> ());
+                   notice ~role:Message_local ("Cancelled unsent message " ^ id)
+               | None -> notice ~role:Message_error "Local queue changed; inspect /queue again")
+            | Edit (id, message) ->
+              let request = {item.request with Keeper_chat.message = message} in
+              (match Chat_queue.replace_request state.msg_queued ~request_id:id request with
+               | Error detail -> notice ~role:Message_error detail
+               | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
+                   notice ~role:Message_local ("Updated unsent message " ^ id))
+            | Move_to_end _ -> notice ~role:Message_error "Local input is already joined in submission order"
+            | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> assert false)
+         | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
       (match state.msg_target_keeper_name with
@@ -11440,6 +11560,17 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Keeper_queue_loaded (keeper_name, result) ->
+      state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+      let role, lines = match result with
+        | Error detail -> Message_error, [detail]
+        | Ok lines -> Message_local,
+            ("Queue snapshot (refresh with /queue)" :: lines @
+             ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
+              "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
+              "Esc stops the current turn; /run-next prioritizes your submitted message."])
+      in
+      chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines)
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else

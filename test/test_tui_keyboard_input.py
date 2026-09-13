@@ -14833,6 +14833,54 @@ def run_schedule_source_status_regression(executable: str) -> None:
 # The Board draft is written in the default keyboard lane, which stops at an
 # earlier scenario's exit step (#34125). This lane runs the one thing: the
 # footer's offer and what the key it offered actually does.
+def run_board_list_footer_regression(executable: str) -> None:
+    """Measure completed native frames, including the bottom of a long list."""
+    for state in ("populated", "empty", "unread", "failed"):
+        fixtures = overview_event_http_fixtures()
+        posts = [board_selection_post(str(i), f"footer-post-{i:02d}",
+                                      f"footer-body-{i:02d}") for i in range(70)]
+        response: HttpResponse = (200, {"posts": posts if state == "populated" else []})
+        gate = GatedHttpResponse(response, hold_seconds=60.0)
+        fixtures["/api/v1/board?sort_by=hot"] = (
+            gate if state == "unread" else
+            (503, {"error": "board-footer-unavailable"}) if state == "failed" else response
+        )
+        fixtures["/api/v1/board/post-69?format=flat"] = (
+            200, {"post": posts[-1], "comments": []})
+        marker = {"populated": b"footer-post-00", "empty": b"(no board posts)",
+                  "unread": b"not loaded yet", "failed": b"board-footer-unavailable"}[state]
+
+        def interact(process: subprocess.Popen[bytes], master_fd: int,
+                     _slave_fd: int, output: bytearray, _base_path: str) -> None:
+            try:
+                palette_go(process, master_fd, output, b"go board", b"MASC Board")
+                wait_for_output(process, master_fd, output, marker, start=0, timeout=10.0)
+                for height in (30, 44, 60):
+                    resize_and_wait(process, master_fd, output, rows=height, columns=140,
+                                    needle=marker, final_cursor=b"\x1b[?25l")
+                    drain_until_quiet(process, master_fd, output)
+                    completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+                    rows = screen_rows(completed)
+                    footer = screen_row_of(rows, b"j/k:move")
+                    composer = screen_row_of(rows, "›".encode())
+                    if footer < 1 or composer != footer + 1:
+                        raise AssertionError(
+                            f"Board {state} at {height}: footer={footer}, composer={composer}: {rows!r}")
+                    if screen_row_of(rows, marker) < 1:
+                        raise AssertionError(f"Board {state} lost its current state: {rows!r}")
+                    if state == "populated":
+                        send_and_wait(process, master_fd, output, b"j" * 69, b"footer-post-69")
+                        send_and_wait(process, master_fd, output, b"\r", b"footer-body-69")
+                        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+                        send_and_wait(process, master_fd, output, b"k" * 69, b"footer-post-00")
+                os.write(master_fd, b"q")
+            finally:
+                gate.release.set()
+
+        run_terminal_scenario(executable, description=f"Board list footer: {state}",
+                              interact=interact, http_fixtures=fixtures)
+
+
 def run_board_compose_footer_regression(executable: str) -> None:
     def interact(
         process: subprocess.Popen[bytes],
@@ -16017,6 +16065,7 @@ def main() -> None:
         print("tui MSX size regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
+        run_board_list_footer_regression(os.path.abspath(sys.argv[1]))
         run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
         print("tui board compose footer regression: PASS")
         return

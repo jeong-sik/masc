@@ -2204,38 +2204,6 @@ let surface_ring : (surface * string) list =
     (Config, "Config");
   ]
 
-(* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
-   collapses onto Keepers -- its rows are one keeper's file writes, chosen by
-   the roster cursor, so it was never a destination of its own. Channels,
-   Automation, and Runs are selected-Keeper detail tabs; standalone Lanes
-   remain Runtime observation, and Code remains a Workspace child.
-   Resources and Tools collapse onto Config: an MCP resource catalog and
-   the tool catalog with its receipts and usage are both answers to "what
-   is registered here", read rarely and never raced against. System logs
-   collapse onto Activity (the Acting surface): tool calls settling and the
-   server's own log lines are two readings of the same fleet timeline, and
-   the ring stop that answers "what happened" is one. Metrics is a deep-dive
-   telemetry surface that collapses onto Overview, off the Tab ring. *)
-let surface_ring_index (view : surface) =
-  let family =
-    match view with
-    | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
-    | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
-    | Code -> Repositories
-    | Resources | Tools -> Config
-    | System_logs -> Acting
-    | Metrics -> Overview
-    | v -> v
-  in
-  let rec find i = function
-    | [] -> 0
-    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
-  in
-  find 0 surface_ring
-
 (** What a surface needs loaded to draw itself.
 
     Declared per surface in one place rather than asked as a separate
@@ -7171,21 +7139,49 @@ let visible_surface_ring (state : state) : (surface * string) list =
   List.filter (fun (s, _) -> is_surface_active state s) surface_ring
 ;;
 
+(* The ring stop a view belongs to. Keeper sub-modes collapse onto Keepers,
+   Task Review and Verdicts collapse onto Planning, Changes collapses onto
+   Keepers -- its rows are one keeper's file writes, chosen by the roster
+   cursor, so it was never a destination of its own. Channels, Automation, and
+   Runs are selected-Keeper detail tabs; standalone Lanes remain Runtime
+   observation, and Code remains a Workspace child. Resources and Tools
+   collapse onto Config: an MCP resource catalog and the tool catalog with its
+   receipts and usage are both answers to "what is registered here", read
+   rarely and never raced against. System logs collapse onto Activity (the
+   Acting surface): tool calls settling and the server's own log lines are two
+   readings of the same fleet timeline, and the ring stop that answers "what
+   happened" is one. Metrics is a deep-dive telemetry surface that collapses
+   onto Overview, off the Tab ring. Connectors is under Config while the
+   Browser Lane reader is on screen, and under Keepers otherwise.
+
+   One mapping. There were two, one per ring index, and only the tests read
+   the one without the Browser Lane arm, so they checked a mapping the strip
+   never drew with. Every surface is named, so a new one has to be given a
+   stop here rather than falling through to itself. *)
+let surface_ring_family (state : state) (view : surface) =
+  match view with
+  | Keepers _ -> Keepers Keeper_list
+  | Verification | Harness -> Planning
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
+  | Changes | Connectors | Schedules -> Keepers Keeper_list
+  | Runtime | Lanes | Clients -> Config
+  | Code -> Repositories
+  | Resources | Tools -> Config
+  | System_logs -> Acting
+  | Metrics -> Overview
+  | Overview -> Overview
+  | Acting -> Acting
+  | Memory -> Memory
+  | Approvals -> Approvals
+  | Board -> Board
+  | Planning -> Planning
+  | Fusion -> Fusion
+  | Repositories -> Repositories
+  | Config -> Config
+
 let visible_surface_ring_index (state : state) (view : surface) =
   let ring = visible_surface_ring state in
-  let family =
-    match view with
-    | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
-    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-    | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
-    | Code -> Repositories
-    | Resources | Tools -> Config
-    | System_logs -> Acting
-    | Metrics -> Overview
-    | v -> v
-  in
+  let family = surface_ring_family state view in
   let rec find i = function
     | [] -> 0
     | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest

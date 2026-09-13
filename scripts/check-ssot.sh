@@ -417,12 +417,41 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 
-# The failure note the body draws under an empty page. Twelve sites draw it:
-# ten read it from one place and two spelled the literal again, so two screens
-# could drift from the other ten on a word.
+# The failure note the body draws under an empty page. Thirteen sites draw it,
+# and all thirteen now read it from one place. The pattern matches the shape
+# rather than the one wording, because the drift that got through was not a
+# second copy of the sentence: the system-log listing wrote a different
+# sentence for the same state, one that named a count the header does not draw
+# when there is no snapshot to count.
+r16_pattern='load failed; [^)]*reading'
+r16_self_test_failed=0
+for fixture in \
+  '  (load failed; nothing here is a reading)' \
+  '  (load failed; the count above is not a reading)' \
+  '  (load failed; these rows are not a reading)'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r16_pattern"; then
+    echo "ERROR[R16-pattern-self-test]: did not match $fixture" >&2
+    r16_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_render_prim.page_failed_note' \
+  '| Page_failed -> page_failed_note' \
+  'page_unread_note' \
+  '  (no entries)' \
+  '  (no entries match the current category filter)' \
+  | rg -q "$r16_pattern"; then
+  echo "ERROR[R16-pattern-self-test]: matched the shared symbol or another empty-page note" >&2
+  r16_self_test_failed=1
+fi
+if [ "$r16_self_test_failed" -eq 0 ]; then
+  echo "OK[R16-pattern-self-test]: the shared wording and a reworded variant both match; the symbol does not."
+else
+  fail=1
+fi
 check_rule "R16-tui-page-failed-note-literal" 0 \
   "Masc_tui_render_prim.page_failed_note" \
-  'load failed; nothing here is a reading' \
+  "$r16_pattern" \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 

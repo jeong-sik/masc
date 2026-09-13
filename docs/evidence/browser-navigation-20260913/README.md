@@ -148,3 +148,5 @@ passed native build/qualification in run 34733001958. Its own multi-channel run
 remains separate from this controlled comparison.
 
 [Full native fd441 route and gesture follow-up](full-native-fd441/README.md) retains the successful canonical-path harness and failed startup cohort separately.
+
+[Observed-claims instruction trial](observed-claims-910/README.md) retains the separately sourced Skill override and its actual returned body.

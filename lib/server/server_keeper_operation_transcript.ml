@@ -7,8 +7,20 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
   let ( let* ) = Result.bind in
   let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
   let tool_delivery_key = match resumed_from with
-    | None -> delivery_key
-    | Some checkpoint -> Keeper_chat_delivery_identity.Operation_checkpoint {operation_id; checkpoint} in
+    | None -> Ok delivery_key
+    | Some (Keeper_semantic_execution.Agent_core checkpoint) ->
+      Ok (Keeper_chat_delivery_identity.Operation_checkpoint {operation_id; checkpoint})
+    | Some (Keeper_semantic_execution.Official_client checkpoint) ->
+      (* The captured native turn distinguishes attempts; JSON framing preserves
+         arbitrary provider identifiers without ambiguous string concatenation. *)
+      let client = match checkpoint.client_kind with
+        | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" in
+      let canonical = Yojson.Safe.to_string (`List (List.map (fun s -> `String s)
+        [client; checkpoint.runtime_id; checkpoint.session_id; checkpoint.turn_id])) in
+      let* continuation_id = Keeper_chat_delivery_identity.Request_id.of_string
+        (Digestif.SHA256.(digest_string canonical |> to_hex)) in
+      Ok (Keeper_chat_delivery_identity.Operation_native {operation_id; continuation_id}) in
+  let* tool_delivery_key = tool_delivery_key in
   let tools_only () = match tool_calls with
     | [] -> Ok ()
     | _ -> Keeper_chat_store.append_tool_calls_once ~base_dir ~keeper_name

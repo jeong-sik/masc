@@ -35,16 +35,24 @@ def observation(base=None, checks=()):
                 base_path=base, checks=rows)
 
 def pdf_readiness(ready=False):
+    """The wire shape MASC sends. Belongs anywhere a catalog or receipt is built."""
     return dict(schema='masc.pdf_tools_readiness.v1', status='tools_available' if ready else 'unavailable',
                 pdf_inspection='not_run', scope='current_process_environment', checks=[dict(command=name, status='started' if ready else 'missing')
                     for name in ('pdftotext', 'pdftoppm')])
+
+
+def pdf_readiness_parsed(ready=False):
+    """What pdf_tools_status now returns. Parsed from the wire shape above
+    rather than hand-built, so a fixture that drifts out of what the decoder
+    accepts fails here instead of passing a value production never produces."""
+    return SETUP.decode_pdf_tools_readiness(pdf_readiness(ready))
 
 class Journey(unittest.TestCase):
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
         renderer.start()
         self.addCleanup(renderer.stop)
-        pdf = patch.object(SETUP, 'pdf_tools_status', return_value=pdf_readiness())
+        pdf = patch.object(SETUP, 'pdf_tools_status', return_value=pdf_readiness_parsed())
         pdf.start()
         self.addCleanup(pdf.stop)
 
@@ -356,7 +364,7 @@ class Journey(unittest.TestCase):
             labels.append(options)
             return [3] if len(labels) == 1 else [0]
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
-                patch.object(SETUP, 'pdf_tools_status', side_effect=[pdf_readiness(), pdf_readiness(True)]), \
+                patch.object(SETUP, 'pdf_tools_status', side_effect=[pdf_readiness_parsed(), pdf_readiness_parsed(True)]), \
                 patch.object(SETUP, 'prerequisite_menu', return_value=True) as install, \
                 patch.object(SETUP, 'pick', side_effect=choose), contextlib.redirect_stderr(io.StringIO()):
             result = SETUP.select_sandbox('/owned/masc', '/workspace')
@@ -364,6 +372,18 @@ class Journey(unittest.TestCase):
         self.assertIn('install missing tools', labels[0][3])
         self.assertIn('tools available', labels[1][3])
         self.assertEqual(result, ['--sandbox-profile', 'docker', '--network-mode', 'inherit'])
+
+    def test_readiness_is_parsed_into_a_closed_answer(self):
+        self.assertTrue(SETUP.decode_pdf_tools_readiness(pdf_readiness(True)).available)
+        parsed = SETUP.decode_pdf_tools_readiness(pdf_readiness())
+        self.assertFalse(parsed.available)
+        self.assertEqual([(row.command, row.status) for row in parsed.checks],
+                         [('pdftotext', 'missing'), ('pdftoppm', 'missing')])
+        # A word the wire never sends is refused here, rather than read as
+        # "not available" by every caller that compares against a literal.
+        for status in ('TOOLS_AVAILABLE', 'available', 'tools_available '):
+            with self.subTest(status=status), self.assertRaises(SETUP.SetupError):
+                SETUP.decode_pdf_tools_readiness(dict(pdf_readiness(True), status=status))
 
     def test_pdf_install_menu_requires_actual_recheck(self):
         action = dict(id='poppler_install', label='Install PDF tools', detail='Uses the selected package manager',
@@ -926,6 +946,20 @@ class LocalVoice(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()):
             SETUP.journey('/bin/masc', None, 8945, 10)
         self.assertEqual(order, ['voice', 'sandbox'])
+
+
+class PdfToolsProbe(unittest.TestCase):
+    # Journey replaces pdf_tools_status for every case, so the probe itself is
+    # exercised here, without that stand-in.
+    def test_readiness_probe_that_never_answers_is_a_setup_error(self):
+        # The sandbox menu asks before every draw, so an unbounded probe would
+        # hold the setup screen. The bound reaches subprocess.run, and running
+        # out of it is refused rather than read as some readiness.
+        expired = subprocess.TimeoutExpired(['/owned/masc'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+        with patch.object(SETUP.subprocess, 'run', side_effect=expired) as run, \
+                self.assertRaisesRegex(SETUP.SetupError, 'did not answer about PDF tool availability in time'):
+            SETUP.pdf_tools_status('/owned/masc')
+        self.assertEqual(run.call_args.kwargs['timeout'], SETUP.PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
 
 
 class InvalidWorkspaceDiagnostic(unittest.TestCase):

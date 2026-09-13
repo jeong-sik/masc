@@ -83,7 +83,7 @@ let make_backend () =
       | Some _ | None -> Error "owner mismatch")
   } in state, backend
 
-let manifest dir mode =
+let manifest ?refresh_policy dir mode =
   let path = Filename.concat dir (mode ^ ".toml") in
   write path (Printf.sprintf {|id = %S
 revision = "fixture-1"
@@ -96,7 +96,8 @@ cpus = 0.5
 memory_bytes = 67108864
 pids = 16
 max_reply_bytes = 4096
-|} mode);
+|} mode ^ Option.fold ~none:"" ~some:(fun policy ->
+      "\n[interface]\nrefresh_policy = " ^ Printf.sprintf "%S" policy ^ "\n") refresh_policy);
   path
 
 let dispatch config operation fields = Runtime.dispatch ~config ~operation (`Assoc fields)
@@ -312,17 +313,22 @@ let test_file_activity_preserves_explicit_observation () =
     let replace cursor = write source_path (Yojson.Safe.to_string (snapshot cursor)) in
     replace "first";
     let file_id = unwrap (dispatch config Runtime.Attach
-      ["manifest_path",`String (manifest dir "file-observer");"run_id",`String "files";
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "file-observer");"run_id",`String "files";
        "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
          "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
     let owned_id = attach config dir "owned-observer" in
+    let stateful_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest dir "stateful-file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
     let sequence id = int "observation_seq" (instance config id) in
-    await clock (fun () -> sequence file_id=1 && sequence owned_id=1);
+    await clock (fun () -> sequence file_id=1 && sequence owned_id=1 && sequence stateful_id=1);
     let refresh () = Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed in
     refresh ();
-    await clock (fun () -> int "unchanged_source_refreshes" (instance config file_id)=1);
+    await clock (fun () -> int "unchanged_source_refreshes" (instance config file_id)=1 && sequence stateful_id=2);
     check Alcotest.int "unchanged capture adds no retained output" 1 (sequence file_id);
     check Alcotest.int "unrelated tool completion does not sample an owned environment" 1 (sequence owned_id);
+    check Alcotest.int "default file observer still receives equal captures" 2 (sequence stateful_id);
     refresh ();
     ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String file_id]));
     await clock (fun () -> sequence file_id=2);
@@ -343,11 +349,46 @@ let test_file_activity_preserves_explicit_observation () =
     let sources,_ = List.nth records 3 in
     check bool "capture failure reaches the worker as incomplete input" true
       (match sources with `List [`Assoc fields] -> List.assoc_opt "complete" fields=Some (`Bool false) | _ -> false);
-    detach config file_id; detach config owned_id;
+    detach config file_id; detach config owned_id; detach config stateful_id;
     await_phase clock config file_id "detached";
-    await_phase clock config owned_id "detached")
+    await_phase clock config owned_id "detached";
+    await_phase clock config stateful_id "detached")
+
+let test_capture_cannot_rewrite_detach_failure () =
+  let entered, enter = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let returned, return = Eio.Promise.create () in
+  let captures = ref 0 in
+  let acquire ~store ~package ~resolve_lane_output ~binding =
+    incr captures;
+    if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
+    let result = Lane_addon_sources.acquire ~store ~package ~resolve_lane_output ~binding in
+    if !captures=2 then Eio.Promise.resolve return ();
+    result in
+  with_fixture ~acquire (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    write source_path {|{"source_id":"file","incarnation":"export","cursor":"1","complete":true,"detail":null,"observations":[]}|};
+    let id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "stop-retry");
+       "run_id",`String "files";"binding",`Assoc ["sources",`List [`Assoc
+         ["source_id",`String "file";"kind",`String "snapshot_file";"path",`String source_path]]]])
+      |> text "instance_id" in
+    await clock (fun () -> int "observation_seq" (instance config id)=1);
+    Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed;
+    Eio.Promise.await entered;
+    detach config id;
+    await_phase clock config id "failed";
+    Eio.Promise.resolve release ();
+    Eio.Promise.await returned;
+    check string "capture does not overwrite cleanup failure with attached" "failed" (phase (instance config id));
+    check Alcotest.int "retired worker receives no additional observation" 1 (Hashtbl.find state.calls id);
+    detach config id;
+    await_phase clock config id "detached")
 
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a capture yielding to detach preserves cleanup ownership" `Quick
+    test_capture_cannot_rewrite_detach_failure;
   test_case "activity probes exact file captures while explicit observes remain stateful" `Quick
     test_file_activity_preserves_explicit_observation;
   test_case "direct attach enforces package binding before worker startup" `Quick

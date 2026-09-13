@@ -16,8 +16,18 @@ Automatic activity follows the sources in the binding:
 | `lane_output` | Existing notifications from the declared producer in the same run. Unrelated Keeper tools do not wake the consumer. |
 | No external sources | Initial/explicit observation and the Add-on's own action lifecycle. Unrelated Keeper tools do not sample an owned environment. |
 
-For a binding containing only snapshot files, automatic capture compares the
-exact source envelopes with the last successfully committed observation. Those
+Packages default to `every_hint`: source interest filtering still applies, but
+every matching hint invokes the worker even for equal captures. A package whose
+automatic observation depends only on changed captured input can opt in:
+
+```toml
+[interface]
+refresh_policy = "source_changes"
+```
+
+With this explicit policy and a binding containing only snapshot files,
+automatic capture compares the exact source envelopes with the last
+successfully committed observation. Those
 envelopes include retained hashes of the original file bytes. An unchanged
 capture does not invoke the worker, append a new observation, or wake downstream
 consumers. `unchanged_source_refreshes` in instance inspection counts these

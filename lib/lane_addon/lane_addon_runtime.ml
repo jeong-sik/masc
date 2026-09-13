@@ -339,14 +339,15 @@ let run ~sw backend m e =
                     let result =
                       let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
+                      if e.stopping then Ok () else
                       let fingerprint =
-                        if Lane_addon_sources.snapshot_files_only e.refresh_interest
+                        if e.package.refresh_policy=Source_changes
+                          && Lane_addon_sources.snapshot_files_only e.refresh_interest
                         then Some (Lane_addon_store.digest (Yojson.Safe.to_string sources))
                         else None in
                       if request=Refresh_sources && previous_phase=Attached
                         && Option.is_some fingerprint && fingerprint=e.last_committed_sources
                       then (
-                        e.phase <- Attached;
                         e.unchanged_source_refreshes <- e.unchanged_source_refreshes + 1;
                         Ok ())
                       else (

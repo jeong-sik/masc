@@ -65,36 +65,39 @@ let read t context args =
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
-let pointer t context args action =
+type pointer_motion = Click_pointer | Drag_pointer of Browser_lane.Pointer.point
+  | Wheel_pointer of { x : int; y : int }
+let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
   let unknown result = Result.map_error (fun e -> Outcome_unknown e) result in
   let* observed = before (script t context Browser_interaction.pointer_guard_script args) in
-  let* viewport_json = before (required "viewport" args) in
-  let* viewport = before (Browser_lane.Pointer.viewport_of_json viewport_json) in
-  let get_point key = let* v = before (required key args) in before (Browser_lane.Pointer.point_of_json v) in
-  let* start = get_point (if action="drag" then "from" else "point") in
   let coords (p : Browser_lane.Pointer.point) = ["x",`Int (int_of_float (p.x *. viewport.width));"y",`Int (int_of_float (p.y *. viewport.height))] in
   let move p = obj (["type",str "pointerMove";"origin",str "viewport"] @ coords p) in
   let button name = obj ["type",str name;"button",`Int 0] in
-  let* source = if action="scroll_at" then
-      let* x = before (required "x" args) in let* y = before (required "y" args) in
-      Ok (obj ["type",str "wheel";"id",str "masc-wheel";"actions",`List [obj
-        (["type",str "scroll";"deltaX",x;"deltaY",y;"origin",str "viewport"] @ coords start)]])
-    else let* middle = if action="drag" then let* finish=get_point "to" in Ok [move finish] else Ok [] in
-      Ok (obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
-        "actions",`List ([move start;button "pointerDown"] @ middle @ [button "pointerUp"])]) in
+  let source = match motion with
+    | Wheel_pointer {x;y} ->
+      obj ["type",str "wheel";"id",str "masc-wheel";"actions",`List [obj
+        (["type",str "scroll";"deltaX",`Int x;"deltaY",`Int y;"origin",str "viewport"] @ coords start)]]
+    | Click_pointer | Drag_pointer _ ->
+      let middle=match motion with Drag_pointer finish->[move finish]
+        | Click_pointer | Wheel_pointer _->[] in
+      obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
+        "actions",`List ([move start;button "pointerDown"] @ middle @ [button "pointerUp"])] in
   (* No replay after dispatch. Release is itself a protocol action and remains
      bounded by the transport deadline. Protected release cleanup may outlast
      the host command deadline by that bound; failure ends the client. *)
   let released=ref (Ok ()) in
   let applied=Eio.Switch.run (fun sw ->
-    if action<>"scroll_at" then Eio.Switch.on_release sw (fun ()->
-      released:=Result.map (fun _->()) (t.command "input.releaseActions" (obj ["context",str context])));
+    (match motion with
+    | Wheel_pointer _ -> ()
+    | Click_pointer | Drag_pointer _ -> Eio.Switch.on_release sw (fun ()->
+      released:=Result.map (fun _->()) (t.command "input.releaseActions" (obj ["context",str context]))));
     t.command "input.performActions" (obj ["context",str context;"actions",`List [source]])) in
   let* _=unknown applied in
   let* ()=unknown !released in
   let* after = unknown (page t context) in
   let* old_url = unknown (string "url" observed) in
+  let action=match motion with Click_pointer->"click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at" in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
 let dispatch t ~verb args =
@@ -127,10 +130,12 @@ let dispatch t ~verb args =
         Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport]))
     | "page.interact" ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
-      let* _=pre (Browser_interaction.parse (obj (("lane",str "live")::fields))) in
-      let* action=pre (string "action" args) in
-      if List.mem action ["click_at";"scroll_at";"drag"] then pointer t context args action
-      else if List.mem action ["click";"fill";"scroll";"follow_link"] then
+      let* request=pre (Browser_interaction.parse (obj (("lane",str "live")::fields))) in
+      (match request.action with
+      | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
+      | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
+      | Browser_lane.Drag {from;to_;viewport} -> pointer t context args ~viewport ~start:from (Drag_pointer to_)
+      | Browser_lane.Click _ | Click_node _ | Fill _ | Fill_node _ | Scroll _ | Follow_link _ ->
         (match script t context Browser_interaction.script args with
         | Error e -> Error (Outcome_unknown e)
         | Ok result -> (match field "interactionFailure" result with
@@ -138,7 +143,7 @@ let dispatch t ~verb args =
               (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
                | _ -> Error (Outcome_unknown message))
             | None -> Ok result))
-      else Error (Before_effect "unsupported BiDi interaction")
+      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction"))
     | _ -> Error (Before_effect "unsupported BiDi browser verb")
 
 module Endpoint = Ws_direct_core.Endpoint

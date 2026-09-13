@@ -21,5 +21,26 @@ let test_unsupported () =
   (match Peer.dispatch peer ~verb:"page.arbitrary" (obj []) with
    | Error (Peer.Before_effect _) -> () | _ -> fail "unsupported verb must be pre-effect");
   check bool "no protocol dispatch" false !called
+let test_pointer_validation () =
+  let calls=ref [] in
+  let command method_ _ =
+    calls:=method_::!calls;
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | _ -> Error "unexpected effect dispatch" in
+  let peer=Peer.create ~command in
+  let viewport=obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+    "scrollX",`Int 0;"scrollY",`Int 0] in
+  let point=obj ["x",`Float 0.5;"y",`Float 0.5] in
+  let base=["tabId",`Int 1;"expectedUrl",`String "https://example.test/";"viewport",viewport] in
+  let rejected fields =
+    calls:=[];
+    (match Peer.dispatch peer ~verb:"page.interact" (obj (base @ fields)) with
+     | Error (Peer.Before_effect _) -> () | _ -> fail "malformed pointer admitted");
+    check (list string) "parser rejects before any page or input command"
+      ["browsingContext.getTree"] !calls in
+  rejected ["action",`String "click_at";"point",obj ["x",`Int 1;"y",`Float 0.5]];
+  rejected ["action",`String "scroll_at";"point",point;"x",`Int 0;"y",`String "120"];
+  rejected ["action",`String "drag";"from",point;"to",point;"point",point]
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
-  "effect",[test_case "closed verbs" `Quick test_unsupported]]
+  "effect",[test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation]]

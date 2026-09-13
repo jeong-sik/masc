@@ -6569,6 +6569,41 @@ let memory_overview_query (state : state) =
     | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
 
+(* What Esc does on Memory, nearest layer first: a filter, then the fact
+   browser, then the surface. The keeper table drew "[Esc to clear]" beside its
+   filter, but only the fact browser cleared one: on the table Esc left for
+   Overview and kept the filter, which narrowed the list again the next time
+   Memory opened. *)
+type memory_back = Memory_stays | Memory_leaves
+
+let memory_back (state : state) =
+  if Option.is_some state.search || state.search_last <> "" then begin
+    state.search <- None;
+    state.search_last <- "";
+    (match state.memory_facts_keeper with
+     | Some _ ->
+         state.memory_facts_cursor <- 0;
+         state.memory_facts_scroll <- 0
+     | None ->
+         state.memory_health_cursor <- 0;
+         state.memory_health_scroll <- 0);
+    Memory_stays
+  end
+  else
+    match state.memory_facts_keeper with
+    | Some _ ->
+        (* Close the fact browser back to the health table. The listing is
+           dropped with it: facts are cheap to re-ask and a kept copy would
+           redraw stale rows on reopen. *)
+        state.memory_facts_keeper <- None;
+        state.memory_facts <- None;
+        state.memory_facts_error <- None;
+        state.memory_facts_cursor <- 0;
+        state.memory_facts_scroll <- 0;
+        state.memory_facts_category <- Category_all;
+        Memory_stays
+    | None -> Memory_leaves
+
 let visible_memory_keepers (state : state) =
   let open Tui_decode in
   let raw_keepers =

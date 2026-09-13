@@ -4844,7 +4844,9 @@ type state = {
      draft they set aside to do it. [None] means the composer holds the
      operator's own text, so pressing down has nothing to give back. *)
   mutable msg_recall_at: int option;
-  mutable msg_recall_draft: string;
+  mutable msg_recall_draft:
+    string * Masc_tui_keeper_chat_projection.attachment list
+    * Masc_tui_keeper_chat_projection.image_reference list * msg_anchor option;
   (* The waiting line the composer is editing, if the walk stepped onto one.
      [Some request_id] makes the next Enter replace that line instead of
      queueing a second copy of it -- the arrows copy, and a copy of something
@@ -6203,7 +6205,7 @@ let create_state
   msg_drafts = [];
   msg_history = [];
   msg_recall_at = None;
-  msg_recall_draft = "";
+  msg_recall_draft = ("", [], [], None);
   msg_recall_replaces = None;
   msg_live = None;
   msg_loaded = [];

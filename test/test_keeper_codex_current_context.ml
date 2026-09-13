@@ -83,7 +83,9 @@ default = "codex.context"
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
-    Keeper_codex_runtime.run ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
+    Keeper_codex_runtime.run
+        ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+          ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal:"Continue from current World State."
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages:[Agent_core.Types.user_msg "Previous completed work"]

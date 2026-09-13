@@ -1101,6 +1101,10 @@ let reset_message_file_changes state keeper_name =
    previous target's compose was holding ([composing_for_keeper]) is released
    by the retarget, and this is when it goes. Passed in because the drain is
    defined with the dispatch path, after this. *)
+let forget_recall (state : state) =
+  state.msg_recall_at <- None;
+  state.msg_recall_draft <- ("", [], [], None)
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
@@ -1115,6 +1119,9 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      have written files while this pane was elsewhere. Compact mode still
      performs no GET; it only invalidates this presentation cache. *)
   reset_message_file_changes state keeper_name;
+  (* Recall is a walk through one Keeper's messages. A Down on the new
+     Keeper must not restore the previous Keeper's draft or image payload. *)
+  forget_recall state;
   state.msg_target_keeper_name <- Some keeper_name;
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
@@ -1253,7 +1260,21 @@ let recall_land (state : state) entries at =
   let entry = List.nth entries (count - 1 - at) in
   set_composer_text state entry.me_text;
   state.msg_recall_replaces <-
-    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
+    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id;
+  (* A queued edit owns the complete request, not just its text. Never attach
+     the draft's images to a different recalled line. *)
+  let attachments, references =
+    match state.msg_recall_replaces with
+    | Some item -> item.request.attachments, item.request.references
+    | None -> [], []
+  in
+  state.msg_attachments <- attachments;
+  state.msg_references <- references;
+  state.msg_attachments_since <-
+    (if attachments = [] then None
+     else match List.rev state.msg_history with
+       | newest :: _ -> Some (msg_anchor newest)
+       | [] -> None)
 
 let recall_older (state : state) =
   let sent = own_typed_messages state in
@@ -1263,7 +1284,9 @@ let recall_older (state : state) =
     let at =
       match state.msg_recall_at with
       | None ->
-          state.msg_recall_draft <- Buffer.contents state.msg_input;
+          state.msg_recall_draft <-
+            (Buffer.contents state.msg_input, state.msg_attachments,
+             state.msg_references, state.msg_attachments_since);
           0
       | Some at -> min (at + 1) (count - 1)
     in
@@ -1275,19 +1298,19 @@ let recall_newer (state : state) =
   match state.msg_recall_at with
   | None -> ()
   | Some 0 ->
-      state.msg_recall_at <- None;
       (* Back at the operator's own draft: it is not an edit of anything. *)
       state.msg_recall_replaces <- None;
-      set_composer_text state state.msg_recall_draft
+      let text, attachments, references, since = state.msg_recall_draft in
+      forget_recall state;
+      set_composer_text state text;
+      state.msg_attachments <- attachments;
+      state.msg_references <- references;
+      state.msg_attachments_since <- since
   | Some at ->
       let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
       if List.length sent > at then recall_land state sent at
-
-(* Typing makes the composer the operator's again: the walk is over, so a step
-   forward must not replace what they just wrote with a draft from before it. *)
-let forget_recall (state : state) = state.msg_recall_at <- None
 
 (* A queued line is drawn in the conversation, so cancelling one or pulling it
    back into the composer has to take its row with it. The row is found by the
@@ -1344,7 +1367,6 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
   end
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
-    ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
@@ -1365,23 +1387,6 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
         load_older ~before
     | Some _ | None -> ()
   in
-  let live_is_on_screen live =
-    (* [msg_live] survives leaving the chat, so a prompt for keeper A must
-       not be answered (or interrupted) from keeper B's screen. *)
-    state.msg_target_keeper_name = Some (turn_log_keeper_name live)
-  in
-  match state.msg_live, key with
-  | Some live, ("y" | "Y" | "n" | "N")
-    when live_is_on_screen live
-         && Option.is_some
-              (Keeper_chat_transcript.awaiting_approval live.tl_transcript) -> (
-      match Keeper_chat_transcript.awaiting_approval live.tl_transcript with
-      | Some awaiting ->
-          answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
-            ~allow:(String.lowercase_ascii key = "y");
-          true
-      | None -> true)
-  | _ ->
   let apply_autocomplete direction =
     let text = Buffer.contents state.msg_input in
     let keeper_names =
@@ -1413,6 +1418,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
+    forget_recall state;
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
@@ -1589,6 +1595,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          waiting line is abandoned the same way: the line stays queued and the
          next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
+      forget_recall state;
       if Option.is_some state.msg_recall_replaces
       then begin
         clear_staged_attachments state;
@@ -1646,6 +1653,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        with
        | None -> ()
        | Some (item, _rest) ->
+         forget_recall state;
          let request = item.Chat_queue.request in
          state.msg_recall_replaces <- Some item;
          (* The attachments come back with the text. They were staged for this
@@ -4561,9 +4569,10 @@ let launch_lane_addons state ~mailbox request =
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
   let last_action, action_receipt = match request with
-    | Addons.Act action | Addons.Action_status action -> Some action, None
+    | Addons.Act action -> Some action, None
+    | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;last_action;action_receipt };
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt };
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
@@ -8793,6 +8802,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
             | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
          | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
+  | Masc_tui_command.Answer_tool_approval allow ->
+      Buffer.clear state.msg_input;
+      (match target with
+       | None -> notice ~role:Message_local "Select a Keeper first"
+       | Some target ->
+         match inflight_for_keeper state target with
+         | Some entry ->
+           (match Keeper_chat_transcript.awaiting_approval entry.log.tl_transcript with
+            | Some awaiting ->
+              launch_keeper_approval state ~mailbox entry.sent_request
+                ~tool_call_id:awaiting.call_id ~allow
+            | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
+         | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
       match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper ~explicit:true state ~mailbox) with
@@ -10608,12 +10630,6 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
    lifecycle already uses: the first press names the action, the same press
    again submits it, and any other key disarms. [Goal_phase.Public_action.t]
    rides along so no string name of an action exists in this file. *)
-let goal_public_action_key (action : Goal_phase.Public_action.t) =
-  match action with
-  | Goal_phase.Public_action.Request_complete -> "c"
-  | Goal_phase.Public_action.Drop -> "x"
-  | Goal_phase.Public_action.Reopen -> "o"
-
 let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
     =
   match state.planning_mode with
@@ -10629,7 +10645,7 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
           state.goal_action_error <- None;
           add_event state "system"
             (Printf.sprintf "press %s again to %s goal %s"
-               (goal_public_action_key action)
+               (planning_action_key action)
                (match action with
                 | Goal_phase.Public_action.Request_complete ->
                     "request completion of"
@@ -11365,6 +11381,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
          | Masc_tui_command.Set_embeds _
+        | Masc_tui_command.Answer_tool_approval _
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
         | Masc_tui_command.Run_next
@@ -11397,7 +11414,6 @@ let handle_composer_key state ~base_path ~mailbox key =
              on screen, so Esc here has nothing to stop. *)
           ~interrupt_turn:(fun () -> false)
           ~submit_message:(fun _ -> ())
-          ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
                    ~open_named_image:(fun () -> open_named_image state ~mailbox)
@@ -11600,7 +11616,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error detail -> {view with loading=false;error=Some detail}
         | Ok (snapshot, receipt, action) -> {view with loading=false;error=None;snapshot=(match snapshot with None -> view.snapshot | Some _ -> snapshot);
             action_receipt=(match action with None -> view.action_receipt | Some _ -> action);
-            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)})
+            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)});
+      (match result, state.lane_addons with
+       | Ok (_, _, Some {Masc.Lane_addon_action.state=
+           (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
+         when view.generation=generation && not view.loading
+              && Option.is_none view.draft && Option.is_none view.document_key
+              && Option.is_none view.action_menu ->
+           launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+       | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
@@ -16626,8 +16650,22 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                (match view.draft with
-                 | Some draft ->
+                (match view.action_menu, view.draft with
+                 | Some _, _ ->
+                     (match key with
+                      | "esc" -> update {view with action_menu=None;scroll=0}
+                      | "j" | "down" -> update (Addons.move_action view 1)
+                      | "k" | "up" -> update (Addons.move_action view (-1))
+                      | "J" | "K" ->
+                          let _, cols = get_terminal_size () in
+                          let last = List.length (Addons.lines ~width:(framed_inner_width cols) view) - 1 in
+                          update {view with scroll=max 0 (min last (view.scroll + (if key="J" then 1 else -1)))}
+                      | "\r" | "\n" | "enter" ->
+                          (match Addons.submit_action view with
+                           | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                           | Error detail -> update {view with action_menu=None;error=Some detail})
+                      | _ -> ())
+                 | None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
@@ -16646,7 +16684,7 @@ and is loaded on demand through keeper_skill.
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
-                 | None ->
+                 | None, None ->
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -16678,12 +16716,19 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "D" -> update {view with technical_details=not view.technical_details;scroll=0}
+                     | "a" ->
+                         if view.loading || Option.is_some (Addons.pending_action view)
+                         then update {view with error=Some "An action or read is pending; t checks its status."}
+                         else (match Addons.open_actions ~request_id:(Random_id.uuid_v7 ()) view with
+                           | Ok next -> update next
+                           | Error detail -> update {view with error=Some detail})
                      | "t" ->
                          (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -18889,19 +18934,6 @@ and is loaded on demand through keeper_skill.
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)
-                   ~answer_approval:(fun ~tool_call_id ~allow ->
-                     match
-                       Option.bind state.msg_live (fun live ->
-                         inflight_by_request_id state (turn_log_request_id live))
-                     with
-                     | Some request ->
-                         launch_keeper_approval state ~mailbox:async_messages
-                           request ~tool_call_id ~allow
-                     | None ->
-                         (* No request in flight means no turn to answer for.
-                            The prompt belongs to a turn, so this is
-                            unreachable while one is shown. *)
-                         ())
                    ~load_older:(fun ~before ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
@@ -22511,6 +22543,16 @@ and is loaded on demand through keeper_skill.
            change; opening the tab or moving the cursor loads it too. What
            this line added was coverage for a change with no feed event, and
            that is not worth a seconds-long scan on a timer. *)
+        (* The visible Add-ons pane follows the existing refresh cadence.
+           Status reads reuse the accepted request; they never submit it again. *)
+        (match state.lane_addons with
+         | Some view when not view.loading && Option.is_none view.draft
+              && Option.is_none view.document_key && Option.is_none view.action_menu ->
+             let request = match Masc_tui_lane_addons.pending_action view with
+               | Some action -> Masc_tui_lane_addons.Action_status action
+               | None -> Masc_tui_lane_addons.Inspect in
+             launch_lane_addons state ~mailbox:async_messages request
+         | _ -> ());
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

@@ -101,6 +101,12 @@ LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
 
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
+# Masc_tui_scroll.window_text: where a scrolled window stands in its list,
+# "first-last/count". The Keeper detail pane draws it on its own row; the diff
+# surfaces put it in "[lines ...]".
+WINDOW_TEXT_RE = re.compile(rb"(?<![\d/-])(\d+)-(\d+)/(\d+)(?![\d/])")
+LINES_WINDOW_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
+
 def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
     """The composer's prefix and what was typed after it are styled separately
     -- the origin colour ends with the prefix and the body starts after a reset
@@ -2430,18 +2436,31 @@ def keeper_detail_overscroll_interaction(
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
-            indicators = re.findall(rb"\[(\d+)/(\d+)\]", detail)
+            # The indicator is the window the pane drew, "first-last/count"
+            # (Masc_tui_scroll.window_text). Opened at the top, its first row
+            # is 1 and its height is the rows the pane shows; the scroll
+            # positions are the rows past that height, plus the top.
+            indicators = WINDOW_TEXT_RE.findall(CSI_RE.sub(b"", detail))
             if not indicators:
                 raise AssertionError(
                     f"Keeper detail did not expose a scroll indicator: {detail!r}"
                 )
-            position_count = int(indicators[-1][1])
+            first, last, total = (int(value) for value in indicators[-1])
+            if first != 1:
+                raise AssertionError(
+                    f"Keeper detail did not open at its first row: {detail!r}"
+                )
+            height = last - first + 1
+            position_count = total - height + 1
             if position_count < 3:
                 raise AssertionError(
                     f"Keeper detail fixture has too few scroll positions: {detail!r}"
                 )
 
-            bottom = f"[{position_count}/{position_count}]".encode()
+            def window(top: int) -> bytes:
+                return f"{top}-{top + height - 1}/{total}".encode()
+
+            bottom = window(position_count)
             send_and_wait(
                 process,
                 master_fd,
@@ -2471,7 +2490,7 @@ def keeper_detail_overscroll_interaction(
             )
             refresh_gate.release.set()
 
-            previous = f"[{position_count - 1}/{position_count}]".encode()
+            previous = window(position_count - 1)
             send_and_wait(process, master_fd, output, b"k", previous)
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             send_and_wait(
@@ -2488,7 +2507,7 @@ def keeper_detail_overscroll_interaction(
                 b"\r",
                 b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
-            top = f"[1/{position_count}]".encode()
+            top = window(1)
             if top not in beta:
                 raise AssertionError(
                     f"new Keeper detail did not reset to the top: {beta!r}"
@@ -10467,7 +10486,10 @@ def changes_keeper_and_arrow_detail_interaction(
     tall = send_and_wait(
         process, master_fd, output, b"\x1b[C", b"turn 11  task task-11  applied"
     )
-    if b"scroll 0]" not in CSI_RE.sub(b"", tall):
+    # "[lines first-last/count]": the window the diff drew. At the top its
+    # first row is 1; at the end its last row is the count.
+    opened = LINES_WINDOW_RE.findall(CSI_RE.sub(b"", tall))
+    if not opened or int(opened[-1][0]) != 1:
         raise AssertionError(
             f"the tall diff did not open at the top: {CSI_RE.sub(b'', tall)!r}"
         )
@@ -10475,19 +10497,27 @@ def changes_keeper_and_arrow_detail_interaction(
     os.write(master_fd, b"j" * 60)
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
-    settled = CSI_RE.sub(b"", bytes(output[mark:])).decode("utf-8")
-    at_end = re.findall(r"scroll (\d+)\]", settled)
+    settled = CSI_RE.sub(b"", bytes(output[mark:]))
+    at_end = LINES_WINDOW_RE.findall(settled)
     if not at_end:
         raise AssertionError(
             f"the tall diff drew no scroll indicator: {settled[-800:]!r}"
         )
-    bottom = int(at_end[-1])
-    if bottom == 0:
+    first, last, total = (int(value) for value in at_end[-1])
+    if first == 1:
         raise AssertionError(
             f"the tall diff did not scroll at all: {settled[-800:]!r}"
         )
+    if last != total:
+        raise AssertionError(
+            f"the tall diff stopped short of its end: {settled[-800:]!r}"
+        )
     send_and_wait(
-        process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
+        process,
+        master_fd,
+        output,
+        b"k",
+        f"lines {first - 1}-{last - 1}/{total}]".encode("ascii"),
     )
     send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(

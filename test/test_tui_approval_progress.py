@@ -58,7 +58,7 @@ def scenario(binary: str, columns: int) -> None:
 
         return h.StreamingHttpResponse(chunks)
 
-    fixtures = {"/api/v1/keepers/chat/stream": h.RequestHttpResponse(respond)}
+    fixtures: h.HttpFixtures = {"/api/v1/keepers/chat/stream": h.RequestHttpResponse(respond)}
 
     def interact(process, master, _slave, output, _base):
         try:
@@ -91,14 +91,14 @@ def scenario(binary: str, columns: int) -> None:
             frame = bytes(output[start:end])
             screen = h.screen_text(frame)
             assert b"IN PROGRESS" in screen and b"awaiting results: Read" in screen, screen
-            assert b"approval for Edit:" in screen and b"[y]" in screen and b"[n]" in screen, screen
+            assert b"approval for Edit:" in screen and b"/approve" in screen and b"/deny" in screen, screen
             assert b"held at a tool call" not in screen, screen
             # This fixture uses ASCII content and single-cell frame glyphs.
             # Check the required text's actual addressed row and column span,
             # not merely its presence somewhere in the emitted bytes.
             rows = h.screen_rows(frame)
             for needle in (b"IN PROGRESS", b"awaiting results: Read",
-                           b"approval for Edit:", b"[y]", b"[n]"):
+                           b"approval for Edit:", b"/approve", b"/deny"):
                 row = h.screen_row_of(rows, needle)
                 assert 1 <= row <= 30, (needle, row)
                 end_column = h.fixture_cell_width(

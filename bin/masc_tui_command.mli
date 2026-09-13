@@ -58,6 +58,8 @@ type t =
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
   | Queue of string
   | Run_next
+  | Answer_tool_approval of bool
+      (** [/approve] or [/deny] answers this Keeper's held tool call. *)
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)

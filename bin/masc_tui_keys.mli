@@ -92,20 +92,26 @@ val footer_hints_code : pane:code_pane -> string
     questions never appeared on the screen they work on, and why blame and
     the row search did not either when they arrived. *)
 
+val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
+(** The Runtime footer: {!for_surface} [Runtime] with [p] labelled for where it
+    goes from [mode], and [e] only on the keeper-lane reading. *)
+
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
-val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
+val footer_hints_fusion_detail : position:string -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
-    the live scroll position, which the static per-surface table cannot know. *)
+    the window the renderer drew, which the static per-surface table cannot
+    know. *)
 
 val footer_hints_lanes_run_list : string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
-val footer_hints_lanes_run_detail : scroll:int -> max_scroll:int -> string
-(** The Lanes run-detail footer, with the synchronized Input/Output scroll
-    position appended the same way the Fusion detail footer does. *)
+val footer_hints_lanes_run_detail : position:string option -> string
+(** The Lanes run-detail footer, with the window the stacked Input/Output list
+    drew appended the way the Fusion detail footer does; [None] where the two
+    split panes' titles already name theirs. *)
 
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)

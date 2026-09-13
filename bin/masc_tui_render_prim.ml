@@ -1782,6 +1782,40 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+(* A value in brackets: [text], folded in the middle only when it runs past
+   [max_cells]. Four places fitted the value with [fit_width] first, which
+   pads as well as cuts, so a short one closed its bracket after a run of
+   spaces -- "[post-a      ]", "[executing ]", "[active    ]". A row that
+   needs the bracket to line up pads after it. *)
+let bracketed ~max_cells text =
+  let text =
+    if Message_layout.display_width text <= max_cells then text
+    else Message_layout.fit_middle max_cells text
+  in
+  "[" ^ text ^ "]"
+
+(* The Board reader's title row: the screen, which post, its hearth, its score
+   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and then "c0" at zero -- a second spelling for the same count -- and are one
+   spelling now, receding at zero. *)
+let board_read_title ~screen ~id ~hearth ~votes ~replies =
+  let id = bracketed ~max_cells:Render_schedule.board_id_width id in
+  let hearth_tag =
+    match hearth with
+    | Some h when not (String.equal h "") ->
+        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
+    | _ -> ""
+  in
+  let score =
+    if votes > 0 then Printf.sprintf "▲%+d" votes
+    else if votes < 0 then Printf.sprintf "▼%d" votes
+    else " 0"
+  in
+  Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (board_score_style votes) score Ansi.reset
+    (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
+
 
 (* Three steps for three bands, from the palette every other reading on this
    screen draws through. Emphasis only ever restates what the count beside it
@@ -1860,6 +1894,22 @@ let planning_phase_label = function
   | Goal_phase.Awaiting_confirmation -> "confirming"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
+
+(* The key a goal detail takes for each lifecycle request, and the words its
+   Actions and ARMED rows say it with. The Actions row called [c] "Complete"
+   beside a Next line saying [c] submits the goal for verification, and the
+   ARMED row called it "Request Completion": the key sends the goal to the
+   completion judge, and completing it is a confirmation this screen does not
+   offer. *)
+let planning_action_key = function
+  | Goal_phase.Public_action.Request_complete -> "c"
+  | Goal_phase.Public_action.Drop -> "x"
+  | Goal_phase.Public_action.Reopen -> "o"
+
+let planning_action_label = function
+  | Goal_phase.Public_action.Request_complete -> "Request completion"
+  | Goal_phase.Public_action.Drop -> "Drop"
+  | Goal_phase.Public_action.Reopen -> "Reopen"
 
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
@@ -2540,7 +2590,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%s, scroll %d]  %s" (Masc_tui_message_layout.count_noun total "line") scroll ds.ds_esc_hint
+       Printf.sprintf "[lines %s]  %s" (Masc_tui_scroll.window_text ~scroll ~height:content_height total) ds.ds_esc_hint
      else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf

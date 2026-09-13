@@ -201,7 +201,8 @@ let tool_result_json ~id (result : tool_result) =
     | Ok content -> result.success, content
     | Error detail -> false,
         [ `Assoc [ "type", `String "text"; "text", `String detail ]
-        ; `Assoc [ "type", `String "text"; "text", `String result.content ] ]
+        ; `Assoc [ "type", `String "text"; "text",
+            `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
   in
   Mcp_transport_protocol.make_response
     ~id

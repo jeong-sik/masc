@@ -31,6 +31,7 @@ let describe = function
   | Command.Queue input -> "queue:" ^ input
   | Command.Run_next -> "run-next"
   | Command.Interrupt_turn -> "interrupt"
+  | Command.Answer_tool_approval allow -> if allow then "approve" else "deny"
   | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
   | Command.Steer_turn message -> "steer:" ^ message
   | Command.Steer_missing_message -> "steer-missing-message"
@@ -128,6 +129,8 @@ let test_pane_commands_parse_by_word () =
     ; "queue:"
     ; "queue:pause"
     ; "run-next"
+    ; "approve"
+    ; "deny"
     ; "interrupt"
     ; "interrupt:tester"
     ; "steer:answer the correction\nwith this context"
@@ -176,6 +179,8 @@ let test_pane_commands_parse_by_word () =
        ; "/queue"
        ; "/queue pause"
        ; "/run-next"
+       ; "/approve"
+       ; "/deny"
        ; "/interrupt"
        ; "/interrupt tester"
        ; "/steer answer the correction\nwith this context"

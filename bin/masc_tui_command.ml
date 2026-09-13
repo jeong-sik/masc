@@ -24,6 +24,7 @@ type t =
   | Switch_keeper_missing_name
   | Queue of string
   | Run_next
+  | Answer_tool_approval of bool
   | Interrupt_turn
   | Interrupt_keeper_turn of string
   | Steer_turn of string
@@ -112,6 +113,16 @@ let catalog =
     ; aliases = []
     ; args = ""
     ; summary = "put my submitted message first, then stop the observed turn"
+    }
+  ; { word = "approve"
+    ; aliases = []
+    ; args = ""
+    ; summary = "allow this keeper's held tool call"
+    }
+  ; { word = "deny"
+    ; aliases = []
+    ; args = ""
+    ; summary = "deny this keeper's held tool call"
     }
   ; { word = "interrupt"
     ; aliases = []
@@ -317,6 +328,8 @@ let parse text =
     | "keeper", name -> Switch_keeper name
     | "queue", args -> Queue (if body = "" then args else args ^ "\n" ^ body)
     | "run-next", "" -> Run_next
+    | "approve", "" -> Answer_tool_approval true
+    | "deny", "" -> Answer_tool_approval false
     | "interrupt", "" -> Interrupt_turn
     | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message

@@ -61,3 +61,17 @@ let content_height ~rows ~chrome ~count ~preview_keep ~overflow_takes_row =
     | Some keep -> body_height ~total ~keep
   in
   if overflow_takes_row && count > total then max 1 (total - 1) else total
+
+(* Where a window stands in its list, as the first and last rows it shows and
+   the count: "27-52/80". Five surfaces wrote their own. Board and the Keeper
+   call list said "rows 27-52 of 80", the lane run panes and the question
+   reader "27-52/80", and the Keeper detail pane "[1/5]" -- its scroll offset
+   over the offsets it could take, a number no row on screen carried. The call
+   list fell back to the first row over the count when the long form did not
+   fit. *)
+let window_text ~scroll ~height count =
+  if count <= 0 then "0/0"
+  else if height <= 0 then Printf.sprintf "0/%d" count
+  else
+    let first = max 0 (min scroll (count - 1)) in
+    Printf.sprintf "%d-%d/%d" (first + 1) (min count (first + height)) count

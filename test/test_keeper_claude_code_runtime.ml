@@ -1486,6 +1486,8 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+                      ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
                     ~pre_tool_rejects:(ref [])
                     ~runtime_id:"claude.claude"
                     ~keeper_name:"claude-pre-dispatch"

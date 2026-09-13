@@ -238,20 +238,20 @@ let listed_id endpoint =
   | Ok _ -> Alcotest.fail "expected exactly one voice"
   | Error message -> Alcotest.fail message
 
-let test_resolved_alias_selects_the_same_transport_as_the_request () =
+let test_declared_kind_selects_the_same_transport_as_the_request () =
   with_catalogue_processes (fun ~read:_ ->
     let endpoint =
-      { (endpoint ~kind:Voice_config.Macos_say ~base_url:None) with
-        Voice_config.id = "elevenlabs"
+      { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
+        Voice_config.id = "say"
       ; api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
       }
     in
-    Alcotest.(check string) "HTTP alias wins over the declared command kind"
+    Alcotest.(check string) "declared HTTP transport wins over a command-shaped ID"
       "http-voice" (listed_id endpoint);
     let endpoint =
-      { endpoint with Voice_config.id = "say"; kind = Voice_config.Elevenlabs_direct }
+      { endpoint with Voice_config.id = "elevenlabs"; kind = Voice_config.Macos_say }
     in
-    Alcotest.(check string) "command alias wins over the declared HTTP kind"
+    Alcotest.(check string) "declared command transport wins over an HTTP-shaped ID"
       "Command Voice" (listed_id endpoint))
 
 let test_catalogue_credentials_reach_stdin_and_never_argv () =
@@ -434,8 +434,8 @@ let () =
   Alcotest.run
     "voice_catalog"
     [ ( "request dispatch and credentials"
-      , [ Alcotest.test_case "resolved aliases select the request transport" `Quick
-            test_resolved_alias_selects_the_same_transport_as_the_request
+      , [ Alcotest.test_case "declared kind selects the request transport" `Quick
+            test_declared_kind_selects_the_same_transport_as_the_request
         ; Alcotest.test_case "credentials reach stdin and never argv" `Quick
             test_catalogue_credentials_reach_stdin_and_never_argv
         ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick

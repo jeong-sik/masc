@@ -502,17 +502,48 @@ let test_the_observation_names_the_tts_tuning () =
             Alcotest.failf "tts.agent_voice_settings must be an object, got %s"
               (Yojson.Safe.to_string other))))
 
-(* adapter_for_endpoint resolves the id before the kind, so an id that is an
-   alias for another adapter reaches that transport while the API reports the
-   declared one. *)
-let test_an_id_that_contradicts_the_kind_is_refused () =
-  refused ~what:"an id naming a different transport than the declared kind"
-    (`Assoc
-       [ "change", `String "put_endpoint"
-       ; "section", `String "stt"
-       ; "endpoint",
-         `Assoc [ "id", `String "elevenlabs"; "kind", `String "openai_compat" ]
-       ])
+(* Endpoint ids are names, not transport selectors. The declared kind survives
+   request -> committed config -> observation and selects the runtime adapter. *)
+let test_an_alias_shaped_id_preserves_the_declared_kind () =
+  with_workspace (fun ~base_path ~path ->
+    let change =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint", `Assoc
+            [ "id", `String "elevenlabs"
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "https://fixture.invalid/v1"
+            ]
+        ]
+    in
+    (match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+     | Error error -> Alcotest.fail (Actions.error_message error)
+     | Ok _ -> ());
+    let endpoint =
+      match Voice_setup.observe ~runtime_config_path:path with
+      | Ok (_, Some { Voice_config.stt = Some stt; _ }) ->
+        (match List.find_opt
+                 (fun (ep : Voice_config.endpoint) -> ep.id = "elevenlabs")
+                 stt.endpoints with
+         | Some endpoint -> endpoint
+         | None -> Alcotest.fail "the committed endpoint is absent")
+      | Ok _ -> Alcotest.fail "the committed STT section is absent"
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+    Alcotest.(check bool) "the runtime uses the declared transport" true
+      (adapter.transport = Voice_runtime_overlay.Openai_compat);
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      match member "endpoints" (member "stt" json) with
+      | `List endpoints ->
+        let observed = List.find (fun ep -> string_member "id" ep = "elevenlabs") endpoints in
+        Alcotest.(check string) "the observation names the same kind"
+          "openai_compat" (string_member "kind" observed)
+      | _ -> Alcotest.fail "the observation must carry STT endpoints")
+
 
 (* The fixture's own endpoint carries a timeout on an openai_compat kind, so the
    round trip has to keep accepting that pair. *)
@@ -815,8 +846,8 @@ let () =
             test_the_observation_names_the_tts_tuning
         ] )
     ; ( "the declared kind is what the runtime will use"
-      , [ Alcotest.test_case "an id contradicting the kind" `Quick
-            test_an_id_that_contradicts_the_kind_is_refused
+      , [ Alcotest.test_case "an alias-shaped id preserves the declared kind" `Quick
+            test_an_alias_shaped_id_preserves_the_declared_kind
         ; Alcotest.test_case "a timeout on an http endpoint stays accepted" `Quick
             test_a_timeout_on_an_http_endpoint_is_accepted
         ] )

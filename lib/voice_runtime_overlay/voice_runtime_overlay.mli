@@ -48,10 +48,8 @@ type stt_request =
 
 val resolve_adapter : string -> adapter option
 val adapter_for_endpoint_kind : Voice_config.endpoint_kind -> adapter
-(** The adapter a kind names, with no id consulted. {!adapter_for_endpoint}
-    resolves the id first and falls back to this, so a caller that needs to know
-    whether an id is pulling an endpoint away from its declared kind compares
-    the two. *)
+(** The adapter a kind names. Endpoint resolution uses this same mapping;
+    endpoint ids never override the declared transport. *)
 
 val adapter_for_endpoint : Voice_config.endpoint -> adapter
 val select_endpoints : ?provider:string -> Voice_config.endpoint list -> Voice_config.endpoint list
@@ -70,8 +68,8 @@ type speaker =
 val speaker_of_transport : transport -> speaker
 
 val speaker_of_endpoint : Voice_config.endpoint -> speaker
-(** {!speaker_of_transport} for the adapter this endpoint resolves to, so an id
-    that aliases another adapter is answered for the adapter it reaches. *)
+(** {!speaker_of_transport} for the adapter this endpoint's declared kind names.
+    An id that happens to spell another adapter's alias does not change it. *)
 val default_agent_voices : unit -> (string * string) list
 val default_session_url : path:string -> string
 val session_endpoint_result : Voice_config.t -> (Voice_config.endpoint, string) result

@@ -283,7 +283,7 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
 (* Resolve the HTTP endpoint's model, independently of the MCP winner. *)
-let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~audio_device () =
+let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~message ~voice ~audio_device () =
   let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
@@ -1028,7 +1028,7 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
-      ~tts
+      ~(tts : Voice_config.tts_config)
       ~agent_id
       ~message
       ~priority

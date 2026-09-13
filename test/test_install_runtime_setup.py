@@ -1047,6 +1047,8 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertNotIn('default_voice', endpoint)
 
     def test_voice_verify_checks_the_workspace_it_is_pointed_at(self):
+        binary = BINARY
+        assert binary is not None
         # A workspace set up with --base-path is checked with --base-path. The
         # loader finds runtime.toml through the environment, so without the flag
         # and with nothing exported there is no workspace to check -- and the
@@ -1065,18 +1067,20 @@ base_url = "https://voice.fixture.invalid/v1"
                     tempfile.TemporaryDirectory(prefix='voice-verify-home-') as home:
                 env['HOME'] = home
                 pointed = subprocess.run(
-                    [BINARY, 'voice-verify', '--base-path', str(base), '--message', 'check'],
+                    [binary, 'voice-verify', '--base-path', str(base), '--message', 'check'],
                     capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
                 self.assertIn('macos-say', pointed.stdout, pointed.stderr)
                 self.assertNotIn('voice config missing', pointed.stdout)
                 unpointed = subprocess.run(
-                    [BINARY, 'voice-verify', '--message', 'check'],
+                    [binary, 'voice-verify', '--message', 'check'],
                     capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
                 self.assertEqual(unpointed.returncode, 1)
                 self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
 
 
     def test_voice_verify_uses_explicit_workspace_for_config_and_command(self):
+        binary = BINARY
+        assert binary is not None
         with self.workspace() as (ambient, ambient_runtime), self.workspace() as (selected, selected_runtime):
             calls = selected / 'probe-calls.json'
             command = selected / 'fake-whisper'
@@ -1101,7 +1105,7 @@ base_url = "https://voice.fixture.invalid/v1"
 
             def probe():
                 return subprocess.run(
-                    [BINARY, 'voice-verify', '--base-path', str(selected), '--audio', str(audio), '--json'],
+                    [binary, 'voice-verify', '--base-path', str(selected), '--audio', str(audio), '--json'],
                     capture_output=True, text=True, env=env, check=False,
                 )
 

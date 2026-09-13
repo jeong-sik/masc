@@ -484,7 +484,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
         @ (match view.receipt with None -> [] | Some json ->
             List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
 
-let lines ?(height=24) ?(failed_note = "") ~width view =
+let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
   match visual_lines ~failed_note ~height ~width view with
   | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None ->
@@ -599,8 +599,8 @@ let rec finite_values = function
            | _ -> None)
   | _ -> None
 
-let technical_lines ~width view =
-  match visual_lines ~height:24 ~width view with
+let technical_lines ?(height=24) ?(failed_note = "") ~width view =
+  match visual_lines ~failed_note ~height ~width view with
   | Some lines ->
       List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None -> []
@@ -619,6 +619,7 @@ let action_target view =
           Option.bind view.snapshot (fun snapshot ->
             List.find_opt (fun instance -> String.equal instance.id id) snapshot.instances)))
   | Rows -> None
+  | Timeline | Connections -> None
 
 let open_actions ~request_id view =
   let* instance = match action_target view with
@@ -740,7 +741,7 @@ let rec action_fields prefix = function
       action_fields (if prefix="" then key else prefix ^ "." ^ key) value) fields
   | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
 
-let lines ~width view =
+let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.action_menu with
   | Some menu ->
       (["Run action on " ^ menu.target_title;
@@ -755,7 +756,8 @@ let lines ~width view =
           (Masc.Tui_decode.sanitize_terminal_text line))
   | None ->
       if view.technical_details || Option.is_some view.document_key || Option.is_some view.draft
-      then technical_lines ~width view
-      else compact_lines ~width view |> List.concat_map (fun line ->
+      then technical_lines ~height ~failed_note ~width view
+      else if view.focus = Timeline || view.focus = Connections then visual_text_lines ~height ~failed_note ~width view
+      else compact_lines ~width view |>  List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))

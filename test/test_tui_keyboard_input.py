@@ -12290,10 +12290,18 @@ def fusion_list_detail_interaction(
             output,
             b"masc://overview/tasks/task-linked-501",
         )
-        verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
-        )
-        verdict_plain = CSI_RE.sub(b"", verdict)
+        verdict_start = len(output)
+        send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
+        # The heading is painted before asynchronous task/goal enrichment.
+        # Observe the linked goal and the finished footer before checking the
+        # accumulated screen, rather than the first partial detail frame.
+        for observed in (b"masc://planning/goal-ssim-501", b"Left/Esc:list"):
+            wait_for_output(process, master_fd, output, observed,
+                            start=verdict_start, timeout=3.0)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=end_of_needle(output, b"masc://planning/goal-ssim-501", verdict_start),
+                        timeout=3.0)
+        verdict_plain = screen_text(bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)]))
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them
         # met on a screen, so a verdict said "approve" without saying what it
@@ -12306,7 +12314,7 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            b"left/Esc:list",
+            b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(

@@ -298,6 +298,10 @@ val decide_modality_reroute_for_runtime_candidates :
     [checkpoint_messages] and [initial_messages], so media already in a resumed
     checkpoint counts. *)
 
+val runtime_accepts_image_input : runtime:Runtime.t -> bool
+(** Image admission from the selected materialized runtime, without rereading
+    a mutable registry. Includes model and execution transport capabilities. *)
+
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->
   Agent_core.Types.content_block list ->

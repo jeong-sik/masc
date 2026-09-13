@@ -6020,6 +6020,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6104,6 +6105,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6207,6 +6209,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6649,8 +6652,8 @@ value = {surface="dashboard", content="must not run"}
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
-          ~content_transport:Runtime_official_client_tool.Codex ~tool_approval:None
-          ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
+          ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
+          ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
           ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
@@ -6723,6 +6726,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6842,6 +6846,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6969,6 +6974,7 @@ let test_write_then_unchanged_read_completes () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -7998,7 +8004,9 @@ default = "official.primary"
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run ?official_client_continuation:continuation
+      Masc.Keeper_codex_runtime.run
+        ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+          ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
         ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
         ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."
@@ -8621,6 +8629,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
       check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
       let dynamic = Masc.Keeper_official_client_host.dynamic_tools
           ~content_transport:Runtime_official_client_tool.Codex
+          ~accepts_image_input:true
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
           ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
           ~event_bus:None ~context_injector:None

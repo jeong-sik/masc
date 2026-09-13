@@ -561,6 +561,31 @@ let tool_hook_error_to_string = function
       detail
 ;;
 
+(* The model declaration is the MASC SSOT for media input, and dispatch fails
+   closed on it before a turn starts
+   ([Runtime_agent.apply_runtime_model_input_capabilities]). A tool result is
+   model input too, but it is built mid-turn, after that check has run. Without
+   this the Codex, Claude Code and Antigravity hosts would hand an image to a
+   text-only model and collect the provider's rejection seconds later — losing
+   a textual receipt that was usable, with the tool's effect already applied.
+   Antigravity answers [false] for every model: its transport carries text. *)
+let image_capability_error ~accepts_image_input content_blocks =
+  if accepts_image_input
+  then None
+  else
+    match content_blocks with
+    | None -> None
+    | Some blocks ->
+      if List.exists
+           (function Agent_core.Types.Image _ -> true | _ -> false)
+           blocks
+      then
+        Some
+          "official-client tool result cannot deliver image content to a \
+           runtime whose model does not accept image input"
+      else None
+;;
+
 let record_terminal_error terminal_error detail =
   if Option.is_none !terminal_error then terminal_error := Some detail
 ;;
@@ -574,16 +599,22 @@ type repeated_call_state =
    consecutive transitions made no progress, matching the Agent Core guard. *)
 let repeated_call_abort_threshold = 3
 
+(* Hash what the model is shown, branching the way projection branches:
+   [None] delivers [content], [Some blocks] delivers the blocks and never
+   [content]. Hashing both let a tool whose unused flat receipt carries a
+   timestamp or a duration look like progress on every identical call, so the
+   repeated-call abort never fired on it. The shape tag keeps a text-only
+   result and a block result from colliding on the same bytes. *)
 let dynamic_tool_fingerprint ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
-  let context = feed_string context result.content in
   let context = match result.content_blocks with
-    | None -> feed_string context "text-only"
+    | None -> feed_string (feed_string context "text-only") result.content
     | Some blocks ->
-      feed_string context
+      feed_string
+        (feed_string context "content-blocks")
         (`List (List.map Llm_provider.Api_common.content_block_to_json blocks)
          |> Yojson.Safe.to_string)
   in
@@ -801,7 +832,8 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_agent_core ~content_transport ~tool_approval ~runtime_label ~keeper_name
+let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+    ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
@@ -940,10 +972,20 @@ let dynamic_tool_of_agent_core ~content_transport ~tool_approval ~runtime_label 
         in
         match execute () with
         | result ->
+          let delivery =
+            match image_capability_error ~accepts_image_input result.content_blocks with
+            | Some detail -> Error detail
+            | None ->
+              (match
+                 Runtime_official_client_tool.project_content content_transport
+                   ~content:result.content ~content_blocks:result.content_blocks
+               with
+               | Ok _items -> Ok ()
+               | Error detail -> Error detail)
+          in
           let result, delivery_error =
-            match Runtime_official_client_tool.project_content content_transport
-              ~content:result.content ~content_blocks:result.content_blocks with
-            | Ok _ -> result, None
+            match delivery with
+            | Ok () -> result, None
             | Error detail ->
               (* Execution may already have committed. Delivery failure must
                  reach settlement and the terminal outcome while retaining the
@@ -1110,7 +1152,8 @@ let dynamic_tool_of_agent_core ~content_transport ~tool_approval ~runtime_label 
   }
 ;;
 
-let dynamic_tools ~content_transport ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
+let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+    ~keeper_name ~turn_count ~tools
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
@@ -1129,6 +1172,7 @@ let dynamic_tools ~content_transport ~tool_approval ~runtime_label ~keeper_name 
       (List.map
          (dynamic_tool_of_agent_core
             ~content_transport
+            ~accepts_image_input
             ~tool_approval
             ~runtime_label
             ~keeper_name

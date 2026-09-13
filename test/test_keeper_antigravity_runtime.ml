@@ -797,6 +797,8 @@ let test_spawn_failure_is_pre_dispatch () =
                   let reports = ref [] in
                   let attempt =
                     Keeper_antigravity_runtime.run
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+                      ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-pre-dispatch"
@@ -892,6 +894,8 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   let reports = ref [] in
                   let attempt =
                     Keeper_antigravity_runtime.run
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+                      ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-blank-prompt"

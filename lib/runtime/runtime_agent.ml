@@ -750,6 +750,13 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
        ~default:Runtime_schema.model_capabilities_default)
   |> apply_execution_input_capabilities rt.execution
 
+(* Tool-result media admission uses the materialized dispatch snapshot, so a
+   concurrent configuration replacement cannot change the active client's
+   capabilities between selection and host construction. *)
+let runtime_accepts_image_input ~(runtime : Runtime.t) =
+  (input_capabilities_of_runtime runtime).Llm_provider.Capabilities.supports_image_input
+;;
+
 (* RFC-0440: one candidate set for every media consumer. The keeper reroute
    (RFC-0265) used to see only the lane it dispatched on and the vision tool
    only [runtime.media_failover]; a lane whose one image-capable head was down

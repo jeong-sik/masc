@@ -47,26 +47,84 @@ let dynamic_tool_bytes tools =
    result; neither may silently turn a non-text result into successful prose. *)
 type content_transport = Codex | Mcp
 
+(* The media types an official-client image item accepts. Both transports
+   close on the same set: the Codex app-server item and the Claude Code MCP
+   ImageContent. The initial-image validators
+   ([Runtime_codex_app_server.validate_images],
+   [Runtime_claude_code.validate_images]) read it from here so a turn image and
+   a tool-result image are never judged by two lists that drift apart. *)
+let official_client_image_media_types =
+  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+;;
+
+let validate_base64_image_data data =
+  if String.trim data = "" then Error "must not be empty"
+  else if String.exists (fun c -> c = '\n' || c = '\r') data then Error "must not contain newlines"
+  else match Base64.decode data with
+    | Ok _ -> Ok ()
+    | Error _ -> Error "must contain valid Base64 data"
+;;
+
 let project_content transport ~content ~content_blocks =
-  (* None is the producer's text-only result; unknown/unsupported media fail below.
-     DET-OK: preserve explicit text for None; Some blocks is authoritative,
-     including an empty list. *)
+  (* DET-OK: [None] is the producer's text-only result, so [content] is the payload;
+     [Some] stays authoritative even when empty, and unsupported media error below. *)
   let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
-  let text value = match transport with
+  (* [Api_common.content_block_to_json] sanitizes every Text it serializes, so
+     a block that reaches a provider through the canonical path can never carry
+     invalid UTF-8. This path writes the client's JSON itself; without the same
+     call a tool could emit bytes the app-server or MCP client refuses to parse
+     after the tool has already run. *)
+  let text value =
+    let value = Llm_provider.Utf8_sanitize.sanitize value in
+    match transport with
     | Codex -> `Assoc ["type", `String "inputText"; "text", `String value]
     | Mcp -> `Assoc ["type", `String "text"; "text", `String value]
   in
   let unsupported kind = Error ("official-client tool result cannot deliver " ^ kind) in
+  let malformed detail = Error ("official-client tool result image " ^ detail) in
+  (* Fail closed on this side of the process boundary. The producer has already
+     run, so a payload the app-server or the MCP client rejects comes back as a
+     turn failure seconds later, attributed to the thread rather than to the
+     tool that built it -- and with the tool's effect already applied. The
+     initial-image path refuses the same shapes before dispatch; a tool result
+     is model input too. *)
+  let base64_payload ~media_type data =
+    match validate_base64_image_data data with
+    | Ok () -> Ok (media_type,data)
+    | Error detail -> malformed ("base64 data " ^ detail)
+  in
+  let checked_base64 ~media_type data =
+    if not (List.mem media_type official_client_image_media_types)
+    then
+      malformed
+        (Printf.sprintf
+           "media type %S is not one of %s"
+           media_type
+           (String.concat ", " official_client_image_media_types))
+    else base64_payload ~media_type data
+  in
   let project = function
     | Agent_core.Types.Text value -> Ok (text value)
     | Agent_core.Types.Image {media_type; data; source_type} ->
       (match transport, source_type with
-       | Codex, Base64 -> Ok (`Assoc
-           ["type", `String "inputImage";
-            "imageUrl", `String ("data:" ^ media_type ^ ";base64," ^ data)])
+       | Codex, Base64 ->
+         Result.map
+           (fun (media_type, data) -> `Assoc
+              ["type", `String "inputImage";
+               "imageUrl", `String ("data:" ^ media_type ^ ";base64," ^ data)])
+           (checked_base64 ~media_type data)
        | Codex, Url -> Ok (`Assoc ["type", `String "inputImage"; "imageUrl", `String data])
-       | Mcp, Base64 -> Ok (`Assoc
-           ["type", `String "image"; "mimeType", `String media_type; "data", `String data])
+       (* MCP's own ImageContent leaves the media-type set open, but the client
+          behind this transport does not: Claude Code refuses anything outside
+          the shared set before it spawns. Letting a tool result through here
+          would reach the provider in a format the initial-image path already
+          rejects, and fail the turn after the tool ran. *)
+       | Mcp, Base64 ->
+         Result.map
+           (fun (media_type, data) -> `Assoc
+              ["type", `String "image"; "mimeType", `String media_type;
+               "data", `String data])
+           (checked_base64 ~media_type data)
        | (Codex | Mcp), File_id -> unsupported "file-id image content"
        | Mcp, Url -> unsupported "URL image content over MCP")
     | Agent_core.Types.Audio _ -> unsupported "audio content"

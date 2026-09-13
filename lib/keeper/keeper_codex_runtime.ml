@@ -492,7 +492,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -730,6 +730,7 @@ let run_without_lifecycle ~on_session_settled ~required_native_posture ~official
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -815,6 +816,7 @@ let run_without_lifecycle ~on_session_settled ~required_native_posture ~official
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -1225,7 +1227,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1296,7 +1298,7 @@ let run ?required_native_posture ?official_client_continuation ~runtime_id ~keep
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~keeper_name

@@ -13734,6 +13734,7 @@ let render_agenda (state : state) =
     | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay

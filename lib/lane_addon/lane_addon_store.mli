@@ -24,6 +24,10 @@ val append_observation : t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> Lane_addon_types.output -> (unit, string) result
 val observations : t -> instance_id:string ->
   ((Yojson.Safe.t * Lane_addon_types.output) list, string) result
+val read_observation : instance_id:string -> seq:int -> max_bytes:int -> t ->
+  (Lane_addon_types.output, string) result
+(** One immutable completed record. Missing, oversized and malformed records
+    fail; callers must not advance a consumer cursor on those failures. *)
 val query_observations : t -> instance_id:string -> expected_seq:int -> max_bytes:int ->
   since:float option -> until:float option -> lane_id:string option ->
   (Lane_addon_types.output, string) result

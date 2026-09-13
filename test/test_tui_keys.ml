@@ -207,8 +207,8 @@ let schedule_form_row : schedule_row =
   ; sch_schedule_instance_id = "instance-old"
   ; sch_status = "scheduled"
   ; sch_source = "operator_request"
-  ; sch_requested_by = "operator (human_operator)"
-  ; sch_scheduled_by = "operator (human_operator)"
+  ; sch_requested_by = "operator (human)"
+  ; sch_scheduled_by = "operator (human)"
   ; sch_requested_at_iso = "2026-09-01T00:00:00Z"
   ; sch_due_at_iso = Some "2026-09-02T00:00:00Z"
   ; sch_next_due_at_iso = Some "2026-09-02T00:00:00Z"
@@ -493,7 +493,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   let keeper name : Tui_decode.keeper =
     { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name; k_trace_id = name; k_paused = false; k_current_task_id = None
     ; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.
-    ; k_last_turn_ts = ""; k_last_proactive_outcome = "never"
+    ; k_last_turn_ts = ""; k_last_proactive_outcome = None
     ; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z"
     }
   in
@@ -1851,6 +1851,38 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Tools", Tools
     ]
 
+(* An open approval is a yes-or-no question, and its footer used to spell the
+   answer as two items -- "y:confirm  n:deny" -- which a fitted row drops one
+   at a time: at 44 cells it had lost [n], and at 34 both. The pinned spelling
+   is "y / n", the one the queue's own row already used. *)
+let test_an_open_approval_keeps_its_answer_keys_at_every_width () =
+  let hints = Masc_tui_keys.footer_hints_approval_detail in
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i =
+      i + n <= h
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  Alcotest.(check bool) "the queue and the open approval spell it alike" true
+    (holds "y / n:decide" hints);
+  List.iter
+    (fun width ->
+      let row =
+        Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:width ~port:8935
+          ~hints ()
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "the answer survives %d cells" width)
+        true
+        (holds "y / n" row);
+      Alcotest.(check bool)
+        (Printf.sprintf "and so does the way out at %d cells" width)
+        true
+        (holds "Esc" row))
+    [ 120; 60; 44; 34 ]
+
 let test_the_code_footer_names_the_keys_of_the_pane_it_draws () =
   (* The renderer used to spell this footer by hand, naming d, H, m and w.
      The three language-server questions worked on that screen and never
@@ -2000,6 +2032,8 @@ let () =
             `Quick test_code_asks_the_language_server_three_questions
         ; Alcotest.test_case "the Code footer names the keys of its pane"
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
+        ; Alcotest.test_case "an open approval keeps its answer keys" `Quick
+            test_an_open_approval_keeps_its_answer_keys_at_every_width
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "Code search counts follow immutable fetched rows"

@@ -30,6 +30,24 @@ val expand_turn_label : string
 (** How that key is printed on the folded line. Beside the byte so the name
     and the binding cannot drift apart. *)
 
+val voice_speak_key : string
+val voice_listen_key : string
+(** Ctrl-Y and Ctrl-A as the table spells them, for the rows that name them
+    beside a draft or a capture. *)
+
+val voice_keys_hint : string
+(** The two voice keys named for a reader looking at an empty draft; the
+    composer row and the chat pane draw this one string. *)
+
+val roster_toggle_key : string
+(** Ctrl-B, as the roster pane's title names it. *)
+
+val context_inspector_key : string
+val context_inspector_label : string
+(** Ctrl-X: the byte the chat matches and the name the context header prints
+    beside the figure it explains. The table lists no footer binding for it;
+    its home is that row. *)
+
 val global : binding list
 (** Shared bindings shown once in Help. Text input and modal panels can own a
     printable key before its cross-surface fallback runs; each such binding's
@@ -66,6 +84,11 @@ val footer_hints : Masc_tui_types.surface -> string
 val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
+
+val footer_hints_approval_detail : string
+(** The keys an open approval answers to. The decision keys are one item
+    ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
+    the scroll before it gives up the answer. *)
 
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys

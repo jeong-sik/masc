@@ -7,9 +7,12 @@ let of_args = function
      | Some reference, None ->
        (match Tool_output.normalized_artifact_ref_of_json reference with
         | Tool_output.Decoded_normalized_artifact_ref reference ->
-          (match List.assoc_opt "mode" fields with
-           | Some (`String "overwrite") -> Ok (Artifact reference)
-           | Some _ | None -> Error (Invalid "Artifact content requires overwrite mode"))
+          (match Keeper_tool_write_mode.of_args (`Assoc fields) with
+           | Ok Keeper_tool_write_mode.Overwrite -> Ok (Artifact reference)
+           | Ok (Keeper_tool_write_mode.Append | Keeper_tool_write_mode.Patch as mode) ->
+             Error (Invalid (Printf.sprintf "content_artifact requires overwrite mode, got %S"
+                               (Keeper_tool_write_mode.to_string mode)))
+           | Error detail -> Error (Invalid (Keeper_tool_write_mode.rejection_message detail)))
         | Tool_output.Invalid_normalized_artifact_ref {detail} -> Error (Invalid detail)
         | Tool_output.Not_normalized_artifact_ref -> Error (Invalid "Expected an exported artifact reference"))
      | None, Some (`String content) -> Ok (Text content)

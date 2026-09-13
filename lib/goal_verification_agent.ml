@@ -61,7 +61,9 @@ let group_pending_by_goal work =
 
 let collect_pending config : (pending_work list, string) result =
   match Goal_store.list_goals_result config ~phase:Goal_phase.Verifying () with
-  | Error _ as error -> error
+  (* The scan contract stays a string in PR-1; RFC-0444 PR-5 records
+     [Scan_skipped of unavailable] as a durable row instead. *)
+  | Error unavailable -> Error (Goal_store.unavailable_to_string unavailable)
   | Ok goals ->
   let rec collect acc = function
     | [] -> Ok (List.rev acc)
@@ -195,6 +197,7 @@ let defer ~goal_id ~reason =
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
 let bind_review config ~goal_id =
+  Result.map_error Goal_store.write_error_to_string @@
   Goal_store.transact_goal config ~goal_id (fun goal ->
     match goal.Goal_store.phase with
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->

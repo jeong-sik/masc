@@ -603,6 +603,7 @@ let test_direct_turn_reuses_current_task_context () =
   in
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:(Inputs.Current_task task)
       ~held_task_skills:[]
@@ -632,6 +633,7 @@ let test_direct_turn_reuses_current_task_context () =
 let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
@@ -659,6 +661,7 @@ let test_direct_turn_carries_held_task_skills () =
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:[]
@@ -688,6 +691,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
       | Error (Invalid detail | Unavailable detail) -> fail detail in
     Publication.publish ~base_path ~proposal_id |> require;
     let render () = Turn.For_testing.direct_turn_dynamic_context
+      ~lane_updates:(Ok (`List []))
       ~workspace_memory:(Publication.observe ~base_path)
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
       ~approval_authority_text:"" ~recent_direct_conversation_text:"owner conversation"

@@ -6,5 +6,6 @@
  (deps
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_loader.ml
+  %{workspace_root}/bin/masc_tui_ansi.ml
   (glob_files %{workspace_root}/bin/masc_tui_render*.ml))
  (libraries alcotest ast_grep))

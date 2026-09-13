@@ -162,7 +162,10 @@ docker pull "$image"
 docker run --rm "$image" bash -lc 'ldd --version | head -1; ocaml -version'
 
 docker rm -f "$container" >/dev/null 2>&1 || true
-docker run -d --name "$container" "$image" sleep infinity >/dev/null
+docker run -d --name "$container" \
+  -e PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
+  -e LIBRARY_PATH=/usr/local/lib -e CPATH=/usr/local/include \
+  "$image" sleep infinity >/dev/null
 
 # libncurses-dev and libprotobuf-dev are here for the opam solve, not for the
 # link. conf-ncurses runs `pkg-config ncurses`, which needs the .pc file that
@@ -209,6 +212,9 @@ tar -C "$repo_root" --null -T "$tracked" -cf - \
   | docker exec -i -u root "$container" bash -c \
       'mkdir -p /src && tar -C /src -xf - && chown -R opam:opam /src'
 
+echo "== pinned SQLite at the existing glibc floor"
+docker exec -u root "$container" bash /src/scripts/build-release-sqlite.sh "${jobs:-2}"
+
 # The repo supports exactly OCaml 5.5.1; the image's default switch is not
 # guaranteed to be that patch release.
 echo "== opam switch 5.5.1"
@@ -242,16 +248,9 @@ docker exec "$container" bash -lc '
   done
 '
 
-# Bake SQLite into the executables rather than requiring libsqlite3.so.0 on
-# the target host: libsqlite3-dev ships the static archive, and removing the
-# shared linker symlink makes -lsqlite3 resolve to it.
-#
-# The order matters and is release.yml's. Removing the symlink before `opam
-# install` instead makes the OCaml sqlite3 package fail to build, because its
-# stub *shared* library cannot link a non-PIC static archive
-# ("relocation ... can not be used when making a shared object"). The symlink
-# has to survive until the bindings are built and disappear before the
-# executables are linked.
+# The pinned /usr/local archive is PIC and supplies both binding stubs and
+# final executables. Remove distro shared linker aliases as well so a missing
+# prefix cannot silently restore a dependency on the host's old shared SQLite.
 echo "== prefer static SQLite"
 docker exec -u root "$container" bash -c 'rm -f /usr/lib/*/libsqlite3.so /usr/lib/libsqlite3.so'
 
@@ -327,8 +326,10 @@ echo "== collect into $out_dir"
 mkdir -p "$out_dir"
 for binary in "${release_binaries[@]}"; do
   name="$(basename "$binary")"
+  echo "== export $binary -> $out_dir/$name"
   docker cp "$container:/src/_build/default/$binary" "$out_dir/$name"
   chmod +x "$out_dir/$name"
+  echo "== exported $name ($(wc -c < "$out_dir/$name" | tr -d ' ') bytes)"
 done
 
 # The checked release binaries have already been exported. Dune lifecycle
@@ -338,6 +339,7 @@ done
 # matrix where its native dependencies live, then verify its exported logs
 # against the checked-out commit before the host installation smoke uses them.
 if [ -n "$lifecycle_out" ]; then
+  echo "== lifecycle evidence begin"
   lifecycle_status=0
   docker exec -e MASC_BUILD_COMMIT="$build_commit" \
     -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" "$container" bash -lc '
@@ -347,6 +349,7 @@ if [ -n "$lifecycle_out" ]; then
     python3 scripts/keeper-full-lifecycle-evidence.py \
       --build-source-sha "$MASC_BUILD_COMMIT" --output-dir /tmp/masc-release-lifecycle
   ' || lifecycle_status=$?
+  echo "== lifecycle evidence finished with exit $lifecycle_status; exporting logs"
   mkdir -p "$lifecycle_out"
   docker cp "$container:/tmp/masc-release-lifecycle/." "$lifecycle_out/"
   if [ "$lifecycle_status" -ne 0 ]; then

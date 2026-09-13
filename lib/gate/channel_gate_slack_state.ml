@@ -85,6 +85,39 @@ let trigger_policy_json () =
 let bot_token_opt = Env_config_slack.bot_token_opt
 let app_token_opt = Env_config_slack.app_token_opt
 
+(* Why the connector cannot do its job, as a closed sum. Slack needs both
+   credentials and they fail differently: without SLACK_APP_TOKEN the Socket
+   Mode gateway never starts, and without SLACK_BOT_TOKEN it starts and
+   receives but every reply fails ([send_message] returns [Missing_token]).
+   A connector that cannot answer is not available, so both are part of the
+   verdict. [Connector_unavailable] carries the config boundary's own
+   operator-facing reason (disabled, or an invalid [slack] section); the
+   tokens are suppressed in that state, so it is checked first. *)
+type credential_error =
+  | Connector_unavailable of string
+  | Missing_app_token
+  | Missing_bot_token
+
+let credential_error_message = function
+  | Connector_unavailable reason -> reason
+  | Missing_app_token -> "SLACK_APP_TOKEN is unset or empty"
+  | Missing_bot_token ->
+    "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
+     chat.postMessage fails"
+
+let credential_error_of_presence ~app_present ~bot_present =
+  match Env_config_slack.unavailable_reason () with
+  | Some reason -> Some (Connector_unavailable reason)
+  | None ->
+    if not app_present then Some Missing_app_token
+    else if not bot_present then Some Missing_bot_token
+    else None
+
+let credential_error () =
+  credential_error_of_presence
+    ~app_present:(Option.is_some (app_token_opt ()))
+    ~bot_present:(Option.is_some (bot_token_opt ()))
+
 let gateway_state_label = function
   | Slack_gateway_state.Disconnected -> "disconnected"
   | Awaiting_hello -> "awaiting_hello"
@@ -131,20 +164,8 @@ let status_json ?(audit_limit = 10) () =
     | Ok bindings -> bindings, ""
     | Error error -> [], Store.binding_store_error_to_string error
   in
-  (* Slack needs both credentials to do its job, and they fail differently:
-     without SLACK_APP_TOKEN the Socket Mode gateway never starts, and without
-     SLACK_BOT_TOKEN it starts and receives but every reply fails
-     ([send_message] returns [Missing_token]). A connector that cannot answer
-     is not available, so both are part of the verdict. *)
   let credential_error =
-    match Env_config_slack.unavailable_reason () with
-    | Some reason -> reason
-    | None ->
-      if not app_present then "SLACK_APP_TOKEN is unset or empty"
-      else if not bot_present then
-        "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
-         chat.postMessage fails"
-      else ""
+    credential_error_of_presence ~app_present ~bot_present
   in
   let available =
     app_present && bot_present && startup_ok && binding_store_read_ok
@@ -165,8 +186,7 @@ let status_json ?(audit_limit = 10) () =
          | Failed msg -> Some msg
          | Disconnected | Awaiting_hello | Connected | Reconnect_pending _ ->
            None)
-      ; (if String.equal credential_error "" then None
-         else Some credential_error)
+      ; Option.map credential_error_message credential_error
       ]
       |> List.filter_map Fun.id
       |> String.concat "; "

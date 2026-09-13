@@ -1290,7 +1290,8 @@ let active_goal_summaries_for_task
              ; summary_review_note = goal.last_review_note
              }
          else None)
-      ) (Goal_store.list_goals_result config ())
+      ) (Result.map_error Goal_store.unavailable_to_string
+           (Goal_store.list_goals_result config ()))
 ;;
 
 let constitution_unreadable_reported : (string, unit) Hashtbl.t =
@@ -1436,6 +1437,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : (goal_summary list, string) result option)
+    ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_publication.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
@@ -1795,6 +1797,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        keeper commits or upstream advances, not per cycle. Projection only —
        it states where each checkout stands so the keeper can choose to
        fetch/rebase; nothing here schedules or forces that work. *)
+    | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     | Keeper_context_layers.Workspace_memory ->
       format_workspace_memory_observation workspace_memory
     | Keeper_context_layers.Repository_freshness ->
@@ -2030,6 +2033,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       | Keeper_context_layers.Connected_surfaces
       | Keeper_context_layers.Namespace_state
       | Keeper_context_layers.Workspace_memory
+      | Keeper_context_layers.Lane_updates
       | Keeper_context_layers.Repository_freshness
       | Keeper_context_layers.Autonomous_trigger
       | Keeper_context_layers.Scheduled_automation
@@ -2122,6 +2126,7 @@ let build_prompt
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?lane_updates
       ?repository_freshness
       ?context_budget_bytes
       ~observation
@@ -2138,6 +2143,7 @@ let build_prompt
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?lane_updates
       ?repository_freshness
       ?context_budget_bytes
       ~observation
@@ -2155,6 +2161,7 @@ let build_prompt_preview
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?lane_updates
       ?repository_freshness
       ~observation
       ()
@@ -2168,6 +2175,7 @@ let build_prompt_preview
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?lane_updates
     ?repository_freshness
     ~observation
     ()

@@ -348,20 +348,57 @@ let toggle_tool_visibility = function
   | Tools_full -> Tools_compact
 ;;
 
+(* The three Gate stances in the words the [w] chooser's help already uses
+   ("manual, Auto Judge or allow-all"), for the rows with no space for the
+   chooser's sentence. The chat header and the Keeper detail printed the wire
+   token instead -- "auto_judge" is the one spelling no other part of the
+   screen uses, and the row it sits on is where an operator decides whether to
+   send work. *)
+let gate_mode_word = function
+  | Masc.Keeper_gate_mode.Manual -> "manual"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Auto Judge"
+  | Masc.Keeper_gate_mode.Always_allow -> "allow-all"
+
+(* A stance as it arrives on the wire. A value this build does not know keeps
+   the server's own spelling rather than collapsing to one word: the reader is
+   deciding on it, and "unknown" would hide which unknown it is. *)
+let gate_mode_word_of_wire raw =
+  match Masc.Keeper_gate_mode.of_string raw with
+  | Some mode -> gate_mode_word mode
+  | None -> raw
+
 (* The chat header shows the effective stances, including their defaults. A
    blank label here is worse than repetition: this is the surface where the
    operator decides whether to send work, and AUTO/YOLO plus the Gate mode
    change what can happen after that send. A Keeper-level [workspace] value is
    inheritance, so resolve it through the workspace observation rather than
    printing a setting that is not itself a mode. *)
+(* The stance's one word, the wire's own: the chat header, the Keeper Info
+   row, the footer's [g:auto] and the event line all name it, and they named it
+   four ways -- AUTO, "asked", auto, "(auto)" -- so a reader had to know that
+   the header's AUTO and the Info row's "asked" were one fact. *)
+let tool_mode_word = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "auto"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "yolo"
+
+(* What the stance does to a tool call, beside its word. *)
+let tool_mode_effect = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
+
 let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
-  let chat_mode = if yolo then "YOLO" else "AUTO" in
+  let chat_mode =
+    String.uppercase_ascii
+      (tool_mode_word
+         (if yolo then Masc.Keeper_tool_approval_mode.Yolo
+          else Masc.Keeper_tool_approval_mode.Auto))
+  in
   let gate_mode =
     match keeper_gate_mode with
-    | Some mode when not (String.equal mode "workspace") -> mode
-    | Some _ | None -> Option.value ~default:"?" workspace_gate_mode
+    | Some mode when not (String.equal mode "workspace") -> Some mode
+    | Some _ | None -> workspace_gate_mode
   in
-  chat_mode, gate_mode
+  chat_mode, Option.map gate_mode_word_of_wire gate_mode
 ;;
 
 (* Usage coverage can be warming independently of the catalog. Missing time
@@ -1218,7 +1255,7 @@ type schedule_row = {
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
   sch_payload_summary: string option;
-  sch_last_wake_status: string option;
+  sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
   sch_last_wake_error: string option;
   sch_queue_projection_status: string option;
@@ -1355,7 +1392,7 @@ type schedule_snapshot = {
     only the newest of these on its row; the whole list arrives from the exact
     schedule lookup. *)
 type schedule_wake = {
-  swk_status: string;
+  swk_status: Schedule_contract_values.wake_status;
   swk_started_at_iso: string option;
   swk_finished_at_iso: string option;
   swk_error: string option;
@@ -2171,6 +2208,20 @@ type surface =
   | Resources
   | Tools
   | System_logs
+
+(** The Activity screen is two surfaces under one tab strip: the event
+    feed and the system logs, reached from each other with 1 and 2. A
+    rule about "the Activity screen" reads this rather than [Acting]
+    alone -- the pane that stays off that screen was keyed to the one
+    constructor, so pressing 2 opened it and narrowed the table by 56
+    cells, and 1 closed it again. *)
+let on_activity_screen = function
+  | Acting | System_logs -> true
+  | Overview | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Connectors | Runtime | Config
+  | Resources | Tools ->
+      false
 
 type browser_lane_visibility =
   | Browser_lane_hidden
@@ -3170,13 +3221,43 @@ module Browser_lane_view = struct
   }
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
+  type scene_scope_context = {
+    target : Browser_lane.node_ref;
+    role : Masc.Browser_scene.region_role;
+    label : string;
+  }
+  type scene_counts = {
+    article_count : int;
+    region_count : int;
+    link_count : int;
+    control_count : int;
+    raster_count : int;
+  }
+  type navigation_guard = {
+    expected_url : string;
+    navigation_source : Masc.Browser_scene.navigation_source;
+  }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
     | Read_refresh
     | Scene_read of int
     | Scene_regions of int
     | Scene_refresh of { tab_id : int; scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+    | Scene_scroll of {
+        tab_id : int;
+        document_id : string;
+        expected_url : string;
+        scene_view : Browser_lane.scene_view;
+        scope : Browser_lane.node_ref option;
+        delta_y : int;
+      }
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
+    | Scene_follow of { tab_id : int; document_id : string; node_id : string; expected_url : string }
+    | Scene_follow_refresh of {
+        tab_id : int;
+        guard : navigation_guard;
+        scene_view : Browser_lane.scene_view;
+      }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
@@ -3191,7 +3272,8 @@ module Browser_lane_view = struct
     clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
-    scene : scene option; scene_cursor : int;
+    scene : scene option; scene_cursor : int; scene_scope : scene_scope_context option;
+    scene_guard : navigation_guard option;
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
@@ -3217,12 +3299,16 @@ module Browser_lane_view = struct
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
+      scene_guard = None; read_view = Text_view; refresh_pending = None;
+      read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; read_view = Text_view }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
+    scene_guard = None; read_view = Text_view }
   let after_action t =
-    { t with reading = None; scene = None; scene_cursor = 0;
-      selected_tab = None; scroll = 0; load = Idle; read_continuation = No_read_continuation }
+    { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
+      scene_guard = None; selected_tab = None; scroll = 0; load = Idle;
+      read_continuation = No_read_continuation }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
     | No_read_continuation -> None | Deferred_read -> Some Read
@@ -3241,8 +3327,8 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Viewport_cadence _)), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)), _ -> Reading
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
      lane makes over HTTP, so the sixth -- the one for a browser that is not
@@ -3283,29 +3369,36 @@ module Browser_lane_view = struct
       | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
       | Some tab_id, Scene_view {scene_view;scope} ->
-          Some (Scene_refresh {tab_id;scene_view;scope})
+          (match t.scene_guard with
+           | Some guard when Option.is_none t.scene ->
+               Some (Scene_follow_refresh {tab_id;guard;scene_view})
+           | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
+    | Loading (_, (Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
     | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
     | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view
     | Scene_read _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
     | Scene_regions _ -> Scene_view {scene_view = Browser_lane.Regions; scope = None}
+    | Scene_scroll {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
     | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
+    | Scene_follow _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
+    | Scene_follow_refresh {scene_view;_} -> Scene_view {scene_view; scope = None}
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+      reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None;
+      scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
@@ -3320,7 +3413,7 @@ module Browser_lane_view = struct
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
                    | None, _ -> Idle
                  in
-                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scroll = 0;
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scroll = 0;
                    client_picker = Some 0; load }, false)
     | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
@@ -3449,7 +3542,110 @@ module Browser_lane_view = struct
              else (Hashtbl.add seen node.node_id (); true))
           scene.content.nodes
 
+  let scene_counts (scene : scene) =
+    let seen = Hashtbl.create 64 in
+    List.fold_left (fun counts (node : Masc.Browser_scene.node) ->
+      if Hashtbl.mem seen node.node_id then counts
+      else (
+        Hashtbl.add seen node.node_id ();
+        match node.kind with
+        | Region Masc.Browser_scene.Article ->
+            {counts with article_count = counts.article_count + 1}
+        | Region _ -> {counts with region_count = counts.region_count + 1}
+        | Control {href = Some _; _} -> {counts with link_count = counts.link_count + 1}
+        | Control _ -> {counts with control_count = counts.control_count + 1}
+        | Raster -> {counts with raster_count = counts.raster_count + 1}
+        | Text -> counts))
+      {article_count = 0; region_count = 0; link_count = 0;
+       control_count = 0; raster_count = 0}
+      scene.content.nodes
+
+  let scene_summary scene =
+    let counts = scene_counts scene in
+    let add count noun parts =
+      if count = 0 then parts
+      else parts @ [Masc_tui_message_layout.count_noun count noun]
+    in
+    let parts = [] in
+    let parts = add counts.article_count "article" parts in
+    let parts = add counts.region_count "region" parts in
+    let parts = add counts.link_count "link" parts in
+    let parts = add counts.control_count "control" parts in
+    let parts = add counts.raster_count "image" parts in
+    match parts with
+    | [] -> None
+    | _ -> Some (String.concat " · " parts)
+
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+  let scene_scope_context_for_node t (node : Masc.Browser_scene.node) =
+    match t.scene with
+    | Some scene ->
+        (match node.kind with
+         | Region role -> Some {target = {Browser_lane.document_id=scene.content.document_id;
+                                          node_id=node.node_id}; role; label=node.text}
+         | Text | Raster | Control _ -> None)
+    | None -> None
+
+  let scene_scope_context_for_index t index =
+    Option.bind (List.nth_opt (scene_targets t) index)
+      (scene_scope_context_for_node t)
+
+  (** The page's primary reading surface, when its semantic landmarks make
+      that choice unambiguous.  This is deliberately a closed, exact-role
+      shortcut: it never guesses from labels, text, CSS classes, or a URL.
+      A [main] landmark wins over an [article]; an ambiguous page stays under
+      operator control through the ordinary region picker. Role strings are
+      classified at the browser boundary before this exact match. *)
+  type primary_region_error =
+    | No_primary_region
+    | Ambiguous_primary_region
+
+  let primary_region_target t =
+    let regions = scene_targets t |> List.mapi
+      (fun index (node : Masc.Browser_scene.node) -> index, node)
+      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+        match node.kind with
+        | Region role -> Some (role, index, node)
+        | Text | Raster | Control _ -> None) in
+    let choose role =
+      match List.filter (fun (candidate, _, _) -> candidate = role) regions with
+      | [(_, index, node)] ->
+          (match t.scene with
+           | Some scene -> `Chosen (index, {Browser_lane.document_id=scene.content.document_id;
+                                            node_id=node.node_id})
+           | None -> `Missing)
+      | [] -> `Missing
+      | _ -> `Ambiguous in
+    match choose Masc.Browser_scene.Main with
+    | `Chosen target -> Ok target
+    | `Ambiguous -> Error Ambiguous_primary_region
+    | `Missing ->
+        (match choose Masc.Browser_scene.Article with
+         | `Chosen target -> Ok target
+         | `Ambiguous -> Error Ambiguous_primary_region
+         | `Missing -> Error No_primary_region)
+
+  type primary_region_action =
+    | Primary_regions of { tab_id : int }
+    | Primary_guarded_regions of { tab_id : int; guard : navigation_guard }
+    | Primary_focus of { tab_id : int; index : int; target : Browser_lane.node_ref }
+    | Primary_error of primary_region_error
+    | Primary_unavailable
+
+  let primary_region_action t =
+    match t.selected_tab with
+    | None -> Primary_unavailable
+    | Some tab_id ->
+        (match t.scene_guard with
+         | Some guard -> Primary_guarded_regions {tab_id;guard}
+         | None ->
+             match t.scene with
+             | Some scene when scene.content.view = Browser_lane.Regions ->
+                 (match primary_region_target t with
+                  | Ok (index, target) -> Primary_focus {tab_id;index;target}
+                  | Error error -> Primary_error error)
+             | Some _ | None -> Primary_regions {tab_id})
 
 
   let region_observed (target : Browser_lane.node_ref) (scene : scene) =
@@ -3483,7 +3679,10 @@ module Browser_lane_view = struct
           if tab.id = scene.tab_id then
             {tab with title = scene.content.title; url = scene.content.url}
           else tab) reading.tabs }) t.reading in
-    {t with scene = Some scene; reading; load = Idle;
+    let scene_scope = match scene.content.scope, t.scene_scope with
+      | Some target, Some context when target = context.target -> Some context
+      | (Some _ | None), _ -> None in
+    {t with scene = Some scene; scene_scope; scene_guard = None; reading; load = Idle;
       read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
       scene_cursor = Option.value ~default:0 selected_index;
       scroll = if Option.is_some selected_index then t.scroll else 0}
@@ -3502,29 +3701,60 @@ module Browser_lane_view = struct
                              || (scene.content.view = Browser_lane.Regions && scene.content.scope = None
                                  && match scope with Some target -> not (region_observed target scene) | None -> false)) ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
-    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+         | Ok _ -> {t with scene = None; scene_scope = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; scene_scope = None; load = Failed detail})
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_scroll {tab_id;_} | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_scroll {scene_view;scope;_} -> scene_view, scope
           | Scene_focus {target;_} -> Browser_lane.Content, Some target
           | Scene_click {scope;_} -> Browser_lane.Content, scope
+          | Scene_follow _ -> Browser_lane.Content, None
+          | Scene_follow_refresh {scene_view;_} -> scene_view, None
           | _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
                          && scene.tab_id = tab_id && t.selected_tab = Some tab_id
-                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope
+                         && (match operation with
+                             | Scene_scroll {document_id;_} -> scene.content.document_id = document_id
+                             | _ -> true) ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
+         | Ok _ ->
+             let scene_guard = match operation with
+               | Scene_follow_refresh {guard;_} -> Some guard
+               | _ -> t.scene_guard in
+             {t with scene = None; scene_scope = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
+         | Error detail ->
+             let scene_guard = match operation with
+               | Scene_follow_refresh {guard;_} -> Some guard
+               | _ -> t.scene_guard in
+             {t with scene = None; scene_scope = None; scene_guard; load = Failed detail})
+    | _ -> t
+
+  let accept_follow ~generation ~(guard : navigation_guard)
+      (result : (scene, string) result) t =
+    match t.load with
+    | Loading (current, Scene_follow {tab_id;_}) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = Browser_lane.Content
+                         && scene.content.scope = None ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; scene_scope = None; scene_guard = Some guard;
+             load = Failed "follow destination source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; scene_scope = None; scene_guard = Some guard;
+             load = Failed detail})
     | _ -> t
 
 
-  type scene_action = Read_region | Click_control
+  type scene_action = Read_region | Follow_link | Click_control
 
   let scene_target_action (node : Masc.Browser_scene.node) =
     match node.kind with
     | Region _ -> Some Read_region
+    | Control { href = Some _; clickable = true; disabled = false; _ } -> Some Follow_link
     | Control { clickable = true; disabled = false; _ } -> Some Click_control
     | Text | Raster | Control _ -> None
 
@@ -3541,11 +3771,36 @@ module Browser_lane_view = struct
           ordered in
         { t with scene_cursor = Option.value ~default:first next }
 
+  (** Move between exact [article] regions in an observed region scene. *)
+  let move_scene_article ~backwards t =
+    let articles = match t.scene with
+      | Some scene when scene.content.view = Browser_lane.Regions ->
+          scene_targets t |> List.mapi (fun index node -> index, node)
+      | Some _ | None -> [] in
+    let articles = articles
+      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+        match node.kind with
+        | Region Masc.Browser_scene.Article -> Some index
+        | Region _ | Text | Raster | Control _ -> None) in
+    match articles with
+    | [] -> t
+    | first :: _ ->
+        let ordered = if backwards then List.rev articles else articles in
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        let fallback = if backwards then List.hd (List.rev articles) else first in
+        { t with scene_cursor = Option.value ~default:fallback next }
+
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
         let target_kind = match node.kind with
-          | Region _ -> "region" | Control _ -> "control" | Text -> "text" | Raster -> "raster" in
+          | Region _ -> "region"
+          | Control {href = Some _; _} -> "link"
+          | Control _ -> "control"
+          | Text -> "text"
+          | Raster -> "raster" in
         let pinned = ["lane",`String (source_name scene.source);"tabId",`Int scene.tab_id;
           "expectedUrl",`String scene.content.url] @
           (match scene.client_id with None -> [] | Some id -> ["clientId",`String id]) in
@@ -3556,6 +3811,8 @@ module Browser_lane_view = struct
           | None -> `Null
           | Some Read_region -> `Assoc ["kind",`String "read_region";"tool",`String "BrowserRead";
               "input",`Assoc (pinned @ ["mode",`String "scene";"scope",`Assoc target])]
+          | Some Follow_link -> `Assoc ["kind",`String "follow_link";"tool",`String "BrowserInteract";
+              "input",`Assoc (pinned @ ["action",`String "follow_link"] @ target)]
           | Some Click_control -> `Assoc ["kind",`String "click_control";"tool",`String "BrowserInteract";
               "input",`Assoc (pinned @ ["action",`String "click"] @ target)] in
         let source = match node.source_context with
@@ -3579,10 +3836,22 @@ module Browser_lane_view = struct
             | None -> `Null
             | Some target -> `Assoc ["documentId",`String target.document_id;
                 "nodeId",`String target.node_id]);
+          "scopeContext",(match scene.content.scope, t.scene_scope with
+            | Some target, Some context when target = context.target ->
+                `Assoc ["documentId",`String context.target.document_id;
+                  "nodeId",`String context.target.node_id;
+                  "role",`String (Masc.Browser_scene.region_role_to_string context.role);
+                  "label",`String context.label]
+            | (Some _ | None), _ -> `Null);
           "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
             "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
           "truncated",`Bool scene.content.truncated;
-          "tag",`String node.tag;"text",`String node.text;"source",source]))
+          "tag",`String node.tag;"text",`String node.text;
+          "headingLevel",(match node.heading_level with None -> `Null | Some level -> `Int level);
+          "href",(match node.kind with
+            | Control {href = Some href; _} -> `String href
+            | Region _ | Control _ | Text | Raster -> `Null);
+          "source",source]))
     | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~action t =
@@ -3628,7 +3897,7 @@ module Browser_lane_view = struct
                        | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
                        | None -> false)
                | _ -> false in
-             { t with reading = Some reading; load = Idle; read_view = Text_view;
+             { t with reading = Some reading; scene_guard = None; load = Idle; read_view = Text_view;
                scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
@@ -3650,7 +3919,8 @@ module Browser_lane_view = struct
         let index = (current + direction + count) mod count in
         match List.nth_opt reading.tabs index with
         | None -> t
-        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle; read_view = Text_view }
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0;
+            scene_scope = None; scene_guard = None; load = Idle; read_view = Text_view }
 end
 
 module Browser_history = struct
@@ -3734,6 +4004,24 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
     |> List.concat_map (fun line -> if line = "" then [""] else
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+  let block_tag = function
+    | "article" | "blockquote" | "dd" | "div" | "dt" | "figcaption"
+    | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    | "header" | "li" | "main" | "p" | "pre" | "section" | "summary" -> true
+    | _ -> false in
+  let block_geometry (node : Masc.Browser_scene.node) =
+    let semantic_block = match Masc.Browser_scene.text_role node with
+      | Masc.Browser_scene.Heading _ -> true
+      | Masc.Browser_scene.Plain_text -> block_tag node.tag in
+    if not semantic_block then None
+    else match node.rects with
+      | [] -> None
+      | first :: rest ->
+          let top, bottom = List.fold_left
+            (fun (top, bottom) (rect : Masc.Browser_scene.rect) ->
+               (min top rect.y, max bottom (rect.y +. rect.height)))
+            (first.y, first.y +. first.height) rest in
+          Some (top, bottom) in
   match view.scene with
   | Some scene ->
     (* The target index came from re-scanning [scene_targets] for every node,
@@ -3746,8 +4034,9 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    let reversed, _, selected = List.fold_left
-      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
+    let reversed, _, selected, _ = List.fold_left
+      (fun (reversed, offset, selected, previous_block_bottom)
+        (node : Masc.Browser_scene.node) ->
       let index = Hashtbl.find_opt target_index node.node_id in
       (* Text is the reading surface. DOM tags do not help read a paragraph,
          author or timestamp; the selected text still has its observed index
@@ -3756,8 +4045,10 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       let label = match node.kind with
         | Text -> None
         | Raster -> Some "image · Ctrl-O"
-        | Region role -> Some ("region · " ^ role)
+        | Region role ->
+            Some ("region · " ^ Masc.Browser_scene.region_role_to_string role)
         | Control {disabled=true;_} -> Some "disabled"
+        | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"
         | Control _ -> Some "button/link" in
       let prefix = match label, index with
@@ -3767,12 +4058,25 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Some label, Some i ->
             Printf.sprintf "[%s%d %s] "
               (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      let lines = wrap (prefix ^ node.text) in
+      let text = match Masc.Browser_scene.text_role node with
+        | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ node.text
+        | Masc.Browser_scene.Plain_text -> node.text in
+      let geometry = block_geometry node in
+      let separator = match geometry, previous_block_bottom with
+        | Some (top, _), Some bottom when top > bottom -> [""]
+        | _ -> [] in
+      let lines = wrap (prefix ^ text) in
       let selected = match selected, index with
-        | None, Some i when i = view.scene_cursor -> Some offset
+        | None, Some i when i = view.scene_cursor ->
+            Some (offset + List.length separator)
         | _ -> selected in
-      List.rev_append lines reversed, offset + List.length lines, selected)
-      ([], 0, None) scene.content.nodes in
+      let previous_block_bottom = match geometry with
+        | Some (_, bottom) -> Some bottom
+        | None -> None in
+      List.rev_append lines (List.rev_append separator reversed),
+      offset + List.length separator + List.length lines, selected,
+      previous_block_bottom)
+      ([], 0, None, None) scene.content.nodes in
     List.rev reversed, selected
   | None -> match view.reading with
   | None -> [], None
@@ -6719,7 +7023,11 @@ let agenda (state : state) : Masc_tui_agenda.t =
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
-    | None, Some _ -> Masc_tui_agenda.Read_failed
+        (match snapshot.scs_read_error with
+         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | None -> "schedule store unreadable")
+    | None, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -6739,7 +7047,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
   in
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
-    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read

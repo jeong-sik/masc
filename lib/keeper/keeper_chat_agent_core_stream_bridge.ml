@@ -785,9 +785,11 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | Ping ->
       { bridge_state; chat_events = [ Agent_core_stream_ping ] }
   | Timeout reason ->
-      { bridge_state;
-        chat_events =
-          [ Event_error { message = redact_text ("Timeout: " ^ reason) } ]
+      (* A stream liveness timeout ends this attempt, not the turn: the turn
+         driver may move to the next lane candidate. The turn's Completion
+         path is the only publisher of a terminal event. *)
+      { bridge_state
+      ; chat_events = [ protocol_error ~reason:(redact_text reason) Sse_timeout ]
       }
   | ContentBlockDelta { index; delta = TextSnapshot _ } ->
       poison_scope bridge_state ~kind:Sse_parse_failed
@@ -1233,26 +1235,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           }
       | None ->
           { bridge_state; chat_events = [ block_stop ] })
+  (* Provider stream failures below end one runtime attempt. The turn driver
+     decides whether another lane candidate runs; the turn's Completion path
+     is the only publisher of a terminal event. Each failure stays visible
+     as its typed protocol error. *)
   | SSEError { message; error_type; raw = _ } ->
-      let reason =
-        match error_type with
-        | None -> message
-        | Some error_type -> error_type ^ ": " ^ message
-      in
       poison_scope_with bridge_state ~kind:Sse_error
         ~reason:(redact_text message)
         ~diagnostic:
           (protocol_error ?event_type:error_type ~reason:(redact_text message)
              Sse_error)
-        [ Event_error
-            { message = redact_text ("Provider stream error: " ^ reason) }
-        ]
+        []
   | NDJSONError { message; error_type; raw } ->
-      let reason =
-        match error_type with
-        | None -> message
-        | Some error_type -> error_type ^ ": " ^ message
-      in
       poison_scope_with bridge_state ~kind:Ndjson_error
         ~reason:(redact_text message)
         ~diagnostic:
@@ -1260,30 +1254,21 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ~reason:(redact_text message)
              ~raw_bytes:(String.length raw)
              Ndjson_error)
-        [ Event_error
-            { message =
-                redact_text ("Provider NDJSON stream error: " ^ reason) }
-        ]
+        []
   | SSEParseFailed { raw; reason } ->
       poison_scope_with bridge_state ~kind:Sse_parse_failed
         ~reason:(redact_text reason)
         ~diagnostic:
           (protocol_error ~reason:(redact_text reason)
              ~raw_bytes:(String.length raw) Sse_parse_failed)
-        [ Event_error
-            { message =
-                redact_text ("Provider stream parse failed: " ^ reason) }
-        ]
+        []
   | NDJSONParseFailed { raw; reason } ->
       poison_scope_with bridge_state ~kind:Ndjson_parse_failed
         ~reason:(redact_text reason)
         ~diagnostic:
           (protocol_error ~reason:(redact_text reason)
              ~raw_bytes:(String.length raw) Ndjson_parse_failed)
-        [ Event_error
-            { message =
-                redact_text ("Provider NDJSON stream parse failed: " ^ reason) }
-        ]
+        []
   | SSEUnknownEventType { event_type; raw } ->
       poison_scope_with bridge_state ~kind:Sse_unknown_event_type
         ~reason:("unknown provider event type: " ^ event_type)
@@ -1298,9 +1283,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         ~diagnostic:
           (protocol_error ~event_type:part ~reason
              ~raw_bytes:(String.length raw) Sse_unsupported_part)
-        [ Event_error
-            { message = "Provider stream capability unsupported: " ^ reason }
-        ]
+        []
   | SSEUnsupportedResponse { provider_kind; response; raw } ->
       let provider = Agent_core.Llm_provider.Provider_kind.to_string provider_kind in
       let reason = redact_text (Printf.sprintf "%s.response.%s" provider response) in
@@ -1308,9 +1291,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         ~diagnostic:
           (protocol_error ~event_type:response ~reason
              ~raw_bytes:(String.length raw) Sse_unsupported_response)
-        [ Event_error
-            { message = "Provider stream capability unsupported: " ^ reason }
-        ]
+        []
   | StreamIncomplete { reason } ->
       let redacted_reason = redact_text reason in
       let quarantined =
@@ -1326,11 +1307,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           (if tools_in_current_scope bridge_state = []
            then []
            else quarantined.chat_events)
-          @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete
-            ; Event_error
-                { message =
-                    redact_text ("Provider stream incomplete: " ^ reason) }
-            ]
+          @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete ]
       }
   | StreamRepeating { paragraph; occurrences; bytes_seen } ->
       (* Same shape as an incomplete stream: the scope is poisoned and the
@@ -1358,7 +1335,5 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           (if tools_in_current_scope bridge_state = []
            then []
            else quarantined.chat_events)
-          @ [ protocol_error ~reason Sse_stream_repeating
-            ; Event_error { message = reason }
-            ]
+          @ [ protocol_error ~reason Sse_stream_repeating ]
       }

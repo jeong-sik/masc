@@ -119,6 +119,22 @@ function browserScene(args) {
     }
     return parts.join('').trim();
   };
+  // A text node inside a heading often belongs to a span, while a link heading
+  // is observed as a control. Preserve
+  // that observed semantic ancestry without treating font size, CSS classes,
+  // or text resemblance as a heading signal. ARIA headings require an
+  // explicit valid level; an incomplete role stays unclassified.
+  const headingLevel = element => {
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const tag=ancestor.localName || '';
+      if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
+      if (ancestor.getAttribute('role') === 'heading') {
+        const raw=ancestor.getAttribute('aria-level');
+        return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
+      }
+    }
+    return null;
+  };
   const sourceContext = element => {
     const raw = element.getAttribute('data-masc-source');
     if (raw === null) return null;
@@ -183,7 +199,8 @@ function browserScene(args) {
       const element=node.parentElement;
       if (!element || !node.textContent.trim() || !visible(element)) continue;
       const range=document.createRange(); range.selectNodeContents(node);
-      describe('text',element,node.textContent,boxes(range.getClientRects(),element));
+      describe('text',element,node.textContent,boxes(range.getClientRects(),element),
+        {headingLevel:headingLevel(element)});
       continue;
     }
     if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
@@ -198,7 +215,8 @@ function browserScene(args) {
       describe('control',node,label,boxes(node.getClientRects(),node),{
         ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
         controlType:input ? node.type : tag,disabled:node.matches(':disabled'),editable,
-        clickable:typeof node.click === 'function' && !node.matches(':disabled')});
+        clickable:typeof node.click === 'function' && !node.matches(':disabled'),
+        headingLevel:headingLevel(node)});
       continue;
     }
     if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
@@ -219,6 +237,7 @@ function browserScene(args) {
     throw new Error('scene_response_exceeds_1_mib');
   return scene;
 }
+
 
 
 function browserDocument() {

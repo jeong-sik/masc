@@ -114,7 +114,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
-  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  if modal
+     || Masc_tui_types.on_activity_screen state.view
+     || Option.is_some (browser_lane_on_screen state)
   then 0
   else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
   then Masc_tui_acting_pane.pane_cols
@@ -442,12 +444,17 @@ let render_overview (state : state) =
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
+         (* Neither name is padded to a column. Both are fixed for the
+            session, so nothing to their right moves between frames, and
+            the 24 and 20 cells they used to be padded to were blank on
+            the live workspace ("default", "me") while the transport
+            tail behind them was cut to "ws …" beside the roster pane. *)
          let cluster_line =
            Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
              Ansi.dim
-             (fit_width (Terminal_text.single_line o.ov_cluster) 24)
+             (Terminal_text.single_line o.ov_cluster)
              Ansi.reset
-             (fit_width (Terminal_text.single_line o.ov_project) 20)
+             (Terminal_text.single_line o.ov_project)
              transport_summary observer_summary
        in
        box_line buf cols cluster_line);
@@ -981,8 +988,10 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   in
   let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
-  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
-    ^ "Esc: back to the list" ^ Ansi.reset);
+  (* Opens on MASC and its name, like every other surface; the way out is the
+     footer's to say, and saying it here too spelled the same key twice in two
+     notations. *)
+  box_line buf cols (screen_title " MASC Approval");
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =
@@ -999,9 +1008,17 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
     (fun (line : Approval_detail.line) ->
       let text = line.Approval_detail.text in
       match line.Approval_detail.label with
-      | Some _ ->
+      | Some label ->
+        (* The name is bold, what sits beside it is not: the row carries both
+           now, and bolding the whole of it would weight the value too. *)
+        let drawn = fit_width text (cols - 6) in
+        let name = String.length label in
         box_line buf cols
-          (Printf.sprintf "  %s%s%s" Ansi.bold (fit_width text (cols - 6)) Ansi.reset)
+          (if String.length drawn >= name then
+             Printf.sprintf "  %s%s%s%s" Ansi.bold (String.sub drawn 0 name)
+               Ansi.reset
+               (String.sub drawn name (String.length drawn - name))
+           else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->
         box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
     drawn;
@@ -1042,7 +1059,7 @@ let render_approval_detail (state : state) (row : approval_row) =
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  y:confirm  n:deny  R:retry if offered  Esc:back");
+       ~hints:Masc_tui_keys.footer_hints_approval_detail);
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
@@ -2388,7 +2405,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -2461,7 +2478,11 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
-  | Goal_phase.Awaiting_confirmation, _ -> (Theme.warn (), "proof passed - operator confirmation required via goal confirmation CLI")
+  (* Named by path: "goal confirmation CLI" is not a command anyone can type.
+     This screen has no key for the step it is asking for (#35996), and the
+     row has to fit the split pane, so the path is the whole instruction. *)
+  | Goal_phase.Awaiting_confirmation, _ ->
+    (Theme.warn (), "proof passed - confirm via scripts/goal-confirmation.py")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -2547,7 +2568,7 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let title = planning_workspace_title state ~tab:Planning_goals ~window:"" in
+  let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" in
   let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
@@ -2646,8 +2667,33 @@ let render_planning_list (state : state) =
            items bands
          |> String.concat backlog_sep
        in
+       (* Budget summary chrome against the actual header and divider rows.
+          Retained history and wrapped modes already occupy [buf]; preserve
+          a goal (or empty note), its selected detail and the footer before
+          adding optional trend/backlog rows. *)
+       let phase_width = planning_phase_column + 2 in
+       let title_width =
+         Render_schedule.planning_title_width
+           ~inner_width:(max 1 (framed_inner_width cols - 2))
+           ~phase_width
+       in
+       let list_header = Buffer.create 256 in
+       box_line_styled list_header cols ~style:(Theme.recede ())
+         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       let divider = Buffer.create 128 in
+       box_divider divider cols;
+       let selection_rows = if count = 0 then 0 else 1 in
+       let reserved_rows =
+         count_frame_lines list_header + (2 * count_frame_lines divider)
+         + 1 + selection_rows + tail_rows
+       in
+       let add_summary_if_fits summary =
+         if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
+         then Buffer.add_buffer buf summary
+       in
        box_line buf cols rollup;
-       box_line_styled buf cols ~style:(Theme.info ())
+       let trend = Buffer.create 256 in
+       box_line_styled trend cols ~style:(Theme.info ())
          (match state.planning_baseline with
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
@@ -2656,18 +2702,14 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       box_line buf cols
+       add_summary_if_fits trend;
+       let backlog_summary = Buffer.create 256 in
+       box_line backlog_summary cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       box_divider buf cols;
+       add_summary_if_fits backlog_summary;
+       Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
-       let phase_width = planning_phase_column + 2 in
-       let title_width =
-         Render_schedule.planning_title_width
-           ~inner_width:(max 1 (framed_inner_width cols - 2))
-           ~phase_width
-       in
-       box_line_styled buf cols ~style:(Theme.recede ())
-         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       Buffer.add_buffer buf list_header;
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next --
@@ -2679,7 +2721,6 @@ let render_planning_list (state : state) =
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
-       let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
          Masc_tui_planning_proof_mark.legend_rows
@@ -2844,7 +2885,7 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s%s%s  %s"
-    (planning_workspace_title state ~tab:Planning_goals ~window:"")
+    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:"")
     status_color (bracketed ~max_cells:planning_phase_column status_label) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -3138,6 +3179,18 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
 let schedule_status_color status =
   semantic_status_color status
 
+(* The wake's status is the contract's own word, so the list column is as
+   wide as the widest word the contract can send and no wider: the value
+   was a string, and the column a literal 10 that happened to fit
+   "succeeded". Measured once from the contract's list, the column and
+   the vocabulary cannot drift apart. *)
+let schedule_wake_word = Schedule_contract_values.wake_status_to_string
+
+let schedule_wake_word_cells =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 Schedule_contract_values.wake_status_strings
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -3319,10 +3372,11 @@ let render_schedule_list (state : state) =
                let subject = schedule_row_subject row in
                let status_color = schedule_status_color row.sch_status in
                let last_wake =
-                 Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
+                 Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+                   row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
+                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s \xc2\xb7 %s  %s"
                    status_color
                    (* The column still lines up: the padding goes after the
                       bracket, not inside it. *)
@@ -3339,7 +3393,7 @@ let render_schedule_list (state : state) =
                    (fit_width (Terminal_text.single_line subject)
                       subject_width)
                    (schedule_status_color last_wake)
-                   (fit_width (Terminal_text.single_line last_wake) 10)
+                   (fit_width last_wake schedule_wake_word_cells)
                    Ansi.reset
                    (* The enqueue result and what became of the wake are two
                       facts, and the list carried only the first: a wake the
@@ -3500,11 +3554,16 @@ let schedule_wake_lines
       ~(history : schedule_wake_history option)
       ~(history_error : (string * string) option) =
   let last_wake_fields =
-    [ field
-        ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
-             row.sch_last_wake_status)
-        "Status" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status)
+    [ (let word =
+         Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+           row.sch_last_wake_status
+       in
+       field
+         ~style:
+           (if Option.is_some row.sch_last_wake_status then
+              schedule_status_color word
+            else Ansi.dim)
+         "Status" word)
     ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
     ; field
         ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
@@ -3540,18 +3599,18 @@ let schedule_wake_lines
              (fun (wake : schedule_wake) ->
                 let started = timestamp wake.swk_started_at_iso in
                 let finished = timestamp wake.swk_finished_at_iso in
+                (* The status is the row's label, drawn through [field] so
+                   the times start in the column every other value on the
+                   page starts in. A literal 12 here put them two cells to
+                   the left of the Reaction time below. *)
+                let word = schedule_wake_word wake.swk_status in
                 let head =
-                  ( schedule_status_color wake.swk_status
-                  , Printf.sprintf "  %-12s %s \xe2\x86\x92 %s"
-                      (Terminal_text.single_line wake.swk_status) started finished )
+                  field ~style:(schedule_status_color word) word
+                    (Printf.sprintf "%s \xe2\x86\x92 %s" started finished)
                 in
                 match wake.swk_error with
                 | None -> [ head ]
-                | Some err ->
-                    [ head
-                    ; ( Theme.bad ()
-                      , "               " ^ Terminal_text.single_line err )
-                    ])
+                | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
 let schedule_detail_lines ~width (row : schedule_row)
@@ -5368,7 +5427,9 @@ let render_lanes (state : state) =
    whose projection says [absent]: the first means the producer has not
    answered for this Keeper yet, the second means it answered that no root is
    configured. Saying "none" for both would report a fact the server did not
-   send. *)
+   send. [None] here is the first; the tab decides what to say about it from
+   the Lanes reading the list rides on, because a list that is empty after a
+   failed read and one that is empty before any read are the same list. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
   match
@@ -5377,7 +5438,7 @@ let secret_lines (state : state) (k : keeper) =
         String.equal p.Masc.Tui_decode.ksp_keeper k.k_name)
       state.keeper_secrets
   with
-  | None -> [ dim "  (no projection reported for this Keeper)" ]
+  | None -> None
   | Some p ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
       let status_line =
@@ -5417,6 +5478,7 @@ let secret_lines (state : state) (k : keeper) =
                "  Values were read and validated. They are never sent here."
              else "  Values were not validated on the last read.")
         ]
+      |> Option.some
 
 (* The Identity tab's body. Numbering comes from
    [Masc_tui_types.identity_connectable], which is also what the key handler
@@ -5616,6 +5678,20 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ filter_rows)
     @ numbered @ rejected @ attached_tool_lines
 
+(* The last proactive cycle's outcome in words. The row printed the wire
+   token -- "never_started", "tool_use" -- beside a Last Turn that said
+   "(never)": one fact, two spellings, and one of them the server's. An
+   exhaustive match, so an outcome the contract adds has to be given a word
+   before the screen draws it. *)
+let proactive_outcome_word = function
+  | Masc.Keeper_meta_contract.Proactive_never_started -> "never started"
+  | Masc.Keeper_meta_contract.Proactive_unknown -> "unknown"
+  | Masc.Keeper_meta_contract.Proactive_silent -> "silent"
+  | Masc.Keeper_meta_contract.Proactive_text_response -> "replied with text"
+  | Masc.Keeper_meta_contract.Proactive_tool_use -> "used tools"
+  | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
+  | Masc.Keeper_meta_contract.Proactive_error -> "error"
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
@@ -5654,14 +5730,43 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        Keeper is attached to -- is actually decided under. An operator reading
        one for the other is how a call gets made that nobody meant to allow. *)
     add_section "Gate";
-    add_row "Chat asks (YOLO):"
-      (if List.mem k.k_name state.keeper_yolo_names then
-         (Theme.bad ()) ^ "skipped" ^ Ansi.reset
-       else Ansi.dim ^ "asked" ^ Ansi.reset);
+    (* The same word the chat header wears in capitals and the footer offers
+       after g, with what it does beside it. This row said "asked" under a
+       header saying AUTO. *)
+    add_row "Tool calls:"
+      (let mode =
+         if List.mem k.k_name state.keeper_yolo_names then
+           Masc.Keeper_tool_approval_mode.Yolo
+         else Masc.Keeper_tool_approval_mode.Auto
+       in
+       let tone =
+         match mode with
+         | Masc.Keeper_tool_approval_mode.Yolo -> Theme.bad ()
+         | Masc.Keeper_tool_approval_mode.Auto -> Ansi.dim
+       in
+       tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
+       ^ Masc_tui_types.tool_mode_effect mode ^ Ansi.reset);
+    (* "workspace" is where the stance comes from, not what it is. The chat
+       header resolves the same inheritance before drawing it; this row left
+       the reader to go and look it up. *)
     add_row "Effects (Gate mode):"
-      (match List.assoc_opt k.k_name state.keeper_gate_modes with
-       | Some mode -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line mode ^ Ansi.reset
-       | None -> Ansi.dim ^ "workspace" ^ Ansi.reset);
+      (let inherited =
+         Option.map
+           (fun (modes : Tui_decode.gate_lane_modes) ->
+             gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+           state.gate_modes
+       in
+       match List.assoc_opt k.k_name state.keeper_gate_modes with
+       | Some mode when not (String.equal mode "workspace") ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+           ^ Ansi.reset
+       | Some _ | None ->
+           Ansi.dim ^ "workspace"
+           ^ (match inherited with
+              | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
+              | None -> "")
+           ^ Ansi.reset);
     add_row "Judge first:"
       (match List.assoc_opt k.k_name state.keeper_gate_judges with
        | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset
@@ -5787,7 +5892,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_empty ();
 
     add_section "Autonomy";
-    add_row "Last Outcome:" k.k_last_proactive_outcome;
+    add_row "Last Outcome:"
+      (match k.k_last_proactive_outcome with
+       | Some outcome -> proactive_outcome_word outcome
+       | None -> "-");
     add_empty ();
 
     (* Timestamps section *)
@@ -6189,7 +6297,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           status @ logs
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
-      | Detail_secrets -> secret_lines state k
+      | Detail_secrets -> (
+          match secret_lines state k with
+          | Some lines -> lines
+          | None -> (
+              (* The projection rides the Lanes reading. Before that reading
+                 has answered, and after one that failed, the list is empty
+                 for every Keeper, and this tab said "no projection reported"
+                 -- an answer the server had not given. *)
+              match state.lanes, state.lanes_error with
+              | None, Some detail ->
+                  [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ]
+              | None, None -> [ tab_loading_row "loading" ]
+              | Some _, _ ->
+                  [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
       | Detail_github ->
           stamped_or state.github_identity_view
             state.github_identity_view_error
@@ -6217,23 +6338,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        underline, and from every text capture -- a frame dump, a screenshot
        pasted into an issue, the keyboard-input fixtures. Info's own body
        opens with a section called "Identity", which is also the name of
-       another tab, so a reader with no mark had a wrong guess waiting. *)
-    let tabs =
-      Masc_tui_types.keeper_detail_tabs
-      |> List.map (fun tab ->
-             let label = Masc_tui_types.keeper_detail_tab_label tab in
-             if tab = state.detail_tab then
-               Ansi.bold ^ Ansi.underline
-               ^ Masc_tui_theme.Glyph.current_entry
-               ^ label ^ Ansi.reset
-             else Ansi.dim ^ label ^ Ansi.reset)
-      |> String.concat "  "
-    in
-    let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
+       another tab, so a reader with no mark had a wrong guess waiting.
+
+       Drawn through [tab_strip] with the row's width: nine tabs are wider
+       than the row beside the roster pane, and cut from the right the mark
+       on Runs was the part that went. *)
+    let before =
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s%s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs
+        Ansi.reset tab_strip_gap
     in
+    let tabs =
+      tab_strip ~width:(tab_strip_width ~cols ~before)
+        (List.map
+           (fun tab ->
+             (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
+           Masc_tui_types.keeper_detail_tabs)
+    in
+    let title = before ^ tabs in
     box_line buf cols title;
 
     (* Divider *)
@@ -6584,18 +6706,20 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
-let activity_tab_strip ~on_logs =
-  tab_strip [ ("Events", not on_logs); ("Logs", on_logs) ]
+let activity_tab_strip ~cols ~on_logs =
+  tab_strip
+    ~width:(tab_strip_width ~cols ~before:(screen_title " MASC Activity" ^ tab_strip_gap))
+    [ ("Events", not on_logs); ("Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
    the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
    as that tab's count. It stays after the strip rather than moving before it,
    so the tabs do not shift sideways when the count grows a digit. *)
-let activity_title ~on_logs reading =
+let activity_title ~cols ~on_logs reading =
   Printf.sprintf "%s  %s  \xc2\xb7  %s"
     (screen_title " MASC Activity")
-    (activity_tab_strip ~on_logs)
+    (activity_tab_strip ~cols ~on_logs)
     reading
 
 let render_system_logs (state : state) =
@@ -6638,14 +6762,14 @@ let render_system_logs (state : state) =
     match state.system_logs with
     | None ->
         Printf.sprintf "%s  %s  %s"
-          (activity_title ~on_logs:true
+          (activity_title ~cols ~on_logs:true
              (title_missing_reading ~error:state.system_logs_error))
           timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s  %s  %s"
-          (activity_title ~on_logs:true
+          (activity_title ~cols ~on_logs:true
              (Printf.sprintf "(%d of %d, seq %d)%s" total_entries
                 snapshot.sys_total snapshot.sys_latest_seq filter_note))
           timestamp (connection_badge state)
@@ -6773,13 +6897,13 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:"")
           (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_task_review
+          (planning_workspace_title state ~cols ~tab:Planning_task_review
              ~window:
                (Printf.sprintf " (%d of %d)" shown
                   snapshot.Masc.Tui_decode.vs_total))
@@ -7033,7 +7157,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~tab:Planning_task_review ~window:""
+       (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
         ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
@@ -7201,7 +7325,7 @@ let render_harness_list (state : state) =
     match state.harness with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:"")
           (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
@@ -7221,7 +7345,7 @@ let render_harness_list (state : state) =
           else ""
         in
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~tab:Planning_verdicts
+          (planning_workspace_title state ~cols ~tab:Planning_verdicts
              ~window:
                (Printf.sprintf " (%d%s%s)" shown of_total by_fallback))
           timestamp (connection_badge state)
@@ -7479,7 +7603,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
-       (planning_workspace_title state ~tab:Planning_verdicts ~window:""
+       (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
         ^ " \xe2\x96\xb8 verdict")
        (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
        (connection_badge state));
@@ -7542,7 +7666,7 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh  %s"
+            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -8186,9 +8310,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let age = fusion_run_age ~now run in
   let started_text = Printf.sprintf "%s (%s ago)" date_time age in
   let pipeline = fusion_pipeline_diagram run in
+  (* The pipeline row names the four stops and marks the one the run is on;
+     a Flow row above it named the same four stops again with no state, and a
+     Stage row below the status named the marked stop a third time. On a
+     finished run the three read "completed / completed / completed". The
+     stops are the pipeline's to draw; the status says whether the run ended,
+     and Progress says what it is doing about the stop it is on. *)
   let run_lines =
     [ Ansi.bold, "  RUN"
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.reset
       , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
@@ -8208,9 +8337,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           Ansi.reset
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
-    ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
-    ; ( Ansi.reset
+    ]
+    (* Progress narrates a stop the run is still on. Once it has ended the
+       stage is terminal and the row would repeat the status word. *)
+    @ (match run.fur_stage with
+       | Fusion_stage_completed | Fusion_stage_failed -> []
+       | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
+       | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
+           [ Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
+    @ [ ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
     ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
@@ -9204,9 +9339,15 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, None when Option.is_some view.scene ->
           let action = match Option.bind (selected_scene_target view) scene_target_action with
             | Some Read_region -> "Enter:read region  "
+            | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+          let article_hint = match view.scene with
+            | Some scene when scene.content.view = Browser_lane.Regions -> "N/P:article  "
+            | Some _ | None -> "" in
+          action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+      | None, None when Option.is_some view.scene_guard ->
+          "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -9220,9 +9361,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
+        | Loading (_, Scene_follow _) -> "Following observed browser link…", Theme.info ()
+        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
@@ -9231,12 +9375,22 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             (match browser_label view with
              | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
              | None -> "Capturing selected tab… (any key cancels preview)"), Theme.info ()
-        | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | Failed detail ->
+            let retry = match view.scene_guard with
+              | Some _ -> " · followed destination pending · r:recheck"
+              | None -> "" in
+            "Read/action failed: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
-             | Some scene -> Printf.sprintf "Scene %.1f ms • %d nodes%s" scene.elapsed_ms
-                 (List.length scene.content.nodes) (if scene.content.truncated then " • truncated" else ""), Theme.ok ()
+             | Some scene ->
+                 let summary = match Browser_lane_view.scene_summary scene with
+                   | None -> ""
+                   | Some text -> " • " ^ text in
+                 let truncation = if scene.content.truncated then " • truncated" else "" in
+                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s" scene.elapsed_ms
+                   (List.length scene.content.nodes)
+                   truncation summary, Theme.ok ()
              | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -9306,7 +9460,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some scene, _ ->
              let scope = match scene.content.view, scene.content.scope with
                | Browser_lane.Regions, _ -> "Page regions"
-               | Content, Some _ -> "Selected region"
+               | Content, Some target ->
+                   (match view.scene_scope with
+                    | Some context when context.target = target ->
+                        "Selected " ^ Masc.Browser_scene.region_role_to_string context.role
+                        ^ " · " ^ fit_width (Terminal_text.single_line context.label)
+                            (max 8 (cols - 32))
+                    | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
              "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
@@ -9654,8 +9814,12 @@ let runtime_detail_lines state target ~width =
         match preferred_at with
         | None -> []
         | Some at ->
+            (* The terminal's clock, like every other timestamp on the screen;
+               the list row beside this reads "last success 19:18:20" and the
+               detail read the same instant as "2026-08-24T10:18:20Z". *)
             runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
-              (Masc_domain.iso8601_of_unix_seconds at)
+              (Terminal_text.short_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds at))
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -9685,12 +9849,12 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
               (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
-            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
-            @ (match row.rpp_reachable with
-               | None -> []
-               | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "Reachable"
-                     (runtime_bool value))
+            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
+                (Terminal_text.short_timestamp row.rpp_checked_at)
+            (* No Reachable row: the decoder admits a probe only when its
+               reachable flag agrees with its status, so the row could only
+               repeat the status two rows above it -- "reachable" then
+               "yes". *)
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->
@@ -9737,7 +9901,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Left/Esc:list  r:refresh  Tab:next");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Left / Esc:list  r:refresh  Tab:next");
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -9804,6 +9968,9 @@ let render_runtime (state : state) =
         Printf.sprintf "%s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
           (tab_strip
+             ~width:
+               (tab_strip_width ~cols
+                  ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap))
              [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
                    (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
@@ -10061,7 +10228,7 @@ let render_tools (state : state) =
   in
   box_top buf cols;
   box_line buf cols header;
-  box_line buf cols (" " ^ Render_tools.tools_pane_strip state);
+  box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()
@@ -10501,7 +10668,7 @@ let render_acting (state : state) =
      "scope turns · …", one line down. *)
   let header =
     Printf.sprintf "%s  %s  %s"
-      (activity_title ~on_logs:false
+      (activity_title ~cols ~on_logs:false
          (Printf.sprintf "(%s \xc2\xb7 %s held)"
             (Message_layout.count_noun shown "row")
             (Message_layout.count_noun held "event")))
@@ -11715,11 +11882,9 @@ let render_runtime_params (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
+  let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Config")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -11965,19 +12130,20 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s · %s%s%s  "
+      (screen_title " MASC 프롬프트")
+      Ansi.dim count_text
+      (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
+      Ansi.reset
+      (match held_back with
+       | [] -> ""
+       | entries ->
+         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+           (List.length entries) Ansi.reset)
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s · %s%s%s  %s  %s"
-       (screen_title " MASC 프롬프트")
-       Ansi.dim count_text
-       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
-       Ansi.reset
-       (match held_back with
-        | [] -> ""
-        | entries ->
-          Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-            (List.length entries) Ansi.reset)
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -12168,12 +12334,13 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view prompts ~count:(fun _ -> Printf.sprintf "%d개" total)
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s · 읽기 전용%s  "
+      (screen_title " MASC 런타임 프롬프트 자산")
+      Ansi.dim count_text Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s · 읽기 전용%s  %s  %s"
-       (screen_title " MASC 런타임 프롬프트 자산")
-       Ansi.dim count_text Ansi.reset
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
@@ -12306,12 +12473,12 @@ let render_presets (state : state) =
     | None -> title_missing_reading ~error:state.presets_error
   in
   box_top buf cols;
+  let before =
+    Printf.sprintf "%s  %s%s%s  " (screen_title " MASC 프리셋") Ansi.dim count_text
+      Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s%s%s  %s  %s"
-       (screen_title " MASC 프리셋")
-       Ansi.dim count_text Ansi.reset
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
@@ -12440,13 +12607,14 @@ let render_themes (state : state) =
   let lift_on = Masc_tui_theme.lift_is_enabled () in
   let name_width = theme_name_width ~cols in
   box_top buf cols;
+  let before =
+    screen_title
+      (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
+         (List.length entries) native_count)
+    ^ tab_strip_gap
+  in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title
-          (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
-             (List.length entries) native_count))
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_divider buf cols;
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
@@ -12461,6 +12629,7 @@ let render_themes (state : state) =
     let chip label active count = (label ^ " " ^ string_of_int count, active) in
     Ansi.dim ^ "f:filter  " ^ Ansi.reset
     ^ tab_strip
+        ~width:(tab_strip_width ~cols ~before:"  f:filter  ")
         [ chip "All" (state.theme_filter = `All) (List.length all_entries)
         ; chip "Dark" (state.theme_filter = `Dark) dark_count
         ; chip "Light" (state.theme_filter = `Light) light_count
@@ -12558,9 +12727,10 @@ let render_config_models (state : state) =
         ^ title_missing_reading ~error:state.runtime_config_view_error
         ^ Ansi.reset
   in
+  let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Models")
-       (config_pane_strip state) path_note (connection_badge state));
+    (Printf.sprintf "%s%s  %s  %s" before (config_pane_strip ~cols ~before state)
+       path_note (connection_badge state));
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -12751,11 +12921,9 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | None -> "?"
   in
   box_top head cols;
+  let before = screen_title " MASC Voice · setup" ^ tab_strip_gap in
   box_line head cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Voice · setup")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line buf cols "";
   box_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
@@ -12908,11 +13076,9 @@ let render_voice (state : state) =
     | lines -> List.iter (fun line -> box_line buf cols line) lines
   in
   box_top head cols;
+  let before = screen_title " MASC Voice" ^ tab_strip_gap in
   box_line head cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Voice")
-       (config_pane_strip state)
-       (connection_badge state));
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
   box_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -13003,9 +13169,10 @@ let render_config (state : state) =
         ^ title_missing_reading ~error:state.runtime_config_view_error
         ^ Ansi.reset
   in
+  let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
-    Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
-      (config_pane_strip state) path_note
+    Printf.sprintf "%s%s  %s  %s  %s" before
+      (config_pane_strip ~cols ~before state) path_note
       (Printf.sprintf "%s%s%s" Ansi.dim
          (let now = Unix.localtime (Unix.gettimeofday ()) in
           Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -13027,16 +13194,45 @@ let render_config (state : state) =
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current
-         one, so the age is the only thing on screen that separates them. *)
+         one, so the age is the only thing on screen that separates them.
+
+         The age is measured first and the paths take what is left: they
+         were padded to 28 and 32 cells and cut from the right, so on a
+         workspace under /var/folders both read as the same "/var/folders/
+         bv/cjrbl01x52s…" while the age behind them left the row. A path's
+         deciding end is its tail, which [fit_middle] keeps. *)
       (match state.server_identity with
        | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
        | Some identity ->
+           let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
+           let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
+           let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
+           let labels = "  base " ^ "   masc " ^ "   binary " in
+           let room =
+             framed_inner_width cols
+             - Message_layout.display_width labels
+             - Message_layout.display_width age
+           in
+           let base_cells = Message_layout.display_width base in
+           let masc_cells = Message_layout.display_width masc in
+           let base, masc =
+             if base_cells + masc_cells <= room then base, masc
+             else
+               (* A path that fits its half keeps its whole self and the
+                  other takes the rest; two long ones split the room. The
+                  shorter path is never cut to make room for a blank. *)
+               let half = room / 2 in
+               let base_room, masc_room =
+                 if base_cells <= half then base_cells, room - base_cells
+                 else if masc_cells <= half then room - masc_cells, masc_cells
+                 else half, room - half
+               in
+               ( Message_layout.fit_middle base_room base
+               , Message_layout.fit_middle masc_room masc )
+           in
            c.push
-             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
-                (fit_width identity.Tui_decode.sid_base_path 28)
-                (fit_width identity.Tui_decode.sid_masc_root 32)
-                (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
-                Ansi.reset));
+             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim base masc
+                age Ansi.reset));
       List.iter (fun (tone, text) ->
         c.push_styled ~style:(config_metadata_style tone)
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
@@ -13248,6 +13444,9 @@ let render_context_inspector state =
   in
   let tabs =
     tab_strip
+      ~width:
+        (tab_strip_width ~cols
+           ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  "))
       [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
       ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
       ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)
@@ -13734,6 +13933,7 @@ let render_agenda (state : state) =
     | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
@@ -13780,8 +13980,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:(if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
-      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
+    ~hints:(if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
+      else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
+      else "j/k:select  Tab:focus  o:observe  a:actions  S:subscriptions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
@@ -13789,8 +13990,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
-     over the whole terminal and the Activity feed already fills its own
-     screen, so neither reserves the columns. *)
+     over the whole terminal and the Activity screen, both its tabs,
+     already fills its own, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
      acting_pane_columns state ~terminal_cols);

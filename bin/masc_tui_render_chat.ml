@@ -545,7 +545,13 @@ let keeper_message_identity ~max_cells state keeper_name =
         Printf.sprintf " %s%s%s %s\xc2\xb7 gate:%s%s"
           (if yolo then (Theme.bad ()) else (Theme.info ()))
           chat_mode Ansi.reset Ansi.dim
-          (Terminal_text.single_line gate_mode) Ansi.reset
+          (* Nothing observed is said in the words every other surface uses
+             for it. "?" beside a stance that decides what a send can do left
+             the reader to guess whether it meant manual or unread. *)
+          (match gate_mode with
+           | Some word -> Terminal_text.single_line word
+           | None -> Masc_tui_types.title_unread)
+          Ansi.reset
       in
       let status =
         String.concat ""
@@ -1924,7 +1930,7 @@ let render_keeper_message (state : state) =
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
               ~max_cells:(min 32 (max 0 (inner_cells / 3)))
-              observation
+              ~inspect_key:Masc_tui_keys.context_inspector_label observation
         | Some _ | None -> None
     in
     let context_cells =
@@ -2839,7 +2845,7 @@ let render_keeper_message (state : state) =
          && state.keeper_message_focus = Right_pane
          && Option.is_none state.voice_capture
          && Option.is_none state.voice_continuous
-      then Ansi.dim ^ "  " ^ Masc_tui_composer.voice_keys_hint ^ Ansi.reset
+      then Ansi.dim ^ "  " ^ Masc_tui_keys.voice_keys_hint ^ Ansi.reset
       else ""
     in
     List.iteri
@@ -2985,18 +2991,20 @@ let render_keeper_message (state : state) =
               Ansi.reset
         in
         (* Both endings, because they are not the same and the difference is
-           what the operator loses. ^Y keeps the sentence; Esc abandons it. *)
+           what the operator loses. Ctrl-Y keeps the sentence; Esc abandons it. *)
         Printf.sprintf
-          "%s  %s^Y send · Esc discard%s"
+          "%s  %s%s send · Esc discard%s"
           bar
           Ansi.dim
+          Masc_tui_keys.voice_speak_key
           Ansi.reset
       (* Between utterances in continuous mode: on, but nothing recording. A
          mode that is idle looks exactly like one that is off without this. *)
       | None when state.voice_continuous <> None ->
         Printf.sprintf
-          "%s대기 중 — 말하면 잡습니다 · ^A to stop%s"
+          "%s대기 중 — 말하면 잡습니다 · %s to stop%s"
           Ansi.dim
+          Masc_tui_keys.voice_listen_key
           Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then

@@ -33,7 +33,7 @@ jobs:
           TEST_PLATFORM: ${{ matrix.platform }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, subprocess, tempfile
+          import hashlib, json, os, pathlib, runpy, subprocess, tempfile
           platform = os.environ['TEST_PLATFORM']
           commit = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
           with tempfile.TemporaryDirectory() as temporary:
@@ -52,8 +52,9 @@ jobs:
                   return {str(p.relative_to(stage)):hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in stage.rglob('*') if p.is_file()}
               before = snapshot()
+              probe = runpy.run_path('scripts/package-macos-runtime.py')['PYTHON_HTTPS_PROBE']
               subprocess.run([str(stage/'python/bin/python3'),'-I','-c',
-                              'import json,tarfile,ssl,urllib.request; assert urllib.request.urlopen("https://example.com",timeout=30).status == 200'],check=True)
+                              probe],check=True)
               assert snapshot() == before, 'runtime bytes changed during use'
               receipt = json.loads((stage/'runtime-provenance.json').read_text())
               assert receipt['source_commit'] == commit and receipt['platform'] == platform

@@ -16,6 +16,20 @@ NAMES = ('masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-hel
          'masc-check-runtime-deployment-preflight')
 MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'}
 
+# Run inside the staged interpreter. HTTP rejection is still a response over
+# validated TLS; certificate, proxy CONNECT and network errors must propagate.
+PYTHON_HTTPS_PROBE = '''
+import json, tarfile, ssl, urllib.request, urllib.error, urllib.parse
+try:
+    response = urllib.request.urlopen("https://example.com", timeout=30)
+except urllib.error.HTTPError as error:
+    response = error
+with response:
+    if urllib.parse.urlsplit(response.geturl()).scheme != "https":
+        raise ValueError("HTTPS probe ended on a non-HTTPS response")
+    print("staged Python: validated HTTPS response", response.status)
+'''
+
 
 def run(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
@@ -233,7 +247,7 @@ def package(dist, stage, platform, commit, lock_path):
                     [str(stage.resolve() / 'masc-tui'), '--help'],
                     [str(stage.resolve() / 'masc-deployment-preflight-helper'), '--help'],
                     [str(stage.resolve() / 'python/bin/python3'), '-I', '-c',
-                     'import json,tarfile,ssl,urllib.request; assert urllib.request.urlopen("https://example.com",timeout=30).status == 200']):
+                     PYTHON_HTTPS_PROBE]):
         subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, *command], env=clean, check=True)
     freeze_python_bytecode(stage)
     provenance = {'schema': 'masc.macos-runtime.v1', 'source_commit': commit, 'platform': platform,

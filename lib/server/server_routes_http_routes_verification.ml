@@ -161,7 +161,11 @@ let confirmation_error_to_string = function
   | Goal_store_unavailable unavailable -> Goal_store.unavailable_to_string unavailable
 ;;
 
-let confirmation_error_of_write_error = function
+(* Annotated: [Store_unavailable] is a constructor of three Goal_store sums
+   (write_error, delete_goal_error, lookup); without the annotation the
+   compiler picks the last one declared. *)
+let confirmation_error_of_write_error (error : Goal_store.write_error) =
+  match error with
   | Goal_store.Store_unavailable unavailable -> Goal_store_unavailable unavailable
   | Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error ->
     Confirmation_rejected (Goal_store.write_error_to_string error)

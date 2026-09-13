@@ -671,6 +671,12 @@ let validate_lanes
          })
 ;;
 
+let with_terminal_default ~default_runtime_id candidates =
+  if List.exists (String.equal default_runtime_id) candidates
+  then candidates
+  else candidates @ [ default_runtime_id ]
+;;
+
 let lanes_of_decls
     ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
     (runtimes : t list)
@@ -681,8 +687,7 @@ let lanes_of_decls
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id candidate_ids
-          |> Runtime_lane.with_terminal_default ~runtime_id:default_runtime_id)
+          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
        lane_decls)
 ;;
 
@@ -1356,7 +1361,9 @@ let degrade_loaded_for_missing_catalog
              }
              :: dropped_lanes )
          | _ ->
-           ( Runtime_lane.filter_candidates (fun id -> not (is_missing id)) lane
+           ( Runtime_lane.make
+               ~id:(Runtime_lane.id lane)
+               kept_candidates
              :: kept
            , dropped_candidates
            , dropped_lanes ))
@@ -1819,70 +1826,28 @@ let verifier_exact_lane_slot_ids () =
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
 
-(* Whether the lane can actually judge, asked of the runtime table instead of
-   the registry. The registry carries cli slot ids verbatim on purpose --
-   "whether an id resolves to a live official-client runtime is answered at
-   execution with a typed error" (runtime_exact_output_registry.mli) -- so a
-   lane can publish, resolve, and hand back an id that names nothing. The
-   failover walk meets that typed error per attempt and moves to the next
-   candidate, which is the intended shape. A readiness claim cannot: the server
-   reports [exact_output_authority_available] from this lane resolving, so a
-   typo in [verifier_exact.cli_slots] would report an authority that is ready
-   while every review failed with an unresolved runtime. The runtime table
-   lives here, so the claim is checked here. Admitted API slots are not
-   re-checked: publication already matched them against the frozen catalog. *)
+(* Readiness uses the same configured direct-runtime admission as dispatch. *)
 let verifier_cli_slot_rejection slot_id =
-    match
-      List.find_opt
-        (fun (runtime : t) -> String.equal runtime.id slot_id)
-        (get_runtimes ())
-    with
-    | None -> Some (Printf.sprintf "%S is not a materialized runtime" slot_id)
-    | Some runtime ->
-      (match runtime.execution with
-       | Runtime_execution.Agent_core _ ->
-         Some
-           (Printf.sprintf
-              "%S is an API runtime, so it cannot serve an official-client cli slot"
-              slot_id)
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ ->
-         if not (Runtime_execution.supports_native_none runtime.execution) then
-           Some (Printf.sprintf "%S cannot disable built-in native tools" slot_id)
-         else if not runtime.model.tools_support then
-           Some (Printf.sprintf "%S cannot supply the required verdict tool" slot_id)
-         else None)
+  match verifier_cli_slot_admission ~runtime_id:slot_id with
+  | Ok () -> None | Error detail -> Some detail
 ;;
 
-type verifier_slot_dispatch = Cli_runtime | Api_route
-
 let verifier_exact_slot_admission ~runtime_id =
-  (* The explicit single-runtime override need not be a registry lane member.
-     Only a declared CLI slot adds an execution-kind constraint; the driver
-     always enforces the actual candidate's required tools/native posture. *)
+  let direct () = match get_runtime_by_id runtime_id with
+    | Some runtime -> verifier_runtime_admission runtime
+    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
   match Runtime_exact_output_registry.current () with
-  | Error Runtime_exact_output_registry.Registry_not_published -> Ok Api_route
-  (* A review captured its slot from an earlier read of the registry. While a
-     replacement holds the registry this second read cannot say whether the id
-     is still a declared CLI slot; reading it as an API route let a CLI slot
-     that shares a lane's name walk that lane's candidates, outside the
-     authority the review captured. Refuse; the review can run again. *)
+  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
   | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
     (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
-     | Ok {cli_slots; _} when List.mem runtime_id cli_slots ->
-       (match verifier_cli_slot_rejection runtime_id with
-        | None -> Ok Cli_runtime
-        | Some detail -> Error detail)
-     | Ok _ | Error _ -> Ok Api_route)
+     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
+     | Ok _ | Error _ -> direct ())
 ;;
 
 let verifier_api_slot_ready slot_id =
   let state = runtime_state () in
-  let candidates = match find_declared_lane state.lanes slot_id with
-    | Some lane -> Runtime_lane.declared_candidates lane
-    | None -> [slot_id] in
+  let candidates = [slot_id] in
   List.exists (fun id ->
     match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
     | None -> false
@@ -2000,14 +1965,13 @@ let resolve_assignment (assigned_id : string) =
   | None ->
     (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
      | Some runtime ->
-       let lane = Runtime_lane.make ~id:runtime.id [runtime.id] in
-       let lane =
+       let candidates =
          match state.default_runtime with
          | Some default ->
-           Runtime_lane.with_terminal_default ~runtime_id:default.id lane
-         | None -> lane
+           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
+         | None -> [ runtime.id ]
        in
-       `Lane lane
+       `Lane (Runtime_lane.make ~id:runtime.id candidates)
      | None ->
        (match Option.bind state.startup_degradation (fun degradation ->
           List.find_opt (fun (missing : missing_catalog_model) ->

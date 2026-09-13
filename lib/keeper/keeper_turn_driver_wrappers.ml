@@ -20,7 +20,6 @@ include Keeper_turn_driver
    directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
 let run_named_with_masc_tools
     ~runtime_id
-    ?runtime_selection
     ?(keeper_name = "")
     ~goal
     ?goal_blocks
@@ -63,8 +62,7 @@ let run_named_with_masc_tools
   let+ selected =
     Keeper_turn_driver.run_named
       ~runtime_id
-      ?runtime_selection
-      ~keeper_name
+        ~keeper_name
       ~goal
       ?goal_blocks
       ~base_path

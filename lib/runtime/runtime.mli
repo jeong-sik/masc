@@ -577,16 +577,9 @@ val verifier_exact_lane_readiness : unit -> (unit, string) result
     ids verbatim, so a typo there reads as a configured judge until the review
     reaches dispatch. *)
 
-type verifier_slot_dispatch = Cli_runtime | Api_route
-
-val verifier_exact_slot_admission : runtime_id:string -> (verifier_slot_dispatch, string) result
-(** Reject an invalid/incompatible declared CLI candidate at its own attempt,
-    without removing it or its peers from frozen declaration order. Explicit
-    API slots and standalone overrides may name a declared lane; CLI slots
-    name one concrete runtime. Both still require driver tool admission.
-    Only an unpublished registry reads an id as an API route; a registry that
-    is being replaced is an [Error], because it cannot say whether the id is
-    still a declared CLI slot. *)
+val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
+(** Validate one configured direct slot. A declared CLI slot retains its
+    execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a

@@ -393,7 +393,7 @@ let install () =
         | Error detail ->
           Error (Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
-        | Ok slot_dispatch ->
+        | Ok () ->
         Option.iter Eio.Switch.check sw;
         Eio.Switch.run (fun review_sw ->
           let review_root = Filename.temp_file "masc-completion-review-" "" in
@@ -402,9 +402,6 @@ let install () =
           Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
           Keeper_turn_driver_wrappers.run_named_with_masc_tools
             ~runtime_id:evaluator_runtime
-            ~runtime_selection:(match slot_dispatch with
-              | Runtime.Cli_runtime -> Keeper_turn_driver.Exact_runtime
-              | Runtime.Api_route -> Keeper_turn_driver.Exact_route)
             ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
             ~base_path:review_root
             ~goal:prompt

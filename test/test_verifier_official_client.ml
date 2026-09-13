@@ -94,7 +94,9 @@ let test_review ?(shadow_lane=false) mode =
   let config = Workspace.default_config root in
   let proof_root = Filename.concat root Playground_paths.all_playgrounds_prefix in
   Fs_compat.mkdir_p proof_root;
-  write (Filename.concat proof_root "proof.txt") "verified-file-receipt";
+  write (Filename.concat proof_root "proof.txt")
+    (if mode = "large-read" then "verified-file-receipt\n" ^ String.make 18000 'x' ^ "\nlast-readable-proof-byte"
+     else "verified-file-receipt");
   write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
   let lookup_tools = match VAT.create_goal_proof ~config with
     | Ok tools -> tools | Error detail -> fail detail in
@@ -127,6 +129,19 @@ candidates = ["forbidden.verifier", "official.verifier"]
     | `Lane lane -> check (list string) "ordinary Keeper routing keeps its lane order"
         ["forbidden.verifier"; "official.verifier"] (Runtime_lane.ordered_candidates lane)
     | _ -> fail "normal Keeper shadow lane disappeared");
+  if mode = "valid" then (
+    let tool = Agent_core.Tool.create ~name:"report_review_verdict" ~description:"Required verifier callback"
+      ~parameters:[] (fun _ -> fail "an arbitrary transform must be refused before tool dispatch") in
+    let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
+      ~keeper_name:"arbitrary-transform-probe" ~base_path:root
+      ~goal:"Reject the unsupported transform." ~system_prompt:"Explicit verifier contract."
+      ~tools:[tool] ~agent_core_tools:[tool] ~output_contract:Keeper_turn_driver.Tool_verdict
+      ~provider_config_transform:(fun config -> Ok config) ~sw () in
+    (match refused with
+     | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="provider_config_transform";_})) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "arbitrary provider transform was ignored");
+    check bool "rejected transform never spawns client" false (Sys.file_exists capture));
   let declarations = match Runtime_toml.parse_string runtime_text with
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
@@ -149,7 +164,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
   (match mode, result.AR.verdict, result.gate with
-   | "valid", Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "large-read"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
@@ -165,6 +180,11 @@ candidates = ["forbidden.verifier", "official.verifier"]
   let serialized = Yojson.Safe.to_string (`List rows) in
   check bool "real contained text reaches tool response" true
     (String_util.contains_substring serialized "verified-file-receipt");
+  if mode = "large-read" then (
+    check bool "large authority lookup remains readable on actual client wire" true
+      (String_util.contains_substring serialized "last-readable-proof-byte");
+    check bool "lookup is not replaced by an inaccessible session artifact" false
+      (String_util.contains_substring serialized Tool_output.marker_prefix));
   let images content = Yojson.Safe.Util.to_list content
     |> List.filter (fun block -> member "type" block = `String "image") in
   let user = List.find (fun row -> member "type" row = `String "user") rows in
@@ -267,7 +287,7 @@ let () =
   Workspace_metric_hooks.install ();
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
-      ["valid"; "missing"; "duplicate"];
+      ["valid"; "missing"; "duplicate"; "large-read"];
      "shadow lane", [test_case "verifier uses direct binding while Keeper routing retains its lane" `Quick
        (fun () -> test_review ~shadow_lane:true "valid")];
      "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick

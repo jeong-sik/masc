@@ -52,7 +52,6 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
-type runtime_selection = Resolve_assignment | Exact_runtime | Exact_route
 
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -278,7 +277,6 @@ let lane_declares ~lane_id runtime_id =
   | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
 
 let attempt_runtime_candidates
-    ?(preserve_order = false)
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
@@ -340,7 +338,6 @@ let attempt_runtime_candidates
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let demote_rest rest =
-    if preserve_order then rest else
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
@@ -945,7 +942,6 @@ let official_client_dispatch ~provider_config_transform =
 
 let run_named
     ~runtime_id
-    ?(runtime_selection = Resolve_assignment)
     ?(keeper_name = "")
     ?pre_tool_rejects
     ~base_path
@@ -1172,13 +1168,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
-    (* Either claim pins the runtime: a verdict must stay with its explicitly
-       admitted slot, and an exact runtime was named rather than resolved.
-       Rerouting would answer from a runtime the caller did not choose. *)
-    match runtime_selection, output_contract with
-    | (Exact_runtime | Exact_route), _ -> []
-    | Resolve_assignment, Tool_verdict -> []
-    | Resolve_assignment, Provider_default -> modality_reroute_candidates
+    match output_contract with
+    | Tool_verdict -> []
+    | Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
@@ -1261,9 +1253,9 @@ let run_named
     fun ~mode blocks ->
       (* Exact-lane admission also owns provider selection for image evidence:
          retain unread artifacts, but never dispatch an out-of-lane vision call. *)
-      let mode = match runtime_selection with
-        | Resolve_assignment -> mode
-        | Exact_runtime | Exact_route -> Keeper_vision_ingest.Store_only in
+      let mode = match output_contract with
+        | Provider_default -> mode
+        | Tool_verdict -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
@@ -1279,7 +1271,6 @@ let run_named
       lane_id_opt
   in
   attempt_runtime_candidates
-    ~preserve_order:(runtime_selection <> Resolve_assignment)
     ~pre_tool_rejects
     ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred

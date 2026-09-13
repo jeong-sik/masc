@@ -601,14 +601,14 @@ let with_chat_admission_command ~base_path ~keeper_name run =
 let pause_observed_turn ~base_path ~keeper_name ~interrupt_token =
   with_chat_admission_command ~base_path ~keeper_name (fun owner entry ->
     match entry with
-    | None -> Ok (Keeper_owner.Operation_not_current { running_operation_id = None }, Keeper_owner.chat_control_token owner)
+    | None -> Ok (Keeper_owner.Interrupt_result (Keeper_owner.Operation_not_current { running_operation_id = None }), Keeper_owner.chat_control_token owner)
     | Some entry -> Keeper_owner.pause_and_interrupt owner
         (Keeper_owner.Observed_turn { current = entry.current_turn_switch; interrupt_token }))
 ;;
 
-let pause_running_operation ~base_path ~keeper_name operation_id =
+let pause_running_operation ?expected_control_token ~base_path ~keeper_name operation_id =
   with_chat_admission_command ~base_path ~keeper_name (fun owner _ ->
-    Keeper_owner.pause_and_interrupt owner (Keeper_owner.Direct_operation operation_id))
+    Keeper_owner.pause_and_interrupt ?expected_control_token owner (Keeper_owner.Direct_operation operation_id))
 ;;
 
 let run_next_operation ~base_path ~keeper_name ~operation_id ~interrupt_token =

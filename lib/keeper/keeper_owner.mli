@@ -37,6 +37,8 @@ type operation_interrupt_result =
     never signal a newer operation: the expected id is compared by the Owner
     before its exact child cancel capability is invoked. *)
 
+type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
+
 type interrupt_target =
   | Observed_turn of
       { current : Keeper_registry_types.turn_switch option Atomic.t
@@ -304,7 +306,7 @@ val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
-val pause_and_interrupt : t -> interrupt_target -> (operation_interrupt_result * string, error) result
+val pause_and_interrupt : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
 val chat_control_token : t -> string
 val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
 (** Validate the exact current execution, persist the operator pause, then signal.

@@ -35,6 +35,8 @@ type operation_interrupt_result =
       { running_operation_id : Operation_id.t option }
   | Operation_interrupt_failed of string
 
+type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
+
 type interrupt_target =
   | Observed_turn of
       { current : Keeper_registry_types.turn_switch option Atomic.t
@@ -185,7 +187,7 @@ type _ command =
       (Chat_operation.t, error) result command
   | Resume_direct_gate : {operation_id:Operation_id.t; waiting:Keeper_semantic_execution.gate_wait;
       resolution:Keeper_semantic_execution.gate_resolution} -> (unit, error) result command
-  | Pause_and_interrupt : interrupt_target -> (operation_interrupt_result * string, error) result command
+  | Pause_and_interrupt : {target : interrupt_target; expected_control_token : string option} -> (pause_result * string, error) result command
   | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option } ->
       (run_next_result, error) result command
   | Interrupt_running_operation :
@@ -1130,17 +1132,31 @@ let start
             Chat_operation_store.resume_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~waiting ~resolution) |> Result.map fst in
           Eio.Promise.resolve resolve response; loop state shutdown_operation_id
-        | Command (Pause_and_interrupt target, resolve) ->
+        | Command (Pause_and_interrupt {target; expected_control_token}, resolve) ->
           if Option.is_some shutdown_operation_id || (Keeper_owner_reducer.projection state).stopping then (
             Eio.Promise.resolve resolve (Error Owner_stopping);
             loop state shutdown_operation_id)
           else
-          (match exact_interrupt target with
-           | None ->
+          let interrupt = exact_interrupt target in
+          let pending_authority = match interrupt, target, expected_control_token with
+            | None, Direct_operation operation_id, Some token
+              when String.equal token (chat_control_token t)
+                && not !(t.child_active)
+                && Option.is_none (Atomic.get t.turn_in_flight)
+                && Option.is_none (Atomic.get t.operation_projection).running_operation_id ->
+              run_operation_read t ~label:"authorize exact pending admission stop" (fun () ->
+                Chat_operation_store.get t.operation_store operation_id)
+              |> Result.map (function
+                | None | Some {Chat_operation.state = Queued; _} -> true
+                | Some {Chat_operation.state = (Running _ | Succeeded _ | Failed _ | Cancelled _); _} -> false)
+            | (Some _ | None), (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
+          (match pending_authority with
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Ok false when Option.is_none interrupt ->
              Eio.Promise.resolve resolve (Ok
-               (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }, chat_control_token t));
+               (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
-           | Some interrupt ->
+           | Ok _ ->
              let paused = match (Keeper_owner_reducer.projection state).meta with
                | Some meta when meta.paused -> Ok state
                | _ -> commit_meta state
@@ -1151,9 +1167,12 @@ let start
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
                 Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
-                let result = try interrupt (); Operation_interrupt_signalled with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn -> Operation_interrupt_failed (Printexc.to_string exn) in
+                let result = match interrupt with
+                  | None -> Pending_admission_paused
+                  | Some interrupt -> Interrupt_result
+                      (try interrupt (); Operation_interrupt_signalled with
+                       | Eio.Cancel.Cancelled _ as exn -> raise exn
+                       | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
                 Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
                 loop state shutdown_operation_id))
         | Command (Run_next_operation { operation_id; observed }, resolve) ->
@@ -1582,7 +1601,7 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
-let pause_and_interrupt t target = request t (Pause_and_interrupt target)
+let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })
 
 let interrupt_running_operation t operation_id =

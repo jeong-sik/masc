@@ -11356,6 +11356,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           restore report. Typed from the roster they would land in a pane the
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
+       | Masc_tui_command.Queue _
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
        | Masc_tui_command.Preset_save_missing_name
        | Masc_tui_command.Preset_restore _

@@ -739,7 +739,7 @@ let compact_lines ~width view =
         let row_details = if view.focus <> Rows then [] else
           List.concat_map (fun (row : Row.row) ->
             ["  fields: " ^ Yojson.Safe.to_string (`Assoc row.fields)]
-            @ List.map (fun evidence -> "  evidence: " ^ evidence.uri) row.evidence
+            @ List.map (fun (evidence : Row.evidence) -> "  evidence: " ^ evidence.uri) row.evidence
             @ (if row.related_ids=[] then [] else ["  related: " ^ String.concat ", " row.related_ids])) snapshot.output.rows
           @ Option.to_list (Option.map (fun value -> "Receipt: " ^ Yojson.Safe.to_string value) view.receipt) in
         installations @ instances @ configurations @ observations @ row_details @ gaps

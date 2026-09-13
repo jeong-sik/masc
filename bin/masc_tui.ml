@@ -8309,10 +8309,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Toggle_burn_hud ->
       Buffer.clear state.msg_input;
       state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "enabled" else "hidden" in
+      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
       let cost = Masc_tui_types.fleet_total_cost_usd state in
       notice ~role:Message_local
-        (Printf.sprintf "Token burn velocity HUD %s (fleet total: $%.4f)" status_str cost)
+        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in

@@ -576,6 +576,19 @@ let composer_cursor state ~rows ~cols =
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
+(* What [/burn] puts at the right of the tab row: the fleet's cost, then one
+   braille bar per Keeper for its token total when any Keeper has spent one.
+   It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
+   and, with nothing spent, bars of blank cells inside the brackets. The bars
+   are each Keeper's running total, not a rate over time. *)
+let burn_hud_text (state : state) =
+  if not state.burn_hud_visible then None
+  else
+    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
+    if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
+      Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
+    else Some cost
+
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -667,22 +680,17 @@ let surface_strip (state : state) ~cols =
   if hi < n - 1 then
     Buffer.add_string parts
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
-  if state.burn_hud_visible then begin
-    let total_cost = Masc_tui_types.fleet_total_cost_usd state in
-    let spark = Masc_tui_types.fleet_token_sparkline state in
-    let hud =
-      Printf.sprintf "%s[HUD $%.2f %s%s%s]%s"
-        (Theme.recede ()) total_cost (Theme.info ()) spark (Theme.recede ()) Ansi.reset
-    in
-    let hud_raw = Printf.sprintf "[HUD $%.2f %s]" total_cost spark in
-    let hud_cells = Message_layout.display_width hud_raw in
-    let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
-    if cols >= used_cells + hud_cells + 2 then begin
-      let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
-      Buffer.add_string parts gap;
-      Buffer.add_string parts hud
-    end
-  end;
+  (match burn_hud_text state with
+   | None -> ()
+   | Some hud_raw ->
+       let hud = Theme.recede () ^ hud_raw ^ Ansi.reset in
+       let hud_cells = Message_layout.display_width hud_raw in
+       let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
+       if cols >= used_cells + hud_cells + 2 then begin
+         let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
+         Buffer.add_string parts gap;
+         Buffer.add_string parts hud
+       end);
   Buffer.contents parts
 
 

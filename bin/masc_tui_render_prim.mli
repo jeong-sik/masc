@@ -212,6 +212,11 @@ val write_list_sidebar :
 
 val data_unreliable_row : cols:int -> string -> string
 
+val burn_hud_text : Masc_tui_types.state -> string option
+(** The tab row's [/burn] reading without styling: the fleet's cost, and each
+    Keeper's token total as a braille bar when any Keeper has spent one.
+    [None] while it is hidden. *)
+
 val fenced_document_text : language:string -> string -> string
 
 val lexed_span : string * String.t -> string

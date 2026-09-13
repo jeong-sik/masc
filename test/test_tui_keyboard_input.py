@@ -10806,26 +10806,66 @@ def changes_keeper_and_arrow_detail_interaction(
 
 
 def keeper_gate_mode_footer_interaction(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    _slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    footer = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=200,
-        needle=re.compile(rb"g\x1b\[0m:auto"),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"g:yolo" in CSI_RE.sub(b"", footer):
-        raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
-    os.write(master_fd, b"q")
+    gate: GatedHttpResponse,
+) -> Interaction:
+    """The footer names the action `g` performs, so it must name only one.
 
+    The approval-mode override arrives over HTTP, and until it does the Keeper
+    is not known to be in YOLO, so the first footer legitimately offers
+    `g:yolo`. Holding the response makes that first frame certain instead of
+    timing-dependent: on a fast machine it was already gone by the time the
+    assertion looked, and on CI it was not.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        before = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=200,
+            needle=re.compile(rb"g\x1b\[0m:yolo"),
+            final_cursor=b"\x1b[?25l",
+        )
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
+            raise AssertionError("the approval-mode override never reached its fixture")
+        gate.release.set()
+        footer = wait_for_output(
+            process,
+            master_fd,
+            output,
+            re.compile(rb"g\x1b\[0m:auto"),
+            start=len(before),
+            timeout=10.0,
+        )
+        del footer
+        # Read the row, not the byte window. The window that carries the Auto
+        # footer also carries the YOLO one drawn before the override landed, so
+        # a substring check over it fails on a footer already replaced.
+        # screen_rows keys by cursor address, so the later write to a row wins.
+        drawn_rows = screen_rows(bytes(output))
+        footer_row = screen_row_of(drawn_rows, b"g:auto")
+        if footer_row < 0:
+            raise AssertionError(
+                f"no footer row offers Auto: {bytes(output[-2000:])!r}"
+            )
+        if b"g:yolo" in drawn_rows[footer_row]:
+            raise AssertionError(
+                "the footer offers Auto and YOLO on the same row: "
+                f"{drawn_rows[footer_row]!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
 
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
@@ -13518,14 +13558,19 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=changes_navigation_fixtures,
     )
     gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = (
-        200,
-        {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+    gate_mode_gate = GatedHttpResponse(
+        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+        subsequent_response=(
+            200,
+            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+        ),
+        hold_seconds=15.0,
     )
+    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
     run_terminal_scenario(
         executable,
         description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction,
+        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
         http_fixtures=gate_mode_fixtures,
     )
     run_terminal_scenario(

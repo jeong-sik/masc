@@ -105,6 +105,31 @@ let test_original_presentation () =
     let missing = dispatch task "presentation.pptx" [] in
     Alcotest.(check bool) "missing managed parser is an explicit failure" true
       (Tool_result.failure_class missing = Some Tool_result.Dependency_unavailable));
+  (* A small valid source must not let a renderer output bypass the PDF
+     source ceiling before the complete generated file is read. *)
+  let fake_bin = Filename.concat base "oversized-renderer" in
+  Fs_compat.mkdir_p fake_bin;
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree fake_bin);
+  let fake_soffice = Filename.concat fake_bin "soffice" in
+  write fake_soffice (Printf.sprintf {|#!/usr/bin/env python3
+import pathlib, sys
+if "--version" in sys.argv:
+    print("bounded-output renderer fixture")
+else:
+    output = pathlib.Path(sys.argv[sys.argv.index("--outdir") + 1]) / "source.pdf"
+    with output.open("wb") as stream:
+        stream.write(b"%%PDF-")
+        stream.truncate(%d)
+|} (Verification_pdf_inspection.max_source_bytes + 1));
+  Unix.chmod fake_soffice 0o700;
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect ~finally:(fun () -> Unix.putenv "PATH" old_path) (fun () ->
+    Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+    match Verification_presentation_inspection.inspect ~base_path:base
+      ~max_image_bytes:(Env_config_keeper.KeeperVision.max_image_bytes ()) ~bytes:original with
+    | Error (Verification_presentation_inspection.Policy_rejected _) -> ()
+    | Error error -> Alcotest.fail (Verification_presentation_inspection.error_to_string error)
+    | Ok _ -> Alcotest.fail "oversized generated PDF escaped the source bound");
   Alcotest.(check string) "original source remains byte-for-byte unchanged" original
     (read (Filename.concat root "presentation.pptx"))
 

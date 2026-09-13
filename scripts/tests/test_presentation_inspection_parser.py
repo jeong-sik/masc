@@ -52,15 +52,13 @@ class PresentationParserTests(unittest.TestCase):
         self.assertEqual([], slides[1]["hyperlinks"])
 
     def test_python38_syntax_and_containment(self):
-        ast.parse(PYTHON, feature_version=(3, 8))
-        # Python 3.8 does not provide is_relative_to. Exercise the fallback itself.
-        with patch.object(
-            Path,
-            "is_relative_to",
-            side_effect=AssertionError("Python 3.9 API"),
-            create=True,
-        ):
-            self.assertTrue(self.inspect()["ok"])
+        tree = ast.parse(PYTHON, feature_version=(3, 8))
+        self.assertFalse(any(isinstance(node, ast.Attribute) and node.attr == "is_relative_to"
+                             for node in ast.walk(tree)))
+        # Run containment through the host's stdlib unchanged. Python 3.12's
+        # relative_to internally calls is_relative_to; mocking that method
+        # breaks a supported public API rather than simulating Python 3.8.
+        self.assertTrue(self.inspect()["ok"])
 
     def test_zip_bomb_rejected_before_crc_decompression(self):
         with zipfile.ZipFile(

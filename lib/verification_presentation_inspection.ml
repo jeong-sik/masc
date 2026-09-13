@@ -41,6 +41,15 @@ let read_owned root path =
   | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
   | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
 
+let read_bounded_owned root path ~max_bytes =
+  match Fs_compat.load_owned_regular_file_prefix ~ownership_root:root ~max_bytes path with
+  | Ok (Some prefix) when prefix.truncated ->
+      Error (Policy_rejected (Printf.sprintf "%s exceeds %d byte inspection limit"
+        (Filename.basename path) max_bytes))
+  | Ok (Some prefix) -> Ok prefix.content
+  | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
+  | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
+
 let field key fields = List.assoc_opt key fields
 
 let parse_hyperlinks = function
@@ -147,7 +156,8 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       let* parser_output = run python
           ["-I"; "-B"; "-c"; Verification_presentation_inspection_parser.source;
            source; Presentation_runtime_dependencies.environment_dir ~base_path; parsed_path] in
-      let* parsed = read_owned root parsed_path in
+      let* parsed = read_bounded_owned root parsed_path
+        ~max_bytes:Verification_pdf_inspection.max_extracted_bytes in
       let* slides, parser_diagnostics = parse_result ~bytes ~sha256 parsed in
       let* after_parse = read_owned root source in
       let* () = if String.equal bytes after_parse then Ok ()
@@ -159,7 +169,8 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       let* renderer_output = run "soffice"
           ["-env:UserInstallation=" ^ profile_uri; "--headless"; "--nologo";
            "--nodefault"; "--norestore"; "--convert-to"; pdf_filter; "--outdir"; root; source] in
-      let* pdf_bytes = read_owned root (Filename.concat root "source.pdf") in
+      let* pdf_bytes = read_bounded_owned root (Filename.concat root "source.pdf")
+        ~max_bytes:Verification_pdf_inspection.max_source_bytes in
       let* rendered_pdf = Verification_pdf_inspection.inspect ~base_path ~max_image_bytes ~bytes:pdf_bytes ()
         |> Result.map_error (fun error -> Pdf_inspection_failed error) in
       let* () = if List.length slides = List.length rendered_pdf.pages then Ok ()

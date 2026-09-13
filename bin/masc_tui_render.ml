@@ -623,10 +623,16 @@ let render_overview (state : state) =
           ^ fit_width err (cols - 8)
           ^ Ansi.reset)
    | None | Some _ -> ());
-  if row_budget.task_rows > 0 && List.is_empty state.tasks
-     && Option.is_none tasks_error then
-    box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
-  else begin
+  let no_tasks_note =
+    match local_rows_page state ~error:tasks_error with
+    | Page_empty -> Some "  (no tasks)"
+    | Page_unread -> Some page_unread_note
+    | Page_failed -> None
+  in
+  (match no_tasks_note with
+   | Some note when row_budget.task_rows > 0 && List.is_empty state.tasks ->
+     box_line buf cols (Ansi.dim ^ note ^ Ansi.reset)
+   | Some _ | None -> begin
     (* The panel is shorter than the list can get, so the cursor can sit below
        the last visible row; the window follows it the way Board's does. *)
     let task_scroll_offset =
@@ -645,7 +651,7 @@ let render_overview (state : state) =
           box_line buf cols ("  " ^ task_line t)
       end
     done
-  end;
+  end);
 
   (* Carry the frame to the bottom of the terminal. Without this the surface
      stops where its content does and the footer under it lands wherever that
@@ -3856,21 +3862,19 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
   match runtime with
   | None -> Ansi.dim ^ "- -" ^ Ansi.reset
   | Some row ->
+      let module Mark = Masc_tui_keeper_mark in
       let sandbox =
-        match row.kr_sandbox_profile with
-        | "docker" -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "D" ^ Ansi.reset
-        | "microvm" -> (Theme.category Theme.Slot_2) ^ "M" ^ Ansi.reset
-        | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
-        | other when String.length other > 0 ->
+        match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
+        | Some (Mark.Docker as known), _ ->
+          (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Microvm as known), _ ->
+          (Theme.category Theme.Slot_2) ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Local as known), _ -> Ansi.dim ^ Mark.sandbox_letter known ^ Ansi.reset
+        | None, other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
-        | _ -> Ansi.dim ^ "?" ^ Ansi.reset
+        | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      (match row.kr_activation_mode with
-       | Activation_manual -> "M"
-       | Activation_on_demand -> "D"
-       | Activation_autonomous -> "A")
-      ^ " "
-      ^ sandbox
+      Mark.activation_letter row.kr_activation_mode ^ " " ^ sandbox
 
 (* Column header labels line up with the cell budgets
    [Render_schedule.allocate_keeper_columns] hands out, so the arithmetic lives
@@ -4110,6 +4114,7 @@ let render_keeper_list (state : state) =
   let selected_reading =
     Option.map (keeper_reading state) (selected_keeper state)
   in
+  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
   Buffer.add_char buf '\n';
 
@@ -4120,7 +4125,12 @@ let render_keeper_list (state : state) =
   in
   let heading =
     screen_title
-      (Printf.sprintf " MASC Keepers (%d)" (List.length state.keepers))
+      (Printf.sprintf " MASC Keepers %s"
+         (match state.keepers, local_rows_page state ~error:keepers_error with
+          | _ :: _, _ | [], Page_empty ->
+              Printf.sprintf "(%d)" (List.length state.keepers)
+          | [], (Page_unread | Page_failed) ->
+              title_missing_reading ~error:keepers_error))
     (* The same marker the footer draws. These two said different things
        about the same pair of fields: the heading kept its own spelling and
        so reported no count, and named n/N on surfaces where those keys do
@@ -4213,15 +4223,10 @@ let render_keeper_list (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  Health = heartbeat/readiness   Lifecycle = keeper process   Last = time since last turn";
-  box_line_styled buf cols ~style:(Theme.recede ())
-    "  Mode: M manual / D on demand / A autonomous   S = sandbox (D docker \xc2\xb7 M microvm \xc2\xb7 L local)";
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
 
-  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
@@ -4242,10 +4247,19 @@ let render_keeper_list (state : state) =
   let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
   let readings_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows readings in
   if keeper_count = 0 then begin
-    if keeper_rows > 0 && Option.is_none keepers_error then
-      box_line buf cols
-        (Ansi.dim ^ "   no keeper metadata under .masc/keepers/" ^ Ansi.reset);
-    let filled = if Option.is_none keepers_error then 1 else 0 in
+    (* A roster that was never read is as empty as one that holds no files;
+       only the second is "no keeper metadata". *)
+    let note =
+      match local_rows_page state ~error:keepers_error with
+      | Page_empty -> Some "   no keeper metadata under .masc/keepers/"
+      | Page_unread -> Some page_unread_note
+      | Page_failed -> None
+    in
+    Option.iter
+      (fun note ->
+        if keeper_rows > 0 then box_line buf cols (Ansi.dim ^ note ^ Ansi.reset))
+      note;
+    let filled = if Option.is_some note then 1 else 0 in
     for _ = 1 to max 0 (keeper_rows - filled) do
       box_empty buf cols
     done

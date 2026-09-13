@@ -732,6 +732,32 @@ let footer_hints_approval_detail =
     ; b Act "Esc" "back"
     ]
 
+(* The Board draft's two footers were written out in the renderer, and the
+   pane above them then spelled the same key a second way: "Ctrl-E: $EDITOR"
+   over a footer saying "Ctrl-E:$EDITOR", with "Enter: newline" beside it
+   that the footer never named. Both rows project from here, and the pane
+   keeps to what the draft is and where it goes. *)
+let board_compose_writing_bindings =
+  [ b Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
+  ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
+  ; b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
+  ; b Meta "Tab" "surfaces"
+  ]
+
+(* No [q] here: while the draft has the keys, [q] is a printable scalar and
+   goes into the draft like any other letter. Leaving is Esc and then d. *)
+let footer_hints_board_compose_writing =
+  "type to write  " ^ hints_of_bindings board_compose_writing_bindings
+
+let board_compose_armed_bindings ~reply =
+  [ b Act "s" "send" ]
+  @ [ b Act "e" "edit in $EDITOR" ]
+  @ (if reply then [] else [ b Act "h" "cycle hearth" ~help:"a new post's sub-board" ])
+  @ [ b Act "d" "discard"; b Meta "Esc" "keep writing" ]
+
+let footer_hints_board_compose_armed ~reply =
+  hints_of_bindings (board_compose_armed_bindings ~reply)
+
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =
   let own =

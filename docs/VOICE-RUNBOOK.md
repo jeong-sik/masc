@@ -134,6 +134,109 @@ and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
 optional step cannot fail the thing it is optional to — and by this point the
 workspace and the model connection are already saved.
 
+### The whole loop, on a fresh workspace, with nothing running
+
+Walked end to end 2026-09-13 on M3 Max / macOS 26. No server was started, and
+nothing listened on a port at any point.
+
+```
+masc init --base-path /tmp/fresh                      0.79s   1,504 lines written
+masc voice-local-setup --base-path /tmp/fresh \
+     --list-voices                                    3.05s   184 voices, 9 Korean
+masc voice-local-setup --base-path /tmp/fresh \
+     --voice Yuna                                     0.59s   9 lines added
+masc voice-local-setup --base-path /tmp/fresh \
+     --model ~/models/whisper/ggml-large-v3-turbo.bin 0.37s   7 lines added
+```
+
+`voice-local-setup` added 16 lines in total and changed none of the 1,504 that
+`init` wrote. Then, with `alpha` mapped to a Korean voice by hand:
+
+```
+masc voice-verify --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
+
+tts
+  macos-say       macos_say     answered: 119044 bytes of audio in "Eddy (한국어(한국))"
+
+stt  (utterance.wav, 144,276 bytes)
+  whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
+```
+
+| Leg | Wall |
+|---|---|
+| speak only | 0.75s |
+| speak and hear | 3.79s |
+
+The sentence came back exactly as it was spoken, including the full stop. The
+transcript is whisper's own; masc passed `-l auto` and did not name a language.
+
+**What this does and does not prove.** It is the two halves a voice turn needs
+— a keeper's words become audio in that keeper's voice, and a recording becomes
+text a keeper can be sent. It is not a keeper turn: no model was called and no
+message was appended to a chat. The turn itself is the two HTTP calls under
+[External devices](#external-devices), and the reply comes back as a clip on
+the chat line, announced as whatever container it is (see [The announcement has
+to agree with it](#the-announcement-has-to-agree-with-it)).
+
+Two downloads stand between a new machine and the hearing half — the 8.9MB
+brew bottle and the 1.6GB model, both named by `masc prerequisite-actions
+whisper`. Speaking needs neither: every number in the `tts` row above came off
+a machine with nothing installed for it.
+
+### Where the chosen voice is written, and why it matters
+
+Walked on a fresh workspace 2026-09-13, `masc init` then
+`masc voice-local-setup --voice Yuna`, then one keeper mapped by hand:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+
+[voice.tts.agent_voices]
+alpha = "Eddy (한국어(한국))"
+```
+
+```
+masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+```
+
+The mapped keeper gets its own voice; an unmapped one gets the workspace
+default. That is the order a reader expects, and it is not free — it depends
+on the chosen voice being written to `[voice.tts]` and **not** to the
+endpoint.
+
+A voice on the endpoint outranks `agent_voices`. Measured on the same
+workspace with the one line `default_voice = "Yuna"` added under
+`[[voice.tts.endpoints]]`:
+
+| Endpoint line | keeper `alpha` (mapped to Eddy) | keeper `beta` (unmapped) |
+|---|---|---|
+| present | **Yuna**, 85,908 bytes — the mapping is ignored | Yuna |
+| absent | **Eddy**, 119,044 bytes | Yuna, 85,908 bytes |
+
+Nothing is logged in the first row. The keeper speaks, the bytes are real, and
+the voice is simply not the one that was assigned.
+
+The field exists for a reason and is not going away: a voice name is
+provider-shaped — `say` takes a label, ElevenLabs a 20-character `voice_id` —
+so a workspace that already has a `[voice.tts]` section has a default that
+belongs to the other provider, and adding `say` alongside it has to carry its
+own. So `voice-local-setup` writes the endpoint voice only in that case
+(`Voice_setup.voice_placement`), and a fresh mac — one provider, no section
+yet — gets the section default with per-keeper voices layered over it.
+
+The cost of the remaining case is worth stating plainly: on a workspace with
+two TTS providers, `agent_voices` does not reach the second one. There is no
+per-provider agent mapping. A keeper mapped to an ElevenLabs `voice_id` would
+otherwise have that id handed to `say`, which does not fail on a name it does
+not have — it speaks in the system voice.
+
 ### Outside the journey
 
 ```
@@ -187,6 +290,30 @@ whisper-cli -m ggml-large-v3-turbo -l auto -nt -f clip.wav
 The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
 whisper.cpp requires, so nothing is converted between the microphone and the
 transcript. And `-l auto` detects Korean, so there is no language to configure.
+
+### Checking one keeper's voice
+
+The section default is not what a keeper speaks in — a keeper mapped under
+`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
+
+```
+masc voice-verify --agent sangsu --json
+```
+
+Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
+exists and `nowhere` to a name that does not:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
+
+All three say `answered`, because `say` answers a name it does not have by
+speaking in the system voice. The byte counts cannot separate them either —
+the third is the same 79,758 as the default. **The voice name in the report is
+what separates them**, and a name that is not in `say -v '?'` is a mapping
+that never took.
 
 ### The trap: a wrong voice name is silent
 
@@ -507,6 +634,30 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+### Speaking without touching the keyboard
+
+`Ctrl-Y` records one sentence and appends the transcript to the draft. The
+mode that lets a conversation run is a different key:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
+| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
+| `Esc` | discard a running capture (the draft keeps what was there before) |
+
+Continuous mode measures the room's noise floor **once** when it turns on,
+which is what keeps the gap between sentences short enough to speak across; it
+measures again if the mode is turned off and on in a different room. Silence
+re-arms too, so a pause longer than the trailing-silence window does not end
+the mode. Only the key that started it ends it.
+
+Both are control codes rather than letters because every printable key in a
+focused composer row is draft text.
+
+That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
+it: ending a capture hands the draft to the same send path Enter uses. Off by
+default, and described under Configuration below.
+
 ## External devices
 
 Any device that can make two HTTP calls can speak to a keeper. No MASC change
@@ -722,6 +873,50 @@ This is the reading half of the container fix: for a while every clip was
 named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
 of silence) or would have been announced as MP3. A player told the wrong
 type either refuses or plays nothing, and neither says why.
+
+### The announcement has to agree with it
+
+The route above is what a clip is **served** as. What a keeper's spoken reply
+is **announced** as is a separate field, written when the reply is appended to
+the chat, and for a while it was the literal `audio/mpeg` for every clip:
+
+```json
+{ "audio": { "token": "9f3c…", "audio_url": "/api/v1/voice/audio/9f3c…",
+             "mime": "audio/mpeg" } }
+```
+
+A fresh mac speaks through `say`, which writes WAVE. So the route answered
+`audio/wav` for bytes the same chat line called MP3: two fields about one
+file, disagreeing.
+
+**What this did and did not break, traced 2026-09-13.** The dashboard's
+`<audio>` element is given `src` and no `type`, so the browser picks its
+decoder from the route's `content-type` and plays the clip correctly. The
+field is not decorative either: `normalizeAudioClip` drops a clip that has no
+`mime` at all, and the value it keeps is persisted on the chat line and
+emitted on the SSE payload. So the cost is not a silent player today — it is
+a wrong answer on the wire and in the history to anything that reads it
+instead of fetching: an external device following the SSE stream, an export,
+a player that picks a decoder from the field rather than the response.
+
+The cause is worth naming because it is not a typo. The path already knew the
+container: the helper that turned `…/9f3c.wav` into a token **matched that
+extension and then dropped it**, handing back the token alone. The caller,
+left holding half the answer, filled in the other half with a constant. Both
+halves now come back together (`clip_of_path`), and the record is built in one
+place (`Keeper_chat_store.audio_clip_of_synthesized_file`) rather than field
+by field at the call site.
+
+`test/voice_clip_announcement` writes a real file and checks that what the
+announcement says and what `find_clip` would serve are the same string —
+asserting the literal alone would pass again if only one side moved, which is
+how this started. Planting `mime = "audio/mpeg"` back turns that suite red on
+the WAVE case and nothing else.
+
+A clip under a container masc does not write (`.ogg`, say) is now announced as
+no clip at all, with a line in the log, because the serving route resolves a
+token by trying each container it knows and would answer `404` for it however
+it was labelled. The reply is still recorded as text.
 
 ### Speaking to a keeper, not just probing it
 

@@ -1,13 +1,17 @@
 name = "masc_fusion_status"
 description = """
-Read Fusion status and original deliberation evidence.
+Read Fusion run status and original deliberation evidence without starting one.
 
-Without run_id, list your tracked runs. With it, read original Board evidence: \
-full panel answers, judge advice, source context, post/origin IDs and evidence hash, \
-plus separate Keeper decisions. Missing registry metadata is null; Board evidence \
-remains readable by run_id subject to retention. Registry history replays at startup. \
-Do not poll: inspect evidence after the completion wake before attributing panel views \
-or using masc_fusion_decision. Unavailable does not prove expiry. Read-only."""
+With no argument, lists tracked runs belonging to you. With run_id, reads that
+exact run's original durable Board evidence: full panel answers, judge advice,
+source context, original post/origin identities and evidence hash, alongside
+separate Keeper decisions. The run metadata can be null when the registry entry
+is not retained; available durable evidence remains readable by run_id. Registry
+history is replayed at startup, while Board evidence follows Board retention.
+Wait for the completion wake instead of polling. Once it arrives, use this tool
+to inspect the full evidence before attributing panel positions or recording your
+own choice with masc_fusion_decision. Unavailable evidence is reported explicitly;
+it is not a finding that the post expired. Read-only."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
@@ -20,4 +24,6 @@ defer_loading = true
 name = "run_id"
 type = "string"
 description = """
-Run ID from masc_fusion. Omit to list your tracked running and recently completed runs."""
+Optional fusion run id (the run_id returned by masc_fusion). When given, \
+returns that run's status and original durable evidence; when omitted, lists every tracked run \
+(in-progress and recently completed)."""

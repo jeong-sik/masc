@@ -152,25 +152,11 @@ let handle_speak_with_outcome
           let base_dir = config.Workspace.base_path in
           let surface = Surface_ref.Dashboard { session_id = None } in
           let clip : Keeper_chat_store.audio_clip option =
-            match Json_util.get_string json "audio_file" with
-            | Some path ->
-              let token =
-                path |> Filename.basename |> Filename.chop_extension
-              in
-              let audio_url = Masc_network_defaults.voice_audio_path token in
-              let duration_sec =
-                Voice_bridge_core.audio_duration_seconds ~audio_file:path
-              in
-              Some
-                { Keeper_chat_store.token
-                ; audio_url = Some audio_url
-                ; mime = "audio/mpeg"
-                ; duration_sec
-                ; message_text = message
-                ; device_id = audio_device
-                ; expired = false
-                }
-            | None -> None
+            Option.bind (Json_util.get_string json "audio_file") (fun audio_file ->
+              Keeper_chat_store.audio_clip_of_synthesized_file
+                ~audio_file
+                ~message_text:message
+                ~device_id:audio_device)
           in
           Keeper_chat_store.append_assistant_message
             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();

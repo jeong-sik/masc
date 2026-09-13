@@ -3878,6 +3878,10 @@ type board_list_reading =
   | Board_list_unread
   | Board_list_read
 
+type local_intervention =
+  | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
+  | Retained_after_stop
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3919,7 +3923,7 @@ type state = {
   mutable keeper_chat_control_generations : (string * int) list;
   mutable keeper_chat_control_tokens : (string * string) list;
   mutable keeper_chat_control_pending : (string * int64) list;
-  mutable keeper_interactive_waiting : (string * string * int * Masc_tui_keeper_chat_projection.interactive_target option) list;
+  mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
   mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
@@ -5425,7 +5429,8 @@ let working_chat_for_keeper state keeper_name =
     state.msg_inflight
 
 let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name (entry : inflight) =
-  let held_input = List.exists (fun (name, _, _, _) -> name = keeper_name)
+  let held_input = List.exists (fun (name, _, intervention) -> name = keeper_name
+    && match intervention with Awaiting_control _ -> true | Retained_after_stop -> false)
     state.keeper_interactive_waiting in
   let newer_input = held_input
     || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
@@ -5451,7 +5456,8 @@ let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
-  state.keeper_interactive_waiting <- List.filter (fun (name, _, _, _) -> name <> keeper_name)
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
   generation
 
@@ -5461,11 +5467,20 @@ let finish_keeper_chat_control state keeper_name ~generation =
   else begin
     let next = advance_keeper_chat_control state keeper_name in
     state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
-    state.keeper_interactive_waiting <- List.map (fun (name, id, held, target) ->
-      if name = keeper_name && held = generation then name, id, next, target
-      else name, id, held, target) state.keeper_interactive_waiting;
+    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+      let intervention = match intervention with
+        | Awaiting_control held when name = keeper_name && held.generation = generation ->
+          Awaiting_control {held with generation = next}
+        | Awaiting_control _ | Retained_after_stop -> intervention in
+      name, id, intervention) state.keeper_interactive_waiting;
     true
   end
+
+let release_retained_keeper_input state keeper_name =
+  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
+    name <> keeper_name || match intervention with
+    | Retained_after_stop -> false | Awaiting_control _ -> true)
+    state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing
    once. A later control advances again; old outcomes cannot mark a resumed
@@ -8178,7 +8193,13 @@ let keeper_message_activity_rows (state : state) =
     in
     let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
       state.msg_queued ~keeper_name in
-    activity @ submitted @ (if local_count > 0 then
+    let retained = List.exists (fun (name, _, intervention) ->
+      name = keeper_name && match intervention with
+      | Retained_after_stop -> true | Awaiting_control _ -> false)
+      state.keeper_interactive_waiting in
+    activity @ submitted @ (if retained then
+      ["Input retained after Esc; /queue resume releases it, or Enter joins a new update"]
+      else []) @ (if local_count > 0 then
       [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
         local_count (if local_count = 1 then "message" else "messages")]
       else [])

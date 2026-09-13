@@ -653,7 +653,7 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   state.keeper_chat_control_tokens <- ["alpha", "before"; "beta", "other"];
   let stop = Tui_types.begin_keeper_chat_control state "alpha" in
-  state.keeper_interactive_waiting <- ["alpha", "after-stop", stop, None];
+  state.keeper_interactive_waiting <- ["alpha", "after-stop", Tui_types.Awaiting_control {generation=stop;target=None}];
   check bool "old snapshot is no longer current" true
     (Tui_types.keeper_chat_control_generation state "alpha" <> 0);
   check bool "stop acknowledgement settles pending control" true
@@ -661,13 +661,27 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   let acknowledged = Tui_types.keeper_chat_control_generation state "alpha" in
   check bool "poll started before acknowledgement is stale" true (acknowledged <> stop);
   check bool "later input follows acknowledged control epoch" true
-    (state.keeper_interactive_waiting = ["alpha", "after-stop", acknowledged, None]);
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Awaiting_control {generation=acknowledged;target=None}]);
   ignore (Tui_types.begin_keeper_chat_control state "alpha");
-  check bool "a newer stop revokes automatic resumption" true (state.keeper_interactive_waiting = []);
+  check bool "a newer stop retains the input but revokes automatic resumption" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Retained_after_stop]);
+  let newer_stop = Tui_types.keeper_chat_control_generation state "alpha" in
+  check bool "new stop acknowledgement finishes" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:newer_stop);
+  check bool "acknowledgement cannot release revoked input" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Retained_after_stop]);
   check bool "older acknowledgement cannot finish newer stop" false
     (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
   check (option string) "unrelated keeper token remains usable" (Some "other")
-    (List.assoc_opt "beta" state.keeper_chat_control_tokens)
+    (List.assoc_opt "beta" state.keeper_chat_control_tokens);
+  state.keeper_interactive_waiting <- state.keeper_interactive_waiting @
+    ["beta", "other-stopped", Tui_types.Retained_after_stop;
+     "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}];
+  Tui_types.release_retained_keeper_input state "alpha";
+  check bool "explicit resume releases only stopped input for its keeper" true
+    (state.keeper_interactive_waiting =
+      ["beta", "other-stopped", Tui_types.Retained_after_stop;
+       "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}])
 ;;
 
 let test_late_interrupt_outcome_cannot_mark_newer_control () =

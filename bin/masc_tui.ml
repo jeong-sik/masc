@@ -1318,7 +1318,7 @@ let recall_newer (state : state) =
    two requests, and dropping "the row that reads like this" would take
    whichever came first. *)
 let forget_queued_history (state : state) (request : Keeper_chat.request) =
-  state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) ->
+  state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
     id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
   state.msg_history <-
     List.filter
@@ -1792,7 +1792,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
-  | Keeper_queue_loaded of string * int option * (string list, string) result
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -7037,6 +7037,8 @@ let take_pending_attachments state =
 ;;
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
+  state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
+    id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
   let control_generation = match admission_intent with
     | Keeper_chat.Interactive _ ->
       state.keeper_observed_interrupts <- List.filter (fun item ->
@@ -7197,12 +7199,15 @@ let launch_waiting_interactive state ~mailbox ~keeper_name =
   match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
   | None -> ()
   | Some control_token ->
-    let ready = List.filter (fun (name, _, generation, _) ->
-      String.equal name keeper_name
-      && generation = keeper_chat_control_generation state keeper_name)
+    let ready = List.filter_map (fun (name, id, intervention) ->
+      match intervention with
+      | Awaiting_control {generation;target}
+        when String.equal name keeper_name
+          && generation = keeper_chat_control_generation state keeper_name -> Some (id, target)
+      | Awaiting_control _ | Retained_after_stop -> None)
       state.keeper_interactive_waiting in
-    List.iter (fun (_, request_id, _, target) ->
-      state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) -> id <> request_id)
+    List.iter (fun (request_id, target) ->
+      state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
         state.keeper_interactive_waiting;
       match Chat_queue.take state.msg_queued ~request_id with
       | None -> ()
@@ -7376,8 +7381,8 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                 state.keeper_observed_interrupts;
               let request_id = item.Chat_queue.request.request_id in
               state.keeper_interactive_waiting <-
-                (target, request_id, keeper_chat_control_generation state target, observed_target) ::
-                List.filter (fun (_, id, _, _) -> id <> request_id) state.keeper_interactive_waiting;
+                (target, request_id, Awaiting_control {generation = keeper_chat_control_generation state target; target = observed_target}) ::
+                List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
               clear_current_message_draft state;
               (match List.assoc_opt target state.keeper_chat_control_tokens with
                | Some _ -> launch_waiting_interactive state ~mailbox ~keeper_name:target
@@ -7385,7 +7390,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                  add_event state "info" "Input retained; waiting for the stop or resume acknowledgement";
                  launch_keeper_turns_load state ~mailbox
                | None ->
-                 state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) -> id <> request_id)
+                 state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
                    state.keeper_interactive_waiting;
                  (match Chat_queue.take state.msg_queued ~request_id with
                   | None -> ()
@@ -7413,7 +7418,8 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         Option.is_none (inflight_for state keeper_name)
-        && not (List.exists (fun (name, _, _, _) -> String.equal name keeper_name)
+        && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
+        && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
           state.keeper_interactive_waiting)
         && not (composing_for_keeper state keeper_name)
         &&
@@ -7657,12 +7663,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     let result = try perform () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
-    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, result)) in
+    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
   chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
     (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, Error "Eio switch is unavailable"))
+  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
   end
 ;;
 
@@ -11669,8 +11675,14 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
-  | Keeper_queue_loaded (keeper_name, control_generation, result) ->
-      Option.iter (fun generation -> ignore (finish_keeper_chat_control state keeper_name ~generation)) control_generation;
+  | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
+      let current_control = match control_generation with
+        | Some generation -> finish_keeper_chat_control state keeper_name ~generation
+        | None -> false in
+      (match action, result with
+       | Masc_tui_queue_inspection.Resume, Ok _ when current_control ->
+         release_retained_keeper_input state keeper_name
+       | (Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _), (Ok _ | Error _) -> ());
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
       launch_keeper_turns_load state ~mailbox;
       let role, lines = match result with

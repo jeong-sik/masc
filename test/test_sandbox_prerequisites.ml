@@ -108,7 +108,7 @@ let test_presentation_install_is_workspace_owned () =
     (List.exists (fun (a:P.action) -> a.id="presentation_renderer_install")
       (P.catalog ~host:(S.Linux S.Arm64) ~distribution:P.Other dependency));
   let calls = ref [] in
-  let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error "fixture venv failure") parser in
+  let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error P.Did_not_finish) parser in
   check int "venv failure cannot install a package into another Python" 1 (List.length !calls);
   check bool "failed environment creation remains failed" true (match outcome with P.Failed _ -> true | _ -> false)
 

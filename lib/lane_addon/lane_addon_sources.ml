@@ -82,6 +82,27 @@ let interested sources activity = List.exists (function
   | Msx_capture _ -> activity=Msx_changed
   | Browser_document _ -> activity=Browser_changed
   | Lane_output _ -> false) sources
+(* Which typed activity a finished misc tool stands for, named beside the
+   activity it produces. Every operation is listed: a tool added to
+   {!Tool_schemas_misc.misc_operation} has to say whether it moves an MSX or a
+   browser source, instead of joining the generic arm without a word. Reads
+   (screen, peek, ram_diff, tabs, read) do not move a source, and DOS has no
+   source of its own here. *)
+let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = function
+  | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
+  | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Msx_changed
+  | Misc_browser_session | Misc_browser_goto | Misc_browser_act
+  | Misc_browser_interact -> Browser_changed
+  | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_browser_tabs | Misc_browser_read
+  | Misc_dos_load | Misc_dos_eject | Misc_dos_screen | Misc_dos_step
+  | Misc_dos_press | Misc_dos_type | Misc_dos_peek
+  | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
+  | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
+  | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
+  | Misc_ask | Misc_ask_status | Misc_ask_withdraw
+  | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
+  | Misc_tool_help | Misc_web_fetch | Misc_web_search -> Tool_completed
 let snapshot_files_only = function
   | [] -> false
   | sources -> List.for_all (function Snapshot_file _ -> true | _ -> false) sources

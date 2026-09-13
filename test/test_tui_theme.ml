@@ -300,10 +300,10 @@ let test_tone_is_three_values () =
 
 let test_glyphs_hold_their_bytes () =
   let open Masc_tui_theme.Glyph in
-  check str "done" "\xe2\x97\x8f" task_done;
-  check str "active" "\xe2\x97\x90" task_active;
-  check str "todo" "\xe2\x97\x8b" task_todo;
-  check str "cancelled" "\xc3\x97" task_cancelled;
+  check str "done" "\xe2\x97\x8f" progress_done;
+  check str "active" "\xe2\x97\x90" progress_active;
+  check str "waiting" "\xe2\x97\x8b" progress_waiting;
+  check str "ended" "\xc3\x97" progress_ended;
   (* Only the top priority speaks; the !!!/!!/! ladder put a mark on most
      rows, which distinguishes nothing. *)
   check str "priority 1 speaks once" "!" (priority 1);

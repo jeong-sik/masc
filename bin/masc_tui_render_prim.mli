@@ -217,6 +217,11 @@ val write_list_sidebar :
 
 val data_unreliable_row : cols:int -> string -> string
 
+val overview_pulse_text : Masc_tui_types.state -> now:float -> string
+(** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
+    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
+    any keeper-turn reading has come back. *)
+
 val burn_hud_text : Masc_tui_types.state -> string option
 (** The tab row's [/burn] reading without styling: the fleet's cost, and each
     Keeper's token total as a braille bar when any Keeper has spent one.
@@ -272,6 +277,11 @@ val planning_phase_color : Goal_phase.t -> string
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
     phase. *)
+
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
 
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
@@ -351,7 +361,9 @@ val runtime_config_status_lines :
 
 val help_masthead : Masc_tui_types.state -> string list
 
-val help_lines : Masc_tui_types.state -> string list
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
 

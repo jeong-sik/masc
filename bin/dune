@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
+ (libraries masc masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
  (name masc_reliable_change_g1_check)
@@ -814,7 +814,7 @@
  (name masc_tui_help)
  (wrapped false)
  (modules masc_tui_help)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_frame masc_tui_message_layout))
 
 (library
  (name masc_tui_roster_pane)
@@ -1061,6 +1061,8 @@
  (modules masc_tui_types)
  (libraries mtime.clock.os masc_tui_esc_interrupt
   masc_tui_answering
+  masc.voice_wizard
+  masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_lane_declaration
@@ -1341,6 +1343,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.voice_wizard
+  masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
   masc_tui_lane_declaration

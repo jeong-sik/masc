@@ -572,6 +572,24 @@ let composer_cursor state ~rows ~cols =
 
 ;;
 
+(* The Overview's Pulse: Keeper turns that finished in each of the last eight
+   fifteen-second windows, oldest first. The finishes are counted from two
+   successive keeper-turn readings, so until one reading has come back there is
+   nothing to count -- and eight flat bars said "nothing finished" for a read
+   that had not been made or had been refused. The shared words say which. *)
+let overview_pulse_text (state : state) ~now =
+  match state.keeper_turns_observed_at with
+  | None -> title_missing_reading ~error:state.keeper_turns_error
+  | Some _ ->
+      let buckets = Array.make 8 0 in
+      List.iter
+        (fun (_, ts) ->
+          let idx = min 7 (int_of_float (Float.max 0.0 (now -. ts) /. 15.0)) in
+          let slot = 7 - idx in
+          buckets.(slot) <- buckets.(slot) + 1)
+        state.keeper_turn_finishes;
+      Chart.sparkline (Array.to_list buckets)
+
 (* The strip above every surface: the Tab ring with the active family
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
@@ -1851,9 +1869,14 @@ let planning_phase_color = function
 ;;
 
 (* The goal count, the completed share and one counter per phase. With no goals
-   the row read "Goals: 0 no goals  │  ● Exec: 0  ◆ Ver: 0  ◇ Conf: 0  ✓ Done: 0
-   ✕ Drop: 0" -- the count, a sentence saying the count, and five zeros -- over a
-   list that says "(no goals)" itself. The count is the whole reading there. *)
+   the row read the count, a sentence saying the count, and five zero counters
+   over a list that says "(no goals)" itself. The count is the whole reading
+   there.
+
+   Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
+   marks the Backlog row under them wears for running, done and cancelled.
+   Verifying and awaiting confirmation are stages only a Goal has, so their
+   diamonds are theirs. *)
 let planning_rollup_row ~cols (rollup : planning_rollup) =
   let total_goals =
     (* Every phase counts, or the denominator drops the goals waiting on a
@@ -1877,13 +1900,28 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
       (String.concat "  "
-         [ counter Goal_phase.Executing "●" "Exec" rollup.pr_active
+         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
+             "Exec" rollup.pr_active
          ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
          ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
              rollup.pr_awaiting_confirmation
-         ; counter Goal_phase.Completed "✓" "Done" rollup.pr_done
-         ; counter Goal_phase.Dropped "✕" "Drop" rollup.pr_dropped
+         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
+             "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
+             "Drop" rollup.pr_dropped
          ])
+
+(* The Backlog counts, each with the mark its Task rows wear. Claimed had no
+   mark here while a claimed Task row draws the half circle, so the one count a
+   reader could match to a row was the one left bare. *)
+let planning_backlog_counts (backlog : planning_backlog) =
+  let open Masc_tui_theme.Glyph in
+  [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
+  ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
+  ; ("running", backlog.pb_running, progress_active ^ " running")
+  ; ("done", backlog.pb_done, progress_done ^ " done")
+  ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
+  ]
 
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
@@ -2596,11 +2634,41 @@ let help_masthead (_state : state) =
   ]
 
 
+(* The rows one help entry takes in [width] cells: [lead] (its key or usage,
+   [lead_cells] wide) with the start of [text], and the rest of [text] on rows
+   that start at [column], where every entry's text starts.
+
+   The sheet cut each entry to its column. Two columns at 120 cells are 57
+   each, and 23 of the 29 slash-command rows and 16 of the 20 Config rows ran
+   past that, so a summary ended in an ellipsis where it said what the key
+   does. A usage too long to leave [help_text_minimum_cells] beside it puts the
+   text on the rows under it, rather than one word to a row. *)
+let help_text_minimum_cells = 20
+
+(* The key column: two cells of indent, the key padded to this, and a space. *)
+let help_key_cells = 16
+
+let help_entry_rows ~width ~lead ~lead_cells ~column text =
+  let indent = String.make column ' ' in
+  let under words =
+    List.map
+      (fun piece -> indent ^ piece)
+      (Message_layout.wrap_words ~max_cells:(max 1 (width - column)) words)
+  in
+  let beside = width - lead_cells in
+  if lead_cells > column && beside < help_text_minimum_cells then
+    lead :: under text
+  else
+    match Message_layout.wrap_words ~max_cells:(max 1 beside) text with
+    | [] -> [ lead ]
+    | [ first ] -> [ lead ^ first ]
+    | first :: rest -> (lead ^ first) :: under (String.concat " " rest)
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_lines (state : state) =
+let help_lines ~width (state : state) =
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2626,29 +2694,31 @@ let help_lines (state : state) =
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
     header_line
-    :: List.map
+    :: List.concat_map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-16s%s %s"
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (String.trim key)
-             Ansi.reset
-             action)
+           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           help_entry_rows ~width
+             ~lead:
+               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  key_cell Ansi.reset)
+             ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
+             ~column:(2 + help_key_cells + 1) action)
          entries
     @ [ "" ]
   in
   let slash_commands =
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
-    :: List.map
+    :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           Printf.sprintf "  %s%s%s%s%s"
-             (Theme.warn ())
-             text
-             Ansi.reset
-             (Masc_tui_command.help_summary_padding text)
+           let padding = Masc_tui_command.help_summary_padding text in
+           help_entry_rows ~width
+             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
+             ~column:(2 + Masc_tui_command.help_summary_column)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]

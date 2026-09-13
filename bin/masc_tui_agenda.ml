@@ -100,7 +100,7 @@ let same_day (a : Unix.tm) (b : Unix.tm) =
    says something is scheduled. *)
 let hour_and_minute ~now ~localtime row =
   match Time_codec.parse_rfc3339_opt row.at_iso with
-  | None -> Masc.Tui_decode.short_timestamp_for_terminal row.at_iso
+  | None -> Masc.Tui_decode.short_timestamp_for_terminal ~localtime row.at_iso
   | Some at ->
     let tm = localtime at in
     let clock = Printf.sprintf "%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min in

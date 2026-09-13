@@ -504,7 +504,8 @@ module Terminal_text = struct
     Option.value ~default (optional_single_line value)
 
   let single_lines values = List.map single_line values
-  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let short_timestamp text =
+    Masc.Tui_decode.short_timestamp_for_terminal ~localtime:Unix.localtime text
   (* The screen's clock is the terminal's zone. This is the one place that
      names it, so every row clock and the header clock agree. *)
   let clock_timestamp text =
@@ -514,12 +515,12 @@ end
 (** Task status icon *)
 let task_status_icon status =
   match status with
-  | Masc_domain.Done _ -> "\xe2\x97\x8f"  (* filled circle *)
+  | Masc_domain.Done _ -> Masc_tui_theme.Glyph.progress_done
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _ -> "\xe2\x97\x90"  (* half circle *)
-  | Masc_domain.Todo -> "\xe2\x97\x8b"  (* empty circle *)
-  | Masc_domain.Cancelled _ -> "\xc3\x97"
+  | Masc_domain.AwaitingVerification _ -> Masc_tui_theme.Glyph.progress_active
+  | Masc_domain.Todo -> Masc_tui_theme.Glyph.progress_waiting
+  | Masc_domain.Cancelled _ -> Masc_tui_theme.Glyph.progress_ended
 
 (** Priority indicator. Empty for everything but the top priority — the glyph
     owner in [Masc_tui_theme.Glyph] says which ranks speak at all. *)

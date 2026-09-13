@@ -220,6 +220,28 @@ let test_decode_saved_settings_and_effective_prompt_sources () =
   check bool "unknown comparison status is rejected" true
     (Result.is_error (D.decode_preset_detail (payload (`Assoc ["status", `String "unknown"]))))
 
+(* The pane's row where an empty list would be. It named [s], which on Config
+   opens Resources, and it called a store of unreadable presets empty. *)
+let test_pane_empty_line_names_the_save_key () =
+  let empty = { D.pss_presets = []; pss_unreadable = [] } in
+  let footer = Masc_tui_keys.footer_hints_config ~pane:Masc_tui_types.Config_presets in
+  let has needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  check bool "the footer's save key is n" true (has "n:" footer);
+  (match Text.pane_empty_line empty with
+   | None -> fail "an empty store draws a row"
+   | Some line ->
+       check bool "the row names n" true (has "n 으로" line);
+       check bool "and not s" false (has "s 로" line));
+  check (option string) "unreadable presets are not an empty store"
+    (Some "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다")
+    (Text.pane_empty_line { D.pss_presets = []; pss_unreadable = [ "torn", "manifest.json missing" ] });
+  check (option string) "a list draws no empty row" None
+    (Text.pane_empty_line { D.pss_presets = [ morning ]; pss_unreadable = [] })
+
 let () =
   run "Masc_tui_preset_text"
     [ ( "preset text"
@@ -229,6 +251,8 @@ let () =
         ; test_case "restore lines show skips and the runtime outcome" `Quick
             test_restore_lines_show_skips_and_the_runtime_outcome
         ; test_case "pane row and detail lines" `Quick test_pane_row_and_detail
+        ; test_case "pane empty line names the save key" `Quick
+            test_pane_empty_line_names_the_save_key
         ; test_case "saved comparison and current effective source decode independently" `Quick
             test_decode_saved_settings_and_effective_prompt_sources
         ] )

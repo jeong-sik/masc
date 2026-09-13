@@ -577,7 +577,20 @@ let image_capability_error ~accepts_image_input content_blocks =
     | None -> None
     | Some blocks ->
       if List.exists
-           (function Agent_core.Types.Image _ -> true | _ -> false)
+           (function
+             | Agent_core.Types.Image _ -> true
+             (* Every other block is named so a new media kind has to decide
+                here. A nested ToolResult can carry blocks of its own, but
+                [Runtime_official_client_tool.project_content] refuses nested
+                tool-call content before anything is delivered. *)
+             | Agent_core.Types.Text _
+             | Agent_core.Types.Thinking _
+             | Agent_core.Types.ReasoningDetails _
+             | Agent_core.Types.RedactedThinking _
+             | Agent_core.Types.ToolUse _
+             | Agent_core.Types.ToolResult _
+             | Agent_core.Types.Document _
+             | Agent_core.Types.Audio _ -> false)
            blocks
       then
         Some

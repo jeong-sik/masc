@@ -10311,13 +10311,14 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # Selecting beta is this scenario's precondition, not its subject, and
+        # one `j` only reaches it when the roster has already arrived and left
+        # the cursor on the row above. On a slower runner it has not, so the
+        # press moves to the first row and the band never appears: this timed
+        # out on Linux CI for three unrelated pull requests (#35577, #35713 and
+        # this one) and passes on macOS either way. select_keeper_row walks
+        # until the row reports itself selected, which is the fact this needs.
+        select_keeper_row(process, master_fd, output, b"beta")
         if not wait_for_fixture_event(
             process, master_fd, output, gate.requested, timeout=10.0
         ):

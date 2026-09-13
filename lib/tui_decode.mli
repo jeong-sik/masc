@@ -2353,6 +2353,9 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
+val http_status_error : status_code:int -> body:string -> string
+(** A non-2xx answer as one terminal-safe line: [HTTP <status>: ] and then the
+    body's ["error"] sentence when it has one, otherwise the body's head. *)
 (** Transport owns the target URL; keep it before the verbose failure reason. *)
 val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :

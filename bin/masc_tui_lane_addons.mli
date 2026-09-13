@@ -22,7 +22,7 @@ type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
 }
-type focus = Configurations | Instances | Rows
+type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
   presentation : presentation; action_menu : action_menu option;

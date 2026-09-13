@@ -548,7 +548,7 @@ let reasoning_replay_values = List.map fst reasoning_replay_table
 
 let reasoning_replay_override_of_string raw =
   match normalize raw with
-  | "" -> Some Default_reasoning_replay
+  | "" -> None
   | normalized -> List.assoc_opt normalized reasoning_replay_table
 ;;
 
@@ -564,7 +564,7 @@ let assistant_tool_content_format_values =
 
 let assistant_tool_content_format_of_string raw =
   match normalize raw with
-  | "" -> Some Assistant_tool_content_null
+  | "" -> None
   | normalized -> List.assoc_opt normalized assistant_tool_content_format_table
 ;;
 
@@ -580,7 +580,7 @@ let chat_output_budget_field_values =
 
 let chat_output_budget_field_of_string raw =
   match normalize raw with
-  | "" -> Some Chat_max_tokens
+  | "" -> None
   | normalized -> List.assoc_opt normalized chat_output_budget_field_table
 ;;
 
@@ -596,7 +596,7 @@ let tool_schema_conformance_values =
 
 let tool_schema_conformance_of_string raw =
   match normalize raw with
-  | "" -> Some Rich_json_schema
+  | "" -> None
   | normalized -> List.assoc_opt normalized tool_schema_conformance_table
 ;;
 
@@ -608,7 +608,7 @@ let reasoning_output_format_values = List.map fst reasoning_output_format_table
 
 let reasoning_output_format_of_string raw =
   match normalize raw with
-  | "" -> Some No_reasoning_output_format
+  | "" -> None
   | normalized -> List.assoc_opt normalized reasoning_output_format_table
 ;;
 
@@ -620,7 +620,7 @@ let content_inline_reasoning_values = List.map fst content_inline_reasoning_tabl
 
 let content_inline_reasoning_of_string raw =
   match normalize raw with
-  | "" -> Some No_content_inline_reasoning
+  | "" -> None
   | normalized -> List.assoc_opt normalized content_inline_reasoning_table
 ;;
 

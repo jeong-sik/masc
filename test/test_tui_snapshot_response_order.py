@@ -127,6 +127,8 @@ def slow_poll(binary, binary_sha, source):
     fixtures, current = fixtures_and_reading(source, 2)
     path = PATHS[source]
     slow = h.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
+    _, primed = fixtures_and_reading(source, 1)
+    prime = h.GatedHttpResponse(primed, hold_seconds=10.0)
     watching_ticks = threading.Event()
     two_ticks = threading.Event()
     resumed = threading.Event()
@@ -172,12 +174,16 @@ def slow_poll(binary, binary_sha, source):
             # explicit arrival read is still pending. Settle a distinct
             # explicit reading before replacing the endpoint: otherwise its
             # obsolete/owning arrival requests can be counted as timer polls.
-            _, primed = fixtures_and_reading(source, 1)
-            fixtures[path] = primed
-            # A timer can publish the primed value before the queued r is
-            # consumed. The following help key is an ordered input witness:
-            # its frame proves r ran; opening/closing help launches no reads.
+            fixtures[path] = prime
+            # Hold every priming response until r has run. Otherwise a timer
+            # can publish 1 before r, and closing help shows that cached value
+            # while r's owning request has not reached the fixture yet. That
+            # request would be mistaken for the first automatic slow poll.
+            # The help frame witnesses key handling; the later 1-row frame
+            # witnesses settlement of the owning request after that handling.
             h.send_and_wait(process, master, output, b"r?", b"MASC Cheat Sheet")
+            assert h.wait_for_fixture_event(process, master, output, prime.requested, timeout=5.0)
+            prime.release.set()
             h.send_and_wait(process, master, output, b"\x1b", label(source, 1))
             fixtures[path] = source_read
             # No key starts this read: it comes from the actual TUI timer.
@@ -196,6 +202,7 @@ def slow_poll(binary, binary_sha, source):
                     process, master, output)
             os.write(master, b"q")
         finally:
+            prime.release.set()
             trace("scenario cleanup")
             print("SNAPSHOT_POLL_TIMELINE " + json.dumps({
                 "source": source, "binary_sha256": binary_sha,

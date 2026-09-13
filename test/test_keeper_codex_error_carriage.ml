@@ -14,6 +14,7 @@ let class_of (err : Agent_core.Error.t) =
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) ->
     "api:context_overflow"
   | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> "api:timeout"
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> "provider:auth"
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
     "provider:unavailable"
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _) ->
@@ -37,7 +38,7 @@ let test_every_variant_lands_in_its_class () =
     "config:codex_app_server";
   check "subscription_required"
     (Codex.Subscription_required "login")
-    "config:codex_subscription";
+    "provider:auth";
   check "context overflow pre-tool"
     (Codex.Context_window_exceeded
        { message = "full"; tool_effect_attempted = false })

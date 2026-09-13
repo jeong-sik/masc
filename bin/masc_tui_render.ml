@@ -12452,15 +12452,18 @@ let render_themes (state : state) =
      ^ fit_width "colours" 16 ^ "  " ^ fit_width "page" 9 ^ " "
      ^ fit_width "contrast" 12)
   ;
+  (* The key the way the footer spells it, then the three filters as the
+     product's tab strip draws a choice: the one in force marked. It read
+     "Filter: [f] [All 53] · Dark 40 · Light 13", where the brackets meant a
+     key once and the chosen filter once, on the same row. *)
   let filter_tag =
-    let chip label active count =
-      if active then "[" ^ label ^ " " ^ string_of_int count ^ "]"
-      else label ^ " " ^ string_of_int count
-    in
-    Printf.sprintf "Filter: [f] %s · %s · %s"
-      (chip "All" (state.theme_filter = `All) (List.length all_entries))
-      (chip "Dark" (state.theme_filter = `Dark) dark_count)
-      (chip "Light" (state.theme_filter = `Light) light_count)
+    let chip label active count = (label ^ " " ^ string_of_int count, active) in
+    Ansi.dim ^ "f:filter  " ^ Ansi.reset
+    ^ tab_strip
+        [ chip "All" (state.theme_filter = `All) (List.length all_entries)
+        ; chip "Dark" (state.theme_filter = `Dark) dark_count
+        ; chip "Light" (state.theme_filter = `Light) light_count
+        ]
   in
   let explanation =
     if cols >= 92 then
@@ -12469,7 +12472,7 @@ let render_themes (state : state) =
          else "native 7/7=all pass · N/7 low=below 4.5:1")
     else ""
   in
-  box_line_styled buf cols ~style:Ansi.dim ("  " ^ filter_tag ^ explanation);
+  box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
   let chosen = state.theme_choice in
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
@@ -12500,7 +12503,7 @@ let render_themes (state : state) =
   if show_sample then begin
     box_divider buf cols;
     box_line buf cols
-      (Printf.sprintf "  Sample: %s[● Ok]%s  %s[▲ Warn]%s  %s[× Bad]%s  %s[◆ Info]%s  %s[@keeper]%s  %s[⚡ tool]%s"
+      (Printf.sprintf "  Sample: %s● Ok%s  %s▲ Warn%s  %s× Bad%s  %s◆ Info%s  %s@keeper%s  %s⚡ tool%s"
          (Theme.ok ()) Ansi.reset
          (Theme.warn ()) Ansi.reset
          (Theme.bad ()) Ansi.reset
@@ -12516,11 +12519,13 @@ let render_themes (state : state) =
          Theme.Syntax.diff_removed Ansi.reset);
   end;
   box_line_styled buf cols ~style:Ansi.dim
+    (* What is in force, then its keys in the footer's spelling. [f] is on
+       the filter row above, so it is not said twice. *)
     (match chosen with
      | None ->
-       "  following the terminal's own colours \xe2\x80\x94 Enter picks a theme, f filters"
+       "  terminal colours  \xc2\xb7  Enter:pick a theme"
      | Some name ->
-       Printf.sprintf "  %s \xe2\x80\x94 Enter picks another, x follows terminal, f filters"
+       Printf.sprintf "  %s  \xc2\xb7  Enter:pick another  x:follow terminal"
          (Terminal_text.single_line name));
   box_bottom buf cols;
   Buffer.add_string buf

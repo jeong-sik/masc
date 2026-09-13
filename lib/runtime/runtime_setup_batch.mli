@@ -3,7 +3,20 @@
     stage validation runs in a child, without publishing its catalog globally. *)
 type revision
 type error = Invalid_selection | Invalid_configuration | Changed_configuration
-  | Configuration_unavailable | Validation_failed | Verification_failed of string
+  | Configuration_unavailable
+  | Child_not_started of Process_eio.spawn_refusal
+      (** The MASC executable could not be spawned for stage validation or
+          verification. *)
+  | Validation_failed of { exit : Unix.process_status; stderr : string }
+      (** The native stage validator ran and did not exit 0. Carries how it
+          ended and what it wrote to stderr. *)
+  | Verification_failed of { runtime_id : string; code : string; detail : string option }
+      (** The runtime's own verification report says it is not verified.
+          [code] and [detail] are the report's failure, read back through
+          {!Runtime_verification.of_json}. *)
+  | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
+      (** The verification child produced no report this module can read, or
+          a verified report with a failing exit. *)
   | Write_failed | Rollback_failed | Lock_unavailable
 type readiness = Not_probed | Verified
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;

@@ -249,8 +249,12 @@ let publish t event =
 let close t =
   if not t.closed
   then (
-    t.closed <- true;
-    Eio.Stream.add t.stream End_of_turn)
+    (* The flag follows the sentinel. A close cancelled while the bus is full
+       has delivered nothing, so a later close must still add the sentinel;
+       a flag set first would make that retry a no-op and leave the reader
+       parked in [take] with nothing left to wake it. *)
+    Eio.Stream.add t.stream End_of_turn;
+    t.closed <- true)
 ;;
 
 let subscribe_published t =

@@ -19550,26 +19550,9 @@ and is loaded on demand through keeper_skill.
                   goto_surface state ~mailbox:async_messages Acting
             | Connectors -> state.view <- Keepers Keeper_detail
             | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  if Option.is_some state.search || state.search_last <> "" then begin
-                    state.search <- None;
-                    state.search_last <- "";
-                    state.memory_facts_cursor <- 0;
-                    state.memory_facts_scroll <- 0
-                  end
-                  else begin
-                    (* Close the fact browser back to the health table. The
-                       listing is dropped with it: facts are cheap to re-ask
-                       and a kept copy would redraw stale rows on reopen. *)
-                    state.memory_facts_keeper <- None;
-                    state.memory_facts <- None;
-                    state.memory_facts_error <- None;
-                    state.memory_facts_cursor <- 0;
-                    state.memory_facts_scroll <- 0;
-                    state.memory_facts_category <- Category_all
-                  end
-                end
-                else state.view <- Overview
+                (match memory_back state with
+                 | Memory_stays -> ()
+                 | Memory_leaves -> state.view <- Overview)
             | Tools ->
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config

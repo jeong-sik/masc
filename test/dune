@@ -5153,6 +5153,8 @@
 
 (include stanzas/test_tui_ask_projection.inc)
 
+(include stanzas/test_tui_memory_back.inc)
+
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test

@@ -317,9 +317,11 @@ let test_repositories_footer_offers_code_and_git_changes () =
 
 let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
-     same movement and no arm answered it. *)
+     same movement and no arm answered it. [/] narrows this table rather than
+     moving a cursor through it, and Esc clears that filter before it leaves,
+     so both are named the way the fact browser names them. *)
   check str "the health table names the way into the facts"
-    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists

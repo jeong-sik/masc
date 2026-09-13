@@ -82,11 +82,45 @@ type authorization_source =
       ; stderr : string
       }
 
+type refusal_kind =
+  | Socket_denied
+  | Write_denied
+  | Unspecified
+
+let refusal_kind_tag = function
+  | Socket_denied -> "socket_denied"
+  | Write_denied -> "write_denied"
+  | Unspecified -> "unspecified"
+;;
+
+(* The closed reading of the shim's refusal record. The wire does not type
+   the refused rule yet, so this is a reading of what the refusal logged:
+   the sandbox's socket rule names the domain, the Landlock rule names the
+   filesystem. An empty or unrecognized stderr refuses towards the judge —
+   misclassification can only cost a judge visit, never an allow. *)
+let mentions ~(needle : string) (haystack : string) =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec at i =
+    if i + needle_len > haystack_len then false
+    else String.sub haystack i needle_len = needle || at (i + 1)
+  in
+  needle_len = 0 || at 0
+;;
+
+let classify_refusal stderr =
+  if mentions ~needle:"socket" stderr || mentions ~needle:"connect" stderr
+  then Socket_denied
+  else if mentions ~needle:"landlock" stderr then Write_denied
+  else Unspecified
+;;
+
 type observation =
   | Observed_result of boxed_execution
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
+      ; refusal_kind : refusal_kind
       }
   | Observation_unavailable of string
 
@@ -2059,45 +2093,50 @@ let decide_after_observation request ~observe =
            source
        in
        allow request source [ audit_receipt ]
-     | Observed_refused { status; stderr } ->
-       (match request.network_mode with
-        | Some Keeper_types_profile_sandbox.Network_none ->
-          (* The box's write/socket policy refused the attempt, but this
-             keeper's own sandbox already cuts every network route at its
-             boundary (RFC-0415) regardless of what that refused attempt
-             would have done — the judge exists to weigh reachable effect,
-             and Network_none removes the one this stage cannot otherwise
-             rule out. The refusal is not silently dropped: it travels as
-             the {!Network_isolated} audit source, and the caller still
-             dispatches the call for real (RFC-0422 §3.4's "no second
-             dispatch" applies only to {!Observed_in_box}, which this is
-             not — nothing ran yet). *)
-          Log.Keeper.info
-            ~keeper_name:request.keeper_name
-            "observe run refused operation=%s %s stderr_bytes=%d; \
-             network_mode=none reconfirmed, allowing without the judge"
-            request.operation
-            (status_label status)
-            (String.length stderr);
-          let source = Network_isolated { status; stderr } in
-          let audit_receipt =
-            audit_allow
-              request
-              ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-              source
-          in
-          allow request source [ audit_receipt ]
-        | Some (Keeper_types_profile_sandbox.Network_inherit | Keeper_types_profile_sandbox.Network_policy)
-        | None ->
-          Log.Keeper.info
-            ~keeper_name:request.keeper_name
-            "observe run refused operation=%s %s stderr_bytes=%d; the judge decides"
-            request.operation
-            (status_label status)
-            (String.length stderr);
-          (* The judge is shown what the box refused rather than left to
-             guess what the request would have done (RFC-0422 §3.3). *)
-          defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested)
+     | Observed_refused { status; stderr; refusal_kind } -> (
+       match (refusal_kind, request.network_mode) with
+       | Socket_denied, Some Keeper_types_profile_sandbox.Network_none ->
+         (* The box's socket rule refused the attempt, and this keeper's
+            own sandbox already cuts every network route at its boundary
+            (RFC-0415): that boundary is the proof, and the judge — whose
+            job is to weigh reachable effect — is not asked. A write
+            refusal would NOT be this: Network_none does not license a
+            write, and the owner's review conditions the shortcut on the
+            socket rule exactly. The refusal is not silently dropped: it
+            travels as the {!Network_isolated} audit source, and the caller
+            still dispatches the call for real (RFC-0422 §3.4's "no second
+            dispatch" applies only to {!Observed_in_box}, which this is
+            not — nothing ran yet). *)
+         Log.Keeper.info
+           ~keeper_name:request.keeper_name
+           "observe run refused operation=%s %s stderr_bytes=%d \
+            refusal_kind=socket_denied; network_mode=none reconfirmed, \
+            allowing without the judge"
+           request.operation
+           (status_label status)
+           (String.length stderr);
+         let source = Network_isolated { status; stderr } in
+         let audit_receipt =
+           audit_allow
+             request
+             ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+             source
+         in
+         allow request source [ audit_receipt ]
+       | _ ->
+         (* A write refusal (or an unnamed one) keeps the judge under any
+            network mode: Network_none forecloses the network route only.
+            The judge is shown what the box refused rather than left to
+            guess what the request would have done (RFC-0422 §3.3). *)
+         Log.Keeper.info
+           ~keeper_name:request.keeper_name
+           "observe run refused operation=%s %s stderr_bytes=%d \
+            refusal_kind=%s; the judge decides"
+           request.operation
+           (status_label status)
+           (String.length stderr)
+           (refusal_kind_tag refusal_kind);
+         defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested)
      | Observation_unavailable reason ->
        (* Unlike Observed_refused, no box could be built at all here — a
           missing shim, an unadvertised box, a dispatch the typed gate

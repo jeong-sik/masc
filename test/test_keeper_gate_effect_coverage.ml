@@ -896,18 +896,23 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
   | Keeper_gate.Unavailable _ -> fail "a connector post made the queue unavailable"
 ;;
 
-(* Task-635 (#26058) narrow gap: an Observed_refused answer defers to the
-   judge unless the calling keeper's own [network_mode] is [Network_none],
-   in which case the sandbox's own network boundary — not the box's refused
-   write/socket policy — already ruled out every route the call could have
-   reached, so the Gate allows through [Network_isolated] without paying
-   the judge. [Observation_unavailable] always defers regardless of
+(* Task-635 (#26058) narrow gap, owner-conditioned: an Observed_refused
+   answer defers to the judge unless the refusal is the box's socket rule
+   AND the calling keeper's own [network_mode] is [Network_none] — only the
+   socket rule stands in for the route the keeper's boundary forecloses. A
+   write refusal (Landlock) or an unnamed refusal keeps the judge under any
+   network mode. [Observation_unavailable] always defers regardless of
    [network_mode]: silence about what a box would have reached says
    nothing about network reachability (a plain filesystem write inside the
    keeper's own tree is untouched by network isolation). *)
-let observed_refused_once () =
+let observed_refused_once ~refusal_kind =
+  let stderr =
+    match refusal_kind with
+    | Keeper_gate.Socket_denied -> "sandbox denied socket connect()"
+    | Keeper_gate.Write_denied -> "sandbox denied the write"
+    | Keeper_gate.Unspecified -> "" in
   Keeper_gate.Observed_refused
-    { status = Unix.WEXITED 1; stderr = "sandbox denied the write" }
+    { status = Unix.WEXITED 1; stderr; refusal_kind }
 ;;
 
 let observation_unavailable_once () =
@@ -955,7 +960,7 @@ let test_observed_refused_allows_without_a_judge_when_network_is_none () =
   (match
      Keeper_gate.decide
        ~keeper_always_allow:false
-       ~observe:observed_refused_once
+       ~observe:(fun () -> observed_refused_once ~refusal_kind:Keeper_gate.Socket_denied)
        request
    with
    | Keeper_gate.Allow { source = Keeper_gate.Network_isolated _; _ } -> ()
@@ -981,10 +986,20 @@ let test_observed_refused_still_defers_without_network_isolation () =
     (fun network_mode ->
        with_network_probe_workspace @@ fun base_path ->
        let request = network_probe_request ~network_mode base_path in
+       (* The owner's condition is exactly this table: a write refusal
+          keeps the judge under every mode, and even the socket refusal
+          keeps it whenever network isolation is not what the calling
+          keeper itself declared. *)
+       let refusal_kind =
+         match network_mode with
+         | Some Keeper_types_profile_sandbox.Network_none ->
+           Keeper_gate.Write_denied
+         | _ -> Keeper_gate.Socket_denied in
        match
          Keeper_gate.decide
            ~keeper_always_allow:false
-           ~observe:observed_refused_once
+           ~observe:(fun () ->
+             observed_refused_once ~refusal_kind)
            request
        with
        | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
@@ -999,6 +1014,7 @@ let test_observed_refused_still_defers_without_network_isolation () =
            (Keeper_gate.authorization_source_to_string source)
        | Keeper_gate.Unavailable _ -> fail "the queue was unavailable")
     [ None
+    ; Some Keeper_types_profile_sandbox.Network_none
     ; Some Keeper_types_profile_sandbox.Network_inherit
     ; Some Keeper_types_profile_sandbox.Network_policy
     ]
@@ -1119,11 +1135,11 @@ let () =
         ] )
     ; ( "network_isolation (task-635, #26058)"
       , [ test_case
-            "Observed_refused allows via Network_isolated when network_mode=none"
+            "Observed_refused allows via Network_isolated only for the socket rule under network_mode=none"
             `Quick
             test_observed_refused_allows_without_a_judge_when_network_is_none
         ; test_case
-            "Observed_refused still defers without network isolation"
+            "Observed_refused still defers without network isolation, and a write refusal keeps the judge even under Network_none"
             `Quick
             test_observed_refused_still_defers_without_network_isolation
         ; test_case

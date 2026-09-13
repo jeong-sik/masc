@@ -53,7 +53,12 @@ let observe t () : Keeper_gate.observation =
        | Ok result ->
          (match box_evidence ~run (t.execution_evidence ()) with
           | Acknowledged -> Keeper_gate.Observed_result { run; result }
-          | Refused -> Keeper_gate.Observed_refused { status = result.status; stderr = result.stderr }
+          | Refused ->
+            Keeper_gate.Observed_refused
+              { status = result.status
+              ; stderr = result.stderr
+              ; refusal_kind = Keeper_gate.classify_refusal result.stderr
+              }
           | Unavailable -> Keeper_gate.Observation_unavailable "enforced_box_not_acknowledged")
        | Error error -> Keeper_gate.Observation_unavailable (unavailable_tag error))
   in

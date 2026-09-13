@@ -206,6 +206,29 @@ type cycle_grant
 val cycle_grant_of_resolution :
   Keeper_event_queue.hitl_resolution -> cycle_grant option
 
+(** Why the box refused the observed attempt — the closed reading of the
+    shim's refusal. [Socket_denied] means the payload tried to reach the
+    network and the socket rule denied it: under [Network_none] that is the
+    exact route the keeper's own boundary forecloses, so the gate may
+    reconfirm isolation instead of asking the judge. [Write_denied] is a
+    filesystem-rule refusal (Landlock): a write could have reached a real
+    effect, so it always keeps the judge. [Unspecified] is every refusal the
+    receipt does not name; unreadable refuses towards the judge, never
+    towards the allow. This is a reading of the refusal's own record, not a
+    property the shim types on the wire yet — an empty or unrecognized
+    stderr classifies as [Unspecified], which errs to the judge. *)
+type refusal_kind =
+  | Socket_denied
+  | Write_denied
+  | Unspecified
+
+val classify_refusal : string -> refusal_kind
+(** The closed reading of a refusal's stderr record: the sandbox's socket
+    rule names the domain, the Landlock rule names the filesystem, and
+    everything else — including an empty record — refuses towards the
+    judge via {!Unspecified}. Misclassification can only cost a judge
+    visit, never an allow. *)
+
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
     decides when to ask, and what each answer means. *)
@@ -217,9 +240,13 @@ type observation =
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
+      ; refusal_kind : refusal_kind
       }
       (** The shim's typed receipt reports setup failure or refusal. A
-          nonzero payload exit alone cannot construct this outcome. *)
+          nonzero payload exit alone cannot construct this outcome. The kind
+          splits the two boundary rules the box can refuse with: only the
+          socket rule may stand in for [Network_none]'s own foreclosed
+          route; a write refusal or an unreadable refusal keeps the judge. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so
@@ -254,7 +281,9 @@ val observed_refusal :
     mode, but never bypasses permission or grants permission itself.
     [Observed_result] is returned through source {!Observed_in_box}.
     [Observed_refused] defers to the judge unless [request.network_mode] is
-    [Network_none], in which case it is returned through
+    [Network_none] and the refusal is {!Socket_denied} — a write refusal, or
+    a refusal whose cause the receipt does not name, keeps the judge even
+    under [Network_none], in which case it is returned through
     {!Network_isolated} instead. [Observation_unavailable] always defers —
     no box could be built at all, which says nothing about what the request
     would have reached, network isolation included. *)

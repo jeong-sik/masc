@@ -1716,8 +1716,9 @@ let render_question_reader (state : state) =
   box_divider buf cols;
   box_line buf cols
     (if Option.is_some state.ask_text_entry then "  Writing answer · Enter saves locally before you send"
-     else Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
-       (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
+     else
+       Printf.sprintf "  Lines %s · PgUp/PgDn or wheel to read"
+         (Masc_tui_scroll.window_text ~scroll ~height:room (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf
@@ -2364,19 +2365,17 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   end;
 
   (* Reading without a position is guessing: the post body and the comment
-     thread each name where they stand, the same "rows X-Y of Z" shape the
-     other reading surfaces carry. *)
+     thread each name where they stand, in the window the other reading
+     surfaces draw. *)
   if total_lines > content_height || detail_line_count > comment_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "post rows %d-%d of %d%s"
-         (min total_lines (scroll.body_offset + 1))
-         (min total_lines (scroll.body_offset + content_height))
-         total_lines
+      (Printf.sprintf "post %s%s"
+         (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
+            ~height:content_height total_lines)
          (if detail_line_count > comment_height then
-            Printf.sprintf "  \xc2\xb7  comments rows %d-%d of %d"
-              (min detail_line_count (scroll.comment_offset + 1))
-              (min detail_line_count (scroll.comment_offset + comment_height))
-              detail_line_count
+            "  \xc2\xb7  comments "
+            ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
+                ~height:comment_height detail_line_count
           else ""));
   box_bottom buf cols;
   scroll.normalized_scroll
@@ -5082,12 +5081,6 @@ let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
   @ indent (lane_run_output_lines ~width detail)
 
-let lane_run_pane_progress ~scroll ~height total =
-  if total = 0 then "0/0"
-  else if height <= 0 then Printf.sprintf "0/%d" total
-  else
-    Printf.sprintf "%d-%d/%d" (scroll + 1) (min total (scroll + height)) total
-
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
   let divider = " │ " in
@@ -5187,12 +5180,12 @@ let render_lane_run_detail (state : state) ~run_id =
             ~left:
               ( Ansi.bold
               , Printf.sprintf "%s  %s" input_title
-                  (lane_run_pane_progress ~scroll:input_scroll
+                  (Masc_tui_scroll.window_text ~scroll:input_scroll
                      ~height:content_height (List.length input_lines)) )
             ~right:
               ( Ansi.bold
               , Printf.sprintf "%s  %s" output_title
-                  (lane_run_pane_progress ~scroll:output_scroll
+                  (Masc_tui_scroll.window_text ~scroll:output_scroll
                      ~height:content_height (List.length output_lines)) );
             let output_lines_window = Rows.of_list ~first:output_scroll ~height:content_height output_lines in
           for index = 0 to content_height - 1 do
@@ -6303,7 +6296,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Scroll indicator *)
     if total_lines > content_height then begin
-      let indicator = Printf.sprintf "%s[%d/%d]%s" Ansi.dim (scroll + 1) (total_lines - content_height + 1) Ansi.reset in
+      let indicator =
+        Ansi.dim
+        ^ Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines
+        ^ Ansi.reset
+      in
       box_line buf cols indicator
     end;
 
@@ -10324,14 +10321,13 @@ let render_keeper_calls (state : state) =
     done
   end;
   if scroll > 0 || total_rows > content_height then
-    let last_visible = min total_rows (scroll + content_height) in
+    let window =
+      Masc_tui_scroll.window_text ~scroll ~height:content_height total_rows
+    in
     let detailed_footer =
-      Printf.sprintf "[%s · rows %d-%d of %d]" (Masc_tui_message_layout.count_noun shown "call") (scroll + 1)
-        last_visible total_rows
+      Printf.sprintf "[%s · %s]" (Masc_tui_message_layout.count_noun shown "call") window
     in
-    let compact_footer =
-      Printf.sprintf "[%d/%d]" (scroll + 1) total_rows
-    in
+    let compact_footer = "[" ^ window ^ "]" in
     let footer =
       if Message_layout.display_width detailed_footer <= framed_inner_width cols
       then detailed_footer

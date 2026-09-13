@@ -405,11 +405,12 @@ let render_memory_body ~cols ~budget (state : state)
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let sort_label = memory_overview_sort_label state.memory_overview_sort in
+  (* The sort it is in, and the filter key the footer gives up first. The row
+     also named [a / A] in bold, a key with no value beside it that the footer
+     carries at every width, so it said the footer's word again louder. *)
   let info_bar =
-    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[a / A]:%s Fleet Memory Search  %s·%s  %s[/]:%s Filter"
+    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[/]:%s Filter"
       (Theme.recede ()) Ansi.reset sort_label
-      (Theme.recede ()) Ansi.reset
-      Ansi.bold Ansi.reset
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
@@ -517,6 +518,54 @@ let render_memory_body ~cols ~budget (state : state)
    | lines ->
        push_divider ();
        List.iter (push_styled ~style:(Theme.recede ())) lines)
+
+let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
+  let total = List.length rows in
+  let cursor = max 0 (min cursor (total - 1)) in
+  let detail_lines =
+    match List.nth_opt rows cursor with
+    | None -> []
+    | Some row -> memory_fact_detail_lines ~cols row
+  in
+  let detail_rows =
+    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+  in
+  let store_error_rows =
+    match state.memory_facts with
+    | None -> 0
+    | Some snapshot ->
+        (match snapshot.mfs_ordinary with
+         | Memory_store_read_error _ -> 1
+         | Memory_store_absent | Memory_store_present _ -> 0)
+        + (match snapshot.mfs_source with
+           | Memory_store_read_error _ -> 1
+           | Memory_store_absent | Memory_store_present _ -> 0)
+  in
+  (* Stats, optional categories/search, two dividers and the column header.
+     These are the rows rendered above the list below; detail owns its own
+     divider. Input asks for the target cursor because wrapped details can
+     change the height on every movement. *)
+  let fixed_rows =
+    4
+    + (if Option.is_some state.memory_facts then 1 else 0)
+    + (if String.trim state.search_last <> "" then 1 else 0)
+    + detail_rows + store_error_rows
+    + (if Option.is_some state.memory_facts_error then 2 else 0)
+  in
+  let room = max 1 (budget - fixed_rows) in
+  let overflowing = total > room in
+  let height = if overflowing then max 1 (room - 1) else room in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:total ~height state.memory_facts_scroll
+    |> Masc_tui_scroll.ensure_visible ~cursor ~height
+  in
+  (detail_lines, height, overflowing, scroll)
+
+let memory_facts_content_height ~cols ~budget ~cursor state =
+  let _, height, _, _ =
+    memory_facts_layout ~cols ~budget ~cursor state (memory_fact_rows state)
+  in
+  height
 
 let render_memory_facts_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -636,40 +685,9 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
-  let detail_lines =
-    match List.nth_opt rows cursor with
-    | None -> []
-    | Some row -> memory_fact_detail_lines ~cols row
+  let detail_lines, content_height, overflowing, scroll =
+    memory_facts_layout ~cols ~budget ~cursor state rows
   in
-  let detail_rows =
-    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
-  in
-  let store_error_rows =
-    match state.memory_facts with
-    | None -> 0
-    | Some snapshot ->
-        (match snapshot.mfs_ordinary with
-         | Memory_store_read_error _ -> 1
-         | Memory_store_absent | Memory_store_present _ -> 0)
-        + (match snapshot.mfs_source with
-           | Memory_store_read_error _ -> 1
-           | Memory_store_absent | Memory_store_present _ -> 0)
-  in
-  let top_fixed =
-    1
-    + (if pills_line <> "" then 1 else 0)
-    + (if search_banner <> "" then 1 else 0)
-    + 1
-    + 1
-    + 1
-    + detail_rows + store_error_rows
-    + (if Option.is_some state.memory_facts_error then 2 else 0)
-  in
-  let room = max 1 (budget - top_fixed) in
-  let overflowing = total > room in
-  let content_height = if overflowing then max 1 (room - 1) else room in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.memory_facts_scroll max_scroll) in
   if total = 0 then
     (let empty =
        match

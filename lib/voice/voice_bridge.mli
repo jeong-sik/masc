@@ -27,8 +27,9 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
     can be replayed on a machine that has no say. *)
 val say_catalogue_of_output : string -> catalogue_voice list
 
-(** Ask one endpoint which voices it has. [Error] carries why there is nothing
-    to show, in words meant for a reader who will type the name instead. *)
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
 (** Whether a say catalogue has a voice. say does not fail on a name it does
@@ -118,6 +119,10 @@ val spoke_detail : bytes:int -> voice:string -> string
     for. A blank voice reads as the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
 
+(** Parse what an ElevenLabs endpoint answers. Separate from the asking so a
+    recorded answer can be replayed without a network. *)
+val catalogue_voices_of_json : Yojson.Safe.t -> (catalogue_voice list, string) result
+
 val probe_tts
   :  ?agent_id:string
   -> message:string
@@ -126,6 +131,12 @@ val probe_tts
 (** Ask every configured TTS endpoint to synthesize [message], and report what
     each one did. The audio is discarded; what is being measured is whether the
     endpoint answers at all, and with how many bytes.
+
+    A voice_mcp endpoint is asked through its [agent_speak] tool, the call a
+    turn makes. That tool plays the sentence where its server plays audio and
+    returns no file, so its answer names the voice without a byte count. The
+    call needs the process's Eio clock and network in {!Eio_context}; without
+    them the endpoint is reported as refused, in those words.
 
     The voice is resolved per endpoint rather than once for the list: a voice id
     is provider vocabulary, so asking one endpoint for another's id probes a

@@ -18,7 +18,7 @@ let contains needle haystack =
 let make_state () = create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 
 let legend () =
-  Masc_tui_render_prim.keeper_action_hints (make_state ()) None
+  Masc_tui_render_prim.keeper_control_hints (make_state ()) None
 
 let test_the_legend_is_split_into_items () =
   let items =
@@ -46,6 +46,37 @@ let test_the_exit_key_survives_a_row_that_cannot_hold_the_legend () =
   Alcotest.(check bool) "and the way out is still on it" true
     (contains "q:quit" plain)
 
+(* On the Sandbox tab [s] sets the remote_ssh backend and [o] reads the
+   container logs, both answered before the Keeper controls. The row beside
+   the tab still said "s:shutdown": a reader who pressed it to stop the Keeper
+   moved its sandbox instead. *)
+let test_a_key_the_tab_takes_leaves_the_controls () =
+  let state = make_state () in
+  state.view <- Keepers Keeper_detail;
+  state.detail_tab <- Detail_sandbox;
+  let keys row =
+    Masc_tui_footer.split_on_double_space (Masc_tui_theme.strip_sgr row)
+    |> List.filter_map (fun item ->
+           match String.index_opt item ':' with
+           | Some at -> Some (String.trim (String.sub item 0 at))
+           | None -> None)
+  in
+  let all = keys (Masc_tui_render_prim.keeper_control_hints state None) in
+  Alcotest.(check bool) "shutdown is a control on its own" true (List.mem "s" all);
+  let taken = Masc_tui_keys.keeper_detail_tab_taken_keys Detail_sandbox in
+  let beside_the_tab =
+    keys (Masc_tui_render_prim.keeper_control_hints ~taken state None)
+  in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) (key ^ " leaves the controls") false
+        (List.mem key beside_the_tab))
+    [ "s"; "o" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) (key ^ " stays") true (List.mem key beside_the_tab))
+    [ "x"; "q" ]
+
 let () =
   Alcotest.run "masc_tui_keeper_legend"
     [ ( "keeper legend"
@@ -53,5 +84,7 @@ let () =
             test_the_legend_is_split_into_items
         ; Alcotest.test_case "the exit key survives the cut" `Quick
             test_the_exit_key_survives_a_row_that_cannot_hold_the_legend
+        ; Alcotest.test_case "a key the tab takes leaves the controls" `Quick
+            test_a_key_the_tab_takes_leaves_the_controls
         ] )
     ]

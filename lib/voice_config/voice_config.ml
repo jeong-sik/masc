@@ -706,6 +706,30 @@ let load_from_runtime_toml () =
     | Error msg -> Error msg
     | Ok text -> parse_runtime_toml_text text)
 
+(* The standalone source read the way the loader reads it, so a surface that
+   reports which configuration is active cannot parse the file differently from
+   the speak and transcribe paths. *)
+let load_standalone_file path =
+  match
+    try Ok (Fs_compat.load_file path) with
+    | Sys_error error ->
+      Error (Printf.sprintf "voice config read failed: %s" error)
+    | Eio.Io _ as exn ->
+      Error
+        (Printf.sprintf
+           "voice config Eio read failed: %s"
+           (Printexc.to_string exn))
+  with
+  | Error msg -> Error msg
+  | Ok content -> (
+    (* parse via parse_json_safe (keeps the UTF-8 repair pass) but
+       keep the Error — read_json_eio would swallow a syntax error
+       into a warn-log plus an empty object that then fails schema
+       parsing with a misleading "must be object" message. *)
+    match Safe_ops.parse_json_safe ~context:path content with
+    | Error msg -> Error (Printf.sprintf "invalid voice config json: %s" msg)
+    | Ok json -> parse_json json)
+
 let load_detailed () =
   (* Prefer runtime.toml [voice] section over standalone JSON.
      Only fall back when the file or section is absent — TOML
@@ -718,29 +742,9 @@ let load_detailed () =
     if not (Sys.file_exists path)
     then Error Not_configured
     else
-      match
-        try Ok (Fs_compat.load_file path) with
-        | Sys_error error ->
-          Error (Printf.sprintf "voice config read failed: %s" error)
-        | Eio.Io _ as exn ->
-          Error
-            (Printf.sprintf
-               "voice config Eio read failed: %s"
-               (Printexc.to_string exn))
-      with
-      | Error msg -> Error (Invalid msg)
-      | Ok content -> (
-        (* parse via parse_json_safe (keeps the UTF-8 repair pass) but
-           keep the Error — read_json_eio would swallow a syntax error
-           into a warn-log plus an empty object that then fails schema
-           parsing with a misleading "must be object" message. *)
-        match Safe_ops.parse_json_safe ~context:path content with
-        | Error msg ->
-          Error (Invalid (Printf.sprintf "invalid voice config json: %s" msg))
-        | Ok json -> (
-          match parse_json json with
-          | Ok config -> Ok config
-          | Error msg -> Error (Invalid msg))))
+      match load_standalone_file path with
+      | Ok config -> Ok config
+      | Error msg -> Error (Invalid msg))
 
 let load_error_to_string = function
   (* Names both places a configuration is read from, and where runtime.toml

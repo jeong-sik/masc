@@ -193,6 +193,13 @@ val coordinator_status_row :
 
 val count_frame_lines : Buffer.t -> int
 
+val slash_hint_text : restore:string -> string -> string option
+(** What the slash word at the start of a draft is -- the command it names,
+    the commands it could still become, or that it is none -- painted, with
+    [restore] handed back after each coloured span. [None] for a draft that is
+    not a slash command. Drawn after the draft on the composer row and in place
+    of the keys in the chat pane's footer. *)
+
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 val keeper_action_color : Status.keeper_next_action_path option -> string
@@ -216,6 +223,11 @@ val write_list_sidebar :
   title:string -> focused:bool -> labels:string list -> selected:int -> unit
 
 val data_unreliable_row : cols:int -> string -> string
+
+val overview_pulse_text : Masc_tui_types.state -> now:float -> string
+(** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
+    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
+    any keeper-turn reading has come back. *)
 
 val burn_hud_text : Masc_tui_types.state -> string option
 (** The tab row's [/burn] reading without styling: the fleet's cost, and each
@@ -283,6 +295,15 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
+val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
+(** The goal count; with any goals, also the completed share and a counter per
+    phase. *)
+
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
 
@@ -291,21 +312,17 @@ val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 val keeper_control_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
+  ?taken:string list ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The Keeper keys alone. A surface whose footer carries the armed or running
-    action as a status item ({!keeper_action_status}) asks for this, so the
-    fitter keeps that sentence whole instead of treating it as a droppable key. *)
+(** The Keeper keys alone, less any whose single keys are in [taken] -- the
+    keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).
+    The footer carries the armed or running action as a status item
+    ({!keeper_action_status}), so the fitter keeps that sentence whole instead
+    of treating it as a droppable key. *)
 
 val keeper_action_status :
   Masc_tui_types.state -> Masc_tui_footer.status_item list
 (** The armed or running Keeper action, if there is one. *)
-
-val keeper_action_hints :
-  ?offers_chat:bool ->
-  ?offers_back:bool ->
-  Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The armed or running sentence when there is one, otherwise
-    {!keeper_control_hints}. For the footers that do not pass status items. *)
 
 val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 
@@ -368,7 +385,9 @@ val runtime_config_status_lines :
 
 val help_masthead : Masc_tui_types.state -> string list
 
-val help_lines : Masc_tui_types.state -> string list
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
 

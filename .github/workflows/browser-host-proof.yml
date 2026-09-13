@@ -15,6 +15,7 @@ on:
       - 'lib/browser_webdriver.*'
       - 'lib/browser_download*'
       - 'lib/browser_bidi_downloads.*'
+      - 'lib/browser_bidi_peer.*'
       - 'scripts/fixtures/firefox_download_artifact_probe.ml'
       - 'lib/browser_page_script.ml'
       - 'lib/browser_screenshot.*'
@@ -26,6 +27,9 @@ on:
       - 'scripts/probe-firefox-controls.py'
       - 'scripts/fixtures/firefox_controls_probe.ml'
       - 'test/test_browser_native_host.py'
+      - 'test/test_browser_bidi_host.py'
+      - 'test/test_browser_bidi_peer.ml'
+      - 'test/stanzas/test_browser_bidi_peer.inc'
       - 'test/test_browser_activation.py'
       - 'connectors/browser/extension/background.js'
       - 'connectors/browser/extension/manifest.json'
@@ -83,13 +87,14 @@ jobs:
         run: opam install . --deps-only --with-test -y
 
       - name: Build native host
-        run: opam exec -- dune build --release bin/masc_browser_host.exe
+        run: opam exec -- dune build --release bin/masc_browser_host.exe test/test_browser_bidi_peer.exe
 
       - name: Exercise native pipes directly
         run: |
           set -euo pipefail
           mkdir -p proof
           python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
+          _build/default/test/test_browser_bidi_peer.exe 2>&1 | tee proof/bidi-peer-tests.log
 
       - name: Install Firefox and geckodriver
         run: |
@@ -97,6 +102,14 @@ jobs:
           if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
             brew install --cask firefox
           fi
+
+      - name: Exercise attached native BiDi observation and input
+        run: |
+          set -euo pipefail
+          python3 test/test_browser_bidi_host.py \
+            _build/default/bin/masc_browser_host.exe \
+            /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/bidi 2>&1 | tee proof/bidi-host-tests.log
 
       - name: Verify bounded upload byte transfer
         run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes

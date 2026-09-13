@@ -600,10 +600,7 @@ let rec finite_values = function
   | _ -> None
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
-  match visual_lines ~failed_note ~height ~width view with
-  | Some lines ->
-      List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
-  | None -> []
+  visual_text_lines ~failed_note ~height ~width view
 
 let pending_action view =
   match view.last_action, view.action_receipt with

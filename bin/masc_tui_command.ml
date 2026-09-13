@@ -702,6 +702,9 @@ let is_slash_navigable ?(keeper_names = []) text =
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
 
+(* Every value in the box is one the caller read. A row that said "Gates: All
+   Secure" sat beside the keeper count in the same frame and style, and nothing
+   here is given a gate to read -- it described a state no one had checked. *)
 let about_banner ?(theme_name = "default") ?active_keepers () =
   let keepers =
     match active_keepers with
@@ -719,6 +722,5 @@ let about_banner ?(theme_name = "default") ?active_keepers () =
     ; " ╭────────────────────────────────────────────────────────╮"
     ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
     ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13s │" theme_name keepers
-    ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
     ; " ╰────────────────────────────────────────────────────────╯"
     ]

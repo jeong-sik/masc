@@ -51,10 +51,6 @@ let evidence_sha256 (post : Board.post) =
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string
     (`Assoc ["body", `String post.body; "meta", (match post.meta_json with Some json -> json | None -> `Null)])) |> to_hex)
 
-let evidence_sha256 (post : Board.post) =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string
-    (`Assoc ["body", `String post.body; "meta", (match post.meta_json with Some json -> json | None -> `Null)])) |> to_hex)
-
 let validate_event json =
   let names = ["type"; "decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task";
     "goal_ids"; "agent"; "actor_kind"; "turn_ref"; "decision"; "choice"; "reason"; "notes"; "ts"] in

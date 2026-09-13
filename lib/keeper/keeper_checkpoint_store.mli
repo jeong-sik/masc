@@ -296,6 +296,14 @@ val load_retained_exact_snapshot :
   session_dir:string -> reference:Keeper_checkpoint_ref.t ->
   (exact_checkpoint_snapshot, checkpoint_cas_error) result
 
+val find_exact_snapshot_for_retention : session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (exact_checkpoint_snapshot, checkpoint_cas_error) result
+(** Find the already identified bytes in retained storage, canonical state, or
+    rolling history under the original session lock. No re-encoding, newest-file
+    selection, or changed-checkpoint substitution is permitted. I/O failure
+    remains an error; the caller must confirm retention before resuming. *)
+
+
 module For_testing : sig
   val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a
   (** Pause the accepted history-link syscall job. The hook must not perform

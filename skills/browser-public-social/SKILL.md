@@ -38,6 +38,10 @@ to scroll the top-level page by the observed viewport
 height, then verify the refreshed document and post identities. Use `Ctrl-O`
 when the painted layout or a nested scroll container is needed; `j`/`k` in
 the text scene only move the terminal reader.
+After a same-document refresh or `J`/`K`, the scene status may show a compact
+observed delta (`new`, `out`, `same`, `changed`) for unique node IDs. Treat
+`out` as outside this observation, not as a deleted post; it is a viewport
+progress hint and never feed-completeness evidence.
 In a content scene, `N`/`P` selects the first observed node for each article;
 `Enter` still follows or clicks that node's observed action. Use `v` and
 `Enter` when a scoped article read is required.

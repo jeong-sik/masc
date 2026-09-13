@@ -370,6 +370,43 @@ let () =
   print_endline "PASS repeated scene node ids keep one number each"
 
 let () =
+  let node node_id text : Masc.Browser_scene.node =
+    { node_id; kind = Text; tag = "p"; text; heading_level = None;
+      ancestor_region = None;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Content; scope = None;
+    nodes = [node "a" "first"; node "a" "inline fragment"; node "b" "second"] }
+  in
+  let first : Lane.scene = {source = Live; client_id = None; tab_id = 2;
+    content; elapsed_ms = 1.} in
+  let first_view = {(Lane.create ()) with selected_tab = Some 2; scene = Some first} in
+  let second_content = {content with scroll_y = 600.;
+    nodes = [node "a" "first"; node "a" "inline changed"; node "c" "new"]} in
+  let second = {first with content = second_content} in
+  (match Lane.scene_delta first second with
+   | {added = 1; removed = 1; unchanged = 0; changed = 1} -> ()
+   | _ -> failwith "scene delta must deduplicate IDs and separate changed nodes");
+  let published = Lane.publish_scene second first_view in
+  (match published.scene_delta with
+   | Some {added = 1; removed = 1; unchanged = 0; changed = 1} -> ()
+   | _ -> failwith "same observed document must publish its scene delta");
+  let scroll_only = Lane.publish_scene {first with content = {content with scroll_y = 600.}}
+    first_view in
+  (match scroll_only.scene_delta with
+   | Some {added = 0; removed = 0; unchanged = 2; changed = 0} -> ()
+   | _ -> failwith "scroll-only observation must retain node identities");
+  let other_document = Lane.publish_scene {second with content = {second_content with document_id = "other"}}
+    first_view in
+  assert (other_document.scene_delta = None);
+  print_endline "PASS scene delta is identity-guarded and scroll-aware"
+
+let () =
   let region node_id role text : Masc.Browser_scene.node =
     { node_id; kind = Region (Masc.Browser_scene.region_role_of_string role); tag = role; text;
       heading_level = None;

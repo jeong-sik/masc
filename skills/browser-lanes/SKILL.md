@@ -71,6 +71,12 @@ TUI의 `m`은 semantic shortcut이다. 처음에는 `regions`를 관측하고, �
 운영자가 고른다. 텍스트·URL·CSS selector 추측으로 primary 영역을 정하지 않는다.
 scene context row의 `page scroll x=… y=…`는 새로 관측한 실제 page offset이다. 이를
 pointer/nested pane 좌표나 문서 전체 길이, feed completeness로 해석하지 않는다.
+같은 source·client·tab·document·view·scope를 다시 관측하면 status row에
+`Δ +new · -out · =same · changed` 형태의 관측 delta도 붙는다. node ID 중복은
+한 번만 세며, geometry-only scroll은 changed가 아니다. `out`은 이번 viewport
+관측에서 빠진 것이지 사이트에서 삭제됐다는 뜻이 아니다. 문서·URL·view·scope가
+바뀌거나 첫 관측이면 delta를 만들지 않는다. 이는 현재 관측 범위의 진행 힌트일
+뿐이며 feed 전체 수집이나 완전성을 증명하지 않는다.
 
 본문이 충분하면 그 결과로 다음 채널을 이어가거나 답한다. 보이는 내용·scope·truncated를
 확인해 실제 수집 범위와 근거 링크를 남긴다. 잘렸다면 더 작은 관측 영역, 지원되는

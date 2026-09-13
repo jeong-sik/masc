@@ -57,13 +57,33 @@ let exact_fusion_run_schema =
     ]
 ;;
 
+let source_pagination_schema = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* properties = match List.assoc_opt "properties" fields with
+      | Some (`Assoc properties) -> Ok properties
+      | _ -> Error "source descriptor properties must be an object" in
+    let cursor = `Assoc ["type", `String "object";
+      "description", `String "Continue with next_cursor from a source_json_page; keep the same source id and comment pagination. Concatenate content until next_cursor is null to recover exact source JSON. A changed source rejects the cursor.";
+      "properties", `Assoc ["source_sha256", `Assoc ["type", `String "string"];
+        "byte_offset", `Assoc ["type", `String "integer"; "minimum", `Int 1]];
+      "required", `List [`String "source_sha256"; `String "byte_offset"];
+      "additionalProperties", `Bool false] in
+    Ok (`Assoc (("properties", `Assoc (("cursor", cursor) :: properties)) :: List.remove_assoc "properties" fields))
+  | _ -> Error "source descriptor schema must be an object"
+;;
+
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
   | [ descriptor ] ->
     (match tool with
      | Fusion_source ->
-       Ok (tool, { descriptor with input_schema = exact_fusion_run_schema })
-     | Read_file | Search_files | Web_fetch | Board_source -> Ok (tool, descriptor))
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema exact_fusion_run_schema)
+     | Board_source ->
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema descriptor.input_schema)
+     | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
   | [] ->
     Error
       (Printf.sprintf
@@ -303,9 +323,9 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
       (match tool with
        | Read_file -> descriptor.description ^ " " ^ image_delivery_note
        | Board_source ->
-         "Read an exact Board post and its paginated comments as original structured evidence, including identities and full metadata. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
+         "Read an exact Board post and its paginated comments as original structured evidence, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
        | Fusion_source ->
-         "Read original durable Fusion panel/judge/source-context evidence and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. This does not run Fusion or adopt advice."
+         "Read original durable Fusion panel/judge/source-context evidence and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }

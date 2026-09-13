@@ -283,8 +283,13 @@ let test_schemas_are_the_descriptor_schemas () =
                 [ "run_id" ]
                 (schema.input_schema |> member "required" |> to_list |> List.map to_string);
               Alcotest.(check (list string))
-                "masc_fusion_status names only the descriptor's parameters"
-                (descriptor.Descriptor.input_schema |> member "properties" |> keys)
+                "masc_fusion_status adds source continuation to exact lookup"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | "masc_board_post_get" ->
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string)) "Board adds source continuation"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
                 (schema.input_schema |> member "properties" |> keys)
             | _ ->
               Alcotest.(check bool)

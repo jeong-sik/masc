@@ -56,6 +56,48 @@ let optional_integer args field ~default =
      | Some _ -> Error (Invalid_request (field ^ " must be an integer when provided")))
   | _ -> Error (Invalid_request "source lookup arguments must be an object")
 
+(* The same wire budget used by the verifier's bridge. Pages carry exact
+   JSON text, not an excerpt; the digest pins every cursor to one observation. *)
+let page_source ~args source =
+  let bytes = Yojson.Safe.to_string source in
+  let total = String.length bytes in
+  let digest = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let budget = Tool_bridge.default_externalize_threshold_bytes in
+  let* cursor = match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "cursor" fields with
+       | None -> Ok None
+       | Some (`Assoc fields) when List.length fields = 2 ->
+         (match List.assoc_opt "source_sha256" fields, List.assoc_opt "byte_offset" fields with
+          | Some (`String expected), Some (`Int offset)
+            when offset > 0 && offset < total
+              && String_util.utf8_char_boundary bytes offset = offset ->
+            if String.equal expected digest then Ok (Some offset)
+            else Error (Source_unavailable "source changed between pages; restart the exact source read")
+          | _ -> Error (Invalid_request "invalid source cursor"))
+       | Some _ -> Error (Invalid_request "invalid source cursor"))
+    | _ -> Error (Invalid_request "source lookup arguments must be an object") in
+  match cursor with
+  | None when total <= budget -> Ok source
+  | None | Some _ ->
+    let offset = match cursor with None -> 0 | Some offset -> offset in
+    let page ending =
+      let next = if ending = total then `Null else `Assoc
+        ["source_sha256", `String digest; "byte_offset", `Int ending] in
+      `Assoc ["representation", `String "source_json_page";
+        "source_sha256", `String digest; "total_bytes", `Int total;
+        "byte_offset", `Int offset; "content", `String (String.sub bytes offset (ending - offset));
+        "next_cursor", next] in
+    let rec fit low high =
+      if low >= high then low else
+        let mid = low + ((high - low + 1) / 2) in
+        let ending = String_util.utf8_char_boundary bytes mid in
+        if String.length (Yojson.Safe.to_string (page ending)) <= budget
+        then fit mid high else fit low (mid - 1) in
+    let ending = String_util.utf8_char_boundary bytes (fit offset (min total (offset + budget))) in
+    if ending <= offset then Error (Source_unavailable "source page envelope exceeds the bridge budget")
+    else Ok (page ending)
+
 let board_error = function
   | Board.Post_not_found _ -> Source_unavailable "referenced Board post was not found; no deletion or expiry is inferred"
   | (Board.Invalid_id _ | Board.Validation_error _) as error ->
@@ -82,7 +124,7 @@ let read_board ~config ~authority ~args = protect (fun () ->
     let offset = min offset total in
     let selected = List.filteri (fun index _ -> index >= offset && index - offset < limit) comments in
     let next = offset + List.length selected in
-    Ok (`Assoc
+    page_source ~args (`Assoc
       [ "source", `String "board"
       ; "post", Board.post_to_yojson post
       ; "comments", `List (List.map Board.comment_to_yojson selected)
@@ -113,7 +155,7 @@ let read_fusion ~config ~authority ~args = protect (fun () ->
       |> Result.map_error fusion_error
     | Goal_workspace ->
       Fusion_decision.read ~config ~run_id |> Result.map_error fusion_error in
-  Ok (`Assoc
+  page_source ~args (`Assoc
     [ "source", `String "fusion"
     ; "run_id", `String run_id
     ; "evidence_sha256", `String (Fusion_decision.evidence_sha256 post)

@@ -243,7 +243,79 @@ let test_corrupt_decision_storage () = with_fixture (fun config task _goal ->
     (fun out -> output_string out "{invalid json\n");
   denied task "masc_fusion_status" (run_args "corrupt-events") "verification_source_storage_failed")
 
+let test_large_sources_survive_actual_bridge () = with_fixture (fun config task goal ->
+  let open Yojson.Safe.Util in
+  let payload = String.concat "" (List.init 5000 (fun _ -> "한글\"\\\n")) in
+  let metadata = `Assoc ["panel", `String payload] in
+  let board = post ~author:"producer" ~visibility:Board.Internal ~meta_json:metadata "Large Board source" in
+  let run_id = "large-fusion-source" in
+  let fusion_post = post ~author:"producer" ~visibility:Board.Unlisted ~meta_json:metadata
+    ~origin:Board.{turn_ref=None; source=Some "fusion"; fusion_run_id=Some run_id}
+    "Large Fusion source" in
+  let cursor_args args cursor = match args with
+    | `Assoc fields -> `Assoc (("cursor", cursor) :: fields) | _ -> assert false in
+  let bridge surface name args =
+    let result = call surface name args in
+    let content = match Tool_bridge.to_agent_core_typed_result ~base_path:config.Workspace.base_path result with
+      | Ok result -> result.Agent_core.Types.content
+      | Error error -> failf "bridge refused source page: %s" error.Agent_core.Types.message in
+    check bool "actual model content stays within bridge budget" true
+      (String.length content <= Tool_bridge.default_externalize_threshold_bytes);
+    (* A spilled blob marker cannot parse as the source-page JSON contract. *)
+    Yojson.Safe.from_string content in
+  let reconstruct surface name args =
+    let first = bridge surface name args in
+    check string "large source advertises lossless continuation" "source_json_page"
+      (first |> member "representation" |> to_string);
+    let expected_digest = first |> member "source_sha256" |> to_string in
+    let rec collect offset page parts =
+      check int "pages are contiguous bytes" offset (page |> member "byte_offset" |> to_int);
+      check string "all pages bind one source observation" expected_digest
+        (page |> member "source_sha256" |> to_string);
+      let content = page |> member "content" |> to_string in
+      check bool "every page makes progress" true (String.length content > 0);
+      let offset = offset + String.length content in
+      match member "next_cursor" page with
+      | `Null ->
+        check int "complete byte count" offset (page |> member "total_bytes" |> to_int);
+        let bytes = String.concat "" (List.rev (content :: parts)) in
+        check string "reconstructed digest matches exact original" expected_digest
+          Digestif.SHA256.(digest_string bytes |> to_hex);
+        Yojson.Safe.from_string bytes, member "next_cursor" first
+      | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
+    collect 0 first [] in
+  List.iter (fun surface ->
+    List.iter (fun (name, args, original) ->
+      let reconstructed, cursor = reconstruct surface name args in
+      let expected = if String.equal name "masc_board_post_get" then
+        `Assoc ["source", `String "board"; "post", Board.post_to_yojson original;
+          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
+            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]]
+      else `Assoc ["source", `String "fusion"; "run_id", `String run_id;
+        "evidence_sha256", `String (Fusion_decision.evidence_sha256 original);
+        "post", Board.post_to_yojson original; "keeper_decisions", `List []] in
+      check bool "entire original source including escapes and Unicode survives" true
+        (reconstructed = expected);
+      let invalid_hash = match cursor with `Assoc fields ->
+        `Assoc (("source_sha256", `String (String.make 64 '0')) :: List.remove_assoc "source_sha256" fields)
+        | _ -> fail "large source lacks continuation" in
+      denied surface name (cursor_args args invalid_hash) "verification_source_unavailable";
+      invalid_input surface name (cursor_args args (`Assoc ["source_sha256", `String "bad"; "byte_offset", `Int 0])))
+      ["masc_board_post_get", post_args board, board; "masc_fusion_status", run_args run_id, fusion_post])
+    [task; goal];
+  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "Private source" in
+  let private_page = bridge task "masc_board_post_get" (post_args private_post) in
+  denied goal "masc_board_post_get"
+    (cursor_args (post_args private_post) (member "next_cursor" private_page))
+    "verification_source_access_denied";
+  let first = bridge task "masc_board_post_get" (post_args board) in
+  let cursor = member "next_cursor" first in
+  ignore (Board_dispatch.add_comment ~post_id:(Board.Post_id.to_string board.id)
+    ~author:"producer" ~content:"New source revision" ~ttl_hours:0 () |> require "changed source");
+  denied task "masc_board_post_get" (cursor_args (post_args board) cursor) "verification_source_unavailable")
+
 let () = run "Verifier collaboration sources" ["dispatch", [
+  test_case "large Board and Fusion sources remain fully readable through bridge" `Quick test_large_sources_survive_actual_bridge;
   test_case "unreadable decision journal remains a storage failure" `Quick test_corrupt_decision_storage;
   test_case "shared peer post and exact paginated comments" `Quick test_shared_thread_and_pagination;
   test_case "pagination defaults apply only to omitted fields" `Quick test_pagination_input_contract;

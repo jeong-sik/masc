@@ -12,6 +12,10 @@ type error =
   | Storage_failed of string
 
 val error_to_string : error -> string
+(** Large responses are bounded JSON-text pages. The caller follows next_cursor
+    with unchanged source arguments and concatenates content to recover the exact
+    structured source. Each cursor pins SHA-256 and UTF-8 byte offset; every page
+    rechecks source authority and refuses changed source observations. *)
 val read_board : config:Workspace.config -> authority:authority -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 val read_fusion : config:Workspace.config -> authority:authority -> args:Yojson.Safe.t ->

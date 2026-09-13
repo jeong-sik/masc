@@ -977,6 +977,35 @@ let test_config_footer_names_child_hops () =
             |> List.filter (fun piece -> not (String.equal piece "")))))
     [ "9:Runtime"; "s:resources"; "t:tools" ]
 
+(* Runtime's footer comes from the table. The renderer's own line named
+   neither [c], the only key to Clients, nor [Esc], the way back to Config, and
+   it offered [e] as if the key table did not know it. *)
+let test_runtime_footer_is_the_tables () =
+  let lanes = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_lanes in
+  let all = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_all in
+  let has hints piece =
+    let n = String.length piece and m = String.length hints in
+    let rec go i = i + n <= m && (String.sub hints i n = piece || go (i + 1)) in
+    go 0
+  in
+  List.iter
+    (fun piece ->
+      Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
+  Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
+  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
+  (* The sheet reads the same table and names the whole walk once, because it
+     is not drawn from either reading. *)
+  let labels key =
+    Masc_tui_keys.for_surface Runtime
+    |> List.filter (fun (b : Masc_tui_keys.binding) -> String.equal b.Masc_tui_keys.key key)
+    |> List.map (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.label)
+  in
+  Alcotest.(check (list string)) "the sheet names the p walk once"
+    [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
+  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
+
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server
      level floor, direct verbose toggle, and category cycle under l/v/c. *)
@@ -2075,6 +2104,8 @@ let () =
             test_the_sheet_says_the_listing_tail_once
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
+        ; Alcotest.test_case "Runtime footer is the table's" `Quick
+            test_runtime_footer_is_the_tables
         ; Alcotest.test_case "Config footer follows active pane and width" `Quick
             test_config_pane_footer_actions
         ; Alcotest.test_case "Activity filter survives evidence hint" `Quick

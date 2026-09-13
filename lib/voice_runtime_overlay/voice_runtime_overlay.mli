@@ -68,8 +68,8 @@ type speaker =
 val speaker_of_transport : transport -> speaker
 
 val speaker_of_endpoint : Voice_config.endpoint -> speaker
-(** {!speaker_of_transport} for the adapter this endpoint resolves to, so an id
-    that aliases another adapter is answered for the adapter it reaches. *)
+(** {!speaker_of_transport} for the adapter this endpoint's declared kind names.
+    An id that happens to spell another adapter's alias does not change it. *)
 val default_agent_voices : unit -> (string * string) list
 val default_session_url : path:string -> string
 val session_endpoint_result : Voice_config.t -> (Voice_config.endpoint, string) result

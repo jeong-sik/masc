@@ -8763,8 +8763,9 @@ let notify_new_asks (snapshot : Tui_decode.asks_snapshot) arrived_ids =
     match List.filter_map keeper_of arrived_ids with
     | [ one ] -> Printf.sprintf "%s is waiting on a decision" one
     | _ ->
-        Printf.sprintf "%d keepers are waiting on a decision"
-          (List.length arrived_ids)
+        let count = List.length arrived_ids in
+        Printf.sprintf "%s %s waiting on a decision"
+          (Masc_tui_message_layout.count_noun count "keeper") (if count = 1 then "is" else "are")
   in
   write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
 

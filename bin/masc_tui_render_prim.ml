@@ -2430,7 +2430,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  %s" total scroll ds.ds_esc_hint
+       Printf.sprintf "[%s, scroll %d]  %s" (Masc_tui_message_layout.count_noun total "line") scroll ds.ds_esc_hint
      else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -3179,7 +3179,7 @@ let context_exact_input_summary ~width
   ( [ "  "
       ^ Context_bars.band ~width ~title:"BY KIND"
           ~caption:
-            (Printf.sprintf "%d items, %s retained" (List.length items)
+            (Printf.sprintf "%s, %s retained" (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_context_inspector.format_bytes total))
     ]
     @ bar @ rows

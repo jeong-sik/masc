@@ -2218,6 +2218,17 @@ let test_the_operator_badge_keeps_who_it_is () =
     (String.trim (badge wide_label_column None))
 ;;
 
+(* One spelling of a counted noun. A one-line Board draft read
+   "(1 lines, 0 chars)" because thirty rows wrote "%d lines" by hand. *)
+let test_a_count_takes_the_number_it_counts () =
+  check string "one" "1 line" (Layout.count_noun 1 "line");
+  check string "none is plural" "0 lines" (Layout.count_noun 0 "line");
+  check string "many" "3 lines" (Layout.count_noun 3 "line");
+  check string "an irregular plural" "2 entries"
+    (Layout.count_noun ~plural:"entries" 2 "entry");
+  check string "and its singular" "1 entry"
+    (Layout.count_noun ~plural:"entries" 1 "entry")
+
 let () =
   run "tui_message_layout"
     [
@@ -2397,5 +2408,7 @@ let () =
             test_scrolling_measures_the_mode_it_draws
         ; test_case "scrolling past the top shows nothing" `Quick
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
+        ; test_case "a count takes the number it counts" `Quick
+            test_a_count_takes_the_number_it_counts
         ] )
     ]

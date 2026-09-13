@@ -7982,7 +7982,7 @@ let palette_entries (state : state) =
       state.tasks
   @ [ "hearth all", Palette_board_hearth None ]
   @ List.map (fun (name, count) ->
-      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      (Printf.sprintf "hearth %s (%s)" name (Masc_tui_message_layout.count_noun count "post"), Palette_board_hearth (Some name)))
       state.board_hearths
   @ List.map
       (fun (p : board_post) ->

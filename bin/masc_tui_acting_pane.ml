@@ -198,9 +198,8 @@ let tokens_sum_figure = function
   | Some i, Some o -> compact_count (i + o)
   | Some n, None | None, Some n -> compact_count n
 
-let plural n word = Printf.sprintf "%d %s%s" n word (if n = 1 then "" else "s")
-let calls_text n = plural n "call"
-let files_text n = plural n "file"
+let calls_text n = Masc_tui_message_layout.count_noun n "call"
+let files_text n = Masc_tui_message_layout.count_noun n "file"
 let more_text n = Printf.sprintf "%d more" n
 let window_text hours = Printf.sprintf "%gh" hours
 
@@ -452,7 +451,7 @@ let header_line ~cols input =
        | None, None -> "keepers not loaded"
        | None, Some _ ->
          let hidden = offline_count input in
-         plural (List.length (working_keepers input)) "keeper"
+         Masc_tui_message_layout.count_noun (List.length (working_keepers input)) "keeper"
          ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden))
       ^ middle_dot
     | Selected_only -> ""

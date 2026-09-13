@@ -84,14 +84,15 @@ class Installation(unittest.TestCase):
     def test_isolated_host_name_rejects_shell_or_path_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            result = subprocess.run(
-                ["bash", str(INSTALLER), "--binary", shutil.which("true"),
-                 "--base-path", str(root / "workspace"),
-                 "--manifest-dir", str(root / "manifests"),
-                 "--host-name", "../owned"],
-                capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("--host-name must contain only", result.stderr)
+            for host_name in ("../owned", "a-b", ".a", "a.", "a..b"):
+                result = subprocess.run(
+                    ["bash", str(INSTALLER), "--binary", shutil.which("true"),
+                     "--base-path", str(root / "workspace"),
+                     "--manifest-dir", str(root / "manifests"),
+                     "--host-name", host_name],
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, host_name)
+                self.assertIn("--host-name must contain nonempty", result.stderr)
 
 
 if __name__ == "__main__":

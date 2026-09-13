@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import shutil
@@ -24,8 +25,8 @@ parser.add_argument("--host-name", default="masc_browser_host",
 args = parser.parse_args()
 if not args.base_path:
     parser.error("--base-path or MASC_BASE_PATH is required")
-if not args.host_name or not all(char.islower() or char.isdigit() or char in "._-" for char in args.host_name):
-    parser.error("--host-name must contain only lowercase letters, digits, '.', '_' or '-'")
+if not re.fullmatch(r"[a-z0-9_]+(?:\.[a-z0-9_]+)*", args.host_name):
+    parser.error("--host-name must contain nonempty lowercase alphanumeric or underscore segments separated by '.'")
 if not args.binary:
     parser.error("--binary must name a built masc-browser-host executable, or install it on PATH")
 source = Path(args.binary).expanduser().resolve()

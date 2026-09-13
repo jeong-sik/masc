@@ -241,9 +241,44 @@ sources=[{source_id="upstream",kind="lane_output",installation_id="producer",sel
 |} extra)); check_error ("invalid output selector: " ^ extra) path)
     ["output_id=\"\""; "output_id=1"; "output=\"frames\""])
 
+let package_interface () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let interface = {|
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{"source_id":{"type":"string"},"kind":{"type":"string"}},"required":["source_id","kind"],"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
+presentation = '''{"description":"Compare reported data","readings":[{"lane_id":"quality","path":["missing"],"label":"Missing records","unit":"records","format":"number"}]}'''
+|} in
+  write manifest (package () ^ "\n" ^ interface);
+  let path = Filename.concat directory "quality.toml" in
+  write path (declaration (msx_binding ^ "limit = 2\n"));
+  let initial = unwrap (Config.load_file ~path) in
+  check int "package declares one display reading" 1 (List.length initial.package.presentation.readings);
+  write path (declaration (msx_binding ^ "limit = 0\n"));
+  check_error "invalid package binding rejected before worker install" path;
+  write path (declaration msx_binding);
+  check_error "missing required package binding rejected" path)
+
+let refresh_policy_is_explicit () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "refresh.toml" in
+  write path (declaration msx_binding);
+  let initial = unwrap (Config.load_file ~path) in
+  check bool "omitted refresh policy preserves every callback" true
+    (initial.package.refresh_policy=Lane_addon_types.Every_hint);
+  write manifest (package () ^ "\n[interface]\nrefresh_policy = \"source_changes\"\n");
+  let opted_in = unwrap (Config.load_file ~path) in
+  check bool "suppression requires a typed package opt-in" true
+    (opted_in.package.refresh_policy=Lane_addon_types.Source_changes);
+  check bool "refresh policy changes the applied configuration identity" false
+    (initial.revision=opted_in.revision);
+  write manifest (package () ^ "\n[interface]\nrefresh_policy = \"guess\"\n");
+  check_error "unknown refresh policy is rejected" path)
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;
+    [test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
+     test_case "package interface validates bindings before installation" `Quick package_interface;
+     test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;
      test_case "relative package and source preserve typed bindings" `Quick relative_package_and_source;
      test_case "comments, rename and key order preserve identity" `Quick comments_rename_and_key_order;
      test_case "meaningful configuration and package changes alter revision" `Quick meaningful_changes;

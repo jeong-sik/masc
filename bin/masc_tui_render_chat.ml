@@ -572,8 +572,14 @@ let keeper_message_identity ~max_cells state keeper_name =
                ~configured_runtime:row.kr_runtime_id
                (Option.map (fun live -> live.tl_transcript) state.msg_live)
            in
+           (* The phase and the runtime are two facts, and the runtime label
+              starts with a word of its own ("configured:", "turn:"). Set side
+              by side with only a space, they read as one phrase -- the header
+              said "paused configured: anthropic.claude-sonnet-4", which names
+              no state a person can act on. The separator the rest of the row
+              uses keeps them apart. *)
            let prefix =
-             Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
+             Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
            let prefix_width = Message_layout.display_width prefix in

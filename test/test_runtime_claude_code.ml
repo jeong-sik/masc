@@ -72,6 +72,9 @@ type fixture_step =
        between the caller and the wire fails the test instead of passing on a
        reply the fixture would have emitted anyway. *)
   | Pause of float
+  | Leave_pipe_holder of float
+    (* Start a background child that inherits stdout and stderr and outlives
+       the CLI, the shape an orphaned MCP server leaves behind. *)
 
 let fixture_script
       ?(auth_json = auth_subscription)
@@ -103,6 +106,8 @@ let fixture_script
            (shell_quote needle))
     | Pause seconds ->
       output_string output (Printf.sprintf "sleep %.3f\n" seconds)
+    | Leave_pipe_holder seconds ->
+      output_string output (Printf.sprintf "sleep %.3f &\n" seconds)
   in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
@@ -241,6 +246,32 @@ let test_subscription_turn_and_env_scrub () =
       check (option string) "subscription" (Some "team") turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
       check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+(* The stderr drain used to be an ordinary fiber of the process switch, so a
+   served turn waited for a background child to release stderr: unbounded for
+   an orphaned MCP server. The holder starts before the result so the race
+   with the CLI's termination cannot skip it. [turn_return_window_s] bounds
+   the whole measured run, not a fixture deadline like
+   [window_outlasting_process_start_s]; the regression it guards against
+   takes the holder's full 20 s. *)
+let pipe_holder_outliving_the_turn_s = 20.0
+let turn_return_window_s = 5.0
+
+let test_result_returns_before_a_background_child_releases_the_pipes () =
+  with_fixture
+    [ Emit assistant; Leave_pipe_holder pipe_holder_outliving_the_turn_s; Emit result ]
+    (fun path ->
+       let started = Unix.gettimeofday () in
+       match run_fixture path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn ->
+         let elapsed = Unix.gettimeofday () -. started in
+         check string "text" "MASC_CLAUDE_OK" turn.text;
+         check bool
+           (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
+           true
+           (elapsed < turn_return_window_s))
 ;;
 
 let test_routed_credentials_reach_probe_and_turn () =
@@ -2036,6 +2067,10 @@ let () =
             "subscription auth and env scrub"
             `Quick
             test_subscription_turn_and_env_scrub
+        ; test_case
+            "result returns before a background child releases the pipes"
+            `Quick
+            test_result_returns_before_a_background_child_releases_the_pipes
         ; test_case "routed credentials reach probe and turn" `Quick test_routed_credentials_reach_probe_and_turn
         ; test_case
             "progress resets stream idle timeout"

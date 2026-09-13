@@ -1038,6 +1038,33 @@ let load_retained_exact_snapshot ~session_dir ~reference =
   | Ok result -> result
   | Error detail -> Error (Source_unavailable (Ref_lock_failed detail))
 
+let find_exact_snapshot_for_retention ~session_dir ~reference =
+  let unavailable detail = Source_unavailable (Ref_read_failed (Io_error detail)) in
+  match with_session_lock ~session_dir (fun session_dir ->
+    match read_retained_locked ~session_dir ~reference with
+    | Ok (Some snapshot) -> Ok snapshot
+    | Error _ as error -> error
+    | Ok None ->
+      Cancel_safe.protect ~on_exn:(fun exn -> Error (unavailable (Printexc.to_string exn))) (fun () ->
+        let paths = agent_core_checkpoint_path ~session_dir
+          ~session_id:(Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id)
+          :: (list_agent_core_history_files ~session_dir |> List.map (Filename.concat session_dir)) in
+        let rec find = function
+          | [] -> Error (Source_unavailable Ref_not_found)
+          | path :: rest ->
+            (match Fs_compat.load_owned_regular_file ~ownership_root:(Filename.dirname session_dir) path with
+             | Error error -> Error (unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
+             | Ok None -> find rest
+             | Ok (Some bytes) ->
+               if offload_checkpoint_cpu (fun () -> Digestif.SHA256.(digest_string bytes |> to_hex)) <> reference.sha256 then find rest
+               else match exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes with
+                 | Error error -> Error (Source_unavailable error)
+                 | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference -> Ok snapshot
+                 | Ok snapshot -> Error (Source_changed snapshot.reference)) in
+        find paths)) with
+  | Ok result -> result
+  | Error detail -> Error (Source_unavailable (Ref_lock_failed detail))
+
 let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
   let installed = ref None in
   let publish auxiliary =

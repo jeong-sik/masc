@@ -56,7 +56,7 @@ jobs:
             addons/msx-observer/skills/msx-observe/scripts/summarize.py \
             addons/msx-observer/skills/msx-observe/references/observations.md \
             addons/protocol.py addons/output-statistics/server.py \
-            test/test_tui_palette_matching.exe 2>&1 | tee proof/build.log
+            test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe 2>&1 | tee proof/build.log
           failed_tests=()
           run_proof_test() {
             local name="$1"
@@ -66,9 +66,10 @@ jobs:
             fi
             failed_tests+=("$name")
           }
-          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_schema_bytes test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_tui_palette_matching; do
+          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_schema_bytes test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_tui_palette_matching test_tui_lane_addons; do
             run_proof_test "$test" "_build/default/test/$test.exe"
           done
+          run_proof_test tui-lane-package python3 test/test_tui_lane_package_pty.py _build/default/bin/masc_tui.exe
           run_proof_test lane-skill-resources python3 -m unittest discover -s addons/tests -p test_skill_resources.py -v
           run_proof_test output-statistics python3 -m unittest discover -s addons/tests -p test_output_statistics.py -v
           if (( ${#failed_tests[@]} > 0 )); then

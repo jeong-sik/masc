@@ -139,3 +139,10 @@ val run_command :
     capture EOF; completion-only fallback is refused rather than returning previews. *)
 val read_complete_file : ?turn_sandbox_factory:Keeper_sandbox_factory.t -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
+(** Raw binary prefix. The command limits its output before transport capture;
+    it is never projected as UTF-8 text. *)
+val read_raw_prefix : ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  host_path:string -> max_bytes:int -> timeout_sec:float -> unit ->
+  (string, string) result

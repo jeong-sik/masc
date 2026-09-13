@@ -366,6 +366,10 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
+For TOML package installations, open `/addons` from the composer or choose
+`go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
+covers configuration editing, connections, Skills, actions and cross-Lane evidence.
+
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It hangs
 off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper

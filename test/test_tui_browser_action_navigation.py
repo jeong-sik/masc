@@ -64,7 +64,7 @@ def run(binary):
                      node("article", "region", "Article body", role="main")]
         elif scope is not None:
             assert scope == {"documentId": "document", "nodeId": "article"}
-            nodes = [node("text", "text", "SELECTED ARTICLE CONTENT")]
+            nodes = [node("text", "text", f"SELECTED ARTICLE CONTENT reading {len(scenes)}")]
         else:
             nodes = [node("intro", "text", "LONG ARTICLE " + ("wrapped article content " * 180)),
                      control("first", "FIRST LINK"), control("disabled", "DISABLED LINK", True),
@@ -134,7 +134,13 @@ def run(binary):
             assert copied["viewport"] == {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}
             record_terminal("copied-region", output)
             focused = scenes[-1]
-            h.send_and_wait(process, fd, output, b"r", b"SELECTED ARTICLE CONTENT")
+            # Identical text need not be emitted again by the differential
+            # renderer. Require a new response revision to prove this refresh
+            # completed while retaining its original region and target.
+            refreshed_count = len(scenes) + 1
+            h.send_and_wait(process, fd, output, b"r",
+                            f"SELECTED ARTICLE CONTENT reading {refreshed_count}".encode())
+            assert len(scenes) == refreshed_count
             assert scenes[-1] == focused and len(actions) == 1
             # No actionable node remains. Tab stays in the observed region.
             os.write(fd, b"\t")

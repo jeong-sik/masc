@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 import zlib
 
 import test_tui_keyboard_input as h
@@ -131,6 +132,14 @@ def slow_poll(binary, binary_sha, source):
     resumed = threading.Event()
     tick_count = 0
     tick_lock = threading.Lock()
+    began = time.monotonic()
+    events = []
+
+    def trace(event):
+        events.append({"event": event, "elapsed_s": time.monotonic() - began,
+                       "calls": slow.calls, "completed": slow.completed.is_set(),
+                       "released": slow.release.is_set()})
+
     # Every full refresh probes compact server identity before loading the
     # surface. Fleet health (/health?full=1) is view-specific and is never
     # requested by Schedules, so it cannot witness that screen's timer.
@@ -141,12 +150,15 @@ def slow_poll(binary, binary_sha, source):
         if watching_ticks.is_set():
             with tick_lock:
                 tick_count += 1
+                trace(f"health tick {tick_count}")
                 if tick_count >= 2:
                     two_ticks.set()
         return health
 
     def source_read():
+        trace("source entered")
         result = slow()
+        trace(f"source returned HTTP {result[0]}")
         if slow.calls > 1:
             resumed.set()
         return result
@@ -159,8 +171,11 @@ def slow_poll(binary, binary_sha, source):
             fixtures[path] = source_read
             # No key starts this read: it comes from the actual TUI timer.
             assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)
+            trace("watching timer ticks")
             watching_ticks.set()
             assert h.wait_for_fixture_event(process, master, output, two_ticks, timeout=5.0)
+            trace("checking pending read")
+            assert not slow.completed.is_set(), f"{source} fixture expired before the pending-read assertion"
             assert slow.calls == 1, f"automatic polls replaced the pending {source} read: {slow.calls}"
             start = len(output)
             slow.release.set()
@@ -170,6 +185,12 @@ def slow_poll(binary, binary_sha, source):
                     process, master, output)
             os.write(master, b"q")
         finally:
+            trace("scenario cleanup")
+            print("SNAPSHOT_POLL_TIMELINE " + json.dumps({
+                "source": source, "binary_sha256": binary_sha,
+                "refresh_s": 0.2, "fixture_hold_s": slow.hold_seconds,
+                "events": events,
+            }), flush=True)
             slow.release.set()
 
     h.run_terminal_scenario(binary, description=f"{source}: automatic polling preserves a slow read",

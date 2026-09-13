@@ -4010,6 +4010,7 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
                (min top rect.y, max bottom (rect.y +. rect.height)))
             (first.y, first.y +. first.height) rest in
           Some (top, bottom) in
+  let region_id (region : Masc.Browser_scene.region_ref) = region.node_id in
   match view.scene with
   | Some scene ->
     (* The target index came from re-scanning [scene_targets] for every node,
@@ -4054,7 +4055,7 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Some (top, _), Some bottom when top > bottom -> [""]
         | _ -> [] in
       let region_header = match node.ancestor_region, previous_region with
-        | Some region, Some previous when region.node_id = previous.node_id -> []
+        | Some region, Some previous when region_id region = region_id previous -> []
         | Some region, _ ->
             (match scene.content.scope with
              | Some target when target.node_id = region.node_id -> []

@@ -148,9 +148,10 @@ let dispatch t ~verb args =
 
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
+exception Peer_finished of (unit, string) result
 let with_connection ~env ~timeout ~url use =
   let* host,port,resource=Browser_bidi_downloads.endpoint url in
-  Eio.Switch.run (fun sw ->
+  try Eio.Switch.run (fun sw ->
     let clock=Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
     let pending=Hashtbl.create 4 and sequence=ref 0 and broken=ref None in
     let disconnect reason =
@@ -199,10 +200,18 @@ let with_connection ~env ~timeout ~url use =
          connection instead of admitting another write behind an unknown one. *)
       Ok (create ~command) in
     try
-      let* peer=Eio.Time.with_timeout_exn clock timeout connect in
-      use peer
+      let peer=match Eio.Time.with_timeout_exn clock timeout connect with
+        | Ok peer->peer | Error reason->raise (Peer_finished (Error reason)) in
+      (* ws-direct forks its reader/writer on [sw]. Returning normally would
+         wait for that open socket before release hooks run. Exit the scope
+         exceptionally to cancel both driver fibers, then recover only our
+         private completion marker outside the switch. No close handshake or
+         remote browser/tab command is required to stop an unresponsive peer. *)
+      let result=use peer in
+      raise (Peer_finished result)
     with
-    | Eio.Time.Timeout->Error "BiDi connection or command deadline exceeded"
+    | Eio.Time.Timeout->raise (Peer_finished (Error "BiDi connection or command deadline exceeded"))
     | Eio.Cancel.Cancelled _ as exn->raise exn
-    | Eio.Io _->Error "BiDi connection failed"
-    | End_of_file->Error "BiDi connection EOF")
+    | Eio.Io _->raise (Peer_finished (Error "BiDi connection failed"))
+    | End_of_file->raise (Peer_finished (Error "BiDi connection EOF")))
+  with Peer_finished result->result

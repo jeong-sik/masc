@@ -42,5 +42,30 @@ let test_pointer_validation () =
   rejected ["action",`String "click_at";"point",obj ["x",`Int 1;"y",`Float 0.5]];
   rejected ["action",`String "scroll_at";"point",point;"x",`Int 0;"y",`String "120"];
   rejected ["action",`String "drag";"from",point;"to",point;"point",point]
+let test_held_open_completion outcome () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock=Eio.Stdenv.clock env in
+      let listener=Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
+      let port=match Eio.Net.listening_addr listener with `Tcp (_,port)->port|_->fail "TCP expected" in
+      let eof,eof_u=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun ()->Eio.Switch.run (fun peer_sw ->
+        let flow,_=Eio.Net.accept ~sw:peer_sw listener in
+        let head=Ws_direct_eio.Driver.read_head ~clock flow in
+        let key=match Ws_direct_eio.Handshake.request_key head with Ok key->key|Error e->fail e in
+        Eio.Flow.copy_string (Ws_direct_eio.Handshake.server_response ~key) flow;
+        (* Keep the peer open. No server-side close or close-frame response can
+           rescue a client that waits for its own driver before cancelling it. *)
+        let read=try ignore (Eio.Flow.single_read flow (Cstruct.create 1)); false
+          with End_of_file->true in
+        Eio.Promise.resolve eof_u read));
+      Eio.Time.with_timeout_exn clock 2. (fun ()->
+        let actual=Peer.with_connection ~env ~timeout:1.
+          ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" port) (fun _->outcome) in
+        check (result unit string) "callback result preserved" outcome actual;
+        check bool "socket EOF without any extra protocol write" true (Eio.Promise.await eof))))
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
+  "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
+    test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"))];
   "effect",[test_case "closed verbs" `Quick test_unsupported; test_case "parsed pointer boundary" `Quick test_pointer_validation]]

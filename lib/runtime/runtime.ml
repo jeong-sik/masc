@@ -1780,9 +1780,11 @@ let verifier_runtime_admission (runtime : t) =
 
 let verifier_cli_slot_admission ~runtime_id =
   let state = runtime_state () in
-  if List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes
-  then Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
-  else match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  (* Verifier slots name direct bindings even when ordinary Keeper routing
+     declares a same-named failover lane. Never resolve that lane here. *)
+  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  | None when List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes ->
+    Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
   | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
   | Some runtime ->
     (match runtime.execution with

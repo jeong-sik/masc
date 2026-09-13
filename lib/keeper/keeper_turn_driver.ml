@@ -1019,18 +1019,13 @@ let run_named
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
-  (* Two refusals, one shape. A named exact runtime and a verdict contract each
-     say the caller already chose the slot, and a lane is the opposite claim --
-     it asks the registry to choose. They are separate conditions because a
-     verdict can be asked of a resolved assignment and an exact runtime can be
-     asked for ordinary output. *)
-  if runtime_selection <> Resolve_assignment && Option.is_some deferred_runtime_lane then
+  if output_contract = Tool_verdict
+     && (Option.is_none (Runtime.get_runtime_by_id runtime_id)
+         || Option.is_some deferred_runtime_lane) then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-      {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
-  else if output_contract = Tool_verdict && Option.is_some (Runtime.get_lane_by_id runtime_id) then
-    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-      { field = "verifier.runtime"; detail = "A verifier slot must name a direct runtime, not a lane" }))
-  else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+      { field = "verifier.runtime"; detail = "A verifier slot requires a direct runtime binding without a deferred lane" }))
+  else
+  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
          (Agent_core.Error.InvalidConfig
@@ -1109,15 +1104,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match runtime_selection, deferred_runtime_lane with
-    | Exact_runtime, _ -> Ok (None, [runtime_id])
-    | Exact_route, _ ->
-      Ok (None, match Runtime.get_lane_by_id runtime_id with
-        | Some lane -> Runtime_lane.declared_candidates lane
-        | None -> [runtime_id])
-    | Resolve_assignment, Some hint ->
+    match output_contract, deferred_runtime_lane with
+    | Tool_verdict, _ -> Ok (None, [runtime_id])
+    | Provider_default, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | Resolve_assignment, None ->
+    | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->

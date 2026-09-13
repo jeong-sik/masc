@@ -662,3 +662,5 @@ let agent_core_handoff_prompt_param_description =
 let agent_core_agent_tool_prompt_param_description =
   "agent_core.agent_tool.prompt_param_description"
 ;;
+let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
+let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"

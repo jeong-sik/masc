@@ -222,7 +222,10 @@ type error =
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_admitted : bool
+      }
   | Timeout of float
 
 exception Runtime_error of error
@@ -276,8 +279,9 @@ let error_to_string = function
       api_status
       tool_effect_attempted
       response_emitted
-  | Process_exited detail ->
-    "Claude Code exited before terminal result: " ^ detail
+  | Process_exited { detail; turn_admitted } ->
+    Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
+      turn_admitted detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -1533,7 +1537,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
-        Error (Process_exited (if detail = "" then "stdout closed" else detail))
+        (* A client that dies before the turn is admitted submitted nothing,
+           so another candidate may still be tried. [turn_admitted] is the
+           same fact the control responses above already read. *)
+        Error
+          (Process_exited
+             { detail = (if detail = "" then "stdout closed" else detail)
+             ; turn_admitted = !turn_admitted
+             })
       | Idle_timeout seconds -> Error (Timeout seconds)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn

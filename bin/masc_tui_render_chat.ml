@@ -363,7 +363,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           let at = max 0 (min row.gutter_label_at width) in
           let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
-             trailing "~", which here would land in the middle of the gutter.
+             trailing "…", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's
@@ -572,8 +572,14 @@ let keeper_message_identity ~max_cells state keeper_name =
                ~configured_runtime:row.kr_runtime_id
                (Option.map (fun live -> live.tl_transcript) state.msg_live)
            in
+           (* The phase and the runtime are two facts, and the runtime label
+              starts with a word of its own ("configured:", "turn:"). Set side
+              by side with only a space, they read as one phrase -- the header
+              said "paused configured: anthropic.claude-sonnet-4", which names
+              no state a person can act on. The separator the rest of the row
+              uses keeps them apart. *)
            let prefix =
-             Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
+             Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
            let prefix_width = Message_layout.display_width prefix in
@@ -2813,6 +2819,22 @@ let render_keeper_message (state : state) =
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
     let rows_above_composer = count_frame_lines chat_buf in
+    (* An empty draft names the voice keys, as the composer row does under
+       every other surface. This pane binds them too and is the one an operator
+       speaks from, yet nothing on it said so: the key list in the footer has
+       no room for them. Measured 2026-09-13 at 120 columns, the footer read
+       [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
+       and the draft row was a bare prompt. The hint sits after the caret, so
+       the caret column does not move, and it goes while a capture or
+       continuous mode runs, because the footer's meter says it louder. *)
+    let voice_hint =
+      if String.equal input ""
+         && state.keeper_message_focus = Right_pane
+         && Option.is_none state.voice_capture
+         && Option.is_none state.voice_continuous
+      then Ansi.dim ^ "  " ^ Masc_tui_composer.voice_keys_hint ^ Ansi.reset
+      else ""
+    in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -2822,7 +2844,9 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line chat_buf chat_cols ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
+        let hint = if index = 0 then voice_hint else "" in
+        box_line chat_buf chat_cols
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line ^ hint))
       composer;
 
     let input_row =

@@ -356,7 +356,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     ~selected_keeper:selected_keeper_name_after_refresh
   |> apply_keeper_log_snapshot state;
 
-  state.last_refresh <- Unix.gettimeofday ()
+  state.local_workspace <- Local_workspace_read
 
 let clear_local_workspace (state : state) =
   state.agents <- [];
@@ -370,7 +370,8 @@ let clear_local_workspace (state : state) =
   state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
-  state.live_context <- Context_state.empty
+  state.live_context <- Context_state.empty;
+  state.local_workspace <- Local_workspace_unread
 ;;
 
 (** Add event to the event log *)
@@ -479,7 +480,9 @@ let decode_board_post ?(require_body = false) json =
      formatted timestamp back into one would be a second reading of the same
      fact. Absent reads as the creation time, which is what an untouched post's
      [updated_at] holds anyway -- so a server too old to send it degrades to
-     "as old as it looks" rather than to a blank column. *)
+     "as old as it looks" rather than to a blank column. With neither there is
+     no time at all, and it stays unknown: read as the epoch it drew a post
+     from 1970, twenty thousand days old, folded to "2…d09h". *)
   let created_at_epoch =
     match Yojson.Safe.Util.member "created_at" json with
     | `Float value -> Some value
@@ -518,8 +521,8 @@ let decode_board_post ?(require_body = false) json =
       bp_created_at;
       bp_updated_at =
         (match updated_at with
-         | Some updated_at -> updated_at
-         | None -> Option.value created_at_epoch ~default:0.);
+         | Some _ -> updated_at
+         | None -> created_at_epoch);
       bp_hearth;
       bp_kind;
     }

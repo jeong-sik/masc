@@ -7,15 +7,29 @@ type check =
   | Failed of { command : string; status : Unix.process_status; detail : string }
 type t = check list
 
+(* A version probe answers straight away or is no use. Without a bound one
+   wedged executable -- a wrapper waiting on input, a stalled network mount --
+   holds the setup screen open for as long as it likes, and the sandbox menu
+   asks for this before every draw. A spent budget is reported as a failed
+   probe, which is what an unusable tool is; no new wire word is introduced. *)
+let probe_timeout_sec = 10.
+
 let observe () =
   List.map (fun command ->
     if not (Executable_path.command_available command) then Missing command
     else
       let status, stdout, stderr = Process_eio.run_argv_with_status_split
+        ~timeout_sec:probe_timeout_sec
         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ())) [command;"-v"] in
       let output = String.trim (stdout ^ "\n" ^ stderr) in
       match status with
       | Unix.WEXITED 0 -> Started {command;output}
+      (* [run_argv_with_status_split] synthesises 124 on its own timeout, the
+         way timeout(1) does. *)
+      | Unix.WEXITED 124 ->
+        Failed {command;status;
+                detail=Printf.sprintf "%s -v did not answer within %.0f seconds"
+                    command probe_timeout_sec}
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
         Failed {command;status;detail=output}) commands
 

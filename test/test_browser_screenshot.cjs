@@ -16,7 +16,7 @@ function fixture({navigates=false,scrolls=false,encoded='cGl4ZWxz'}={}) {
   let reads=0, observations=0; const calls=[], replies=[];
   const viewport={documentId:'d1',width:1280,height:720,scrollX:0,scrollY:0};
   const port={onMessage:{addListener(){}},onDisconnect:{addListener(){}},postMessage(reply){replies.push(JSON.parse(JSON.stringify(reply)));}};
-  const context=vm.createContext({TextEncoder,clearTimeout(){},setTimeout(){},browser:{
+  const context=vm.createContext({TextEncoder,AbortController,clearTimeout(){},setTimeout(){},browser:{
     runtime:{connectNative(){return port;}},
     tabs:{async get(id){assert.equal(id,73);return {url: navigates && reads++ ? 'https://example.org/new':'https://example.org/old',title:'Page'};},
       async executeScript(id,options){assert.equal(id,73);calls.push({call:'executeScript',code:options.code});
@@ -60,6 +60,6 @@ test('a viewport that moves during capture discards ambiguous pixels',async()=>{
 });
 test('oversized reply becomes a bounded error before native messaging',async()=>{
   const f=fixture({encoded:'A'.repeat(8*1024*1024)});
-  await vm.runInContext('onHostMessage({id:"shot",verb:"page.capture",args:{tabId:73}})',f.context);
+  await vm.runInContext('onHostMessage({id:"shot",deadlineMs:Date.now()+20000,verb:"page.capture",args:{tabId:73}})',f.context);
   assert.deepEqual(f.replies,[{id:'shot',ok:false,error:'browser_reply_exceeds_8_mib'}]);
 });

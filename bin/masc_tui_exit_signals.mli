@@ -40,3 +40,12 @@ type verdict =
 val poll : t -> verdict
 (** Once per loop pass. Consumes an interrupt request and arms the next one;
     a terminate request outranks both and is never consumed. *)
+
+val quit_notice : key:string -> waiting:int -> string
+(** What the first quit key -- [q], or Ctrl-C -- says it will do.
+
+    A message sent while a turn is running waits in this process until that
+    turn settles; it is not at the server yet. Quitting drops it, and nothing
+    brings it back on the next launch. So a notice with [waiting] above zero
+    names how many a second press drops. Continuous voice mode with
+    send_on_stop queues a sentence this way each time one ends mid-turn. *)

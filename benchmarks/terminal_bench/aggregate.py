@@ -24,6 +24,11 @@ COLUMNS = [
     "job", "task", "trial", "reward", "duration_ms",
     "input_tokens", "output_tokens", "cache_tokens", "cost_usd",
     "tool_calls", "duplicate_tool_calls", "masc_state",
+    # cost_usd 는 keeper 지출까지 더한 합인데, 원장이 값을 못 매긴 행은 null 로
+    # 오고 합에서는 0 처럼 보인다. 그 행 수가 여기 없으면 "값을 모르는 지출" 이
+    # 표에서 공짜와 구분되지 않는다. 끝에 붙인다 — 기존 컬럼 위치를 읽는
+    # 소비자가 있을 수 있다.
+    "keeper_cost_unreported_rows",
 ]
 
 
@@ -61,7 +66,7 @@ def main() -> None:
             out.writerow([
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
-                read_error or "unreadable",
+                read_error or "unreadable", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -80,6 +85,7 @@ def main() -> None:
             cell(meta.get("tool_calls")),
             cell(meta.get("duplicate_tool_calls")),
             cell(meta.get("masc_state")),
+            cell((meta.get("keeper_usage") or {}).get("cost_rows_unreported")),
         ])
 
 

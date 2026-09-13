@@ -153,17 +153,19 @@ type credential_requirement =
   | Not_required
   | Unknown_provider
 
+let explicit_credential_requirement = function
+  | Runtime_schema.Env key ->
+    let selected = match selected_credential_env key with
+      | Some selected -> selected | None -> key in
+    Reference (Runtime_schema.Env selected)
+  | (Runtime_schema.File _ | Runtime_schema.Inline _) as explicit -> Reference explicit
+;;
+
 let credential_requirement
     ~(provider_id : string)
     (credential : Runtime_schema.credential option) =
-  let select_env key =
-    match selected_credential_env key with
-    | Some selected -> Runtime_schema.Env selected
-    | None -> Runtime_schema.Env key
-  in
   match credential with
-  | Some (Runtime_schema.Env key) -> Reference (select_env key)
-  | Some ((Runtime_schema.File _ | Runtime_schema.Inline _) as explicit) -> Reference explicit
+  | Some explicit -> explicit_credential_requirement explicit
   | None ->
     (match find_registry_entry provider_id with
      | Some entry ->
@@ -171,7 +173,7 @@ let credential_requirement
        (* An empty [api_key_env] is how the catalog declares a provider that
           takes no key; the schema requires the field and allows it to be
           empty. Two of the shipped rows use it. *)
-       if String.trim env = "" then Not_required else Reference (select_env env)
+       if String.trim env = "" then Not_required else explicit_credential_requirement (Runtime_schema.Env env)
      | None -> Unknown_provider)
 ;;
 
@@ -238,8 +240,7 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 
 (* --- Provider kind resolution --- *)
 
-let resolve_api_key ~provider_id ~credential =
-  match credential_requirement ~provider_id credential with
+let resolve_credential_requirement = function
   | Unknown_provider ->
     (* The runtime row names no credential and the catalog has no row for this
        provider, so nothing says whether a key is needed. An empty secret here
@@ -253,6 +254,10 @@ let resolve_api_key ~provider_id ~credential =
      | Ok value when String.trim value = "" ->
        Error "Required provider credential is unavailable"
      | Ok value -> Ok (Llm_provider.Secret.of_string value))
+;;
+
+let resolve_api_key ~provider_id ~credential =
+  resolve_credential_requirement (credential_requirement ~provider_id credential)
 ;;
 
 (* CLI subprocess provider kinds were removed in the agent_core pin bump

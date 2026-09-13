@@ -155,13 +155,17 @@ let create_submit_request ~(config : Workspace.config)
         Keeper_tool_task_runtime.evidence_artifact_reader ~config ~meta ()
     | Ok None | Error _ -> None
   in
+  let open Result.Syntax in
+  let collaboration_refs, other_refs = List.partition (fun reference ->
+    Option.is_some (Workspace_verification_store.collaboration_reference reference)) spec.submitted_evidence in
+  let* collaboration = Verification_collaboration_evidence.capture ~config
+    ~authority:(Verification_collaboration_evidence.Task_producer assignee)
+    ~references:collaboration_refs |> Result.map_error Verification_collaboration_evidence.error_to_string in
   let evidence_snapshot =
-    Workspace_verification_store.snapshot_submitted_evidence_json
-      ?artifact_read
-      ~request_id:verification_id
-      ~base_path
-      ~worker:assignee
-      spec.submitted_evidence
+    match Workspace_verification_store.snapshot_submitted_evidence_json
+      ?artifact_read ~request_id:verification_id ~base_path ~worker:assignee other_refs with
+    | `List items -> `List (items @ List.map Workspace_verification_store.submitted_evidence_item_to_yojson collaboration)
+    | _ -> assert false
   in
   warn_oversized_evidence ~task ~snapshot:evidence_snapshot;
   let output =

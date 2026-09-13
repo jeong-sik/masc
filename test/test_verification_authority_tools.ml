@@ -177,7 +177,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   if remote then write_runtime_toml ~base_path:config.base_path;
   ensure_producer config producer;
   let run () =
-    match VAT.create ~config ~producer with
+    match VAT.create ~submitted_evidence:[] ~config ~producer with
     | Error reason -> Alcotest.failf "surface creation failed: %s" reason
     | Ok surface -> f config surface
   in
@@ -248,7 +248,7 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -262,16 +262,40 @@ let test_schemas_are_the_descriptor_schemas () =
              | "tool_read_file" ->
                  descriptor.Descriptor.description
                  ^ " " ^ VAT.image_delivery_note
+             | "masc_board_post_get" | "masc_fusion_status" ->
+                 (* These descriptors supply input validation; standalone
+                    reviewer descriptions state their narrower authority. *)
+                 schema.description
              | _ -> descriptor.Descriptor.description
            in
            Alcotest.(check string)
              (schema.name ^ " description is the descriptor's")
              expected
              schema.description;
-           Alcotest.(check bool)
-             (schema.name ^ " input schema is the descriptor's")
-             true
-             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+           (match schema.name with
+            | "masc_fusion_status" ->
+              (* The Keeper schema leaves run_id optional because an empty call
+                 lists runs; the verifier reads one exact run and has no
+                 listing. It requires that id and names no other parameter. *)
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string))
+                "masc_fusion_status requires the exact run_id"
+                [ "run_id" ]
+                (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+              Alcotest.(check (list string))
+                "masc_fusion_status adds source continuation to exact lookup"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | "masc_board_post_get" ->
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string)) "Board adds source continuation"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | _ ->
+              Alcotest.(check bool)
+                (schema.name ^ " input schema is the descriptor's")
+                true
+                (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema))
          | found ->
            Alcotest.failf
              "%s resolves to %d descriptors; the surface needs exactly one"
@@ -417,12 +441,12 @@ let test_workspace_producer_gets_owned_read_surface () =
   let path = Filename.concat playground "evidence.txt" in
   Out_channel.with_open_text path (fun channel ->
     output_string channel "first line\nsecond line\n");
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file"; "masc_web_fetch" ]
+      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match
@@ -471,7 +495,7 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   let bundle =
     Filename.concat Playground_paths.all_playgrounds_prefix producer_name
   in
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     let layout = VAT.root_layout surface |> require_layout in
@@ -503,7 +527,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
   let producer_name = "binary-evidence-producer" in
   let playground = workspace_producer_playground config producer_name in
   let surface =
-    match VAT.create ~config ~producer:producer_name with
+    match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
     | Ok surface -> surface
     | Error detail -> Alcotest.fail detail
   in
@@ -848,8 +872,8 @@ let test_goal_and_task_read_deliver_full_png () =
   Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
   let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let encoded = Base64.encode_exn bytes in
-  let task_surface = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal_surface = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task_surface = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal_surface = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   List.iter (fun (surface, path) ->
     let args = `Assoc [ "file_path", `String path ] in
     let result = VAT.dispatch surface ~name:"tool_read_file" ~args in
@@ -930,8 +954,8 @@ let test_goal_and_task_inspect_real_pdf () =
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.pdf")
     (fun out -> output_string out "%PDF-1.7\nnot a PDF document\n");
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   let read surface path = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String path]) in
   List.iter (fun (surface,prefix) ->
@@ -988,6 +1012,143 @@ let test_goal_and_task_inspect_real_pdf () =
     (In_channel.with_open_bin source In_channel.input_all)
 ;;
 
+let test_goal_and_task_inspect_real_mp4 () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-test"));
+  let producer_name = "video-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let source = Filename.concat root "clip.mp4" in
+  Out_channel.with_open_bin source (fun out -> output_string out bytes);
+  Out_channel.with_open_bin (Filename.concat root "broken.mp4")
+    (fun out -> output_string out (String.sub bytes 0 (String.length bytes / 2)));
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
+  let read surface path = VAT.dispatch surface ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String path]) in
+  List.iter (fun (surface,prefix) ->
+    let result = read surface (prefix ^ "clip.mp4") in
+    (match result with
+     | Tool_result.Completed {data;_} ->
+       let open Yojson.Safe.Util in
+       let data = member "inspection" data in
+       Alcotest.(check int) "exact video bytes" (String.length bytes) (member "bytes" data |> to_int);
+       Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+       Alcotest.(check bool) "video and audio independently observed" true
+         (member "video_present" data = `Bool true && member "audio_present" data = `Bool true);
+       Alcotest.(check bool) "all audio/video streams decoded" true
+         (member "decoded_stream_indices" data = `List [`Int 0;`Int 1]);
+       Alcotest.(check bool) "no visual inspection invented" true
+         (member "visual_input" data = `Bool false);
+       Alcotest.(check int) "direct decoder exit" 0
+         (member "full_decode" data |> member "exit_code" |> to_int);
+       Alcotest.(check (float 0.001)) "observed duration" 1.
+         (member "duration_seconds" data |> to_float);
+       let video = member "streams" data |> to_list |> List.hd in
+       Alcotest.(check int) "decoded video width" 64 (member "width" video |> to_int);
+       Alcotest.(check int) "decoded video height" 48 (member "height" video |> to_int)
+     | _ -> Alcotest.fail (Tool_result.message result));
+    Alcotest.(check bool) "truncated video is not a complete successful decode" true
+      (Tool_result.is_failed (read surface (prefix ^ "broken.mp4")));
+    let partial = VAT.dispatch surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path",`String (prefix ^ "clip.mp4");"limit",`Int 1]) in
+    Alcotest.(check bool) "line window refused" true
+      (Tool_result.failure_class partial = Some Tool_result.Workflow_rejection))
+    [task,"";goal,producer_name ^ "/"];
+  let outside = Filename.concat dir "outside.mp4" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.mp4");
+  List.iter (fun (surface,path) ->
+    Alcotest.(check bool) "video keeps producer containment" true
+      (Tool_result.is_failed (read surface path)))
+    [task,outside;goal,outside;task,"escape.mp4";goal,producer_name ^ "/escape.mp4"];
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "missing decoder keeps dependency classification" true
+        (Tool_result.failure_class result = Some Tool_result.Dependency_unavailable);
+      Alcotest.(check bool) "missing decoder is stated" true
+        (String_util.contains_substring (Tool_result.message result) "video_dependency_unavailable"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
+  (* The process runner's deadline result must not reject the producer's
+     evidence as a policy violation. Exercise the public dispatch projection. *)
+  let fake_bin = Filename.concat dir "timeout-bin" in
+  Unix.mkdir fake_bin 0o700;
+  List.iter (fun program ->
+    let executable = Filename.concat fake_bin program in
+    Out_channel.with_open_bin executable (fun out -> output_string out "#!/bin/sh\nexit 124\n");
+    Unix.chmod executable 0o700) ["ffmpeg"; "ffprobe"];
+  with_env "PATH" fake_bin (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "command deadline is a runtime failure" true
+        (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      Alcotest.(check bool) "timeout diagnostic explicit" true
+        (String_util.contains_substring (Tool_result.message result) "video_inspection_timeout"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
+  let oversized = Filename.concat root "oversized.mp4" in
+  Out_channel.with_open_bin oversized (fun out ->
+    seek_out out (64 * 1024 * 1024);
+    output_char out '\000');
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "oversized source rejected before decoder lookup" true
+        (Tool_result.failure_class result = Some Tool_result.Policy_rejection
+         && String_util.contains_substring (Tool_result.message result) "media_source_too_large"))
+      [task,"oversized.mp4";goal,producer_name ^ "/oversized.mp4"]);
+  Alcotest.(check string) "inspection preserves source" bytes
+    (In_channel.with_open_bin source In_channel.input_all)
+;;
+
+(* A capture saved without its extension used to fall through to the ordinary
+   text Read, which projects container bytes as characters. The ISO file type
+   box is what names the format, so the same file must reach the same
+   inspection under either name. *)
+let test_a_capture_without_the_mp4_extension_is_still_inspected () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-signature-test"));
+  let producer_name = "video-signature-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  List.iter (fun filename ->
+  Out_channel.with_open_bin (Filename.concat root filename)
+    (fun out -> output_string out bytes);
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let result = VAT.dispatch task ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String filename]) in
+  (match result with
+   | Tool_result.Completed {data;_} ->
+     let open Yojson.Safe.Util in
+     let data = member "inspection" data in
+     Alcotest.(check int) "exact video bytes" (String.length bytes)
+       (member "bytes" data |> to_int);
+     Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+     Alcotest.(check bool) "no visual inspection invented" true
+       (member "visual_input" data = `Bool false)
+   | _ -> Alcotest.fail (Tool_result.message result))) ["capture"; "capture.m4v"]
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -1009,7 +1170,12 @@ let () =
             test_keeper_surface_uses_the_effective_sandbox_root
         ] )
     ; ( "dispatch"
-      , [ Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
+      , [ Alcotest.test_case "Goal and Task inspect original MP4 metadata and all audio/video streams" `Quick
+            test_goal_and_task_inspect_real_mp4
+        ; Alcotest.test_case
+            "a capture without the .mp4 extension is still inspected as video" `Quick
+            test_a_capture_without_the_mp4_extension_is_still_inspected
+        ; Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
             test_goal_and_task_inspect_real_pdf
         ; Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
             test_goal_and_task_read_deliver_full_png

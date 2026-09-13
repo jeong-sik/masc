@@ -603,6 +603,7 @@ let test_direct_turn_reuses_current_task_context () =
   in
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:(Inputs.Current_task task)
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
@@ -631,6 +632,7 @@ let test_direct_turn_reuses_current_task_context () =
 let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
         [ { Inputs.held_task_id = "task-364"
@@ -657,6 +659,7 @@ let test_direct_turn_carries_held_task_skills () =
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory:Masc.Workspace_memory_publication.Missing
       ~current_task:Inputs.No_current_task
       ~held_task_skills:[]
       ~task_skill_surfaces:[]
@@ -669,6 +672,44 @@ let test_direct_turn_has_no_synthetic_task_context () =
   check bool "no held task means no synthetic task context" false
     (contains ~needle:"### Current Task" context);
   check string "non-task context remains" "recent owner message" context
+
+let test_direct_turn_discovers_published_workspace_memory () =
+  let module Publication = Masc.Workspace_memory_publication in
+  let module Store = Masc.Workspace_memory_proposal in
+  let module Inventory = Masc.Workspace_memory_context in
+  let base_path = Filename.temp_dir "direct-workspace-memory" "" in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let inventory = Inventory.collect ~base_path |> require in
+    let envelope = Inventory.proposal_json inventory
+      (`Assoc ["shared_claims", `List []; "conflicts", `List []; "excluded", `List []]) in
+    let proposal_id = match Store.submit ~base_path envelope with
+      | Ok (id, _) -> id
+      | Error (Invalid detail | Unavailable detail) -> fail detail in
+    Publication.publish ~base_path ~proposal_id |> require;
+    let render () = Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory:(Publication.observe ~base_path)
+      ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
+      ~approval_authority_text:"" ~recent_direct_conversation_text:"owner conversation"
+      ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
+    let direct = render () in
+    List.iter (fun needle -> check bool "direct reply can inspect attributed shared proposal" true
+      (contains ~needle direct))
+      [proposal_id; "keeper_workspace_memory_read"; "model_proposed"; "not_performed";
+       "not_checked_against_current_memory"; "owner conversation"];
+    let shared = Prompt.format_workspace_memory_observation (Publication.observe ~base_path)
+      |> Option.get in
+    check bool "direct reply uses the same shared publication renderer" true
+      (contains ~needle:shared direct);
+    check string "unchanged observation does not accumulate briefing text" direct (render ());
+    let target = Filename.concat base_path
+      (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ proposal_id ^ ".json") in
+    Sys.remove target;
+    let unavailable = render () in
+    check bool "missing referenced proposal is explicitly unavailable" true
+      (contains ~needle:"Discovery is unavailable" unavailable);
+    check bool "unavailable direct reply does not reuse a stale read target" false
+      (contains ~needle:proposal_id unavailable))
 
 let test_direct_and_autonomous_share_system_prompt () =
   let decision = WO.keeper_cycle_decision ~meta base_observation in
@@ -979,6 +1020,8 @@ let () =
             test_direct_turn_has_no_synthetic_task_context;
           test_case "direct turn carries held task skills" `Quick
             test_direct_turn_carries_held_task_skills;
+          test_case "direct reply discovers shared proposal with source uncertainty" `Quick
+            test_direct_turn_discovers_published_workspace_memory;
           test_case "direct and autonomous turns share the stable contract"
             `Quick
             test_direct_and_autonomous_share_system_prompt;

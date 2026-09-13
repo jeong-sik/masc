@@ -31,3 +31,9 @@ enum = ["request_complete", "drop", "reopen"]
 [[params]]
 name = "note"
 type = "string"
+
+[[params]]
+name = "evidence_refs"
+type = "array"
+items = { type = "string" }
+description = "For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."

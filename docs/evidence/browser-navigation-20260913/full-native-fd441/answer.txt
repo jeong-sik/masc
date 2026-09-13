@@ -1,0 +1,9 @@
+Team Channels의 현재 표시 메시지 기준 요약입니다.
+
+- Alpha — 현재 결정: Cedar를 화요일에 배포하며, 접근성 승인 후 진행. 담당자: 명시되지 않음. Mina 요청: 월요일 접근성 체크리스트 승인. [메시지 링크](http://127.0.0.1:51373/alpha.html#a2)
+- Beta — 현재 결정: Cedar용 schema v4 마이그레이션을 월요일 완료. 담당자: Joon. Mina 요청: 마이그레이션 전 client payload 확인. [메시지 링크](http://127.0.0.1:51373/beta.html#b1)
+- Gamma — 현재 결정: schema v4 기준 Cedar E2E QA를 수요일 실행. 담당자: Sora. Mina 요청: 없음. [메시지 링크](http://127.0.0.1:51373/gamma.html#g1)
+
+공통 작업은 Cedar 릴리스 흐름에 맞춰 schema v4 마이그레이션·검증을 진행하고, Alpha의 접근성 승인과 Beta의 client payload 확인을 거쳐 Gamma에서 E2E QA를 수행하는 것입니다.
+
+읽은 범위: live Browser Lane의 `Alpha`, `Beta`, `Gamma` 각 채널 페이지에서 현재 표시된 메시지 목록 전체(각 페이지 `truncated: false`)를 읽었습니다. Alpha의 과거 “금요일 배포” 메시지는 superseded로 제외했고, 우측 Navigation summary의 캐시 문구는 메시지 근거로 사용하지 않았습니다.ેણ

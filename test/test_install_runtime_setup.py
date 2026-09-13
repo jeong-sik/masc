@@ -45,6 +45,141 @@ def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/
     return result
 
 
+def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing') -> dict:
+    return dict(schema='masc.presentation_tools_readiness.v1', scope='workspace_host_runtime',
+                base_path=base, presentation_inspection='not_run',
+                pdf_tools=dict(schema='masc.pdf_tools_readiness.v1', status='tools_available',
+                    scope='current_process_environment', pdf_inspection='not_run',
+                    checks=[dict(command=tool, status='started') for tool in ('pdftotext', 'pdftoppm')]),
+                status='tools_available' if parser == renderer == 'started' else 'unavailable',
+                checks=[dict(component='python_pptx', command=base + '/.masc/runtime-tools/presentation/bin/python3', status=parser),
+                        dict(component='libreoffice', command='soffice', status=renderer)])
+
+
+class PresentationPrerequisites(unittest.TestCase):
+    def test_partial_install_stays_unavailable_and_uses_selected_workspace(self):
+        readiness = presentation_readiness()
+        catalog = dict(schema='masc.prerequisite_actions.v1', dependency_readiness=readiness,
+                       actions=[dict(id='presentation_parser_install', label='Install parser', detail='Workspace parser',
+                                     source_url='https://python-pptx.readthedocs.io/en/latest/user/install.html', requires_admin=False)])
+        receipt = dict(schema='masc.prerequisite_action_result.v1', status='commands_completed_recheck_required',
+                       readiness='unavailable', dependency_readiness=readiness)
+        output = io.StringIO()
+        with patch.object(SETUP.subprocess, 'run', side_effect=[
+                subprocess.CompletedProcess([], 0, json.dumps(catalog), ''),
+                subprocess.CompletedProcess([], 0, json.dumps(receipt), '')]) as run, \
+                patch.object(SETUP, 'pick', return_value=(0, 'Install parser')), contextlib.redirect_stderr(output):
+            self.assertTrue(SETUP.prerequisite_menu('masc', 'presentation-tools', base_path='/tmp/workspace'))
+        self.assertTrue(all(call.args[0][-2:] == ['--base-path', '/tmp/workspace'] for call in run.call_args_list))
+        self.assertIn('libreoffice: missing', output.getvalue())
+        self.assertNotIn('Both presentation dependencies started successfully', output.getvalue())
+
+    def test_claimed_ready_cannot_hide_a_failed_parser(self):
+        readiness = presentation_readiness(parser='failed', renderer='started')
+        readiness['status'] = 'tools_available'
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_presentation_tools_readiness(readiness)
+
+    def test_ready_other_workspace_does_not_enable_the_selected_workspace(self):
+        with self.assertRaisesRegex(SETUP.SetupError, 'another workspace'):
+            SETUP.decode_presentation_tools_readiness(
+                presentation_readiness(base='/tmp/other', renderer='started'), '/tmp/selected')
+
+    def test_presentation_readiness_requires_poppler(self):
+        readiness = presentation_readiness(renderer='started')
+        readiness['pdf_tools']['checks'][1]['status'] = 'missing'
+        readiness['pdf_tools']['status'] = 'unavailable'
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_presentation_tools_readiness(readiness)
+        readiness['status'] = 'unavailable'
+        self.assertFalse(SETUP.decode_presentation_tools_readiness(readiness).available)
+
+    def test_presentation_timeout_returns_to_setup(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=subprocess.TimeoutExpired('masc', 20)):
+            with self.assertRaisesRegex(SETUP.SetupError, 'in time'):
+                SETUP.presentation_tools_status('masc', '/tmp/workspace')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_impress_readiness_requires_generated_pdf(self):
+        for output, expected in [(None, 'failed'), ('not a PDF', 'failed'), ('%PDF-1.7\n', 'started')]:
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                commands = Path(directory) / 'commands'
+                commands.mkdir()
+                renderer = commands / 'soffice'
+                renderer.write_text('#!' + sys.executable + '\n' +
+                    'import pathlib, sys\n' +
+                    "assert sys.argv[sys.argv.index('--convert-to') + 1] == 'pdf:impress_pdf_Export'\n" +
+                    "directory = pathlib.Path(sys.argv[sys.argv.index('--outdir') + 1])\n" +
+                    "assert pathlib.Path(sys.argv[-1]).suffix == '.fodp'\n" +
+                    ('pass\n' if output is None else "(directory / 'probe.pdf').write_text(" + repr(output) + ")\n"))
+                renderer.chmod(0o755)
+                env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+                assert BINARY is not None
+                result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools',
+                    '--base-path', directory], env=env, capture_output=True, text=True, check=True)
+                observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+                renderer_check = next(row for row in observed.checks if row['component'] == 'libreoffice')
+                self.assertEqual(renderer_check['status'], expected)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_successful_install_commands_cannot_hide_failed_renderer_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            commands = Path(directory) / 'commands'
+            commands.mkdir()
+            # Package managers are fixtures: this test must never install host packages.
+            for name, code in [('brew', 0), ('sudo', 0), ('soffice', 7)]:
+                command = commands / name
+                command.write_text('#!/bin/sh\nexit ' + str(code) + '\n')
+                command.chmod(0o755)
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            args = [BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)]
+            catalog = subprocess.run(args, env=env, capture_output=True, text=True, check=True)
+            actions = json.loads(catalog.stdout)['actions']
+            if not any(row['id'] == 'presentation_renderer_install' for row in actions):
+                self.skipTest('host has only manual renderer instructions')
+            result = subprocess.run(args + ['--execute', 'presentation_renderer_install'],
+                                    env=env, capture_output=True, text=True)
+            receipt = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(receipt['status'], 'failed')
+            self.assertEqual(receipt['readiness'], 'unavailable')
+            self.assertEqual(list(base.iterdir()), [], 'renderer fixture cannot create a parser environment')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_catalog_does_not_substitute_another_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / 'workspace'
+            base.mkdir()
+            commands = Path(directory) / 'commands'
+            commands.mkdir()
+            renderer = commands / 'soffice'
+            renderer.write_text('#!/bin/sh\nprintf "fixture LibreOffice version\\n"\n')
+            renderer.chmod(0o755)
+            env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+            before = list(base.iterdir())
+            result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
+                                    env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(list(base.iterdir()), before, 'detection must not install or create a workspace environment')
+            observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+            checks = {row['component']: row for row in observed.checks}
+            self.assertEqual(checks['python_pptx']['status'], 'missing')
+            self.assertEqual(checks['libreoffice']['status'], 'failed')
+            self.assertFalse(observed.available)
+            # An actual isolated interpreter without third-party packages must
+            # fail the import, even though the interpreter itself starts.
+            venv = base / '.masc/runtime-tools/presentation'
+            subprocess.run([sys.executable, '-I', '-m', 'venv', '--without-pip', str(venv)], check=True)
+            result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
+                                    env=env, capture_output=True, text=True, check=True)
+            observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+            parser = next(row for row in observed.checks if row['component'] == 'python_pptx')
+            self.assertEqual(parser['status'], 'failed')
+            self.assertIn('pptx', parser['detail'])
+            self.assertFalse(observed.available)
+
+
 class ModelSelection(unittest.TestCase):
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
@@ -987,13 +1122,45 @@ base_url = "https://voice.fixture.invalid/v1"
             runtime.write_text(runtime.read_text() + voice)
             yield base, runtime
 
+    # voice-local-setup looks --voice up in the list say prints before it
+    # writes. The host running this may have no say at all -- the release job
+    # is Linux -- or a different list, so these run against a say that lists
+    # Yuna and nothing else, which is the host they describe.
+    FAKE_SAY = ("#!/bin/sh\n"
+                "if [ \"$1\" = -v ] && [ \"$2\" = '?' ]; then\n"
+                "  printf 'Yuna                ko_KR    # hello\\n'; exit 0\n"
+                "fi\n"
+                "exit 1\n")
+
     def configure(self, base, *arguments):
         assert BINARY is not None
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('MASC_', 'AGENT_CORE_'))}
-        return subprocess.run(
-            [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
-            capture_output=True, text=True, env=env, check=False)
+        with tempfile.TemporaryDirectory(prefix='voice-fake-say-') as bin_dir:
+            say = Path(bin_dir) / 'say'
+            say.write_text(self.FAKE_SAY)
+            say.chmod(0o755)
+            env['PATH'] = bin_dir + os.pathsep + env.get('PATH', '')
+            return subprocess.run(
+                [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
+                capture_output=True, text=True, env=env, check=False)
+
+    def test_a_voice_say_does_not_list_is_refused_and_nothing_is_written(self):
+        # say does not fail on a name it does not have: measured 2026-09-13,
+        # say -v NoSuchVoice exited 0 with the same bytes as -v Yuna, and
+        # before this check the command wrote default_voice = "NoSuchVoice".
+        for name in ('NoSuchVoice', 'Yu'):
+            with self.subTest(name=name), self.workspace() as (base, runtime):
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', name)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f'say has no voice named "{name}"', result.stderr)
+                self.assertIn('Nothing was written.', result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+        # say matches names without regard to case, so the check does too.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_mcp_voice_probe_reports_its_own_transport_limit(self):
         assert BINARY is not None
@@ -1031,14 +1198,86 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertEqual(after['endpoints'][1]['default_voice'], 'Yuna')
             self.assertEqual(after['endpoints'][1]['kind'], 'macos_say')
 
-    def test_a_new_tts_section_gets_both_defaults(self):
+    def test_a_new_tts_section_keeps_per_keeper_voice_overrides_effective(self):
         import tomllib
         with self.workspace() as (base, runtime):
             result = self.configure(base, '--voice', 'Yuna')
             self.assertEqual(result.returncode, 0, result.stderr)
             tts = tomllib.loads(runtime.read_text())['voice']['tts']
             self.assertEqual(tts['default_voice'], 'Yuna')
-            self.assertEqual(tts['endpoints'][0]['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            endpoint = tts['endpoints'][0]
+            self.assertEqual(endpoint['id'], 'macos-say')
+            self.assertEqual(endpoint['kind'], 'macos_say')
+            # An endpoint voice outranks per-Keeper mappings. The fresh
+            # section owns this default so those mappings remain effective.
+            self.assertNotIn('default_voice', endpoint)
+
+    def test_a_directory_that_was_never_initialized_is_told_to_run_init(self):
+        # Voice is a section of the configuration masc init writes. Measured
+        # before this: exit 1 and the raw Sys_error text for the missing file,
+        # which names neither the workspace nor what to run.
+        with tempfile.TemporaryDirectory(prefix='voice-no-init-') as directory:
+            base = Path(directory)
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('No masc workspace at', result.stderr)
+            self.assertIn('masc init --base-path', result.stderr)
+            self.assertNotIn('Sys_error', result.stderr)
+            self.assertEqual(list(base.iterdir()), [])
+
+    def test_setting_the_same_voice_again_keeps_per_keeper_voices_effective(self):
+        # The second run finds a [voice.tts] section -- the first run's -- and
+        # that section is say's own, so its default is the place for the voice.
+        # Measured before the placement asked who owns the default: the second
+        # run put default_voice on the endpoint and a keeper mapped to another
+        # voice spoke in this one. A workspace already left that way is
+        # repaired by the next run, because the endpoint is written whole.
+        import tomllib
+        with self.workspace() as (base, runtime):
+            for _ in range(2):
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+        stale = ('\n[[voice.tts.endpoints]]\nid = "macos-say"\nkind = "macos_say"\n'
+                 'enabled = true\ndefault_voice = "Yuna"\n\n[voice.tts]\ndefault_voice = "Yuna"\n')
+        with self.workspace(stale) as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+
+    def test_voice_verify_checks_the_workspace_it_is_pointed_at(self):
+        # A workspace set up with --base-path is checked with --base-path. The
+        # loader finds runtime.toml through the environment, so without the flag
+        # and with nothing exported there is no workspace to check -- and the
+        # answer says that, rather than naming a JSON file nobody made.
+        # On a host without `say` the endpoint refuses; the configuration is
+        # still found, which is what this asks.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            # A fresh HOME as well: a workspace recorded as the default under the
+            # real one is found without the flag, which is right, but is not the
+            # machine this describes.
+            with tempfile.TemporaryDirectory(prefix='voice-verify-elsewhere-') as elsewhere, \
+                    tempfile.TemporaryDirectory(prefix='voice-verify-home-') as home:
+                env['HOME'] = home
+                pointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--base-path', str(base), '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertIn('macos-say', pointed.stdout, pointed.stderr)
+                self.assertNotIn('voice config missing', pointed.stdout)
+                unpointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertEqual(unpointed.returncode, 1)
+                self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
 
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):

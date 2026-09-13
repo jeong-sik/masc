@@ -7,6 +7,7 @@ type t = { keeper:string; turn_ref:Ids.Turn_ref.t option; task:task option; goal
 let keeper value = value.keeper
 let turn_ref value = value.turn_ref
 let question value = value.question
+let task_id value = Option.map (fun (task : task) -> task.id) value.task
 let optional encode = function None -> `Null | Some value -> encode value
 let to_yojson value = `Assoc [
   "keeper", `String value.keeper; "turn_ref", optional Ids.Turn_ref.to_yojson value.turn_ref;

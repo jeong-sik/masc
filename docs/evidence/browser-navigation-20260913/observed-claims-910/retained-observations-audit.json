@@ -1,0 +1,84 @@
+{
+  "source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "binary_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+  "operation_id": "kmsg-42fea546ef0da1b60e20cada70c8144a",
+  "state": "Succeeded",
+  "outer_call_count": 6,
+  "outer_errors": 0,
+  "retained_observation_count": 4,
+  "artifact_reads_observed": 0,
+  "observations": [
+    {
+      "execution_id": "exec-1789268417959-0003",
+      "tool_use_id": "exec-89708055-1d73-4193-b8ad-fa015dca2695",
+      "reference": {
+        "sha256": "ab511c7fb0b2e87d4d394392b30a12cbceb268f625a75c2d90f84c46a65946f1",
+        "bytes": 1864,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:54561/index.html",
+      "document_id": "588a4a489fd29c14bd11ed9a424cbe6a",
+      "source": "live",
+      "client_id": "b57138fb-2fab-4344-aa8e-3486546993f8",
+      "tab_id": 1,
+      "scope": {
+        "documentId": "588a4a489fd29c14bd11ed9a424cbe6a",
+        "nodeId": "n1"
+      },
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268422308-0005",
+      "tool_use_id": "composition:36:01a098b5-6e9a-7000-acad-c9afdec919a2:41:exec-9f6076c6-0b9c-4af3-b546-b3a272f7b090:7:content",
+      "reference": {
+        "sha256": "1195840f4f879f05f0edc4eb05bc53e7c21cb6b142a88ad4b5aff7994d90cc28",
+        "bytes": 5863,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:54561/alpha.html",
+      "document_id": "036f08485565cdbbbbbd90906c12c260",
+      "source": "live",
+      "client_id": "b57138fb-2fab-4344-aa8e-3486546993f8",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268425892-0008",
+      "tool_use_id": "composition:36:01a098b5-7c98-7000-bd04-ae64bb3ff09c:41:exec-105f8fc7-9733-4f85-98dd-0bb9db4b5632:7:content",
+      "reference": {
+        "sha256": "f074702c30ba4b88e20b2f1e97ef73b0d33aaca60c0747eed6acf44d98c64e7b",
+        "bytes": 4718,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:54561/beta.html",
+      "document_id": "c46258918c78c36e0a45e10ff4c4a099",
+      "source": "live",
+      "client_id": "b57138fb-2fab-4344-aa8e-3486546993f8",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268429267-000b",
+      "tool_use_id": "composition:36:01a098b5-89cd-7000-aa6b-1ed6c50dcb32:41:exec-a31c1a19-0712-4e3c-a4e9-0ea94613190b:7:content",
+      "reference": {
+        "sha256": "eb3739a5b3d525852902bf6f7aa4166d36f8faca5939225dd278ec6cde8a60cc",
+        "bytes": 4712,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:54561/gamma.html",
+      "document_id": "9241b9af4cb8e4af8be1cbdfaede57f2",
+      "source": "live",
+      "client_id": "b57138fb-2fab-4344-aa8e-3486546993f8",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    }
+  ],
+  "proof_scope": "Exact delivered JSON slices match durable blob bytes; no aligned screenshot claim."
+}

@@ -208,7 +208,13 @@ type error =
       (** The MASC host entered graceful shutdown while this client was
           active. Kept distinct from {!Process_exited}: EOF is only the
           transport symptom here; host shutdown is the observed cause. *)
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_accepted : bool
+      }
+      (** [turn_accepted] is false when the client died before [turn/start] was
+          accepted, which means no turn was submitted and another candidate may
+          still be tried. *)
   | Timeout of
       { seconds : float
       ; turn_accepted : bool

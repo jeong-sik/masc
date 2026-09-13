@@ -371,6 +371,7 @@ let turn_id_of_fields fields =
   | Ok (Some provenance) ->
       let request_id =
         match provenance.Delivery_identity.delivery_key with
+        | Delivery_identity.Operation_native {operation_id=request_id; _}
         | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
         | Delivery_identity.Operation request_id
         | Delivery_identity.Fusion_run request_id
@@ -395,7 +396,8 @@ let operation_id_of_fields fields =
       (Some
          { Delivery_identity.delivery_key =
              (Delivery_identity.Operation request_id
-              | Delivery_identity.Operation_checkpoint {operation_id=request_id; _})
+              | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+              | Delivery_identity.Operation_native {operation_id=request_id; _})
          ; _
          }) ->
       Some (Delivery_identity.Request_id.to_string request_id)
@@ -1040,9 +1042,6 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
         })
     projection.activities
 
-let plural count noun =
-  Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
-
 (* The rows an assistant row's blocks become: one reasoning block, one
    tool block, then what the turn said. The trace interleaves think and
    tool steps; they are gathered into one block each, the way the live pane
@@ -1058,7 +1057,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
     if summary.omitted = 0 then []
     else
       [ Printf.sprintf "(%s not carried by the transcript)"
-          (plural summary.omitted "step")
+          (Masc_tui_message_layout.count_noun summary.omitted "step")
       ]
   in
   let withheld_note =
@@ -1070,7 +1069,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
          .withheld_thinking_entry] cannot carry text at all -- both producers
          of [Trace_think] hardcode an empty one. The count is the whole fact. *)
       [ Printf.sprintf "%s · text not recorded"
-          (plural summary.withheld "reasoning step")
+          (Masc_tui_message_layout.count_noun summary.withheld "reasoning step")
       ]
   in
   let reasoning = summary.reasoning @ withheld_note in

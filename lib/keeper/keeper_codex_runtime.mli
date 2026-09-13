@@ -6,6 +6,7 @@ type successful_tool_completion =
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }
@@ -16,6 +17,7 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

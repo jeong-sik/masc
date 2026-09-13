@@ -51,7 +51,8 @@ Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
 actions (submit_for_verification / done / release / cancel). On \
 action='submit_for_verification', every 'evidence_refs' entry must use \
 'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
-'note:<text>' for narrative evidence. A public URL inside a note (a PR, a CI \
+'note:<text>' for narrative evidence, 'board:<post-id>' for a frozen thread, or \
+'fusion:<run-id>' for frozen advice and decisions. A public URL inside a note (a PR, a CI \
 run) can be fetched live by the verifier itself; materialize volatile \
 contents as an artifact when they must be pinned at submit time. Commits and \
 traces are not fetched. Bare relative paths and absolute host paths are \
@@ -98,5 +99,6 @@ type = "array"
 items = { type = "string", min_length = 1 }
 description = """
 Typed verifier evidence. Use artifact:<producer-root-relative-path> for \
-files or note:<text> for narrative, commit, trace, receipt, or URL evidence. \
+files, board:<post-id> or fusion:<run-id> for submission-bound collaboration \
+snapshots, or note:<text> for narrative, commit, trace, receipt, or URL evidence. \
 Bare and absolute paths are invalid."""

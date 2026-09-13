@@ -135,7 +135,83 @@ let test_unavailable_gap () =
   let saved = Api.post ~base_path (Yojson.Safe.to_string with_detail) |> expect `OK in
   let fetched = Api.get ~base_path ~id:(Some (get_id saved)) |> expect `OK in
   json_equal "unavailable diagnostic survives round-trip" (canonical with_detail) (field "proposal" fetched)
+module Publication = Masc.Workspace_memory_publication
+let require_publication = function Ok value -> value | Error detail -> Alcotest.fail detail
+let publication_path base_path = Filename.concat base_path
+  (Common.masc_dirname ^ "/workspace-memory/publication.json")
+let write_bytes path bytes =
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel bytes)
+let published base_path = match Publication.observe ~base_path with
+  | Publication.Available descriptor -> descriptor
+  | Missing -> Alcotest.fail "missing publication"
+  | Unavailable detail -> Alcotest.fail detail
+let unavailable base_path = match Publication.observe ~base_path with
+  | Publication.Unavailable _ -> ()
+  | Missing | Available _ -> Alcotest.fail "expected unavailable publication"
+let test_publication_discovery () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  let base_path = Filename.temp_dir "workspace-publication" "" in
+  let first = Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `OK |> get_id in
+  Alcotest.(check bool) "saving alone does not publish" true
+    (Publication.observe ~base_path = Publication.Missing);
+  Publication.publish ~base_path ~proposal_id:first |> require_publication;
+  let descriptor = published base_path in
+  Alcotest.(check string) "discovery retains exact immutable id" first descriptor.proposal_id;
+  let unrelated = Filename.concat base_path
+    (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ String.make 64 'f' ^ ".json") in
+  write_bytes unrelated "{invalid historical archive";
+  Alcotest.(check string) "discovery never scans other historical proposals" first
+    (published base_path).proposal_id;
+  let full = Api.get ~base_path ~id:(Some first) |> expect `OK in
+  json_equal "discovered ID resolves all original attribution" (canonical (fixture ())) (field "proposal" full);
+  let text = Masc.Keeper_unified_prompt.format_workspace_memory_observation (Publication.observe ~base_path)
+    |> Option.get in
+  let contains needle = String.split_on_char '\n' text |> List.exists (fun line ->
+    let n = String.length needle in
+    let rec at i = i + n <= String.length line &&
+      (String.sub line i n = needle || at (i+1)) in at 0) in
+  List.iter (fun needle -> Alcotest.(check bool) needle true (contains needle))
+    [first; "model_proposed"; "not_performed"; "not_checked_against_current_memory"; "keeper_workspace_memory_read"];
+  List.iter (fun needle -> Alcotest.(check bool) "source/model content is not injected" false (contains needle))
+    ["Owners disagree on PDF pages"; "PDF has ten pages"; "writer:measurement"];
+  let second_input = fixture () |> replace "context_sha256" (str (String.make 64 'b')) in
+  let second = Api.post ~base_path (Yojson.Safe.to_string second_input) |> expect `OK |> get_id in
+  Publication.publish ~base_path ~proposal_id:second |> require_publication;
+  Alcotest.(check string) "new publication replaces descriptor, preserves archive" second (published base_path).proposal_id;
+  ignore (Api.get ~base_path ~id:(Some first) |> expect `OK);
+  Alcotest.(check bool) "failed publish does not replace last successful publication" true
+    (Result.is_error (Publication.publish ~base_path ~proposal_id:(String.make 64 'c')));
+  Alcotest.(check string) "previous published id remains exact" second (published base_path).proposal_id
+
+let test_publication_integrity () =
+  let base_path = Filename.temp_dir "workspace-publication-corrupt" "" in
+  let id = Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `OK |> get_id in
+  Publication.publish ~base_path ~proposal_id:id |> require_publication;
+  let path = publication_path base_path in
+  let good = Yojson.Safe.from_file path in
+  write_bytes path (Yojson.Safe.to_string (replace "context_sha256" (str (String.make 64 'b')) good));
+  unavailable base_path;
+  Alcotest.(check bool) "invalid latest is not resurrected from successful history" true
+    (Result.is_error (Publication.publish ~base_path ~proposal_id:id));
+  write_bytes path "{invalid";
+  unavailable base_path;
+  let hidden = Masc.Keeper_unified_prompt.format_workspace_memory_observation (Publication.observe ~base_path) in
+  Alcotest.(check bool) "unavailable has explicit nonempty observation" true (Option.is_some hidden);
+  write_bytes path (Yojson.Safe.to_string good);
+  let source = Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ id ^ ".json") in
+  write_bytes source "{corrupt published content";
+  unavailable base_path;
+  Sys.remove source;
+  unavailable base_path;
+  let missing_base = Filename.temp_dir "workspace-publication-dangling" "" in
+  Unix.symlink (Filename.concat missing_base "absent-target")
+    (Filename.concat missing_base Common.masc_dirname);
+  unavailable missing_base
+
 let () = Alcotest.run "workspace memory proposals" ["behavior", [
+  Alcotest.test_case "publication discovers one verified archive without injecting claims" `Quick test_publication_discovery;
+  Alcotest.test_case "corrupt latest publication never falls back or resurrects" `Quick test_publication_integrity;
   Alcotest.test_case "submit, restart read, attribution and idempotence" `Quick test_persist;
   Alcotest.test_case "malformed references refused before persistence" `Quick test_invalid;
   Alcotest.test_case "missing and corruption remain distinct" `Quick test_corruption;

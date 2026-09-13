@@ -4,7 +4,7 @@
 (test
  (name test_verification_authority_tools)
  (modules test_verification_authority_tools)
- (deps fixtures/verifier-image-lookup.png
+ (deps fixtures/verifier-image-lookup.png fixtures/verifier-video.mp4
   ../docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf)
  (libraries
   masc_test_deps

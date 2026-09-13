@@ -627,13 +627,36 @@ let reconcile_committed_proof config ~goal_id =
     outcome) result
 ;;
 
-let request_current_proof config ~goal_id =
+let parse_goal_evidence_refs args =
+  match Json_util.assoc_member_opt "evidence_refs" args with
+  | None -> Ok None
+  | Some (`List rows) ->
+      let rec collect acc = function
+        | [] -> Ok (Some (List.rev acc))
+        | `String reference :: rest ->
+            (match Workspace_verification_store.collaboration_reference reference with
+             | Some _ -> collect (reference :: acc) rest
+             | None -> Error "evidence_refs accepts explicit board: or fusion: references")
+        | _ -> Error "evidence_refs must contain strings" in
+      collect [] rows
+  | _ -> Error "evidence_refs must be a list"
+
+let capture_goal_evidence config = function
+  | None -> Ok None
+  | Some references ->
+      Verification_collaboration_evidence.capture ~config
+        ~authority:Verification_collaboration_evidence.Goal_workspace ~references
+      |> Result.map Option.some
+      |> Result.map_error Verification_collaboration_evidence.error_to_string
+
+let request_current_proof ?evidence_refs config ~goal_id =
   Goal_store.transact_goal config ~goal_id (fun goal ->
     match goal.phase with
     | Goal_phase.Executing | Goal_phase.Verifying ->
-      Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
-        (Goal_verification.mark_proof_pending config ~goal_id
-          ~criterion:(Goal_store.criterion_of_goal goal))
+      Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
+        Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
+          (Goal_verification.mark_proof_pending ?submitted_evidence config ~goal_id
+            ~criterion:(Goal_store.criterion_of_goal goal)))
     | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> Error "goal is not requesting verification")
 ;;
 
@@ -654,7 +677,7 @@ let recover_current_proof config ~goal_id =
    re-armed, a standing pending request is woken again, and a committed
    verdict whose phase/event write was interrupted is reconciled from that
    exact ledger row without another model call. *)
-let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
+let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
   let result = Goal_store.transact_goal ctx.config ~goal_id (fun goal ->
     Result.bind (Goal_verification.get_record_authoritative ctx.config ~goal_id)
       (fun record ->
@@ -664,6 +687,9 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
           | Some ({ Goal_verification.completion =
               (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ } as record)
             when Goal_verification.relation_for_goal ~goal record = Goal_verification.Current ->
+              if Option.is_some evidence_refs then
+                Error "proof result is already committed; reconcile it without evidence_refs before submitting new evidence"
+              else
               let proof_action, note = match verdict.outcome with
                 | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
                 | Goal_verification.Refuted { reason } -> Goal_phase.Record_proof_refuted, Some reason in
@@ -673,9 +699,10 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
                | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a transition"
                | Error detail -> Error detail)
           | Some _ | None ->
-              Result.map (fun record -> goal, (Some record, None))
-                (Goal_verification.mark_proof_pending ctx.config ~goal_id
-                   ~criterion:(Goal_store.criterion_of_goal goal)))) in
+              Result.bind (capture_goal_evidence ctx.config evidence_refs) (fun submitted_evidence ->
+                Result.map (fun record -> goal, (Some record, None))
+                  (Goal_verification.mark_proof_pending ?submitted_evidence ctx.config ~goal_id
+                     ~criterion:(Goal_store.criterion_of_goal goal))))) in
   match result with
   | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Ok (goal, (record, reconciled)) ->
@@ -725,18 +752,31 @@ let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
 
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
+  match parse_goal_evidence_refs args with
+  | Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
+  | Ok evidence_refs ->
   match
     ( validate_string_required args "goal_id"
     , parse_optional_transition_action args "action" )
   with
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
+  | Ok _, Ok (Some public_action)
+      when Option.is_some evidence_refs && public_action <> Goal_phase.Public_action.Request_complete ->
+      error_result_typed ~tool_name ~start_time ~code:Validation_error
+        "evidence_refs is only accepted for request_complete"
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
     (match Goal_store.get_goal ctx.config ~goal_id with
      | None ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+     | Some goal when Option.is_some evidence_refs &&
+         (match goal.Goal_store.phase with
+          | Goal_phase.Executing | Goal_phase.Verifying -> false
+          | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> true) ->
+       error_result_typed ~tool_name ~start_time ~code:Validation_error
+         "this Goal has no active proof request that can accept evidence_refs"
      | Some goal ->
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
@@ -749,7 +789,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
            | Goal_phase.Public_action.Request_complete ->
              (match phase with
               | Goal_phase.Verifying ->
-                answer_verifying_repeat
+                answer_verifying_repeat ?evidence_refs
                   ~tool_name ~start_time ctx ~goal_id ~action goal
               | Goal_phase.Awaiting_confirmation
               | Goal_phase.Executing
@@ -774,7 +814,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                    allowed. Asking to be judged is not a claim; the judgement is
                    the verdict, and refusing the request only hides the goal
                    from the thing that would judge it. *)
-                   (match request_current_proof ctx.config ~goal_id with
+                   (match request_current_proof ?evidence_refs ctx.config ~goal_id with
                     | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                     | Ok (updated_goal, record) ->
                       emit_goal_event ctx ~goal_id ~event_type:"goal_phase"

@@ -116,7 +116,7 @@ let with_ws name fn =
       let producer_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
       Fs_compat.mkdir_p producer_root;
       let lookup_tools =
-        match Masc.Verification_authority_tools.create ~config ~producer:meta.name with
+        match Masc.Verification_authority_tools.create ~submitted_evidence:[] ~config ~producer:meta.name with
         | Ok tools -> tools
         | Error detail -> fail ("verification lookup fixture is invalid: " ^ detail)
       in

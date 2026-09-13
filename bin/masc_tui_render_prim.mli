@@ -101,14 +101,21 @@ val markdown_with_closing :
 
 val document_markdown : width:int -> string -> string list
 
-val page_unread_note : string
+val search_marker : Masc_tui_types.state -> string option
+(** The "/" query on screen and how many rows it reaches, or [None] when no
+    query is on screen. One spelling for the three places that draw it: the
+    footer, the Keepers heading, and the context inspector's title.
 
-val page_failed_note : string
+    The count is taken here, over the rows the surface offers right now, so
+    it cannot describe a list the surface has since left. The "n/N" suffix
+    appears only where those keys have rows to step, and only while footers
+    spell their hints. Plain text -- the footer dims its whole line, so it
+    styles its own. *)
 
-val title_missing_reading : error:'a option -> string
-(** What a title says where its counts would go: whether the read was never
-    asked for or was asked for and failed. The title is the row on top, so
-    saying "not loaded" after a failure is the answer that gets read. *)
+val search_marker_styled : Masc_tui_types.state -> string
+(** {!search_marker} in the colour the two headings share -- accented while
+    the query is being typed, dim once settled -- or [""] when there is no
+    query. *)
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
@@ -154,8 +161,18 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
+val surface_chrome_rows : int
+(** The rows {!surface_chrome} draws around its body: the top border, the
+    title and its rule, the bottom border and the footer. A key handler that
+    bounds a body's scroll subtracts this, the same number the frame does. *)
+
+type chrome_frame = Chrome_screen | Chrome_overlay
+(** [Chrome_screen] draws rules without a box, for a surface that is the whole
+    screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
+
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
+  ?frame:chrome_frame ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -168,6 +185,11 @@ val surface_chrome :
     surface whose rows the drawing counts can say what it clamped to. *)
 
 val connection_badge : Masc_tui_types.state -> string
+
+val coordinator_status_row :
+  Masc_tui_types.state -> style:string -> string -> string
+(** The coordinator's {!connection_badge} and then [status] in [style]. The
+    style covers [status] alone; the badge keeps its own colour. *)
 
 val count_frame_lines : Buffer.t -> int
 
@@ -194,6 +216,11 @@ val write_list_sidebar :
   title:string -> focused:bool -> labels:string list -> selected:int -> unit
 
 val data_unreliable_row : cols:int -> string -> string
+
+val burn_hud_text : Masc_tui_types.state -> string option
+(** The tab row's [/burn] reading without styling: the fleet's cost, and each
+    Keeper's token total as a braille bar when any Keeper has spent one.
+    [None] while it is hidden. *)
 
 val fenced_document_text : language:string -> string -> string
 
@@ -242,15 +269,31 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
+val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
+(** The goal count; with any goals, also the completed share and a counter per
+    phase. *)
+
+val planning_backlog_counts :
+  Masc_tui_types.planning_backlog -> (string * int * string) list
+(** The Backlog counts as [(key, count, label)], each label led by the progress
+    mark its Task rows wear. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
-val keeper_action_hints :
+val keeper_control_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The Keeper keys alone. The footer carries the armed or running action as a
+    status item ({!keeper_action_status}), so the fitter keeps that sentence
+    whole instead of treating it as a droppable key. *)
+
+val keeper_action_status :
+  Masc_tui_types.state -> Masc_tui_footer.status_item list
+(** The armed or running Keeper action, if there is one. *)
 
 val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 
@@ -311,9 +354,11 @@ val runtime_config_status_lines :
   Masc_tui_types.state ->
   cols:int -> (Masc_tui_runtime_config_view.tone * string) list
 
-val help_ascii_banner : cols:int -> Masc_tui_types.state -> string list
+val help_masthead : Masc_tui_types.state -> string list
 
-val help_lines : Masc_tui_types.state -> string list
+val help_lines : width:int -> Masc_tui_types.state -> string list
+(** The cheat sheet's sections, each entry's text wrapped to [width] cells and
+    continued under the column every entry's text starts at. *)
 
 val context_split_width : int -> int
 
@@ -323,6 +368,11 @@ val context_inspector_content_lines :
 val context_split_pane_height : content_height:int -> common_len:int -> int
 
 val keeper_deletions_lines : Masc_tui_types.state -> cols:int -> string list
+
+val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
+(** The deletion overlay's key row: [j/k] only with two or more records, the
+    record scroll only when [scrollable], and [t] only when the selected
+    record can be retried. *)
 
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 

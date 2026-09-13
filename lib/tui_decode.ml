@@ -889,11 +889,24 @@ let preview_line text =
   sanitize_terminal_text (Buffer.contents output)
 ;;
 
-let short_timestamp_for_terminal text =
+(* The date and time beside a record, in the zone the operator's terminal is
+   in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
+   kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
+   under a header clock in local time read as the local hour it was not. A
+   timestamp the codec cannot read keeps the slice, for the same reason
+   [clock_timestamp_for_terminal] does. *)
+let short_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
-    (if String.length text > 19 then String.sub text 0 19
-     else if String.length text = 0 then "(never)"
-     else text)
+    (match Time_codec.parse_rfc3339_opt text with
+     | Some unix_seconds ->
+         let tm = localtime unix_seconds in
+         Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+           (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+           tm.Unix.tm_sec
+     | None ->
+         if String.length text > 19 then String.sub text 0 19
+         else if String.length text = 0 then "(never)"
+         else text)
 ;;
 
 (* The clock beside a row, in the zone the operator's terminal is in. The
@@ -1396,6 +1409,15 @@ let json_error_sentence body =
   | exception Yojson.Json_error _ -> None
 ;;
 
+(* An error body is whatever the far end wrote: an HTML page, a proxy notice,
+   a stack trace. It reaches the event log and every row that draws the
+   failure, so only the head travels. *)
+let raw_error_body_head_bytes = 240
+
+let http_transport_error ~verb ~url ~detail =
+  Printf.sprintf "(%s %s failed: %s)" (sanitize_terminal_text url)
+    (sanitize_terminal_text verb) (sanitize_terminal_text detail)
+
 let http_status_error ~status_code ~body =
   let body = String.trim body in
   let detail =
@@ -1403,10 +1425,15 @@ let http_status_error ~status_code ~body =
     | Some sentence -> sentence
     | None ->
       if body = "" then "empty response body"
-      else if String.length body > 240 then String.sub body 0 240 ^ "..."
+      else if String.length body > raw_error_body_head_bytes then
+        (* The fallback can also be valid JSON without a usable error field.
+           Report its size without claiming a JSON parse failure. *)
+        Printf.sprintf "%s... (%d bytes, response body)"
+          (String.sub body 0 raw_error_body_head_bytes)
+          (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code detail
+  Printf.sprintf "HTTP %d: %s" status_code (sanitize_terminal_text detail)
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =
@@ -9350,6 +9377,7 @@ let decode_task_history json =
    (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
    unknown kind fails the decode rather than rendering as an empty row. *)
 type verification_evidence_item =
+  | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
   | Ev_artifact of {
       ev_reference : string;
@@ -9383,6 +9411,12 @@ let decode_verification_evidence json =
           match member field item with `String s -> Some s | _ -> None
         in
         match member "kind" item with
+        | `String "collaboration" ->
+            (match Workspace_verification_store.submitted_evidence_item_of_yojson item with
+             | Ok (Workspace_verification_store.Evidence_collaboration {reference; content; sha256}) ->
+                 Ok (Ev_collaboration {ev_reference=reference; ev_content=content; ev_sha256=sha256})
+             | Ok _ -> Error "evidence collaboration has a different kind"
+             | Error detail -> Error detail)
         | `String "note" ->
             (match str "content" with
              | Some content -> Ok (Ev_note content)

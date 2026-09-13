@@ -340,13 +340,41 @@ let test_overview_pulse_line () =
   check bool "narrow pulse line bounded" true (Layout.display_width pulse_narrow <= 30)
 ;;
 
+(* The keeper files are read only once the server vouches for this workspace,
+   and the roster is empty before that as well as after a read that found
+   none. The pulse counts it only once it was read (#35747). *)
+let test_pulse_roster_waits_for_the_local_read () =
+  let state = make_state () in
+  state.keepers <- [];
+  let pulse () = Render_metrics.overview_pulse_line ~cols:160 state in
+  check bool "an unread roster is unavailable" true
+    (contains (pulse ()) "roster unavailable");
+  check bool "and is not counted as none" false (contains (pulse ()) "0 configured");
+  state.local_workspace <- Types.Local_workspace_read;
+  state.keepers <- [ make_keeper "alpha"; make_keeper ~paused:true "beta" ];
+  check bool "a read roster is counted" true
+    (contains (pulse ()) "2 configured · 1 unpaused")
+;;
+
 let test_section_pills_line () =
-  let line_fleet = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_fleet in
-  check bool "fleet line bounded" true (Layout.display_width line_fleet <= 100);
-  let line_res = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_resources in
-  check bool "res line bounded" true (Layout.display_width line_res <= 100);
-  let line_tools = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_tools in
-  check bool "tools line bounded" true (Layout.display_width line_tools <= 100)
+  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
+  List.iter
+    (fun active ->
+      let line = Render_metrics.section_pills_line ~cols:100 ~active in
+      let plain = Masc_tui_theme.strip_sgr line in
+      let label = Types.metrics_section_label active in
+      check bool (label ^ ": line bounded") true (Layout.display_width line <= 100);
+      check bool (label ^ ": the section being read wears the mark") true
+        (contains plain ("\xe2\x96\xb8" ^ label));
+      List.iter
+        (fun other ->
+          check bool (label ^ ": every section is named") true
+            (contains plain (Types.metrics_section_label other)))
+        sections;
+      (* 1-3 and s are the footer's; the strip does not spell them again. *)
+      check bool (label ^ ": no key spelling") false
+        (contains plain "[1-3" || contains plain "Sections"))
+    sections
 ;;
 
 let test_section_fleet_lines () =
@@ -435,8 +463,8 @@ let test_section_tools_populated () =
 
 let test_approval_source_observations () =
   let state = make_state () in
-  (* A different successful refresh cannot establish approval source data. *)
-  state.last_refresh <- 100.;
+  (* A successful read of the workspace cannot establish approval source data. *)
+  state.local_workspace <- Types.Local_workspace_read;
   let kpis = Render_metrics.calculate_kpis state in
   check (option int) "unread Gate is not zero" None kpis.gate_pending_count;
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
@@ -575,6 +603,8 @@ let () =
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line
+        ; test_case "pulse roster waits for the local read" `Quick
+            test_pulse_roster_waits_for_the_local_read
         ; test_case "one name per observation state" `Quick
             test_one_name_per_observation_state
         ] )

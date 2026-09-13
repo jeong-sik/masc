@@ -71,6 +71,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+      ~(workspace_memory : Workspace_memory_publication.observation)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
@@ -78,13 +79,15 @@ let direct_turn_dynamic_context
       ~(turn_instructions_text : string)
   : string
   =
-  [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
-  ; approval_authority_text
+  ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
+   @ Option.to_list
+       (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+   @ [ approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
   ; turn_instructions_text
-  ]
+  ])
   |> List.filter (fun text -> String.trim text <> "")
   |> String.concat "\n\n"
 
@@ -193,18 +196,26 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
         (Printf.sprintf "[Co-view context]\n%s"
            (Yojson.Safe.pretty_to_string json))
 
-module For_testing = struct
-  let direct_owner_conversation_context = direct_owner_conversation_context
-  let direct_turn_dynamic_context = direct_turn_dynamic_context
-  let surface_context_to_instructions = surface_context_to_instructions
-end
-
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
   if runtime_id = "" then
     Error (Printf.sprintf "invalid runtime_id for keeper %s: empty" meta.name)
   else
     Ok runtime_id
+
+let resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume =
+  match Option.bind gate_resume Keeper_direct_gate_continuation.official_client with
+  | Some checkpoint -> Ok checkpoint.runtime_id
+  | None -> match resume_lane with
+    | None -> resolve_turn_runtime_id meta
+    | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id
+
+module For_testing = struct
+  let resolve_direct_turn_runtime_id = resolve_direct_turn_runtime_id
+  let direct_owner_conversation_context = direct_owner_conversation_context
+  let direct_turn_dynamic_context = direct_turn_dynamic_context
+  let surface_context_to_instructions = surface_context_to_instructions
+end
 
 type invocation_surface =
   | Direct_message
@@ -478,6 +489,7 @@ let run_keeper_invocation_turn_admitted_inner
        | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
        | Ok direct_resume ->
       let deferred_lane = ref None in
+      let produced_checkpoint = ref None in
       let gate_ids = ref [] in
       let runtime_resume = match direct_resume with
         | Some (Keeper_agent_run.Runtime_continuation admission) -> Some admission
@@ -528,9 +540,7 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = match resume_lane with
-        | None -> resolve_turn_runtime_id meta
-        | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id in
+      let selected_runtime = resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
       match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
@@ -602,6 +612,12 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
+            let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Workspace_memory_publication.observe ~base_path:ctx.config.base_path) in
+            (match workspace_memory with
+             | Workspace_memory_publication.Unavailable detail ->
+               Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
+             | Missing | Available _ -> ());
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -660,6 +676,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
+                  ~workspace_memory
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
                        world_observation.approval_authority)
@@ -814,9 +831,17 @@ let run_keeper_invocation_turn_admitted_inner
                                       ?on_gate_evidence_admitted:(Option.map (fun admission checkpoint ->
                                         Keeper_direct_gate_continuation.discharge ~config:ctx.config
                                           ~keeper_name:meta.name ~operation_id ~user_message:message
-                                          ~checkpoint admission) gate_resume)
+                                          ~checkpoint admission)
+                                        (Option.bind gate_resume (fun admission ->
+                                          Option.map (fun _ -> admission) (Keeper_direct_gate_continuation.checkpoint admission))))
                                       ?deferred_runtime_lane:resume_lane
                                       ~on_runtime_retry_deferred:(fun lane -> deferred_lane := Some lane)
+                                      ~on_produced_checkpoint:(fun ~runtime_id ~attempt checkpoint ->
+                                        let captured =
+                                          Keeper_checkpoint_store.exact_snapshot_of_value
+                                            ~expected_session_id:meta.runtime.trace_id checkpoint
+                                          |> Result.map_error (fun _ -> "producer checkpoint capture failed") in
+                                        produced_checkpoint := Some (runtime_id,attempt,captured))
 			                                ~config:ctx.config
 			                                ~meta
 			                                ~publication_recovery
@@ -847,15 +872,27 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
-                let () = match run_result, gate_resume with
-                  | Ok _, Some admission ->
-                    (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
-                     | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
-                     | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
-                       Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
-                     | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
-                  | Error _, _ | Ok _, None -> () in
+                let run_result = match gate_resume with
+                  | None -> run_result
+                  | Some admission ->
+                    Keeper_direct_gate_continuation.finish_run ~config:ctx.config
+                      ~keeper_name:meta.name ~operation_id admission run_result in
+                let source = match run_result with
+                  | Ok ({Keeper_agent_run.checkpoint=Some checkpoint; _}, _) ->
+                    Ok (Keeper_direct_gate_continuation.Returned_agent_core checkpoint)
+                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=Some settled_session; _}, _) ->
+                    (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
+                     | Ok frame -> Ok (Keeper_direct_gate_continuation.Returned_official_client {settled_session;frame})
+                     | Error error -> Error (Keeper_repetition_snapshot.error_to_string error))
+                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=None; _}, _) ->
+                    Error "official-client producer omitted its settled continuation receipt"
+                  | Error _ ->
+                    (match !produced_checkpoint with
+                     | Some (_runtime_id,_attempt,Ok snapshot) -> Ok (Keeper_direct_gate_continuation.Captured_agent_core snapshot)
+                     | Some (_runtime_id,_attempt,Error detail) -> Error detail
+                     | None -> Error "failed Gate producer has no attempt-owned checkpoint receipt") in
                 let gate_wait = Keeper_direct_gate_continuation.suspend
+                      ~source
                       ?runtime_lane:!deferred_lane
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in

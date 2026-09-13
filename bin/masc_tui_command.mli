@@ -33,11 +33,11 @@ type t =
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
   | Open_patch_modal
-      (** [/patch] or [/review] — open interactive 3D drop-shadow patch review modal. *)
+      (** [/patch] or [/review] — open the patch review overlay. *)
   | Toggle_burn_hud
-      (** [/burn] or [/cost] — toggle token burn velocity and financial telemetry HUD. *)
+      (** [/burn] or [/cost] — show or hide the fleet cost and each Keeper's token total in the tab row. *)
   | Open_link_preview of string option
-      (** [/preview [url]] — open 3D drop-shadow OpenGraph preview and rich embed modal for a web link. *)
+      (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list
       (** [/links] — browse and inspect all web links mentioned in the conversation. *)
   | Set_embeds of [ `On | `Compact | `Off ]
@@ -155,6 +155,9 @@ val help_usage : command_help -> string
 (** {!usage} plus the command's other spellings in parentheses. The column both
     the [/help] list and the cheat sheet draw. *)
 
+val help_summary_column : int
+(** Where a help row's summary starts, counted from the usage's first cell. *)
+
 val help_summary_padding : string -> string
 (** The spaces between a {!help_usage} column and its summary, so the two
     readers of that row do not each carry the column width. *)
@@ -216,8 +219,10 @@ val parse : string -> t
 (** Read the composer's text. Leading blanks are not stripped before the
     slash is looked for: an operator who types a space first meant text. *)
 
-val about_banner : ?theme_name:string -> ?active_keepers:int -> unit -> string
-(** Horned Reaper ASCII splash emblem and live telemetry card. *)
+val about_banner : ?theme_name:string -> ?active_keepers:(int, string) result -> unit -> string
+(** Horned Reaper ASCII splash emblem and live telemetry card. Without
+    [active_keepers] the card says the roster is not loaded rather than
+    counting none. An [Error] reports unavailable; [Ok 0] is known empty. *)
 
 val task_message : task_id:string -> title:string -> body:string -> string
 (** The message handed to the keeper once its task exists: the task id in

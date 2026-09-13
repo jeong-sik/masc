@@ -303,7 +303,7 @@ let test_a_table_column_gives_up_cells_to_fit () =
   check_rows "the wide column is the one that loses"
     [ "<th>id | what           </th>"
     ; rule_row [ 2; 15 ]
-    ; "a1 | a very long ce~"
+    ; "a1 | a very long ce…"
     ]
     (render ~width:20 "| id | what |\n| -- | ---- |\n| a1 | a very long cell |")
 ;;

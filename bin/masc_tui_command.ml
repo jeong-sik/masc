@@ -94,12 +94,12 @@ let catalog =
   ; { word = "patch"
     ; aliases = [ "review" ]
     ; args = ""
-    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    ; summary = "open the patch review for pending code changes"
     }
   ; { word = "burn"
     ; aliases = [ "cost" ]
     ; args = ""
-    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    ; summary = "show or hide the fleet cost and each Keeper's token total in the tab row"
     }
   ; { word = "changes"
     ; aliases = []
@@ -195,7 +195,7 @@ let catalog =
   ; { word = "preview"
     ; aliases = []
     ; args = "[url]"
-    ; summary = "open 3D drop-shadow OpenGraph preview and rich embed modal for a web link"
+    ; summary = "open the OpenGraph preview for a web link"
     }
   ; { word = "links"
     ; aliases = []
@@ -702,7 +702,16 @@ let is_slash_navigable ?(keeper_names = []) text =
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
 
-let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
+(* Every value in the box is one the caller read. A row that said "Gates: All
+   Secure" sat beside the keeper count in the same frame and style, and nothing
+   here is given a gate to read -- it described a state no one had checked. *)
+let about_banner ?(theme_name = "default") ?active_keepers () =
+  let keepers =
+    match active_keepers with
+    | Some (Ok count) -> string_of_int count
+    | Some (Error _) -> "unavailable"
+    | None -> "not loaded"
+  in
   String.concat "\n"
     [ "   ___  ___  ___  _____ _____ "
     ; "  |   \\/   |/ _ \\/  ___/  __ \\"
@@ -712,7 +721,6 @@ let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
     ; "  \\_|   |_|_| |_\\____/ \\____/"
     ; " ╭────────────────────────────────────────────────────────╮"
     ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
-    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
-    ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
+    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13s │" theme_name keepers
     ; " ╰────────────────────────────────────────────────────────╯"
     ]

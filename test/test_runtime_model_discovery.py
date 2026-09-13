@@ -95,6 +95,30 @@ class NativeDiscovery(unittest.TestCase):
                 self.assertIn("credential is unavailable", result.stderr)
                 self.assertEqual(self.calls, [])
 
+    def test_anonymous_explicit_credential_keeps_environment_alias_precedence(self):
+        assert BINARY is not None
+        spec = Path(self.home.name, 'aliased-credential.json')
+        spec.write_text(json.dumps(dict(choice='openai_compatible', endpoint=self.endpoint,
+                                        api_key_env='OLLAMA_CLOUD_API_KEY')))
+        for primary in ('primary-fixture-key', ''):
+            with self.subTest(primary=bool(primary)):
+                self.calls.clear()
+                env = os.environ.copy()
+                env.update(OLLAMA_CLOUD_API_KEY=primary, OLLAMA_API_KEY='fallback-fixture-key')
+                result = subprocess.run(
+                    [BINARY, 'runtime-discover-models', '--spec', str(spec)],
+                    capture_output=True, text=True, env=env, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.calls), 1)
+                self.assertEqual(self.calls[0][1]['authorization'],
+                                 'Bearer ' + (primary or 'fallback-fixture-key'))
+
+    def test_unknown_named_provider_is_not_anonymous(self):
+        result = self.invoke(provider_id='unregistered-discovery-fixture')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("credential is unavailable", result.stderr)
+        self.assertEqual(self.calls, [])
+
     def test_anonymous_local_server_remains_supported(self):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -128,6 +152,32 @@ class NativeDiscovery(unittest.TestCase):
                                         credential_file=str(key))))
         return subprocess.run([BINARY, 'runtime-serving-context', '--spec', str(spec), '--model', model]
                               + (['--load'] if load else []), capture_output=True, text=True, timeout=30)
+
+    def test_serving_context_distinguishes_anonymous_from_unknown_named_provider(self):
+        assert BINARY is not None
+        self.respond = lambda path: (200, {}, dict(data=[dict(id='selected-model')])
+                                     if path == '/models' else
+                                     dict(default_generation_settings=dict(n_ctx=32768)))
+        for provider in (None, 'unregistered-serving-fixture'):
+            with self.subTest(provider=provider):
+                self.calls.clear()
+                fields = dict(choice='llama_cpp', endpoint=self.endpoint)
+                if provider is not None:
+                    fields['provider_id'] = provider
+                spec = Path(self.home.name, 'anonymous-serving.json')
+                spec.write_text(json.dumps(fields))
+                result = subprocess.run(
+                    [BINARY, 'runtime-serving-context', '--spec', str(spec),
+                     '--model', 'selected-model'], capture_output=True, text=True, timeout=30)
+                if provider is None:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)['context'], 32768)
+                    self.assertEqual([path for path, _ in self.calls], ['/models', '/props'])
+                    self.assertTrue(all('authorization' not in headers for _, headers in self.calls))
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("credential is unavailable", result.stderr)
+                    self.assertEqual(self.calls, [])
 
     def test_ollama_selected_model_uses_running_window_and_private_credential(self):
         self.respond_post = lambda path, body: (200, dict(

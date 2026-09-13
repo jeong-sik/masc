@@ -55,6 +55,9 @@ val focus_key : string
 val release_key : string
 (** The key that returns focus to the surface. *)
 
+val voice_keys_hint : string
+(** {!listen_key} and {!continuous_key} as an empty draft names them. *)
+
 val continuous_key : string
 (** The key that turns continuous capture on and off from a focused row.
     Ctrl-A, chosen for the same reason as {!listen_key}: a focused row spends

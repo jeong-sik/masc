@@ -1,0 +1,17 @@
+1789264877092	geckodriver	INFO	Listening on 127.0.0.1:58645
+1789264877103	mozrunner::runner	INFO	Running command: MOZ_CRASHREPORTER="1" MOZ_CRASHREPORTER_NO_REPORT="1" MOZ_CRASHREPORTER_SHUTDOWN="1" "/Applications/Firefox. ... e" "-headless" "-foreground" "-no-remote" "-profile" "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/rust_mozprofileAq4PZ5"
+*** You are running in headless mode.
+1789264877625	Marionette	INFO	Marionette enabled
+1789264877813	Marionette	INFO	Listening on port 58660
+Read port: 58660
+[GFX1-]: RenderCompositorSWGL failed mapping default framebuffer, no dt
+console.error: [Exception... "Component returned failure code: 0x80040111 (NS_ERROR_NOT_AVAILABLE) [nsIContentSniffer.getMIMETypeFromContent]"  nsresult: "0x80040111 (NS_ERROR_NOT_AVAILABLE)"  location: "JS frame :: resource:///modules/FaviconLoader.sys.mjs :: onStopRequest :: line 353"  data: no]
+console.error: "Experiment desktop-release-rollout-show-relay-to-all-browsers-next-sign-up-modal-cta has unknown featureId: email-autocomplete-relay"
+console.error: "Experiment visual-card-updates has unknown featureId: newtabRefinedCardsLayout"
+console.error: "Experiment enable-nimbus-unenrollment-synchronization has unknown featureId: nimbusStore"
+console.error: "Experiment private-window-visual-refresh-design-change-only has unknown featureId: feltPrivacy"
+1789264879531	Marionette	INFO	Stopped listening on port 58660
+console.error: (new Error("Unable to arm timer, the object has been finalized.", "resource://gre/modules/DeferredTask.sys.mjs", 279))
+console.error: (new Error("Unable to arm timer, the object has been finalized.", "resource://gre/modules/DeferredTask.sys.mjs", 279))
+JavaScript error: resource://gre/modules/UrlClassifierListManager.sys.mjs, line 465: NS_ERROR_NOT_INITIALIZED: Component returned failure code: 0xc1f30001 (NS_ERROR_NOT_INITIALIZED) [nsIUrlClassifierDBService.getTables]
+1789264879983	webdriver::server	INFO	Shutting down

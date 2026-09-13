@@ -30,13 +30,8 @@ let transcriber_of_kind = function
 
 (* What an answered TTS probe says.
 
-   The voice, not only the bytes. say does not fail on a voice it does not
-   have -- it speaks in the system voice and exits 0 -- so a byte count alone
-   cannot tell a keeper's own voice from the fallback. Measured 2026-09-13 on
-   one workstation: a keeper mapped to a voice that exists answered 124,690
-   bytes, one mapped to a name that does not answered 79,758, and so did the
-   section default. Only the name separates them, and a reader can check that
-   name against the catalogue.
+   The voice, not only the bytes: the answer is read by someone confirming
+   which voice a keeper got, and two voices can come back the same size.
 
    Quoted by hand rather than with %S: that escapes UTF-8 into byte numbers,
    and a Korean voice name is then unreadable. A blank voice is the system
@@ -123,6 +118,55 @@ let list_voices endpoint =
   match Voice_bridge_transport.list_voices_via_command endpoint with
   | Error message -> Error message
   | Ok output -> Ok (say_catalogue_of_output output)
+;;
+
+(* Whether say has a voice by this name. say does not refuse one it does not
+   have: it exits 0 and speaks in another voice. Measured 2026-09-13 on macOS 26
+   whose first language is Korean, writing WAVE files only: [-v NoSuchVoice]
+   wrote the same bytes as [-v Yuna] for a Korean sentence and for an English
+   one, and neither matched the voice say uses with no [-v]. So the audio cannot
+   tell a mapping that took from one that did not; the catalogue can.
+
+   say matched [yuna] and [YUNA] to Yuna, so the comparison ignores ASCII case.
+   A bare name say prints only with a language is not one of its labels: [-v
+   Eddy] read a Korean sentence in an English voice, 4.8KB against 147KB for
+   [-v "Eddy (한국어(한국))"]. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }
+
+let say_voice_in_catalogue voices ~voice =
+  let wanted = String.lowercase_ascii (String.trim voice) in
+  if
+    List.exists
+      (fun (listed : catalogue_voice) ->
+        String.equal (String.lowercase_ascii listed.voice_id) wanted)
+      voices
+  then Say_has_it
+  else Say_lacks_it { installed = List.length voices }
+;;
+
+(* A blank voice asks for no name, and say then uses its own; there is nothing
+   to look up. *)
+let check_say_voice endpoint ~voice =
+  let voice = String.trim voice in
+  if String.equal voice ""
+  then Ok ()
+  else (
+    match list_voices endpoint with
+    | Error message ->
+      Error
+        (Printf.sprintf "the voices say has could not be listed to check \"%s\": %s"
+           voice message)
+    | Ok voices ->
+      (match say_voice_in_catalogue voices ~voice with
+       | Say_has_it -> Ok ()
+       | Say_lacks_it { installed } ->
+         Error
+           (Printf.sprintf
+              "say has no voice named \"%s\", and would speak in another one without \
+               failing; masc voice-local-setup --list-voices prints the %d it has"
+              voice installed)))
 ;;
 
 (* The container each kind writes. say encodes WAVE and cannot encode MP3
@@ -416,8 +460,15 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   let result =
                     match endpoint.Voice_config.kind with
                     | Voice_config.Macos_say ->
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file
+                      (* Checked here and not before every speak: listing
+                         took 0.56-0.59s per call on the mac that measured
+                         it, which a keeper's every sentence would wait for.
+                         This probe is where a mapping is confirmed. *)
+                      (match check_say_voice endpoint ~voice with
+                       | Error reason -> Error reason
+                       | Ok () ->
+                         Voice_bridge_transport.speak_via_command_to_file
+                           endpoint ~message ~voice ~output_file)
                     | Voice_config.Openai_compat
                     | Voice_config.Elevenlabs_direct
                     | Voice_config.Voice_mcp
@@ -434,15 +485,9 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   remove_quietly output_file;
                   match result with
                   (* The voice that was asked for, not only the bytes that came
-                     back. say does not fail on a voice it does not have -- it
-                     speaks in the system voice and exits 0 -- so the byte count
-                     alone cannot tell a keeper's own voice from the fallback.
-                     Measured: a keeper mapped to a voice that exists answered
-                     114,810 bytes and one mapped to a name that does not
-                     answered 73,614, the same as the section default. Naming
-                     the voice is what lets a reader check it against the
-                     catalogue. A blank one is the system voice, said as such
-                     rather than as "". *)
+                     back. A say voice that is not installed was refused above,
+                     so an answer here is in the voice it names. A blank one is
+                     the system voice, said as such rather than as "". *)
                   | Ok size -> Answered (spoke_detail ~bytes:size ~voice)
                   | Error reason -> Refused reason)
               in
@@ -589,7 +634,22 @@ let cleanup_old_audio_files () =
 
 type agent_speak_completion =
   | Spoken
+  | Synthesized
   | Dedup_skipped
+
+(* The [status] a speak result carries, and the reading of it back. One pair so
+   the value written for a local endpoint and the value decoded from a Voice
+   MCP server's answer are the same three words. *)
+let agent_speak_completion_to_string = function
+  | Spoken -> "spoken"
+  | Synthesized -> "synthesized"
+  | Dedup_skipped -> "dedup_skipped"
+
+let agent_speak_completion_of_string = function
+  | "spoken" -> Some Spoken
+  | "synthesized" -> Some Synthesized
+  | "dedup_skipped" -> Some Dedup_skipped
+  | _ -> None
 
 type agent_speak_result =
   { completion : agent_speak_completion
@@ -798,7 +858,7 @@ let attempt_tts_endpoint
            | Sys_error _ -> ());
           Ok
             (`Assoc
-                [ "status", `String "dedup_skipped"
+                [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
                 ; "agent_id", `String agent_id
                 ; "reason", `String "identical message was played recently (mutex)"
                 ])
@@ -808,10 +868,13 @@ let attempt_tts_endpoint
             | `Failed _ -> "failed"
             | `Skipped _ -> "skipped"
           in
+          (* The clip exists and nothing on this host played it. A keeper reads
+             [status] to tell the operator what happened, so this is not
+             [Spoken]. *)
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Synthesized)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -825,7 +888,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -841,7 +904,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -1030,7 +1093,7 @@ let agent_speak_json
            playback_dedup_window_sec);
       Ok
         (`Assoc
-            [ "status", `String "dedup_skipped"
+            [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
             ; "agent_id", `String agent_id
             ; "reason", `String "identical message was played recently"
             ]))
@@ -1125,10 +1188,10 @@ let agent_speak_json
 
 let decode_agent_speak_result payload =
   match Json_util.get_string payload "status" with
-  | Some "spoken" -> Ok { completion = Spoken; payload }
-  | Some "dedup_skipped" -> Ok { completion = Dedup_skipped; payload }
   | Some status ->
-    Error (Printf.sprintf "voice speak returned unsupported status=%S" status)
+    (match agent_speak_completion_of_string status with
+     | Some completion -> Ok { completion; payload }
+     | None -> Error (Printf.sprintf "voice speak returned unsupported status=%S" status))
   | None -> Error "voice speak result is missing required status"
 ;;
 
@@ -1609,12 +1672,14 @@ let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
       "%s is not installed; it comes with sox. `masc prerequisite-actions \
        whisper` names the install."
       program
+  (* The same sentence every other voice command gives for a refusal that is
+     not a missing program -- one wording for "could not start", kept where the
+     transport keeps it. *)
   | (Process_eio.Empty_argv
     | Process_eio.Spawn_failed _
     | Process_eio.Child_setup_failed _
     | Process_eio.Cwd_unavailable _) as refusal ->
-    Printf.sprintf "the recorder could not start: %s"
-      (Process_eio.spawn_refusal_to_string refusal)
+    Voice_bridge_transport.command_refusal_reason ~command:"the recorder" refusal
 ;;
 
 let record_and_transcribe

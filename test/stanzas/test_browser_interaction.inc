@@ -34,3 +34,13 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_browser_connection_extension)))
+
+(rule
+ (alias runtest-test_browser_navigation_readiness)
+ (deps test_browser_navigation_readiness.cjs
+       ../connectors/browser/extension/background.js)
+ (action (run node --test %{dep:test_browser_navigation_readiness.cjs})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_navigation_readiness)))

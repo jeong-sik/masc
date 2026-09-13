@@ -1012,9 +1012,11 @@ let run_named
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
-  if output_contract = Tool_verdict && Option.is_some (Runtime.get_lane_by_id runtime_id) then
+  if output_contract = Tool_verdict
+     && (Option.is_none (Runtime.get_runtime_by_id runtime_id)
+         || Option.is_some deferred_runtime_lane) then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-      { field = "verifier.runtime"; detail = "A verifier slot must name a direct runtime, not a lane" }))
+      { field = "verifier.runtime"; detail = "A verifier slot requires a direct runtime binding without a deferred lane" }))
   else
   if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
@@ -1095,10 +1097,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
+    match output_contract, deferred_runtime_lane with
+    | Tool_verdict, _ -> Ok (None, [runtime_id])
+    | Provider_default, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | None ->
+    | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->

@@ -79,7 +79,7 @@ let records path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 let member = Yojson.Safe.Util.member
 
-let test_review mode =
+let test_review ?(shadow_lane=false) mode =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
@@ -103,9 +103,30 @@ let test_review mode =
     ; root_layout = ["proof.txt"] } in
   let command, capture = fixture_script root ~mode in
   let config_path = Filename.concat root "runtime.toml" in
-  let runtime_text = runtime_config command in
+  let forbidden_capture = Filename.concat root "forbidden-client-called" in
+  let forbidden_command = Filename.concat root "forbidden-client" in
+  write forbidden_command (Printf.sprintf "#!/bin/sh\nprintf called > %s\nexit 99\n"
+    (Filename.quote forbidden_capture));
+  Unix.chmod forbidden_command 0o700;
+  let runtime_text = runtime_config command ^
+    (if shadow_lane then Printf.sprintf {|
+[providers.forbidden]
+protocol = "claude-code"
+command = %S
+is-non-interactive = true
+[forbidden.verifier]
+[runtime.lanes."official.verifier"]
+candidates = ["forbidden.verifier", "official.verifier"]
+|} forbidden_command else "") in
   write config_path runtime_text;
   (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+  if shadow_lane then (
+    check bool "direct verifier binding admitted despite Keeper shadow lane" true
+      (Result.is_ok (Runtime.verifier_cli_slot_admission ~runtime_id:"official.verifier"));
+    match Runtime.resolve_assignment "official.verifier" with
+    | `Lane lane -> check (list string) "ordinary Keeper routing keeps its lane order"
+        ["forbidden.verifier"; "official.verifier"] (Runtime_lane.ordered_candidates lane)
+    | _ -> fail "normal Keeper shadow lane disappeared");
   let declarations = match Runtime_toml.parse_string runtime_text with
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
@@ -177,6 +198,8 @@ let test_review mode =
     (String_util.contains_substring serialized "masc_skill");
   check int "each tool result observed" (if mode = "missing" then 2 else if mode = "duplicate" then 4 else 3)
     (List.length !calls);
+  check bool "verifier never invokes the shadow lane's first candidate" false
+    (Sys.file_exists forbidden_capture);
   if mode = "valid" then (
     let second = review () in
     check bool "second independent review succeeds" true
@@ -245,5 +268,7 @@ let () =
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"];
+     "shadow lane", [test_case "verifier uses direct binding while Keeper routing retains its lane" `Quick
+       (fun () -> test_review ~shadow_lane:true "valid")];
      "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
        test_unsafe_slots_refused_before_spawn]]

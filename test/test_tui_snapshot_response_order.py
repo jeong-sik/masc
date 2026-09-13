@@ -56,12 +56,12 @@ def label(source: str, count: int) -> bytes:
     return f"{name}: {count}".encode()
 
 
-def open_source(source, process, master, output):
+def open_source(source, process, master, output, count=0):
     if source == "schedules":
-        h.palette_go(process, master, output, b"go schedules", label(source, 0))
+        h.palette_go(process, master, output, b"go schedules", label(source, count))
     else:
         h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
-        h.send_and_wait(process, master, output, b"3", label(source, 0))
+        h.send_and_wait(process, master, output, b"3", label(source, count))
 
 
 def capture(binary_sha, source, scenario, process, master, output):
@@ -127,6 +127,9 @@ def slow_poll(binary, binary_sha, source):
     fixtures, current = fixtures_and_reading(source, 2)
     path = PATHS[source]
     slow = h.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
+    _, initial = fixtures_and_reading(source, 0)
+    next_read = h.GatedHttpResponse(current, hold_seconds=10.0)
+    initial_served = False
     watching_ticks = threading.Event()
     two_ticks = threading.Event()
     resumed = threading.Event()
@@ -156,31 +159,28 @@ def slow_poll(binary, binary_sha, source):
         return health
 
     def source_read():
+        nonlocal initial_served
+        if not initial_served:
+            initial_served = True
+            return initial
+        if slow.release.is_set():
+            trace("poll resumed; response held")
+            resumed.set()
+            return next_read()
         trace("source entered")
         result = slow()
         trace(f"source returned HTTP {result[0]}")
-        if slow.calls > 1:
-            resumed.set()
         return result
 
     fixtures["/health"] = health_read
+    fixtures[path] = source_read
 
     def interact(process, master, _slave, output, _base):
         try:
-            open_source(source, process, master, output)
-            # Opening Schedules can draw its cached zero rows while the
-            # explicit arrival read is still pending. Settle a distinct
-            # explicit reading before replacing the endpoint: otherwise its
-            # obsolete/owning arrival requests can be counted as timer polls.
-            _, primed = fixtures_and_reading(source, 1)
-            fixtures[path] = primed
-            # A timer can publish the primed value before the queued r is
-            # consumed. The following help key is an ordered input witness:
-            # its frame proves r ran; opening/closing help launches no reads.
-            h.send_and_wait(process, master, output, b"r?", b"MASC Cheat Sheet")
-            h.send_and_wait(process, master, output, b"\x1b", label(source, 1))
-            fixtures[path] = source_read
-            # No key starts this read: it comes from the actual TUI timer.
+            # Stay on Overview: navigation and r explicitly supersede reads,
+            # whose delayed HTTP arrivals cannot be distinguished from polls
+            # at the fixture. The startup response is 0; only the real timer
+            # can start the following slow read, without any superseded reads.
             assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)
             trace("watching timer ticks")
             watching_ticks.set()
@@ -188,14 +188,19 @@ def slow_poll(binary, binary_sha, source):
             trace("checking pending read")
             assert not slow.completed.is_set(), f"{source} fixture expired before the pending-read assertion"
             assert slow.calls == 1, f"automatic polls replaced the pending {source} read: {slow.calls}"
-            start = len(output)
             slow.release.set()
-            h.wait_for_output(process, master, output, label(source, 2), start=start, timeout=5.0)
             assert h.wait_for_fixture_event(process, master, output, resumed, timeout=5.0)
+            # A resumed poll means the slow response settled. Hold all later
+            # replies (including surface-entry refreshes), so only that slow
+            # response can supply the 2 rows observed on the destination.
+            open_source(source, process, master, output, count=2)
             capture(binary_sha, source, "slow poll publishes and polling resumes",
                     process, master, output)
+            next_read.release.set()
+            assert h.wait_for_fixture_event(process, master, output, next_read.completed, timeout=5.0)
             os.write(master, b"q")
         finally:
+            next_read.release.set()
             trace("scenario cleanup")
             print("SNAPSHOT_POLL_TIMELINE " + json.dumps({
                 "source": source, "binary_sha256": binary_sha,

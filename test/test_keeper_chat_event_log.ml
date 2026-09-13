@@ -455,7 +455,7 @@ let test_on_publish_hook_receives_monotonic_seq () =
     (List.rev_map fst !seen);
   (* publish order == subscribe order, hook or no hook *)
   (match Masc.Keeper_chat_events.subscribe bus with
-   | E.Text_delta "a" -> ()
+   | Masc.Keeper_chat_events.Next (E.Text_delta "a") -> ()
    | _ -> Alcotest.fail "first subscribed event mismatch")
 
 let test_subscribe_published_returns_seq_and_publish_ts () =
@@ -466,8 +466,14 @@ let test_subscribe_published_returns_seq_and_publish_ts () =
     bus
     (E.Run_started { run_id = "run-seq"; thread_id = "keeper:seq" });
   Masc.Keeper_chat_events.publish bus E.Text_message_end;
-  let p0 = Masc.Keeper_chat_events.subscribe_published bus in
-  let p1 = Masc.Keeper_chat_events.subscribe_published bus in
+  let take () =
+    match Masc.Keeper_chat_events.subscribe_published bus with
+    | Masc.Keeper_chat_events.Next published -> published
+    | Masc.Keeper_chat_events.Closed ->
+      Alcotest.fail "bus closed before its events were read"
+  in
+  let p0 = take () in
+  let p1 = take () in
   Alcotest.(check int) "first seq" 0 p0.seq;
   Alcotest.(check int) "second seq" 1 p1.seq;
   (* The clock is read once per publish, so the subscriber sees exactly the
@@ -506,8 +512,36 @@ let test_on_publish_hook_failure_does_not_break_publish () =
   in
   Masc.Keeper_chat_events.publish bus (E.Text_delta "still delivered");
   match Masc.Keeper_chat_events.subscribe bus with
-  | E.Text_delta "still delivered" -> ()
+  | Masc.Keeper_chat_events.Next (E.Text_delta "still delivered") -> ()
   | _ -> Alcotest.fail "event lost after hook failure"
+
+let test_close_ends_the_read_after_every_earlier_event () =
+  let bus = Masc.Keeper_chat_events.create () in
+  Masc.Keeper_chat_events.publish bus (E.Text_delta "a");
+  Masc.Keeper_chat_events.close bus;
+  (* A second close is the same declaration, not a second sentinel. *)
+  Masc.Keeper_chat_events.close bus;
+  (match Masc.Keeper_chat_events.subscribe bus with
+   | Masc.Keeper_chat_events.Next (E.Text_delta "a") -> ()
+   | _ -> Alcotest.fail "the event published before close is read first");
+  (match Masc.Keeper_chat_events.subscribe bus with
+   | Masc.Keeper_chat_events.Closed -> ()
+   | Masc.Keeper_chat_events.Next _ -> Alcotest.fail "close ends the read");
+  (match Masc.Keeper_chat_events.subscribe_published bus with
+   | Masc.Keeper_chat_events.Closed -> ()
+   | Masc.Keeper_chat_events.Next _ ->
+     Alcotest.fail "a closed bus stays closed for every later read");
+  Alcotest.(check bool)
+    "nothing is left to take"
+    true
+    (Option.is_none (Masc.Keeper_chat_events.take_nonblocking bus))
+
+let test_publish_after_close_is_a_publisher_defect () =
+  let bus = Masc.Keeper_chat_events.create () in
+  Masc.Keeper_chat_events.close bus;
+  match Masc.Keeper_chat_events.publish bus (E.Text_delta "late") with
+  | () -> Alcotest.fail "publish after close must not succeed"
+  | exception Invalid_argument _ -> ()
 
 let test_full_bus_hook_runs_before_add () =
   let hook_calls = ref 0 in
@@ -797,6 +831,11 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
       E.Text_message_start {message_id="message"; role=E.Assistant};
       E.Text_delta "actual answer"; E.Text_message_end; E.Run_finished {run_id="run"}] in
     List.iter (E.publish resumed) final_events;
+    E.close resumed;
+    let rec read_closed_bus entries = match E.subscribe_published resumed with
+      | E.Closed -> List.rev entries
+      | E.Next {seq; ts; event} -> read_closed_bus ({L.seq; ts; event} :: entries) in
+    let delivered = read_closed_bus [] in
     let replay = read_ok (L.read_journal journal)
       |> List.filter (fun (entry : L.journaled_event) -> L.seq_is_after after entry.seq) in
     Alcotest.(check int) "short final answer survives old cursor" (List.length final_events) (List.length replay);
@@ -806,6 +845,8 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
         state, (match event with None -> frames | Some event -> Ag_ui.event_to_sse ~id:entry.seq event :: frames))
         (Projection.initial, []) entries in
       String.concat "" (List.rev frames) in
+    Alcotest.(check string) "closed resumed bus delivers every journal-stamped frame"
+      (frames (List.rev !live)) (frames delivered);
     Alcotest.(check string) "live and replay carry identical durable frame IDs"
       (frames (List.rev !live)) (frames replay))
 ;;
@@ -875,6 +916,14 @@ let () =
             "full bus hook runs before add"
             `Quick
             test_full_bus_hook_runs_before_add
+        ; Alcotest.test_case
+            "close ends the read after every earlier event"
+            `Quick
+            test_close_ends_the_read_after_every_earlier_event
+        ; Alcotest.test_case
+            "publish after close is a publisher defect"
+            `Quick
+            test_publish_after_close_is_a_publisher_defect
         ] )
     ; ( "integration"
       , [ Alcotest.test_case

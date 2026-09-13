@@ -34,6 +34,7 @@ type resources = {
   pids : int;
   max_reply_bytes : int;
 }
+type refresh_policy = Every_hint | Source_changes
 type package = {
   id : string;
   revision : string;
@@ -44,6 +45,7 @@ type package = {
   directory : string;
   action_tool : string option;
   outputs : output_ports;
+  refresh_policy : refresh_policy;
   binding_schema : Yojson.Safe.t option;
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;

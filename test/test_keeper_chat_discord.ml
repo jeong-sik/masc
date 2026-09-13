@@ -11,6 +11,8 @@ let run_adapter ?show_activity ?now events ~post_message ~edit_message
   @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
   List.iter (Masc.Keeper_chat_events.publish stream) events;
+  (* The turn closes its bus when it returns; the adapter reads to that close. *)
+  Masc.Keeper_chat_events.close stream;
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream ~post_message ~edit_message ~send_message
@@ -226,6 +228,50 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
       check bool "fresh attempt text is delivered" true (contains content "fresh");
       check bool "prior tool evidence is retained" true (contains content "Read")
   | posts -> failf "expected one final POST, got %d" (List.length posts)
+
+let test_adapter_reads_past_the_terminal_until_the_bus_closes () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-late"; thread_id = "thread-late" }
+      ; Masc.Keeper_chat_events.Text_delta "final answer"
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-late" }
+      ; Masc.Keeper_chat_events.Text_delta "published after the terminal"
+      ; Masc.Keeper_chat_events.Event_error
+          { message = "published after the terminal" }
+      ]
+      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~edit_message:(fun ~message_id:_ ~content ->
+        sends := content :: !sends;
+        Ok ())
+      ~send_message:(fun ~content ->
+        sends := content :: !sends;
+        Ok ())
+  in
+  check int "delivery settles exactly once" 1 (List.length outcomes);
+  check bool "events after the terminal are read, not delivered" false
+    (List.exists (fun content -> contains content "published after the terminal") !sends)
+
+let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-cut"; thread_id = "thread-cut" }
+      ; Masc.Keeper_chat_events.Text_delta "half an "
+      ]
+      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~edit_message:(fun ~message_id:_ ~content:_ -> Ok ())
+      ~send_message:(fun ~content:_ -> fail "no terminal event, no final send")
+  in
+  match outcomes with
+  | [ Error (Discord_rest_client.Other { reason; _ }) ] ->
+      check bool "the settlement names the missing terminal" true
+        (contains reason "without a terminal event")
+  | outcomes ->
+      failf "a closed bus must settle exactly once with an error, got %d callback(s)"
+        (List.length outcomes)
 
 let test_adapter_empty_terminal_is_local_error () =
   let sends = ref 0 in
@@ -556,6 +602,10 @@ let () =
             test_checkpoint_status_keeps_the_accumulated_stream_text
         ; test_case "unknown-outcome POST retries once then degrades" `Quick
             test_unknown_outcome_post_retries_once_then_degrades
+        ; test_case "reads past the terminal until the bus closes" `Quick
+            test_adapter_reads_past_the_terminal_until_the_bus_closes
+        ; test_case "a bus closed without a terminal settles once" `Quick
+            test_adapter_settles_when_the_bus_closes_without_a_terminal
         ] )
     ; ( "rich-blocks"
       , [ test_case "audio URL uses base URL" `Quick

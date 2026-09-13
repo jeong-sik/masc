@@ -7531,7 +7531,9 @@ def chat_visibility_modes_interaction(
         # word boundaries must tolerate SGR runs and padding inside them.
         settled_at = pane_start
         for needle in (
-            b"gate:auto_judge",
+            # The header names the stance in the [w] chooser's words now,
+            # not the wire token (#35974).
+            b"gate:Auto Judge",
             "\u25c6".encode(),
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
@@ -7569,7 +7571,7 @@ def chat_visibility_modes_interaction(
         title_row = screen_row_of(
             observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        identity_row = screen_row_of(observed_rows, b"gate:Auto Judge")
         if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
@@ -12418,7 +12420,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
             wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
-            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
             releases[0].set()
             wait_for_output(process, master_fd, output, b"Retained feed events: 2", start=0, timeout=10)
@@ -12544,7 +12546,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             if b"ACTING EVENT EVIDENCE" in output[aggregate_start:]:
                 raise AssertionError("Aggregated turn opened as an exact call")
-            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"f", b"scope actions")
             io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
             for scheduling in (b"Execution mode: concurrent", b"Planned index (zero-based): 3",
                                b"Batch index (zero-based) / size: 1 / 2"):

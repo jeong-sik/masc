@@ -207,7 +207,20 @@ type keeper_chat_event =
 
 type t
 (** Bounded per-turn event stream plus its optional journal hook (RFC-0412
-    stage 1). *)
+    stage 1). One publisher fiber writes it; one adapter fiber reads it.
+
+    The publisher ends the turn with {!close}. The reader keeps reading until
+    it takes {!Closed}; terminal events ([Run_finished], [Event_error]) tell
+    the reader what to deliver but do not end its reading. A reader that
+    stopped early would leave the publisher suspended in [Eio.Stream.add] once
+    {!bus_capacity} events waited, and the turn would never settle. *)
+
+(** What a read returns: the next value, or the publisher's declaration that
+    no event follows. Once a reader has taken [Closed], every later read
+    returns [Closed] without blocking. *)
+type 'a next =
+  | Next of 'a
+  | Closed
 
 (** One event as the bus stamped it: the 0-based publish-order sequence number
     and the publish-time clock reading. The journal line for this event (via
@@ -240,21 +253,30 @@ val create :
     Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
     until full. A full stream suspends the writer fiber until a reader frees
     a slot (Eio backpressure) — the hook has already run by then, so the
-    journal still holds the event. *)
+    journal still holds the event.
+
+    @raise Invalid_argument after {!close}: a publish after the end of the
+    turn is a publisher defect, never a delivery. *)
 val publish : t -> keeper_chat_event -> unit
 
-(** [subscribe t] blocks until an event is available, then returns it. *)
-val subscribe : t -> keeper_chat_event
+(** [close t] declares that no event follows. Idempotent. The reader takes it
+    after every event published before it; a full stream suspends this call
+    exactly as it suspends [publish]. *)
+val close : t -> unit
 
-(** [subscribe_published t] blocks until an event is available, then returns
-    it with the seq and ts the bus stamped at publish time. The wire adapter
-    reads through this so the frame id is the journal seq and the projected
-    timestamp is the journaled ts. *)
-val subscribe_published : t -> published
+(** [subscribe t] blocks until an event is available and returns it, or
+    returns [Closed] once the publisher has closed the bus and every earlier
+    event has been read. *)
+val subscribe : t -> keeper_chat_event next
+
+(** [subscribe_published t] is {!subscribe} with the seq and ts the bus
+    stamped at publish time. The wire adapter reads through this so the frame
+    id is the journal seq and the projected timestamp is the journaled ts. *)
+val subscribe_published : t -> published next
 
 (** [take_nonblocking t] returns the next queued event, or [None] when the
-    bus is empty. Drain/test support: it bypasses the blocking [subscribe]
-    contract and must not sit on a live read path. *)
+    bus is empty or closed. Drain/test support: it bypasses the blocking
+    [subscribe] contract and must not sit on a live read path. *)
 val take_nonblocking : t -> keeper_chat_event option
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t

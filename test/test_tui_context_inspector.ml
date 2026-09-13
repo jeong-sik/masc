@@ -362,6 +362,38 @@ let test_evidence_badges_own_their_exact_cell_budget () =
          (17 + label_width + badge <= row_width))
     cases
 
+(* The three tabs colour by producer, so a kind that named no producer would
+   be drawn in a colour that means something else. Every kind answers, and the
+   flow list carries each producer once, in the order a turn assembles them. *)
+let test_every_kind_names_one_producer () =
+  let label = Inspector.input_source_label in
+  Alcotest.(check string)
+    "the system prompt is assembled" "turn prompt assembly"
+    (label (Inspector.exact_input_source Inspector.System_prompt));
+  Alcotest.(check string)
+    "a schema comes from the tool surface" "effective tool surface"
+    (label
+       (Inspector.exact_input_source
+          (Inspector.Tool_schema { name = "masc_check" })));
+  Alcotest.(check string)
+    "a message comes from the provider list" "provider message list"
+    (label (Inspector.exact_input_source (Inspector.Message { role = "tool" })));
+  Alcotest.(check string)
+    "a prompt block is assembled" "turn prompt assembly"
+    (label
+       (Inspector.input_source
+          (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall)));
+  Alcotest.(check string)
+    "tool schemas are the tool surface" "effective tool surface"
+    (label (Inspector.input_source Turn_record.Tool_schemas));
+  Alcotest.(check string)
+    "tool results ride the message list" "provider message list"
+    (label (Inspector.input_source Turn_record.Message_tool_result));
+  Alcotest.(check (list string))
+    "the flow order, each producer once"
+    [ "turn prompt assembly"; "effective tool surface"; "provider message list" ]
+    (List.map label Inspector.input_sources)
+
 let test_a_tool_schema_is_grouped_with_the_other_schemas () =
   (* [exact_input_label] names a schema after its tool, which would put every
      schema in a group of one. The summary needs them counted together: on a
@@ -411,5 +443,7 @@ let () =
             test_evidence_badges_own_their_exact_cell_budget
         ; test_case "a tool schema is grouped with the other schemas" `Quick
             test_a_tool_schema_is_grouped_with_the_other_schemas
+        ; Alcotest.test_case "every kind names one producer" `Quick
+            test_every_kind_names_one_producer
         ] )
     ]

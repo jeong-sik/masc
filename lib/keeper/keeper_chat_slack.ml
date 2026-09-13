@@ -571,6 +571,13 @@ let adapter_loop_with_transport
     let remaining = min_edit_interval_s -. (now () -. last_edit_time) in
     if remaining > 0.0 then sleep remaining
   in
+  (* After the reply is delivered the bus is read to its close, so the turn's
+     publisher never waits on a reader that already left. *)
+  let rec drain_until_closed () =
+    match Keeper_chat_events.subscribe events with
+    | Keeper_chat_events.Closed -> ()
+    | Keeper_chat_events.Next _ -> drain_until_closed ()
+  in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
       ~last_edit_time ~last_edited_text ~post_attempts_left =
     let continue ?(acc_text = acc_text) ?(acc_blocks = acc_blocks)
@@ -581,7 +588,14 @@ let adapter_loop_with_transport
       loop ~acc_text ~acc_blocks ~run_id_opt ~message_id ~last_edit_time
         ~last_edited_text ~post_attempts_left
     in
-    let event = Keeper_chat_events.subscribe events in
+    match Keeper_chat_events.subscribe events with
+    | Keeper_chat_events.Closed ->
+        (* The turn closed the bus before any terminal event: there is no
+           reply to deliver, and the turn layer is waiting on this result. *)
+        on_send_result
+          (Error (Other "Keeper turn closed its event bus without a terminal event"));
+        clear_activity ()
+    | Keeper_chat_events.Next event ->
     (* Tool activity shows here as a transient "사용 중" line that the next one
        overwrites; the trail keeps the same events so the delivered reply can
        still name the work. See keeper_chat_tool_trail.mli. *)
@@ -686,7 +700,7 @@ let adapter_loop_with_transport
               (Error (Other "Slack terminal reply contained no text or blocks"))
         end;
         clear_activity ();
-        ()
+        drain_until_closed ()
     | External_effect_completed _ ->
         external_effect_completed := true;
         (match streaming_transport, message_id with
@@ -705,7 +719,7 @@ let adapter_loop_with_transport
         in
         on_send_result result;
         clear_activity ();
-        ()
+        drain_until_closed ()
     | Run_started { run_id; thread_id = _ } ->
         update_activity "답변을 준비하고 있어요…";
         (* A new run's work is its own; the previous run's trail went out with

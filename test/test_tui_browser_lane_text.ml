@@ -32,6 +32,23 @@ let () =
   (match Masc.Browser_scene.of_json json with
    | Ok {nodes=[{kind=Region Masc.Browser_scene.Main;_}];_} -> ()
    | Ok _ | Error _ -> failwith "scene parser did not classify the observed role");
+  let heading_json = `Assoc [
+    "kind", `String "text"; "nodeId", `String "heading";
+    "tag", `String "span"; "text", `String "Nested title";
+    "headingLevel", `Int 3;
+    "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 100; "height", `Int 20]];
+    "color", `String "rgb(0,0,0)"; "fontSize", `Int 14;
+    "fontWeight", `String "400"; "whiteSpace", `String "normal" ] in
+  let heading_scene_json = `Assoc [
+    "schema", `String "masc.browser.scene.v1"; "documentId", `String "doc";
+    "url", `String "https://example.org"; "title", `String "Example";
+    "viewport", `Assoc ["width", `Int 100; "height", `Int 40;
+      "scrollX", `Int 0; "scrollY", `Int 0];
+    "nodes", `List [heading_json]; "truncated", `Bool false;
+    "view", `String "content"; "scope", `Null ] in
+  (match Masc.Browser_scene.of_json heading_scene_json with
+   | Ok {nodes=[{heading_level=Some 3;_}];_} -> ()
+   | Ok _ | Error _ -> failwith "scene parser dropped the observed heading level");
   print_endline "PASS semantic region roles are typed at the scene boundary"
 
 let () =
@@ -90,6 +107,7 @@ let () =
 let () =
   let node : Masc.Browser_scene.node = {
     node_id="n1";kind=Text;tag="p";text=String.make 152 'x' ^ "한글🙂";
+    heading_level=None;
     rects=[{x=0.;y=0.;width=800.;height=20.}];color="rgb(0,0,0)";
     font_size=16.;font_weight="400";white_space="normal";source_context=Masc.Browser_source_context.Unmapped } in
   let content : Masc.Browser_scene.t = {
@@ -160,6 +178,14 @@ let () =
   assert (Masc.Browser_scene.text_role_of_tag "p" = Masc.Browser_scene.Plain_text);
   let heading = {node with node_id="heading"; tag="h2"; text="Post title"} in
   let body = {node with node_id="body"; tag="p"; text="Post body"} in
+  let nested_heading = {heading with node_id="nested-heading"; tag="span"; heading_level=Some 2} in
+  let aria_heading = {heading with node_id="aria-heading"; tag="span"; heading_level=Some 3} in
+  let heading_link = {heading with node_id="heading-link"; kind=Control {
+      clickable=true; editable=false; disabled=false; href=Some "https://example.org/post"};
+      tag="a"; heading_level=Some 2} in
+  assert (Masc.Browser_scene.text_role nested_heading = Masc.Browser_scene.Heading 2);
+  assert (Masc.Browser_scene.text_role aria_heading = Masc.Browser_scene.Heading 3);
+  assert (Masc.Browser_scene.text_role heading_link = Masc.Browser_scene.Heading 2);
   assert (Masc.Browser_scene.text_role {heading with kind=Raster} = Masc.Browser_scene.Plain_text);
   let heading_scene = {scene with content={content with nodes=[heading;body]}} in
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
@@ -208,7 +234,7 @@ let () =
   assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
   let located : Masc.Browser_source_context.location = {file="dashboard/src/a.ts";line=2;column=3;
     kind=Template;digest=String.make 64 'a'} in
-  let mapped = {node with source_context=Masc.Browser_source_context.Located located} in
+  let mapped = {node with heading_level=Some 2; source_context=Masc.Browser_source_context.Located located} in
   let view = {view with scene=Some {scene with content={content with nodes=[mapped]}}} in
   (match Lane.scene_context view with
    | None -> failwith "selected element context missing"
@@ -216,6 +242,7 @@ let () =
        let open Yojson.Safe.Util in
        let json=Yojson.Safe.from_string text in
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
+       assert (json |> member "headingLevel" = `Int 2);
        assert (json |> member "source" |> member "sha256" |> to_string = located.digest);
        assert (json |> member "scope" = `Null);
        assert (json |> member "truncated" = `Bool false));
@@ -242,6 +269,7 @@ let () =
 let () =
   let node node_id text : Masc.Browser_scene.node =
     { node_id; kind = Text; tag = "p"; text;
+      heading_level = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped } in
@@ -266,6 +294,7 @@ let () =
 let () =
   let region node_id role text : Masc.Browser_scene.node =
     { node_id; kind = Region (Masc.Browser_scene.region_role_of_string role); tag = role; text;
+      heading_level = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
@@ -344,6 +373,7 @@ let () =
 let () =
   let region node_id role text : Masc.Browser_scene.node =
     { node_id; kind = Masc.Browser_scene.Region role; tag = "article"; text;
+      heading_level = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }

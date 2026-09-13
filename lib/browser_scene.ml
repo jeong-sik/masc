@@ -84,11 +84,14 @@ let text_role_of_tag tag =
   | _ -> Plain_text
 
 type node = { node_id : string; kind : kind; tag : string; text : string;
+  heading_level : int option;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 let text_role (node : node) =
   match node.kind with
-  | Text -> text_role_of_tag node.tag
-  | Raster | Region _ | Control _ -> Plain_text
+  | Text | Control _ -> (match node.heading_level with
+      | Some level -> Heading level
+      | None -> text_role_of_tag node.tag)
+  | Raster | Region _ -> Plain_text
 
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
@@ -105,6 +108,11 @@ let optional_href json =
   | Ok `Null -> Ok None
   | Ok (`String value) when String.trim value <> "" -> Ok (Some value)
   | Ok _ -> Error "scene control href must be a nonempty string or null"
+let optional_heading_level json =
+  match field "headingLevel" json with
+  | Error _ | Ok `Null -> Ok None
+  | Ok (`Int value) when value >= 1 && value <= 6 -> Ok (Some value)
+  | Ok _ -> Error "scene headingLevel must be an integer from 1 to 6 or null"
 let number = function
   | `Int value -> Ok (float_of_int value)
   | `Float value when Float.is_finite value -> Ok value
@@ -127,6 +135,7 @@ let rect json =
 let node json =
   let* node_id = get nonempty "nodeId" json in
   let* tag = get nonempty "tag" json in let* text = get string "text" json in
+  let* heading_level = optional_heading_level json in
   let* rects = get (list rect) "rects" json in
   let* () = if rects <> [] then Ok () else Error "scene node has no rectangles" in
   let* color = get string "color" json in let* font_size = get nonnegative "fontSize" json in
@@ -144,7 +153,7 @@ let node json =
   let source_context = match field "sourceContext" json with
     | Ok value -> Browser_source_context.of_json value
     | Error _ -> Browser_source_context.Unmapped in
-  Ok {node_id;kind;tag;text;rects;color;font_size;font_weight;white_space;source_context}
+  Ok {node_id;kind;tag;text;heading_level;rects;color;font_size;font_weight;white_space;source_context}
 let scope_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->
       let* document_id = get nonempty "documentId" (`Assoc fields) in

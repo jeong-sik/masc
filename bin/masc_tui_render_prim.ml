@@ -1782,6 +1782,40 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+(* A value in brackets: [text], folded in the middle only when it runs past
+   [max_cells]. Four places fitted the value with [fit_width] first, which
+   pads as well as cuts, so a short one closed its bracket after a run of
+   spaces -- "[post-a      ]", "[executing ]", "[active    ]". A row that
+   needs the bracket to line up pads after it. *)
+let bracketed ~max_cells text =
+  let text =
+    if Message_layout.display_width text <= max_cells then text
+    else Message_layout.fit_middle max_cells text
+  in
+  "[" ^ text ^ "]"
+
+(* The Board reader's title row: the screen, which post, its hearth, its score
+   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and then "c0" at zero -- a second spelling for the same count -- and are one
+   spelling now, receding at zero. *)
+let board_read_title ~screen ~id ~hearth ~votes ~replies =
+  let id = bracketed ~max_cells:Render_schedule.board_id_width id in
+  let hearth_tag =
+    match hearth with
+    | Some h when not (String.equal h "") ->
+        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
+    | _ -> ""
+  in
+  let score =
+    if votes > 0 then Printf.sprintf "▲%+d" votes
+    else if votes < 0 then Printf.sprintf "▼%d" votes
+    else " 0"
+  in
+  Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (board_score_style votes) score Ansi.reset
+    (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
+
 
 (* Three steps for three bands, from the palette every other reading on this
    screen draws through. Emphasis only ever restates what the count beside it

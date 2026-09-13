@@ -4321,8 +4321,8 @@ type state = {
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
   mutable repository_changes_return_chat: bool;
-  (* Interactive patch review modal: 3D drop-shadow overlay for reviewing
-     and resolving pending code changes, git diffs, and approval gates. *)
+  (* The patch review overlay: the pending diff to scroll, and [e] to open it
+     in $EDITOR. *)
   mutable patch_modal_open: bool;
   mutable patch_modal_scroll: int;
   mutable patch_modal_path: string option;

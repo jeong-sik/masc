@@ -5632,449 +5632,253 @@ def keeper_chat_error_detail_interaction() -> Interaction:
     return interact
 
 
-def chat_queue_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
-    # Admit the run before holding its terminal reply. Withholding the HTTP
-    # response itself truthfully renders WAITING TO START, never IN PROGRESS.
-    gate = GatedHttpResponse((200, {}), hold_seconds=30.0)
+class AtomicChatFixture:
+    """A held server turn with durable admissions and a separately gated Esc ack.
 
-    def terminal_response(request_body: bytes) -> RawHttpResponse | StreamingHttpResponse:
-        with gate.lock:
-            call_index = gate.calls
-            gate.calls += 1
-        response = keeper_chat_succeeded_response(request_body)
-        if call_index != 0:
-            return response
+    Events, rather than model completion or a guessed sleep, release each phase.
+    The real TUI runs against this wire fixture; Owner/SQLite execution is tested
+    by the OCaml suites, not simulated as a claimed production success here.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.started_at = time.time()
+        self.run_next_calls = 0
+        self.release = threading.Event()
+        self.interrupted = threading.Event()
+        self.release_interrupt = threading.Event()
+        self.old_poll_seen = threading.Event()
+        self.submitted: list[dict[str, Any]] = []
+        self.admitted = threading.Condition(self.lock)
+        self.edited = threading.Event()
+        self.paused = False
+        self.token = "control-before-stop"
+        self.turn_token = "9dd7c86d-0ca9-4a91-a24f-4d57085f0372"
+        self.operations: list[dict[str, Any]] = []
+        self.fixtures: HttpFixtures = {
+            "/api/v1/keepers/turns": self.turns,
+            "/api/v1/keepers/chat/stream": RequestHttpResponse(self.stream),
+            "/api/v1/keepers/turn/interrupt": RequestHttpResponse(self.interrupt),
+            "/api/v1/keepers/turn/run-next": RequestHttpResponse(self.unexpected_run_next),
+            "/api/v1/keepers/alpha/waiting-inventory": self.inventory,
+            "/api/v1/keepers/alpha/chat/operations?state=queued": self.queue,
+        }
+
+    def turns(self) -> HttpResponse:
+        if self.interrupted.is_set() and not self.release_interrupt.is_set():
+            self.old_poll_seen.set()
+        return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
+            "keeper_name": "alpha", "status": "ok", "chat_control_token": self.token,
+            "turn": None if self.release.is_set() else {
+                "lane": "autonomous", "started_at_unix": self.started_at,
+                "interrupt_token": self.turn_token,
+                "preview": {"text_tail": "Atomic fixture ready", "last_tool": None,
+                            "status_text": "waiting for cooperative settlement", "updated_at_unix": self.started_at},
+            },
+        }]}
+
+    def inventory(self) -> HttpResponse:
+        return 200, {"keepers": [{"state": "busy", "paused": self.paused,
+            "waiting_on": [{"source": "direct_chat", "what": "Accepted messages waiting for the held turn",
+                            "next_action": "settle current turn", "detail": {}}]}]}
+
+    def queue(self) -> HttpResponse:
+        with self.lock:
+            return 200, {"operations": list(self.operations)}
+
+    def stream(self, body: bytes) -> StreamingHttpResponse:
+        request = json.loads(body)
+        intent = request.get("admission_intent")
+        if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+            raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+        if intent.get("control_token") != self.token:
+            raise AssertionError(f"Enter used stale control authority: {request!r}")
+        if intent.get("interrupt_token") != self.turn_token or intent.get("operation_id") is not None:
+            raise AssertionError(f"Enter did not bind the exact observed turn: {request!r}")
+        with self.admitted:
+            self.submitted.append(request)
+            sequence = len(self.submitted)
+            operation = {
+                "operation_id": request["request_id"], "sequence": str(sequence),
+                "source": {"schema": "masc.keeper_chat_operation.source.v1", "submitted_by": "masc-tui",
+                    "thread_id": "keeper:alpha", "continuation_channel": {"kind": "dashboard", "thread_id": "keeper:alpha"},
+                    "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
+                    "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,
+                    "workspace_id": None, "extra_mentions": [], "user_row_origin": "needs_append"},
+                "input": {"schema": "masc.keeper_chat_operation.input.v1", "message": request["message"],
+                    "user_blocks": [], "turn_instructions": None, "surface_context": None, "attachments": []},
+            }
+            self.operations.append(operation)
+            path = "/api/v1/keepers/alpha/chat/operations/" + request["request_id"]
+            self.fixtures[path] = lambda: (200, operation)
+            self.fixtures[path + "/edit"] = RequestHttpResponse(lambda body: self.edit(operation, body))
+            self.fixtures[f"/api/v1/keepers/alpha/chat/operations?state=queued&after_sequence={sequence}"] = (200, {"operations": []})
+            self.admitted.notify_all()
+        response = keeper_chat_succeeded_response(body)
         blocks = [block for block in response.body.split(b"\n\n") if block]
-        start_index = next(index for index, block in enumerate(blocks)
-                           if json.loads(block.removeprefix(b"data: "))["type"] == "RUN_STARTED")
+        acceptance = json.loads(blocks[0].removeprefix(b"data: "))
+        acceptance["value"]["queued_count"] = sequence
+        acceptance["value"]["interactive"] = {
+            "outcome": "applied", "chat_control_token": self.token,
+            "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+        }
+        self.paused = False
 
         def chunks() -> Iterator[bytes]:
-            yield b"\n\n".join(blocks[:start_index + 1]) + b"\n\n"
-            gate.requested.set()
-            try:
-                if gate.release.wait(timeout=gate.hold_seconds):
-                    yield b"\n\n".join(blocks[start_index + 1:]) + b"\n\n"
-                # A fixture deadline closes the incomplete stream; it must not
-                # fabricate RUN_FINISHED before the interaction releases it.
-            finally:
-                gate.completed.set()
+            yield f"data: {json.dumps(acceptance)}\n\n".encode()
+            if not self.release.wait(timeout=30):
+                raise AssertionError("interaction never released the held server turn")
+            # The original request id is retained even when queued text is edited.
+            terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
+            yield b"\n\n".join(terminal.body.split(b"\n\n")[1:])
 
         return StreamingHttpResponse(chunks)
 
-    return {
-        "/api/v1/keepers/chat/stream": RequestHttpResponse(terminal_response)
-    }, gate
+    def edit(self, operation: dict[str, Any], body: bytes) -> HttpResponse:
+        operation["input"] = json.loads(body)["input"]
+        self.edited.set()
+        return 200, operation
+
+    def interrupt(self, body: bytes) -> HttpResponse:
+        request = json.loads(body)
+        if request.get("interrupt_token") != self.turn_token:
+            raise AssertionError(f"Esc targeted another turn: {request!r}")
+        self.paused = True
+        self.interrupted.set()
+        if not self.release_interrupt.wait(timeout=20):
+            raise AssertionError("interaction never acknowledged Esc")
+        self.token = "control-after-stop"
+        return 200, {"signalled": True, "paused": True, "interrupt_token": self.turn_token,
+                     "chat_control_token": self.token}
+
+    def unexpected_run_next(self, body: bytes) -> HttpResponse:
+        self.run_next_calls += 1
+        raise AssertionError(f"ordinary Enter must not require run-next: {body!r}")
 
 
-def seed_uncoalesced_queue(base_path: str) -> None:
-    """Give every queued line its own turn, which is what this scenario walks.
-
-    [tui].coalesce_queued_input is absent-reads-as-yes, and with it on a line
-    typed while an earlier one is still waiting joins that line instead of
-    queueing behind it -- one NEXT holding "queued-one\\nqueued-two" rather
-    than two. That is the right default (a thought, its correction and the
-    part the writer forgot are one message) and it is not what a scenario
-    about walking a queue of two can use.
-    """
-    config = Path(base_path, ".masc", "config", "runtime.toml")
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("[tui]\ncoalesce_queued_input = false\n", encoding="utf-8")
+def open_atomic_chat(process: subprocess.Popen[bytes], master_fd: int, output: bytearray) -> None:
+    resize_and_wait(process, master_fd, output, rows=40, columns=120, needle=b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    # Seeing the preview proves the same observer response carrying the control
+    # token has reached the UI before the first Enter.
+    wait_for_output(process, master_fd, output, b"Atomic fixture ready", start=0, timeout=10)
 
 
-def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
-    """Pending input stays in NEXT, outside the active causal turn, and the
-    arrows can still edit it."""
-
-    def interact(
-        process: subprocess.Popen[bytes],
-        master_fd: int,
-        _slave_fd: int,
-        output: bytearray,
-        _base_path: str,
-    ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"m",
-            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
-        )
-
-        send_and_wait(
-            process, master_fd, output, b"first-line", composer_showing(b"first-line")
-        )
-        # The turn has to be running before the next Enter can queue behind
-        # it, and the pane says so itself. Waiting on the fixture's own event
-        # instead would stop pumping the terminal, and a TUI whose output
-        # nobody reads blocks before it ever posts.
-        # RUN_STARTED is now present in the fixture stream, so the current
-        # Working transcript must render IN PROGRESS before input queues.
-        sending = send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"IN PROGRESS",
-            start=0,
-            timeout=5.0,
-        )
-        footer_while_sending = frame_row_of(sending, b"  Enter:")
-
-        send_and_wait(
-            process, master_fd, output, b"queued-one", composer_showing(b"queued-one")
-        )
-        first_queued = send_and_wait(
-            process, master_fd, output, b"\r", b"queued-one"
-        )
-        send_and_wait(
-            process, master_fd, output, b"queued-two", composer_showing(b"queued-two")
-        )
-        second_queued = send_and_wait(
-            process, master_fd, output, b"\r", b"queued-two"
-        )
-
-        # The whole screen, not the frame that carried the second queue row.
-        # A frame holds the rows that changed, and the sent line's own row was
-        # drawn before either line was queued -- asking one frame for it fails
-        # on a screen that has it. second_queued is still the wait that says
-        # the second row arrived.
-        _ = second_queued
-        plain = CSI_RE.sub(b"", screen_text(bytes(output)))
-        # Pending messages are visible but not represented as turns the model
-        # has already received.
-        #
-        # The gap between the caret and YOU is column padding, and it has
-        # changed width. Matching the pair rather than one spelling of the gap
-        # asks what this step is about -- the row is marked as a user turn --
-        # without pinning a layout that is free to move.
-        turn_user = re.compile("▶\\s+YOU".encode())
-        if turn_user.search(plain) is None:
-            raise AssertionError(
-                f"the sent line is not marked as a user turn: {plain!r}"
-            )
-        # No needle for the promoted USER row's wording here: this scenario's
-        # line is a direct submission, so it renders through the settled-row
-        # layout path and the promoted block (which says "sent · the running
-        # turn answers it") never draws. Covering that wording needs a
-        # scenario that holds the drained turn open with a second gate
-        # (task-1517); asserting it here failed on a screen that could not
-        # contain it.
-        for expected in (
-            b"NEXT 1",
-            b"queued-one",
-            b"NEXT 2",
-            b"queued-two",
-        ):
-            if expected not in plain:
-                raise AssertionError(
-                    f"a waiting line is not shown in NEXT; "
-                    f"missing {expected!r}: {plain!r}"
-                )
-        # D3: a waiting row names what it waits behind. Both lines queue
-        # while this Keeper's turn is still running, so each row carries the
-        # running-turn reason -- "pending" alone cannot say whether the wait
-        # is behind the turn or behind another line. The queue may coalesce
-        # into one NEXT row holding both lines, so the reason is asked of
-        # the rows that are there, not of two separate rows.
-        if b"behind this Keeper's running turn" not in plain:
-            raise AssertionError(
-                f"a waiting row does not name what it waits behind: {plain!r}"
-            )
-        if b"TURN \xc2\xb7 QUEUED" in plain:
-            raise AssertionError(f"pending input leaked into the transcript: {plain!r}")
-        if turn_user.search(plain).start() > plain.find(b"NEXT 1"):
-            raise AssertionError(f"NEXT was drawn inside the causal transcript: {plain!r}")
-        if b"Enter:queue(2)" not in plain:
-            raise AssertionError(f"the footer lost its count: {plain!r}")
-
-        # NEXT owns fixed rows below history, and the budget hands those rows
-        # to active USER entries as they dispatch. The footer remains fixed.
-        footer_with_queue = frame_row_of(second_queued, b"  Enter:")
-        if footer_with_queue != footer_while_sending:
-            raise AssertionError(
-                "the pane lost rows to the queue: the footer was on row "
-                f"{footer_while_sending} while sending and on row "
-                f"{footer_with_queue} with two lines waiting"
-            )
-        first_plain = CSI_RE.sub(b"", frame_containing(first_queued, b"queued-one"))
-        if b"NEXT 1" not in first_plain:
-            raise AssertionError(
-                f"the first waiting line is not in NEXT: {first_plain!r}"
-            )
-
-        # The newest thing the operator typed is the first thing the arrows
-        # hand back, whether or not it has been dispatched.
-        send_and_wait(
-            process, master_fd, output, b"\x1b[A", composer_showing(b"queued-two")
-        )
-        send_and_wait(
-            process, master_fd, output, b"\x1b[A", composer_showing(b"queued-one")
-        )
-
-        # Standing on a waiting line makes the next Enter a replacement rather
-        # than a second copy, and the footer has to say which one it is: the
-        # composer looks identical either way.
-        wait_for_output(
-            process, master_fd, output, b"Enter:replace", start=0, timeout=5.0
-        )
-        # Edit it and send. The queue keeps two lines, not three -- the
-        # original leaves as the replacement arrives. Before this, the queue
-        # still held the original and the composer queued a copy, so the same
-        # message went out twice.
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"-fixed",
-            composer_showing(b"queued-one-fixed"),
-        )
-        replaced = send_and_wait(
-            process, master_fd, output, b"\r", b"queued-one-fixed"
-        )
-        replaced_plain = CSI_RE.sub(b"", frame_containing(replaced, b"queued-one-fixed"))
-        if not any(
-            marker in replaced_plain
-            for marker in (b"Enter:queue(2)", b"2 waiting")
-        ):
-            raise AssertionError(
-                f"the edit did not replace the queued line; the queue should "
-                f"still hold two: {replaced_plain!r}"
-            )
-
-        # Let the turn settle and the queue drain into it. Until it does, Esc
-        # means "interrupt the turn" and q is just a letter in the composer.
-        # The Enter above already emptied the composer, so there is nothing to
-        # clear -- and nothing would redraw for a Ctrl-U that changed nothing.
-        gate.release.set()
+def wait_for_atomic_admissions(process: subprocess.Popen[bytes], master_fd: int,
+                               output: bytearray, fixture: AtomicChatFixture, count: int) -> None:
+    deadline = time.monotonic() + 10
+    while len(fixture.submitted) < count:
         read_available(master_fd, output)
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        os.write(master_fd, b"q")
+        if process.poll() is not None or time.monotonic() >= deadline:
+            raise AssertionError(f"only {len(fixture.submitted)} of {count} messages reached server admission")
+        with fixture.admitted:
+            fixture.admitted.wait(timeout=0.02)
 
+
+def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
+    """Plain Enter admits every message; /queue edits durable pending input."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            for index, text in enumerate((b"queued-one", b"queued-two"), 1):
+                send_and_wait(process, master_fd, output, text, composer_showing(text))
+                os.write(master_fd, b"\r")
+                wait_for_atomic_admissions(process, master_fd, output, fixture, index)
+            if fixture.release.is_set():
+                raise AssertionError("messages were admitted only after model completion")
+            if [item["message"] for item in fixture.submitted] != ["queued-one", "queued-two"]:
+                raise AssertionError(f"accepted message order changed: {fixture.submitted!r}")
+            if len({item["request_id"] for item in fixture.submitted}) != 2:
+                raise AssertionError("distinct Enter messages lost their durable identities")
+            send_and_wait(process, master_fd, output, b"/queue", composer_showing(b"/queue"))
+            send_and_wait(process, master_fd, output, b"\r", b"Server queued messages: 2")
+            plain = screen_text(bytes(output))
+            for expected in (b"queued-one", b"queued-two", b"Local unsent messages: 0"):
+                if expected not in plain:
+                    raise AssertionError(f"queue inspection omitted {expected!r}: {plain!r}")
+            first_id = fixture.submitted[0]["request_id"]
+            command = f"/queue edit {first_id} queued-one-fixed".encode()
+            send_and_wait(process, master_fd, output, command, composer_showing(command))
+            send_and_wait(process, master_fd, output, b"\r", b"queued-one-fixed")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.edited, timeout=5):
+                raise AssertionError("queue edit never reached the server")
+            if len(fixture.submitted) != 2 or fixture.operations[0]["operation_id"] != first_id:
+                raise AssertionError("edit submitted a replacement operation instead of retaining its identity")
+            fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-queued-one-fixed", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-queued-two", start=0, timeout=10)
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            fixture.release_interrupt.set()
+            fixture.release.set()
     return interact
 
 
-def quit_names_waiting_messages_interaction(gate: GatedHttpResponse) -> Interaction:
-    """A first q says how many waiting messages a second one drops.
-
-    A line sent while a turn runs waits in the TUI, not at the server, and
-    quitting drops it: measured 2026-09-13, three sentences continuous voice
-    mode queued behind a running turn were gone after the TUI was closed and
-    reopened.
-    """
-
-    def interact(
-        process: subprocess.Popen[bytes],
-        master_fd: int,
-        _slave_fd: int,
-        output: bytearray,
-        _base_path: str,
-    ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
-        )
-        send_and_wait(
-            process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
-        )
-        send_and_wait(
-            process, master_fd, output, b"first-line", composer_showing(b"first-line")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
-        send_and_wait(
-            process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
-        # Leave the chat while its turn still runs. The pane already says the
-        # line waits in this TUI; Overview is where the quit notice is drawn.
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"q",
-            # The events pane cuts the notice; the count is the part it keeps.
-            b"q: 1 unsent message is dropped",
-        )
-        # The held turn would otherwise keep the fixture's stream open past
-        # the session; the harness's second q ends it either way.
-        gate.release.set()
-
+def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -> Interaction:
+    """Enter during Esc waits for its receipt, not for the previous model turn."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            send_and_wait(process, master_fd, output, b"original", composer_showing(b"original"))
+            os.write(master_fd, b"\r")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
+            os.write(master_fd, b"\x1b")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
+                raise AssertionError("Esc never reached its exact observed turn")
+            send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
+            send_and_wait(process, master_fd, output, b"\r", b"waiting for the stop or resume acknowledgement")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
+                raise AssertionError("no stale observation arrived during pending Esc")
+            read_available(master_fd, output)
+            if len(fixture.submitted) != 1:
+                raise AssertionError("a stale observer token released input before Esc acknowledgement")
+            fixture.release_interrupt.set()
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            if fixture.submitted[1]["admission_intent"]["control_token"] != "control-after-stop":
+                raise AssertionError("retained Enter did not use the exact stop receipt authority")
+            if fixture.release.is_set():
+                raise AssertionError("retained Enter waited for old model completion")
+            if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
+                raise AssertionError("plain Enter used a second run-next control request")
+            fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            fixture.release_interrupt.set()
+            fixture.release.set()
     return interact
 
 
-def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
-    fixtures, gate = chat_queue_http_fixtures()
-
-    def interrupt_response(request_body: bytes) -> HttpResponse:
-        request_id = json.loads(request_body).get("request_id")
-        return 200, {
-            "signalled": True,
-            "request_id": request_id,
-        }
-
-    fixtures["/api/v1/keepers/turn/interrupt"] = RequestHttpResponse(
-        interrupt_response
-    )
-    return fixtures, gate
-
-
-def chat_steer_interaction(
-    gate: GatedHttpResponse, requests: HttpRequests
-) -> Interaction:
-    """/steer is visibly distinct and dispatches before ordinary NEXT."""
-
-    def interact(
-        process: subprocess.Popen[bytes],
-        master_fd: int,
-        _slave_fd: int,
-        output: bytearray,
-        _base_path: str,
-    ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
-        select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\r",
-            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
-        )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"m",
-            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
-        )
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"original",
-            composer_showing(b"original"),
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
-
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"ordinary-next",
-            composer_showing(b"ordinary-next"),
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
-        steer = b"/steer corrected-course"
-        send_and_wait(
-            process, master_fd, output, steer, composer_showing(steer)
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"STEER 1")
-        # Read the screen, not the frame the steer arrived in. Queueing the
-        # steer renumbers the ordinary entry's header row -- NEXT 1 becomes
-        # NEXT 2 -- but leaves its body row alone, and a frame carries only
-        # the rows that changed. So the frame holds three of these four
-        # strings and the fourth has been sitting on screen since it was
-        # queued.
-        plain = screen_text(bytes(output))
-        expected_rows = (
-            b"STEER 1",
-            b"corrected-course",
-            b"NEXT 2",
-            b"ordinary-next",
-        )
-        for expected in expected_rows:
-            if expected not in plain:
-                raise AssertionError(
-                    f"steer/next lanes are incomplete: {plain!r}"
-                )
-        if plain.find(b"STEER 1") > plain.find(b"NEXT 2"):
-            raise AssertionError(
-                f"steer does not precede ordinary NEXT: {plain!r}"
-            )
-
-        deadline = time.monotonic() + 5.0
-        while not any(
-            path == "/api/v1/keepers/turn/interrupt"
-            for path, _body in requests
-        ):
-            read_available(master_fd, output)
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    "/steer did not signal the current turn"
-                )
-            time.sleep(0.02)
-
-        gate.release.set()
-        deadline = time.monotonic() + 10.0
-        while True:
-            read_available(master_fd, output)
-            chat_bodies = [
-                body
-                for path, body in requests
-                if path == "/api/v1/keepers/chat/stream"
-            ]
-            if len(chat_bodies) >= 3:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    "steer queue did not drain three chat requests: "
-                    f"{requests!r}"
-                )
-            time.sleep(0.02)
-        messages = [
-            json.loads(body).get("message") for body in chat_bodies[:3]
-        ]
-        expected_messages = [
-            "original",
-            "corrected-course",
-            "ordinary-next",
-        ]
-        if messages != expected_messages:
-            raise AssertionError(
-                f"steer dispatch order is not causal: {messages!r}"
-            )
-        interrupt_bodies = [
-            json.loads(body)
-            for path, body in requests
-            if path == "/api/v1/keepers/turn/interrupt"
-        ]
-        original_request_id = json.loads(chat_bodies[0]).get("request_id")
-        if not interrupt_bodies or interrupt_bodies[0].get("request_id") != original_request_id:
-            raise AssertionError(
-                "steer interrupt was not bound to the exact original request: "
-                f"original={original_request_id!r} interrupts={interrupt_bodies!r}"
-            )
-
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"MASC Keepers"
-        )
-        os.write(master_fd, b"q")
-
+def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Interaction:
+    """The quit warning counts input retained while a real Esc ack is pending."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            os.write(master_fd, b"\x1b")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
+                raise AssertionError("Esc acknowledgement was not gated")
+            send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
+            send_and_wait(process, master_fd, output, b"\r", b"waiting for the stop or resume acknowledgement")
+            if fixture.submitted:
+                raise AssertionError("pending control input was already sent to the server")
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+            send_and_wait(process, master_fd, output, b"q", b"q: 1 unsent message is dropped")
+            if fixture.submitted:
+                raise AssertionError("navigation dispatched input before control acknowledgement")
+            # Confirm exit before releasing the server handler. Goodbye is a
+            # visible completed exit; the harness still verifies terminal mode.
+            send_and_wait(process, master_fd, output, b"q", b"Goodbye!")
+        finally:
+            fixture.release_interrupt.set()
+            fixture.release.set()
     return interact
 
 
@@ -6107,7 +5911,7 @@ def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 def chat_reconcile_interaction(
     gate: GatedHttpResponse, requests: HttpRequests
 ) -> Interaction:
-    """An unknown stream outcome keeps NEXT held until exact re-subscribe ends."""
+    """New Enter is admitted while the original identity reconnects separately."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6149,23 +5953,12 @@ def chat_reconcile_interaction(
         send_and_wait(
             process, master_fd, output, b"held-next", composer_showing(b"held-next")
         )
-        held = send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
-        # The reconciliation line is a STATUS row the pane drew when the
-        # subscribe was lost, frames before this one. A frame carries the rows
-        # that changed, so asking the queueing frame for it fails on a screen
-        # that shows it.
-        _ = held
-        held_plain = CSI_RE.sub(b"", screen_text(bytes(output)))
-        if b"reconciling" not in held_plain:
-            raise AssertionError(
-                f"unknown outcome did not expose reconciliation state: {held_plain!r}"
-            )
-        if any(
-            json.loads(body).get("message") == "held-next"
-            for path, body in requests
-            if path == "/api/v1/keepers/chat/stream"
-        ):
-            raise AssertionError("NEXT dispatched before terminal reconciliation")
+        send_and_wait(process, master_fd, output, b"\r", b"reply-held-next")
+        if gate.release.is_set():
+            raise AssertionError("independent input waited for original reconciliation")
+        if not any(json.loads(body).get("message") == "held-next"
+                   for path, body in requests if path == "/api/v1/keepers/chat/stream"):
+            raise AssertionError("new Enter did not reach the server during reconciliation")
 
         gate.release.set()
         deadline = time.monotonic() + 10.0
@@ -6184,6 +5977,11 @@ def chat_reconcile_interaction(
                     f"terminal reconciliation did not release NEXT: {messages!r}"
                 )
             time.sleep(0.02)
+        originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
+        if len({item["request_id"] for item in originals}) != 1:
+            raise AssertionError(f"reconnect invented a new original request identity: {originals!r}")
+        if messages.count("held-next") != 1:
+            raise AssertionError(f"independent Enter was replayed as a new submission: {messages!r}")
         wait_for_output(
             process,
             master_fd,
@@ -13175,28 +12973,29 @@ def run_keyboard_regression(executable: str) -> None:
         },
         http_requests=word_requests,
     )
-    chat_queue_fixtures, chat_queue_gate = chat_queue_http_fixtures()
+    chat_queue = AtomicChatFixture()
     run_terminal_scenario(
         executable,
-        description="Keeper chat queue is drawn and walked",
-        interact=chat_queue_interaction(chat_queue_gate),
-        http_fixtures=chat_queue_fixtures,
-        prepare_workspace=seed_uncoalesced_queue,
+        description="Ordinary Enter reaches the server queue and edits retain identity",
+        interact=chat_queue_interaction(chat_queue),
+        http_fixtures=chat_queue.fixtures,
+        refresh=0.2,
     )
     steer_requests: HttpRequests = []
-    steer_fixtures, steer_gate = chat_steer_http_fixtures()
+    steer = AtomicChatFixture()
     run_terminal_scenario(
         executable,
-        description="Keeper chat steer interrupts and precedes NEXT",
-        interact=chat_steer_interaction(steer_gate, steer_requests),
-        http_fixtures=steer_fixtures,
+        description="Enter during Esc waits for fresh acknowledgement, not model completion",
+        interact=chat_steer_interaction(steer, steer_requests),
+        http_fixtures=steer.fixtures,
+        refresh=0.2,
         http_requests=steer_requests,
     )
     reconcile_requests: HttpRequests = []
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
         executable,
-        description="Unknown Keeper chat outcome holds NEXT until terminal",
+        description="Unknown outcome reconnects by identity while new Enter is admitted",
         interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
         http_fixtures=reconcile_fixtures,
         http_requests=reconcile_requests,
@@ -13735,13 +13534,32 @@ def run_send_on_stop_regression(executable: str) -> None:
 
 
 def run_quit_waiting_regression(executable: str) -> None:
-    fixtures, gate = chat_queue_http_fixtures()
+    fixture = AtomicChatFixture()
     run_terminal_scenario(
         executable,
-        description="A first q names the waiting messages a second drops",
-        interact=quit_names_waiting_messages_interaction(gate),
-        http_fixtures=fixtures,
+        description="Quit names input retained during pending Esc acknowledgement",
+        interact=quit_names_waiting_messages_interaction(fixture),
+        http_fixtures=fixture.fixtures,
+        refresh=0.2,
     )
+
+
+def run_atomic_chat_regression(executable: str) -> None:
+    for description, interaction in (
+        ("Enter admits server queue before model completion", chat_queue_interaction),
+        ("Enter resumes only after fresh Esc acknowledgement", lambda fixture: chat_steer_interaction(fixture, requests)),
+    ):
+        fixture = AtomicChatFixture()
+        requests: HttpRequests = []
+        run_terminal_scenario(executable, description=description,
+            interact=interaction(fixture), http_fixtures=fixture.fixtures,
+            http_requests=requests, refresh=0.2)
+    requests = []
+    fixtures, gate = chat_reconcile_http_fixtures()
+    run_terminal_scenario(executable, description="New Enter does not await unrelated reconciliation",
+        interact=chat_reconcile_interaction(gate, requests), http_fixtures=fixtures,
+        http_requests=requests)
+    run_quit_waiting_regression(executable)
 
 
 def run_ctrl_y_regression(executable: str) -> None:
@@ -16373,6 +16191,10 @@ def main() -> None:
         run_send_on_stop_regression(os.path.abspath(sys.argv[1]))
         print("tui send_on_stop regression: PASS")
         return
+    if len(sys.argv) == 3 and sys.argv[2] == "chat-atomic":
+        run_atomic_chat_regression(os.path.abspath(sys.argv[1]))
+        print("tui atomic chat admission regression: PASS")
+        return
     if len(sys.argv) == 3 and sys.argv[2] == "quit-waiting":
         run_quit_waiting_regression(os.path.abspath(sys.argv[1]))
         print("tui quit with waiting messages regression: PASS")
@@ -16511,7 +16333,7 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(
             "usage: test_tui_keyboard_input.py <masc_tui.exe> "
-            "[cli-base-path|planning-review|repositories|project-changes|config|"
+            "[chat-atomic|cli-base-path|planning-review|repositories|project-changes|config|"
             "chat-clarity|mermaid-chat|changes-newline|schedule-delivery|"
             "schedule-source-status|board-compose-footer|runtime|resources|"
             "keepers-lanes|board-json|code-memo|memory-journal|"

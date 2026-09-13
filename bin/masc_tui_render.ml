@@ -13029,10 +13029,18 @@ let context_inspector_detail_viewport state =
 let context_split_window ~height ~offset lines =
   lines |> List.filteri (fun index _ -> index >= offset && index < offset + height)
 
+(* The context inspector, through the overlay contract. The frame counts its
+   rows and fills under a short body, which this pane did by hand with a loop
+   of empty lines.
+
+   The title opened on " Context" where every other overlay opens on MASC and
+   its name, and spelled the tabs "1:stack 2:request 3:proof" -- key and label
+   in the grammar of a footer hint, with the current one told apart only by
+   colour. The tabs are the shared strip now, and the digits are the footer's
+   to name. The footer's "[/] turn" had no colon, so the fitter read it as a
+   note rather than a key. *)
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 8192 in
   let keeper =
     Option.value ~default:"no Keeper" state.context_inspector_keeper
     |> Keeper_chat.terminal_safe_text
@@ -13041,74 +13049,75 @@ let render_context_inspector state =
     if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
     else ""
   in
-  let tab_label tab number label =
-    if state.context_inspector_tab = tab then
-      Ansi.bold ^ (Theme.info ()) ^ number ^ ":" ^ label ^ Ansi.reset
-    else Ansi.dim ^ number ^ ":" ^ label ^ Ansi.reset
+  let tabs =
+    tab_strip
+      [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
+      ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
+      ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)
+      ]
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
   let search_marker = search_marker_styled state in
-  framed_top buf cols;
-  framed_line buf cols
-    (Printf.sprintf "%s Context  %s%s  %s  %s"
-       (screen_title "") keeper refreshing
-       (tab_label Masc_tui_context_inspector.Composition "1" "stack")
-       (tab_label Masc_tui_context_inspector.Exact_input "2" "request")
-       ^ "  "
-       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "proof")
-       ^ search_marker);
-  framed_divider buf cols;
-  let content_height = framed_content_height ~rows in
-  let drawn =
-    match context_inspector_content_lines ~cols state with
-    | Plain (lines, selected) ->
-        let scroll =
-          Masc_tui_scroll.normalize ~count:(List.length lines)
-            ~height:content_height state.context_inspector_scroll
-        in
-        (* The cursor names a row, the window follows it: on the single-column
-           shapes nothing lives under the row, so the smallest move that keeps
-           it drawn is the right one. *)
-        let scroll =
-          match selected with
-          | None -> scroll
-          | Some cursor ->
-              Masc_tui_scroll.normalize ~count:(List.length lines)
-                ~height:content_height
-                (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
-        in
-        let window =
-          lines
-          |> List.filteri (fun index _ ->
-               index >= scroll && index < scroll + content_height)
-        in
-        List.iter (framed_line buf cols) window;
-        List.length window
-    | Split { common; left; right } ->
-        (* The summary clips to the frame rather than overflowing it: on a
-           short terminal the split gives way before the pane draws a row
-           past its last. *)
-        let common_rows =
-          common |> List.filteri (fun index _ -> index < content_height)
-        in
-        List.iter (framed_line buf cols) common_rows;
-        let split_height =
-          context_split_pane_height ~content_height
-            ~common_len:(List.length common)
-        in
-        let split_drawn =
-          if split_height <= 0 then 0
-          else begin
+  let hints =
+    match state.context_inspector_exact with
+    | Some _ -> "j/k:scroll  Esc:list"
+    | None -> (
+        match
+          state.context_inspector_tab, cols >= keeper_split_threshold_cols
+        with
+        | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
+            "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
+        | _ ->
+            "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
+  in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"context-inspector"
+    ~frame:Chrome_overlay
+    ~title:
+      (screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs
+       ^ search_marker)
+    ~hints
+    ~body:(fun ~budget:content_height c ->
+      match context_inspector_content_lines ~cols state with
+      | Plain (lines, selected) ->
+          let scroll =
+            Masc_tui_scroll.normalize ~count:(List.length lines)
+              ~height:content_height state.context_inspector_scroll
+          in
+          (* The cursor names a row, the window follows it: on the single-column
+             shapes nothing lives under the row, so the smallest move that keeps
+             it drawn is the right one. *)
+          let scroll =
+            match selected with
+            | None -> scroll
+            | Some cursor ->
+                Masc_tui_scroll.normalize ~count:(List.length lines)
+                  ~height:content_height
+                  (Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll)
+          in
+          List.iteri
+            (fun index line ->
+              if index >= scroll && index < scroll + content_height then c.push line)
+            lines
+      | Split { common; left; right } ->
+          (* The summary clips to the frame rather than overflowing it: on a
+             short terminal the split gives way before the pane draws a row
+             past its last. *)
+          List.iteri
+            (fun index line -> if index < content_height then c.push line)
+            common;
+          let split_height =
+            context_split_pane_height ~content_height
+              ~common_len:(List.length common)
+          in
+          if split_height > 0 then begin
             (* Both columns are header :: rows, so the heads are total. The
                header row stays pinned above the windows -- it carries the
                focus caret, and a caret that scrolls away stops saying which
                pane hears j/k. *)
-            let pinned =
-              context_split_lines ~cols ~left_width:(context_split_width cols)
-                ~left:[ List.hd left ] ~right:[ List.hd right ]
-            in
-            List.iter (framed_line buf cols) pinned;
+            context_split_lines ~cols ~left_width:(context_split_width cols)
+              ~left:[ List.hd left ] ~right:[ List.hd right ]
+            |> List.iter c.push;
             let body_height = split_height - 1 in
             let items = List.length left - 1 in
             let cursor =
@@ -13123,40 +13132,15 @@ let render_context_inspector state =
               Masc_tui_scroll.normalize ~count:(List.length right - 1)
                 ~height:body_height state.context_inspector_detail_scroll
             in
-            let window =
-              context_split_lines ~cols ~left_width:(context_split_width cols)
-                ~left:
-                  (context_split_window ~height:body_height ~offset:left_offset
-                     (List.tl left))
-                ~right:
-                  (context_split_window ~height:body_height ~offset:right_offset
-                     (List.tl right))
-            in
-            List.iter (framed_line buf cols) window;
-            split_height
-          end
-        in
-        List.length common_rows + split_drawn
-  in
-  for _ = 1 to max 0 (content_height - drawn) do
-    framed_line buf cols ""
-  done;
-  framed_bottom buf cols;
-  let hints =
-    match state.context_inspector_exact with
-    | Some _ -> "j/k:scroll  Esc:list"
-    | None -> (
-        match
-          state.context_inspector_tab, cols >= keeper_split_threshold_cols
-        with
-        | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
-            "1/2/3 or Tab:switch  [/] turn  /:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
-        | _ ->
-            "1/2/3 or Tab:switch  [/] turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
-  in
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
-  finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows
-    ~cols buf
+            context_split_lines ~cols ~left_width:(context_split_width cols)
+              ~left:
+                (context_split_window ~height:body_height ~offset:left_offset
+                   (List.tl left))
+              ~right:
+                (context_split_window ~height:body_height ~offset:right_offset
+                   (List.tl right))
+            |> List.iter c.push
+          end)
 
 (* What the help overlay can show right now: the rows its sheet folds to at
    this width, and the height it draws them in. The key handler bounds its

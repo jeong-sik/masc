@@ -2587,7 +2587,18 @@ let test_the_overlays_are_the_shared_contract () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
-       ~identifiers:[ "framed_chrome_rows" ])
+       ~identifiers:[ "framed_chrome_rows" ]);
+  (* The context inspector is the contract's as well, and its tabs are the
+     shared strip rather than footer-grammar labels told apart by colour. *)
+  let inspector callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_context_inspector" ~callee
+  in
+  check int "the context inspector draws through the contract" 1
+    (inspector "surface_chrome");
+  check int "the context inspector finishes no frame by hand" 0
+    (inspector "finish_surface");
+  check int "its tabs are the shared strip" 1 (inspector "tab_strip")
 ;;
 
 (* The runtime.toml pane's frame is the shared contract's too. It subtracted

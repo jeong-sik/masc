@@ -1076,6 +1076,55 @@ base_url = "https://voice.fixture.invalid/v1"
                 self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
 
 
+    def test_voice_verify_uses_explicit_workspace_for_config_and_command(self):
+        with self.workspace() as (ambient, ambient_runtime), self.workspace() as (selected, selected_runtime):
+            calls = selected / 'probe-calls.json'
+            command = selected / 'fake-whisper'
+            command.write_text(
+                '#!/usr/bin/env python3\nimport json, pathlib, sys\n'
+                f'pathlib.Path({str(calls)!r}).write_text(json.dumps(sys.argv[1:]))\n'
+                'print("selected workspace transcript")\n'
+            )
+            command.chmod(0o755)
+            endpoint = {'id': 'selected-stt', 'kind': 'whisper_cli',
+                        'model': '/selected/model.bin', 'command': str(command)}
+            ambient_runtime.write_text(ambient_runtime.read_text() + self.REMOTE_STT)
+            selected_runtime.write_text(selected_runtime.read_text() + (
+                '\n[voice.stt]\n[[voice.stt.endpoints]]\n'
+                + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in endpoint.items())
+            ))
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            env['MASC_BASE_PATH'] = str(ambient)
+            audio = selected / 'input.wav'
+            audio.write_bytes(b'fixture audio')
+
+            def probe():
+                return subprocess.run(
+                    [BINARY, 'voice-verify', '--base-path', str(selected), '--audio', str(audio), '--json'],
+                    capture_output=True, text=True, env=env, check=False,
+                )
+
+            def assert_selected(result):
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                attempts = json.loads(result.stdout)['stt']
+                self.assertEqual(attempts[0]['endpoint_id'], 'selected-stt')
+                self.assertEqual(attempts[0]['state'], 'answered')
+                self.assertIn('selected workspace transcript', attempts[0]['detail'])
+                self.assertEqual(json.loads(calls.read_text()),
+                                 ['-m', '/selected/model.bin', '-l', 'auto', '-nt', '-f', str(audio)])
+
+            assert_selected(probe())
+            # An absent TOML voice section falls back inside the same workspace.
+            selected_runtime.write_bytes((ROOT / 'scripts/fixtures/release-evidence/runtime.toml').read_bytes())
+            (selected / '.masc/voice_config.json').write_text(json.dumps({'stt': {'endpoints': [endpoint]}}))
+            assert_selected(probe())
+            calls.unlink()
+            selected_runtime.write_text('not = [valid TOML')
+            rejected = probe()
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse(calls.exists(), 'invalid selected TOML must not probe JSON or ambient workspace')
+
     def test_a_local_model_preserves_the_remote_stt_model(self):
         import tomllib
         with self.workspace(self.REMOTE_STT) as (base, runtime):

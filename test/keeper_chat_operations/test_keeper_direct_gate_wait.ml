@@ -165,7 +165,7 @@ let test_unbound_gate_and_runtime_survive_restart () = with_path (fun path ->
    input: [Integrity_error] is how this store says its own record is broken, and
    an owner that sees it stops trusting the database rather than the request. *)
 let test_refused_binding_reads_as_input_not_corruption () = with_path (fun path ->
-  let binding = Semantic.gate_binding ~approval_ids:["producer-created-approval"]
+  let binding = Semantic.gate_binding ~approval_ids:[obligation.approval_id]
     ~obligations:[obligation] ~runtime_suffix:None |> require in
   with_store path (fun store ->
     let operation = admit store in

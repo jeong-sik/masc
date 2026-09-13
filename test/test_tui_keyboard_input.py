@@ -12381,7 +12381,9 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            b"left/Esc:list",
+            # "Left", capitalised: #35615 gave every key one spelling, and the
+            # detail footer draws "Left/Esc:list" now.
+            b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(
@@ -12460,24 +12462,42 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
-        footer = (
+        # The default Activity pane reserves 56 columns: a 200-column
+        # terminal gives this footer 144 cells. Status yields before hints,
+        # then copy/search yield before pinned exits. A wider frame must still
+        # show those controls; check both states on the actual footer row.
+        footer_head = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
-            b"K:calling Keeper  B:Board evidence  Enter:open  "
-            b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+            b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
+            b"Enter:open"
         )
-        resize_and_wait(
-            process, master_fd, output, rows=30, columns=200,
-            needle=b"MASC Fusion", controls=(FULL_REDRAW,),
-        )
-        # The footer is one row and the resize repaints the list before it, so
-        # the frame that carries the title does not carry the hints. Wait for
-        # the frames to stop and read the screen.
-        drain_until_quiet(process, master_fd, output)
-        footer_frame = bytes(output)
-        if footer not in screen_text(footer_frame):
-            raise AssertionError(
-                f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
+        exits = (b"Esc:back", b"q:quit")
+        secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        for columns, required, omitted in (
+                (200, exits, secondary), (280, exits + secondary, ())):
+            resize_and_wait(
+                process, master_fd, output, rows=30, columns=columns,
+                needle=b"MASC Fusion", controls=(FULL_REDRAW,),
             )
+            # The title and footer can arrive in different frames.
+            drain_until_quiet(process, master_fd, output)
+            drawn_rows = screen_rows(bytes(output))
+            footer_row = screen_row_of(drawn_rows, footer_head)
+            if footer_row < 0:
+                raise AssertionError(
+                    f"Fusion footer at {columns} columns lost navigation: {drawn_rows!r}"
+                )
+            footer = drawn_rows[footer_row]
+            for control in required:
+                if control not in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns omitted {control!r}: {footer!r}"
+                    )
+            for control in omitted:
+                if control in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns retained dropped control {control!r}: {footer!r}"
+                    )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),

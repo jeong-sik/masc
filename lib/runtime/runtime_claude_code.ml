@@ -682,8 +682,9 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
   | "system" | "rate_limit_event" ->
     (* Informational frames before the control response. The admission
-       deadline bounds a client that never answers; a count of them does not
-       change what the client is doing. *)
+       deadline bounds a client that never answers and the wall-clock ceiling
+       one that keeps talking; a count of these frames does not change what
+       the client is doing. *)
     await_initialize
       io
       ~mcp_session

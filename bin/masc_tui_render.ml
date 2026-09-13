@@ -9880,10 +9880,7 @@ let render_runtime (state : state) =
     if shown > content_height then Printf.sprintf "[%d rows, scroll %d]  " shown scroll else ""
   in
   let hints =
-    Printf.sprintf "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
-      scroll_hint
-      (match state.runtime_mode with Runtime_lanes -> "all runtimes" | Runtime_all -> "service lanes")
-    ^ (match state.runtime_mode with Runtime_lanes -> "  e:add failover" | Runtime_all -> "")
+    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->

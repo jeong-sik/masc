@@ -1622,6 +1622,67 @@ let test_stale_chat_interrupt_cannot_pause_successor () =
     (Option.get (Owner.projection owner).meta).paused
 ;;
 
+let test_chat_interrupt_without_successors_does_not_pause () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 2 in
+  let persisted = ref None in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel ()
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun meta -> persisted := Some meta; Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some operation_executor) ~keeper_name:"chat-stop-empty"
+    ~initial_meta:(Some (make_meta "chat-stop-empty")) ()) in
+  let first = operation_id "stop-lone-first" and second = operation_id "stop-lone-second" in
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:first ~source:operation_source ~input:(operation_input "wait")));
+  check bool "first started" true (Chat_operation.Operation_id.equal first (Eio.Stream.take started));
+  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
+  ignore (await_terminal owner first 1_000);
+  check bool "lone interrupt did not pause admission" false
+    (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:second ~source:operation_source ~input:(operation_input "next")));
+  check bool "second starts without run-next" true (Chat_operation.Operation_id.equal second (Eio.Stream.take started))
+;;
+
+let test_submit_operation_resumes_chat_interrupt_pause () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 3 in
+  let persisted = ref None in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel ()
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun meta -> persisted := Some meta; Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some operation_executor) ~keeper_name:"chat-stop-resume"
+    ~initial_meta:(Some (make_meta "chat-stop-resume")) ()) in
+  let first = operation_id "stop-resume-first" and second = operation_id "stop-resume-second"
+  and third = operation_id "stop-resume-third" in
+  List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first; second];
+  check bool "first started" true (Chat_operation.Operation_id.equal first (Eio.Stream.take started));
+  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
+  ignore (await_terminal owner first 1_000);
+  check bool "paused while successor was queued" true
+    (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:third ~source:operation_source ~input:(operation_input "new-input")));
+  check bool "new submission resumed chat interrupt pause" false
+    (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
+  check bool "second proceeds naturally" true (Chat_operation.Operation_id.equal second (Eio.Stream.take started))
+;;
+
 let test_is_operator_interrupt_unwraps_every_shape () =
   let interrupt = Keeper_registry_types.Operator_interrupt in
   let bt = Printexc.get_callstack 0 in
@@ -3302,6 +3363,10 @@ let () =
             test_chat_interrupt_pauses_successors_and_run_next_prioritizes
         ; test_case "stale chat stop cannot pause a successor" `Quick
             test_stale_chat_interrupt_cannot_pause_successor
+        ; test_case "chat stop without successors does not pause admission" `Quick
+            test_chat_interrupt_without_successors_does_not_pause
+        ; test_case "submit operation resumes chat interrupt pause" `Quick
+            test_submit_operation_resumes_chat_interrupt_pause
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick

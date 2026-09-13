@@ -1126,12 +1126,16 @@ let start
              (* Validate before the durable pause. A finishing child cannot admit its
                 successor until this mailbox command settles. Keep a previous,
                 stronger operator latch: run-next may only release its own pause. *)
+             let inventory = Atomic.get t.operation_projection in
              let paused = match (Keeper_owner_reducer.projection state).meta with
                | Some meta when meta.paused -> Ok state
-               | _ -> commit_meta state
-                   (Keeper_owner_reducer.Pause
-                      { reason = Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }
-                      ; updated_at = Time_codec.rfc3339_of_unix (t.now ()) }) in
+               | _ ->
+                 if inventory.queued_count = 0 then Ok state
+                 else
+                   commit_meta state
+                     (Keeper_owner_reducer.Pause
+                        { reason = Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }
+                        ; updated_at = Time_codec.rfc3339_of_unix (t.now ()) }) in
              (match paused with
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
@@ -1215,6 +1219,15 @@ let start
                   in
                   Ok { operation; existing; queued_count = projection.queued_count }))
           in
+          let can_resume = match (Keeper_owner_reducer.projection state).meta with
+            | Some { paused = true; latched_reason = Some (Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }); _ } -> true
+            | _ -> false in
+          let state =
+            if can_resume then
+              match commit_meta state (Keeper_owner_reducer.Resume { updated_at = Time_codec.rfc3339_of_unix (t.now ()) }) with
+              | Ok state -> state
+              | Error (state, _) -> state
+            else state in
           Eio.Promise.resolve resolve response;
           start_child_if_needed state shutdown_operation_id;
           loop state shutdown_operation_id

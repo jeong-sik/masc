@@ -462,7 +462,10 @@ let rec action_fields prefix = function
   | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
 
 let flow_lines view =
-  ["Project context flow (architecture; not an execution receipt)";
+  (match selected_instance view with
+   | None -> ["No selected Add-on action target"]
+   | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
+  @ ["Project context flow (architecture; not an execution receipt)";
    "Project request -> Keeper turn -> tools / code / tests -> retained evidence";
    "Keeper history -> Librarian -> committed memory; tools may commit source-bound memory";
    "Committed memories -> Workspace Curator -> attributed shared proposal";
@@ -483,7 +486,8 @@ let flow_lines view =
          notices @ (if snapshot.instances=[] then ["No Add-on instances in the received snapshot"]
          else List.concat_map (fun instance ->
            let target = name instance in
-           [target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
+           [(if Option.exists (fun selected -> selected.id=instance.id) (selected_instance view)
+             then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
            @ (match Masc.Lane_addon_sources.dependencies instance.binding with
               | Error detail -> ["  Invalid source binding: " ^ detail]
               | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]

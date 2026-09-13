@@ -268,6 +268,12 @@ let context_flow_uses_declared_connections () =
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
     output={rows=[];coverage=[]};complete=None} in
   let view = {UI.initial with presentation=UI.Flow;snapshot=Some snapshot} in
+  check bool "flow exposes the selected action target" true
+    (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
+  let moved = UI.lines ~width:160 {view with instance_cursor=1} in
+  check bool "flow target follows instance selection" true
+    (List.mem "Action target: Project metric · metric-worker" moved
+      && List.mem "> project-metric · Project metric · attached" moved);
   check bool "flow names the actual configured dependency" true
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in

@@ -1206,6 +1206,15 @@ let test_current_image_checkpoint_survives_text_fallback () =
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
     Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
       true (restored.messages = history @ [ canonical_input ] @ suffix);
+    let sidecar = `Assoc ["original_task",`String "image-fallback-task"] in
+    let failed = Driver.For_testing.project_provider_attempt_result
+      ~checkpoint_after:{provider_checkpoint with working_context=Some sidecar}
+      ~replay_prefix_projection:projection (Error (retryable_network_error "checkpoint persistence failed")) in
+    let failed_checkpoint = Driver.For_testing.produced_checkpoint failed |> Option.get in
+    Alcotest.(check bool) "failed producer keeps canonical pixels and exact suffix"
+      true (failed_checkpoint.messages=restored.messages);
+    Alcotest.(check bool) "failed producer keeps its working context"
+      true (failed_checkpoint.working_context=Some sidecar);
     let persisted = ref [] in
     let sink = Driver.For_testing.canonical_checkpoint_sink
         ~replay_prefix_projection:projection
@@ -3073,14 +3082,14 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
         | "small.test_model" ->
           attempt_without_effect
             (Error (context_overflow_error "prompt exceeds context window"))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | "fallback.test_model" ->
           attempt_without_effect
             (Error
                (Agent_core.Error.Api
                   (Agent_core.Retry.RateLimited
                      { retry_after = None; message = "weekly usage limit" })))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "fallback.test_model" ]
   in
@@ -3112,6 +3121,8 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
        the last dispatched fallback"
       "small.test_model"
       terminal.origin_runtime_id;
+    Alcotest.(check string) "checkpoint belongs to earlier terminal-error origin, not last candidate"
+      "small.test_model" (Option.get terminal.checkpoint_after).session_id;
     Alcotest.(check int) "origin attempt index is the first walk index" 0 terminal.origin_attempt;
     Alcotest.(check bool)
       "the reported lane error is the overflow itself"

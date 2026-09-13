@@ -4450,6 +4450,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
   with_exec_fixture ~bind_eio_context:true "cooperative_boundary_result"
     (fun ~config:_ ~meta:_ ~publication_recovery:_ ~ctx_work:_ ->
       let tool_calls = ref 0 in
+      let attempt_agent_ref = ref None in
       let observed_boundary = ref None in
       let sink_stages = ref [] in
       let tool = Agent_core.Tool.create ~name:"boundary_probe"
@@ -4471,7 +4472,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
               else Ok () in
             let config = {config with Runtime_agent.checkpoint_sink =
                 (if with_sink then Some sink else None)} in
-            Runtime_agent.run_blocks ~sw ~net ~config
+            Runtime_agent.run_blocks ~sw ~net ~config ~agent_ref:attempt_agent_ref
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
                 Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
@@ -4483,7 +4484,23 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
         check bool "failed sink never reaches cooperative boundary" true
           (Option.is_none !observed_boundary);
         match result with
-        | Error _ -> ()
+        | Error _ ->
+          let agent = match !attempt_agent_ref with Some agent -> agent | None -> fail "failed producer lost its actual agent" in
+          let sidecar = `Assoc ["original_task",`String "failed-boundary-task"] in
+          let checkpoint = Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt
+            ~session_id:"failed-boundary-session" ~working_context:sidecar (Some agent) |> Option.get in
+          check string "failed producer retains admitted session identity" "failed-boundary-session" checkpoint.session_id;
+          check bool "failed producer retains original working context" true (checkpoint.working_context=Some sidecar);
+          check bool "completed tool result survives failed checkpoint persistence" true
+            (List.exists (fun (message : Agent_core.Types.message) ->
+              List.exists (function Agent_core.Types.ToolResult _ -> true | _ -> false) message.content) checkpoint.messages);
+          check bool "failed spawn cannot reuse a prior attempt's installed agent" true
+            (Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt ~agent_before_attempt:agent
+              ~session_id:"wrong-next-session" (Some agent) = None);
+          let fresh = Agent_core.Agent.clone agent in
+          check bool "newly installed attempt owns its own checkpoint" true
+            (Option.is_some (Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt
+              ~agent_before_attempt:agent ~session_id:"next-owned-session" (Some fresh)))
         | Ok _ -> fail "failed checkpoint sink produced a resumable runtime result")
       else match result with
       | Error error -> fail (Agent_core.Error.to_string error)
@@ -7991,7 +8008,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -8011,6 +8028,9 @@ let test_direct_gate_current_history_resume ?(source_unavailable=false) ?(retent
       let claimed = Masc.Keeper_owner.claim_next_operation owner |> require "claim original" in
       check bool "original claim" true (Option.is_some claimed);
       Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual |> require "manual mode" |> ignore;
+      check bool "non-Gate errors do not require a fabricated producer receipt" false
+        (Gate.suspend ~source:(Error "no checkpoint was produced") ~config ~keeper_name ~operation_id
+          ~session_dir:"unused-with-no-gate" ~session_id:"unused-with-no-gate" ~approval_ids:[] () |> require "no Gate transition");
       let one_shot_request : Masc.Keeper_gate.request =
         {keeper_name; operation="unreplayed_operation"; call_summary=None;
          input=`Assoc ["message", `String "Exact one-shot input"];
@@ -8077,12 +8097,14 @@ let test_direct_gate_current_history_resume ?(source_unavailable=false) ?(retent
           ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
       let source = if native then
         Gate.Returned_official_client {settled_session=(match !native_settlement with Some value -> value | None -> fail "native producer dropped settlement");frame}
-        else if runtime_failure then Gate.Failed_agent_core else Gate.Returned_agent_core original in
+        else if failed_producer || runtime_failure then
+          Gate.Captured_agent_core (Checkpoint.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id original |> require "failed producer immutable capture")
+        else Gate.Returned_agent_core original in
       let unavailable_path = if not source_unavailable then None else
         Some (if native then Masc.Keeper_official_client_session_store.path ~base_path ~keeper_name |> require "native source path"
           else Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id) in
       Option.iter (fun path -> Unix.rename path (path ^ ".held")) unavailable_path;
-      let suspend () = Gate.suspend ~source ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
+      let suspend () = Gate.suspend ~source:(Ok source) ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
       check bool "actual yield parks the same operation" true
         ((if binding_failure then Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path suspend
           else suspend ()) |> require "suspend");
@@ -8102,9 +8124,9 @@ let test_direct_gate_current_history_resume ?(source_unavailable=false) ?(retent
            check bool "runtime suffix retained without checkpoint authority" true
              (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
          | None, Some _ | Some _, None -> fail "lost frozen suffix during Gate binding failure");
-        let original = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
+        let original_operation = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
         check bool "retention failure preserves original input" true
-          (match original with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
+          (match original_operation with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
         check bool "unconfirmed checkpoint is explicit nonterminal state" true
           ((Gate.pending ~base_path ~keeper_name ~operation_id |> require "pending reconciliation")
            = Some Gate.Checkpoint_reconciliation);
@@ -8673,6 +8695,8 @@ let () =
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unprepared Gate recovers frozen runtime suffix after authority repair" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "failed producer captured checkpoint survives unavailable source and original runtime suffix" `Quick
+        (test_direct_gate_current_history_resume ~failed_producer:true ~source_unavailable:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "returned Agent Core checkpoint survives unavailable source store at Gate yield" `Quick
         (test_direct_gate_current_history_resume ~source_unavailable:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "returned native settlement survives unavailable source store at Gate yield" `Quick

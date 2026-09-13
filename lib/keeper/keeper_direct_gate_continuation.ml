@@ -6,9 +6,9 @@ module Snapshot = Keeper_repetition_snapshot
 
 module Native = Keeper_official_client_session_store
 type yield_source =
+  | Captured_agent_core of Keeper_checkpoint_store.exact_checkpoint_snapshot
   | Returned_agent_core of Agent_core.Checkpoint.t
   | Returned_official_client of { settled_session : Native.t; frame : Snapshot.t }
-  | Failed_agent_core
 type authority =
   | Agent_core of {checkpoint:Agent_core.Checkpoint.t; source_reference:Keeper_checkpoint_ref.t}
   | Official_client of Semantic.official_client_checkpoint
@@ -133,19 +133,16 @@ let capture_preparation ~source ~config ~operation_id ~session_dir ~session_id (
     | Returned_official_client {settled_session;frame} ->
       capture_native ~operation_id ~settled_session ~frame
       |> Result.map (fun checkpoint -> Semantic.Prepared_official_client checkpoint, None)
-    | Returned_agent_core _ | Failed_agent_core ->
+    | Captured_agent_core _ | Returned_agent_core _ ->
       let* snapshot = (match source with
+        | Captured_agent_core snapshot -> Ok snapshot
         | Returned_agent_core checkpoint ->
           let* expected_session_id = Keeper_id.Trace_id.of_string session_id in
           Checkpoint.exact_snapshot_of_value ~expected_session_id checkpoint
           |> Result.map_error (fun _ -> "returned Gate checkpoint is invalid")
-        | Failed_agent_core ->
-          (* A failed Agent Core attempt has no returned checkpoint. Capture its
-             owned source once at this yield; reconciliation only uses the
-             immutable pending bytes and never repeats this lookup. *)
-          Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
-          |> Result.map_error (fun _ -> "failed Gate yield checkpoint is unavailable")
         | Returned_official_client _ -> Error "Gate producer source owner changed") in
+      let* () = if Keeper_id.Trace_id.to_string (Checkpoint.exact_snapshot_reference snapshot).trace_id = session_id
+        then Ok () else Error "captured Gate checkpoint belongs to another session" in
       let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
       let* frame = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
       let* () = match Snapshot.active frame with
@@ -185,6 +182,7 @@ let suspend ~source ?runtime_lane ~config ~keeper_name ~operation_id ~session_di
   match approval_ids with
   | [] -> Ok false
   | _ ->
+    let* source = source in
     let* runtime_suffix = match runtime_lane with
       | None -> Ok None
       | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->

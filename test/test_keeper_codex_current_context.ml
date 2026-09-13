@@ -103,18 +103,8 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Error error -> fail (Agent_core.Error.to_string error)
 
 let test_resume_persists_no_per_turn_context () =
-  (* What a resume may write into the vendor thread: nothing. The adapter once
-     injected the current Keeper instructions and the observation frame here,
-     which reads as the fix for a resumed thread being stuck on the
-     instructions it started with -- but thread/inject_items persists what it
-     is given and replays it in every later request, so each turn left another
-     copy of that turn's world state in the thread. That is the loop
-     Keeper_unified_prompt forbids by name (#25193: 943 of 945 user messages in
-     one keeper's checkpoint were byte-identical world-state frames), and with
-     no receipt on the API a retry after a lost turn/start writes the same
-     items twice. The instructions gap is real and stays open; it needs the
-     digest-and-restart shape the session store already uses for the tool
-     surface, not a per-turn write. *)
+  (* Current instructions and observation frames replace configuration; only
+     actual initial conversation rows are injected into persistent history. *)
   with_fixture @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
@@ -134,38 +124,26 @@ let test_resume_persists_no_per_turn_context () =
   check string "autonomous cue stays user input"
     "Continue from current World State."
     (params "turn/start" resumed |> member "input" |> items |> List.hd |> member "text" |> text);
-  (* The frame of the second turn must not be anywhere in the thread. The
-     methods check above says no item was written; this says the bytes did not
-     arrive by another route on the same turn. *)
-  let resumed_text = String.concat "\n" (List.map Yojson.Safe.to_string resumed) in
-  let carries needle haystack =
-    let n = String.length needle and h = String.length haystack in
-    let rec scan index =
-      index + n <= h
-      && (String.equal (String.sub haystack index n) needle || scan (index + 1))
-    in
-    scan 0
-  in
-  check bool "the turn's world state is not persisted anywhere in the resume" false
-    (carries "task-003 todo" resumed_text);
-  (* A fresh thread is where developer items belong: its own history and the
-     context it starts from. *)
+  let instructions rows method_ = params method_ rows |> member "developerInstructions" |> text in
+  let resumed_instructions = instructions resumed "thread/resume" in
+  check bool "resume carries current instructions" true
+    (String.starts_with ~prefix:"Keeper revision 2:" resumed_instructions);
+  check bool "resume carries current world frame" true
+    (String_util.contains_substring resumed_instructions "task-003 todo");
+  check bool "resume does not retain old world frame in configuration" false
+    (String_util.contains_substring resumed_instructions "task-001 done");
   let initial = params "thread/inject_items" first_requests |> member "items" |> items in
-  check (list string) "fresh session receives seed history and current context"
-    ["user";"developer"] (List.map (fun item -> member "role" item |> text) initial);
-  let content item = member "content" item |> items |> List.hd |> member "text" |> text in
-  let started = content (List.nth initial 1) |> Yojson.Safe.from_string in
-  check string "the starting context is the frame of the turn that opened the thread"
-    "World State: task-001 done; goal awaiting confirmation."
-    (started |> member "message" |> member "content_blocks" |> items |> List.hd |> member "text" |> text);
-  check string "a new thread carries the instructions of the turn that opened it"
-    (String.concat "\n\n" ("Keeper revision 1: publish the first artifact." ::
-       Keeper_codex_runtime.For_testing.native_posture_note Runtime_native_tools.codex_default))
-    (params "thread/start" first_requests |> member "developerInstructions" |> text);
+  check (list string) "persistent seed contains conversation only"
+    ["user"] (List.map (fun item -> member "role" item |> text) initial);
+  let started_instructions = instructions first_requests "thread/start" in
+  check bool "start carries original instructions" true
+    (String.starts_with ~prefix:"Keeper revision 1:" started_instructions);
+  check bool "start context is configuration" true
+    (String_util.contains_substring started_instructions "task-001 done");
   (match List.rev !reports with
    | [Keeper_official_client_host.Whole_input_transmitted _;
-      Keeper_official_client_host.Held_by_client_session] -> ()
-   | _ -> fail "fresh context does not imply transmission of the client-owned history")
+      Keeper_official_client_host.Whole_input_transmitted _] -> ()
+   | _ -> fail "both turns transmit current canonical context; vendor tool history stays external")
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->

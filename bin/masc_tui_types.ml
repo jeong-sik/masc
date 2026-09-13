@@ -2391,7 +2391,6 @@ let runtime_listing_chrome ~error ~action_error ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
-let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -6846,17 +6845,29 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
             (match state.system_logs with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
-        ; sc_overflow_takes_row = false
+        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        listing ~error:state.verification_error
-          (match state.verification with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.vs_requests)
+        (* Under the list sit the armed approval and the server's last
+           refusal, one row each while they stand, and the scroll row while the
+           queue overflows. They are frame rows too; a count without them puts
+           the footer past the frame's last row. *)
+        Some
+          { sc_count =
+              (match state.verification with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.vs_requests)
+          ; sc_chrome =
+              listing_chrome ~error:state.verification_error
+              + (if Option.is_some state.verification_verdict_armed then 1 else 0)
+              + (if Option.is_some state.verification_verdict_error then 1 else 0)
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
@@ -6896,7 +6907,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = false
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()

@@ -2045,6 +2045,10 @@ def wheel_scrolls_and_clicks_do_not(
     )
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The header is drawn before the asynchronous roster; a wheel report on a
+    # list that has not arrived moves nothing. Start from alpha's row, which
+    # presses nothing when alpha is already selected.
+    select_keeper_row(process, master_fd, output, b"alpha")
     # An SGR wheel report moves the cursor exactly as the arrow key does.
     send_and_wait(
         process,

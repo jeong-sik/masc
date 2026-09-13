@@ -1807,7 +1807,9 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
      -- and for say only the second one can catch a wrong name, because say
-     speaks in the system voice rather than failing on one it does not have. *)
+     speaks in another voice rather than failing on one it does not have. The
+     probe looks the name up in say's own list and refuses one that is not
+     there. *)
   let tts =
     match agent with
     | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()

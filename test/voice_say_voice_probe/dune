@@ -1,0 +1,8 @@
+; What masc voice-verify says about a keeper mapped to a say voice this
+; machine does not have. say is a script on PATH, so the check needs neither
+; macOS nor a speaker.
+
+(test
+ (name test_voice_say_voice_probe)
+ (libraries alcotest eio eio_main unix masc masc.config_dir_resolver
+  masc.masc_process masc.masc_eio_context))

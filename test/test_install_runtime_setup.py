@@ -1015,7 +1015,7 @@ base_url = "https://voice.fixture.invalid/v1"
                     attempt = attempts[0]
                     self.assertEqual(attempt['state'], 'skipped')
                     self.assertEqual(attempt['detail'],
-                                     'this verifier does not probe the MCP synthesis transport'
+                                     'reached by an MCP tool call, which this probe does not make'
                                      if enabled else 'disabled in the configuration')
 
     def test_speaking_keeps_remote_defaults_and_scopes_the_local_voice(self):

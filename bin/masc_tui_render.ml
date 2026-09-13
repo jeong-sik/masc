@@ -9780,11 +9780,10 @@ let runtime_detail_lines state target ~width =
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
             @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
                 (Terminal_text.short_timestamp row.rpp_checked_at)
-            @ (match row.rpp_reachable with
-               | None -> []
-               | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "Reachable"
-                     (runtime_bool value))
+            (* No Reachable row: the decoder admits a probe only when its
+               reachable flag agrees with its status, so the row could only
+               repeat the status two rows above it -- "reachable" then
+               "yes". *)
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->

@@ -11483,7 +11483,8 @@ def runtime_surface_interaction(
                 # under TZ=UTC so the expected reading is the same on every
                 # machine.
                 b"Checked at: 2026-08-24 10:20:00",
-                b"Reachable: yes",
+                # No "Reachable: yes" row: the decoder keeps reachable and
+                # status in agreement, so the row said the status twice.
                 b"HTTP status: 200",
                 b"Latency: 18ms",
             ):

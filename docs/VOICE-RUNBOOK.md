@@ -718,6 +718,31 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
+(`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
+terminal and gives it back on exit and around Ctrl-Z, the same way it takes
+Ctrl-V and Ctrl-O.
+
+### One sentence into the chat, measured
+
+`masc_tui` on a workspace whose only STT endpoint is `whisper_cli`, in a
+120×40 pty, with `rec` and `play` replaced by scripts. The `rec` stand-in wrote
+0.8s of room noise, then a 2.0s `say -v Yuna` sentence at real-time rate, then
+room noise until stopped, and `play` only recorded its arguments. Keys: `2`,
+Enter on `imp`, `m`, `Ctrl-Y`.
+
+| What happened | When |
+|---|---|
+| `play -qn synth 0.15 sine 880` | as `Ctrl-Y` landed |
+| `rec` started | same second |
+| the prompt's meter | `-63 dB` on room noise, `-26 dB` on the sentence, `^Y send · Esc discard` beside it |
+| `rec` stopped | after 5.1–5.2s of audio: the sentence ended at 2.8s and the trailing-silence wait is 2.0s |
+| `play -qn synth 0.15 sine 440` | as it stopped |
+| `> 마이크로 보낸 새 질문입니다.` in the draft, and `voice: 마이크로 보낸 새 질문입니다.` in the footer | 19.0s, 10.0s and 10.0s after `Ctrl-Y`, three runs |
+
+The sentence came back as spoken. It stays a draft until Enter, unless
+`send_on_stop` is on.
+
 ### Speaking without touching the keyboard
 
 `Ctrl-Y` records one sentence and appends the transcript to the draft. The

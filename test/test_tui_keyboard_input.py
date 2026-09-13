@@ -2609,6 +2609,42 @@ def cli_base_path_overrides_environment_interaction(
     os.write(master_fd, b"q")
 
 
+def ctrl_y_reaches_the_tui_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Ctrl-Y is the speak key, and it has to arrive as a byte.
+
+    On BSD terminals the tty takes it as VDSUSP: read with ISIG on -- which
+    raw mode keeps -- it sends SIGTSTP instead of being delivered. On macOS 26
+    one press ended the TUI with exit 2 on Unix_error(EAGAIN, "read"). Linux
+    has no VDSUSP, so there the check on the key is skipped and the press is
+    the whole test.
+    """
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    if hasattr(termios, "VDSUSP"):
+        cc = termios.tcgetattr(slave_fd)[6][termios.VDSUSP]
+        dsusp = cc if isinstance(cc, int) else cc[0]
+        if dsusp != os.fpathconf(slave_fd, "PC_VDISABLE"):
+            raise AssertionError("raw mode did not reclaim Ctrl-Y from VDSUSP")
+    # Overview has no conversation, so the key's answer there is the link
+    # preview's notice in the events pane -- a sentence the TUI can only draw
+    # if it read the byte. The pane cuts it at 100 columns.
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x19",
+        b"No web links found in this conversa",
+    )
+    if process.poll() is not None:
+        raise AssertionError(f"Ctrl-Y ended the TUI with exit {process.returncode}")
+    os.write(master_fd, b"q")
+
+
 def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interaction:
     draft = b"beta-periodic-draft-29453"
     chat_path = "/api/v1/keepers/chat/stream"
@@ -13377,6 +13413,15 @@ def run_cli_base_path_regression(executable: str) -> None:
     )
 
 
+def run_ctrl_y_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-Y reaches the TUI instead of the tty's delayed suspend",
+        interact=ctrl_y_reaches_the_tui_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+
+
 def run_planning_review_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -15549,6 +15594,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "ctrl-y":
+        run_ctrl_y_regression(os.path.abspath(sys.argv[1]))
+        print("tui Ctrl-Y regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "planning-review":
         run_planning_review_regression(os.path.abspath(sys.argv[1]))

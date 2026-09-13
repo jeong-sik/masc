@@ -1944,17 +1944,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"apply_raw_mode"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
-  check int "raw mode reclaims the key the record cannot carry" 1
+  check int "raw mode reclaims the keys the record cannot carry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_literal_next");
-  check int "raw mode reclaims Ctrl-O from VDISCARD" 1
+       ~callee:"Masc_tui_termios.reclaim");
+  check int "the session reads the keys before it reclaims them" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_discard_output");
-  check int "terminal restoration returns the original discard key" 1
+       ~binding_name:"main"
+       ~callee:"Masc_tui_termios.snapshot");
+  check int "terminal restoration returns the original keys" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.set_discard_output");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.restore");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"restore_terminal_outcome" ~callee:"Frame_presenter.cleanup");

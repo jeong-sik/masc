@@ -1655,7 +1655,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 22 then begin
       (* Ctrl-V: the clipboard's image, staged for the next message. The key
-         reaches here only because [Masc_tui_termios.disable_literal_next]
+         reaches here only because [Masc_tui_termios.reclaim]
          turned off VLNEXT -- with the terminal's default the tty layer eats
          this byte and passes the next one through raw, so the composer would
          see the letter after Ctrl-V and never Ctrl-V itself. *)
@@ -13830,12 +13830,11 @@ let bracketed_paste_disable = "\x1b[?2004l"
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
    filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
-   among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
-   that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
-   key. VDISCARD similarly consumes Ctrl-O on BSD terminals. Reclaiming both
-   here keeps the three places that take raw mode
-   back (session start, the return from Ctrl-Z, the return from $EDITOR) from
-   taking it back without the key.
+   among them, so every call puts back the keys the tty layer takes for itself:
+   Ctrl-V (paste), and on BSD terminals Ctrl-O (Browser screenshot) and Ctrl-Y
+   (speak) -- see [Masc_tui_termios.reclaimed_key]. Reclaiming them here keeps
+   the three places that take raw mode back (session start, the return from
+   Ctrl-Z, the return from $EDITOR) from taking it back without the keys.
 
    The result is not checked because there is nothing left for it to report:
    the [tcsetattr] on the line above just succeeded on this descriptor, so it
@@ -13843,10 +13842,9 @@ let bracketed_paste_disable = "\x1b[?2004l"
    calls, and that ends the session either way. *)
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
-  (* See above: a refusal is a hangup, which ends the session either way. *)
-  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool);
-  (* See masc_tui_termios_stubs.c: unsupported VDISCARD is a no-op; tty hangup follows the contract above. *)
-  ignore (Masc_tui_termios.disable_discard_output Unix.stdin : bool)
+  (* A key this platform lacks is skipped; a refusal is a hangup, which ends
+     the session either way. *)
+  Masc_tui_termios.reclaim Unix.stdin
 ;;
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
@@ -13957,14 +13955,13 @@ let main
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
-  (* Read beside [old_term] because the record cannot carry it. The literal-next
-     character is turned off for as long as this program owns the terminal
+  (* Read beside [old_term] because the record cannot carry them. The reclaimed
+     keys are turned off for as long as this program owns the terminal
      ([apply_raw_mode]) and handed back whenever the terminal is -- at exit and
      around Ctrl-Z. Restoring [old_term] alone leaves the shell without the
-     key, which the PTY harness catches as a terminal this program did not put
+     keys, which the PTY harness catches as a terminal this program did not put
      back the way it found it. *)
-  let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
-  let old_discard_output = Masc_tui_termios.discard_output Unix.stdin in
+  let old_reclaimed_keys = Masc_tui_termios.snapshot Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -14020,16 +14017,9 @@ let main
         Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
     in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
-       terminal back, and this character is the part it cannot reach.
-       [-1] means the descriptor was never a terminal, so there is nothing to
-       return. *)
-    if old_literal_next >= 0
-    then
-      (* See the guard above: a refusal here is the terminal already gone. *)
-      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
-    if old_discard_output >= 0 then
-      (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+       terminal back, and these characters are the part it cannot reach. A
+       refusal here is the terminal already gone. *)
+    Masc_tui_termios.restore Unix.stdin old_reclaimed_keys;
     outcome
   in
   let restore_terminal () =

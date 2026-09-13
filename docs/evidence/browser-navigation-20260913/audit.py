@@ -4,9 +4,10 @@ import hashlib
 import json
 
 base = Path(__file__).resolve().parent
-for directory in base.iterdir():
-    if not directory.is_dir():
-        continue
+for name in ['source-error-early-terminal', 'first-complete-too-early',
+             'commit-then-document-end', 'final-extension-dispatch',
+             'cancel-immediate-read-failure', 'cancel-after-observed-commit']:
+    directory = base / name
     proof = json.loads((directory / 'proof.json').read_text())
     assert hashlib.sha256((directory / 'probe.py').read_bytes()).hexdigest() == proof['probe_sha256']
 
@@ -53,3 +54,37 @@ for index, case in enumerate(cases):
         assert any(event['type'] == 'onDOMContentLoaded' and event['details']['documentId'] == committed[-1]['documentId'] for event in case['events'])
     previous = observed
 print('PASS: pinned bytes, 5 follow/read joins, 4 interactive documents, retained read failure, 5 cleanup stages')
+
+partial = json.loads((base / 'cancel-immediate-read-failure/proof.json').read_text())
+assert partial['failure'] is not None
+assert all(item['ok'] for item in partial['cleanup'])
+negative = json.loads((base / 'cancel-after-observed-commit/proof.json').read_text())
+assert negative['failure'] is None
+assert negative['source_commit'] == proof['source_commit']
+assert negative['background_sha256'] == proof['background_sha256']
+assert len(negative['cleanup']) == 5 and all(item['ok'] for item in negative['cleanup'])
+negative_events = negative['events_before_resource_release']
+negative_cases = [event for event in negative_events if event['kind'] == 'case']
+assert [case['name'] for case in negative_cases] == ['closed-tab', 'read-deadline']
+assert [case['rejected']['error'] for case in negative_cases] == ['navigation_tab_closed', 'browser_command_cancelled']
+for case in negative_cases:
+    assert case['follow']['ok'] and not case['rejected']['ok']
+    assert not any(event['type'] == 'onCommitted' for event in case['nativeEventsAtReadSettlement'])
+late = next(event for event in negative_events if event['kind'] == 'late-commit')
+fresh = next(event for event in negative_events if event['kind'] == 'fresh-read')
+assert late['old_read_reply_count'] == 1
+assert late['committed']['documentId'] != negative_cases[1]['sourceFrameBeforeFollow']['documentId']
+assert fresh['finalFrame']['documentId'] == late['committed']['documentId']
+assert fresh['old_read_reply_count'] == 1 and fresh['answer']['ok']
+assert late['committed']['url'] == fresh['answer']['data']['url']
+assert any(node['tag'] == 'h1' and node['text'] == 'Observed /pending' for node in fresh['answer']['data']['nodes'])
+assert sum(event['kind'] == 'reply' and event['verb'] == 'page.interact' for event in negative_events) == 2
+print('PASS: cancelled reads stay settled; fresh observation follows externally verified commit; prior failure retained')
+
+ci = base / 'native-host-ci'
+provenance = json.loads((ci / 'provenance.json').read_text())
+assert (ci / 'SOURCE_COMMIT').read_text().strip() == provenance['source_commit'] == 'c082d495b1edc03588142b310177712718c36b49'
+assert provenance['run_id'] == 34732183649
+assert 'Ran 15 tests' in (ci / 'native-host-tests.txt').read_text()
+assert (ci / 'native-host-tests.txt').read_text().strip().endswith('OK')
+print('PASS: retained native host CI identity and 15-test result; binary hashes verified at artifact download')

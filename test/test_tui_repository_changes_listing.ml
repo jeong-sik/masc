@@ -83,7 +83,7 @@ let keeper name : Tui_decode.keeper =
   { k_origin = Tui_decode.Persisted_keeper; k_name = name; k_trace_id = name
   ; k_paused = false; k_current_task_id = None; k_total_turns = 0
   ; k_total_tokens = 0; k_total_cost_usd = 0.; k_last_turn_ts = ""
-  ; k_last_proactive_outcome = "never"
+  ; k_last_proactive_outcome = None
   ; k_created_at = "2026-09-13T00:00:00Z"; k_updated_at = "2026-09-13T00:00:00Z"
   }
 

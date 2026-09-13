@@ -107,7 +107,8 @@ let capture ~current_task ~config ~keeper ~turn_ref ~args =
         | Some goal_id, Some _ when List.mem goal_id linked_goals -> Ok [goal_id]
         | Some _, Some _ -> Error (Invalid_context "selected Goal is not linked to the selected Task") in
       let* goals = if goal_ids=[] then Ok [] else
-        let* current = source (Goal_store.list_goals_result config ()) in
+        let* current = source (Result.map_error Goal_store.unavailable_to_string
+          (Goal_store.list_goals_result config ())) in
         List.sort_uniq String.compare goal_ids |> decode_list (fun goal_id ->
           match List.find_opt (fun (goal : Goal_store.goal) -> goal.id=goal_id) current with
           | Some goal -> Ok {id=goal.id; criterion=Goal_store.criterion_of_goal goal}

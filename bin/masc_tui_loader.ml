@@ -580,14 +580,28 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   decode_list "comments" decode_board_comment json_list
 
+(* The kind beside the name is a word, not the wire token: the row read
+   "Operator Proof (human_operator)" and "keeper-701 (automated_actor)". The
+   token is parsed through the schedule contract, so a kind this build does
+   not know fails the read the way every other unknown wire value here does
+   rather than reaching the screen as spelled. *)
+let schedule_actor_kind_word = function
+  | Schedule_contract_values.Human_operator -> "human"
+  | Schedule_contract_values.Automated_actor -> "automated"
+  | Schedule_contract_values.System -> "system"
+
 let decode_schedule_actor json field =
   match Yojson.Safe.Util.member field json with
   | `Assoc _ as actor ->
       let* id = required_string_field actor "id" in
       let* kind = required_string_field actor "kind" in
+      let* kind =
+        Schedule_contract_values.actor_kind_of_string kind
+        |> Result.map_error Schedule_contract_values.decode_error_to_string
+      in
       let* display_name = optional_string_field actor "display_name" in
       let name = Option.value ~default:id display_name in
-      Ok (Printf.sprintf "%s (%s)" name kind)
+      Ok (Printf.sprintf "%s (%s)" name (schedule_actor_kind_word kind))
   | value ->
       Error
         (Printf.sprintf "schedule %s must be an object: %s" field
@@ -670,7 +684,15 @@ let decode_schedule_row json =
   let* sch_payload_target = optional_string_field json "payload_target" in
   let* sch_payload_summary = optional_string_field json "payload_summary" in
   let* sch_last_wake_status =
-    optional_nested_string_field json "last_wake" "status"
+    (* The server writes this from [wake_status_to_string], so a word the
+       contract does not list is a wire error, not a fourth status. *)
+    let* word = optional_nested_string_field json "last_wake" "status" in
+    match word with
+    | None -> Ok None
+    | Some word ->
+        Schedule_contract_values.wake_status_of_string word
+        |> Result.map_error Schedule_contract_values.decode_error_to_string
+        |> Result.map Option.some
   in
   let* sch_last_wake_started_at_iso =
     optional_nested_string_field json "last_wake" "started_at_iso"
@@ -862,7 +884,11 @@ let load_schedules ~(host : string) ~(port : int) :
   | Ok json -> decode_schedule_snapshot json
 
 let decode_schedule_wake json =
-  let* swk_status = required_string_field json "status" in
+  let* swk_status =
+    let* word = required_string_field json "status" in
+    Schedule_contract_values.wake_status_of_string word
+    |> Result.map_error Schedule_contract_values.decode_error_to_string
+  in
   let* swk_started_at_iso = optional_string_field json "started_at_iso" in
   let* swk_finished_at_iso = optional_string_field json "finished_at_iso" in
   let* swk_error = optional_string_field json "error" in

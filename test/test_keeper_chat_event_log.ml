@@ -54,8 +54,8 @@ let protocol_error_sparse : E.stream_protocol_error =
 let all_events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
   ; E.Batch_bound {
-      operation_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-member" with Ok id -> id | Error detail -> fail detail);
-      execution_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> fail detail) }
+      operation_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-member" with Ok id -> id | Error detail -> Alcotest.fail detail);
+      execution_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> Alcotest.fail detail) }
   ; E.Text_message_start { message_id = "msg-1"; role = E.User }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
   ; E.Text_delta "hello"

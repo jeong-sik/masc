@@ -27,6 +27,18 @@ let test_goals_keep_the_share_and_the_phases () =
   Alcotest.(check bool) "a phase counter" true (contains "Exec: 1" row);
   Alcotest.(check bool) "no sentence for the count" false (contains "no goals" row)
 
+(* A phase with no goal in it is not counted: the list under the row names
+   every goal's phase, and five counters with single digits are 92 cells,
+   which beside the roster pane cut the Dropped count off the row. *)
+let test_an_empty_phase_is_not_counted () =
+  let row = plain (Masc_tui_render_prim.planning_rollup_row ~cols:120 (rollup ~active:1 ~done_:1)) in
+  List.iter
+    (fun empty ->
+      Alcotest.(check bool) (empty ^ " is not on the row") false (contains empty row))
+    [ "Ver: 0"; "Conf: 0"; "Drop: 0" ];
+  Alcotest.(check bool) "the phases with goals stay" true
+    (contains "Exec: 1" row && contains "Done: 1" row)
+
 (* The Goal counters sat over the Backlog row in their own marks: a filled
    circle for Executing over a row where the filled circle is done. A stage
    both rows have now wears one mark in both. *)
@@ -75,6 +87,8 @@ let () =
             test_no_goals_is_the_count_alone
         ; Alcotest.test_case "goals keep the share and the phases" `Quick
             test_goals_keep_the_share_and_the_phases
+        ; Alcotest.test_case "an empty phase is not counted" `Quick
+            test_an_empty_phase_is_not_counted
         ; Alcotest.test_case "one mark means one stage across the two rows" `Quick
             test_one_mark_means_one_stage_across_the_two_rows
         ] )

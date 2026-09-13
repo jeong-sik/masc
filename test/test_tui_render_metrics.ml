@@ -17,7 +17,7 @@ let make_keeper ?(paused = false) name : Decode.keeper =
   ; k_total_tokens = 5000
   ; k_total_cost_usd = 0.05
   ; k_last_turn_ts = "2026-09-05T12:00:00Z"
-  ; k_last_proactive_outcome = "success"
+  ; k_last_proactive_outcome = None
   ; k_created_at = "2026-09-01T00:00:00Z"
   ; k_updated_at = "2026-09-05T12:00:00Z"
   }

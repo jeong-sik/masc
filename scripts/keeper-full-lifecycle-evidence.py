@@ -268,6 +268,20 @@ def print_failure_summary(output_dir: pathlib.Path, results: list[dict]) -> None
             print(line, file=sys.stderr)
 
 
+def run_logged_command(command: list[str], repo: pathlib.Path, log_path: pathlib.Path) -> int:
+    """Persist original bytes while running; raw captures stay out of public progress."""
+    with log_path.open("wb") as log:
+        try:
+            completed = subprocess.run(
+                command, cwd=repo, stdout=log, stderr=subprocess.STDOUT, check=False
+            )
+            return completed.returncode
+        except OSError as error:
+            output = f"could not execute {command[0]}: {error}\n"
+            log.write(output.encode("utf-8"))
+            return 127
+
+
 def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path, build_source_sha: str | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     sha = build_source_sha if build_source_sha is not None else source_sha(repo)
@@ -284,22 +298,18 @@ def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path, build_source_sha: s
             ".",
             *scenario["targets"],
         ]
+        print(
+            f"keeper-full-lifecycle-evidence: starting {scenario['id']} "
+            f"{scenario['name']} log={log_path} command={' '.join(command)}",
+            flush=True,
+        )
         started = time.monotonic()
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=repo,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-            exit_code = completed.returncode
-            output = completed.stdout
-        except OSError as error:
-            exit_code = 127
-            output = f"could not execute {command[0]}: {error}\n"
-        log_path.write_text(output, encoding="utf-8")
+        exit_code = run_logged_command(command, repo, log_path)
+        print(
+            f"keeper-full-lifecycle-evidence: finished {scenario['id']} "
+            f"exit={exit_code} duration_seconds={time.monotonic() - started:.3f}",
+            flush=True,
+        )
         results.append(
             {
                 **scenario,

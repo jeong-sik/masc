@@ -48,3 +48,5 @@ val lane_evidence : Masc_domain.tool_schema
 
 val lane_act : Masc_domain.tool_schema
 val lane_action_status : Masc_domain.tool_schema
+
+val lane_updates : Masc_domain.tool_schema

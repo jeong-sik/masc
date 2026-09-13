@@ -33,7 +33,11 @@ type keeper = {
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
-  k_last_proactive_outcome : string;
+  k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
+      (** What the last proactive cycle came to, as the contract types it;
+          [None] for a declared keeper that has no runtime yet. Kept typed so
+          the screen names it in words: as a string it was the wire token
+          ("never_started"), the one spelling no surface uses. *)
   k_created_at : string;
   k_updated_at : string;
 }

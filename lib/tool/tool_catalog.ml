@@ -229,6 +229,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_lane_attach", mutating_tool);
     ("masc_lane_declaration_read", read_state_tool);
     ("masc_lane_declaration_save", mutating_tool);
+    ("masc_lane_updates", mutating_tool);
     ("masc_lane_inspect", read_state_tool);
     ("masc_lane_observe", mutating_tool);
     ("masc_lane_slice", read_state_tool);

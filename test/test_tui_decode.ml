@@ -142,8 +142,9 @@ let test_decode_keeper_projects_current_schema () =
       Alcotest.(check int) "total tokens" 120 keeper.k_total_tokens;
       Alcotest.(check (float 0.0001)) "total cost" 0.42
         keeper.k_total_cost_usd;
-      Alcotest.(check string) "last outcome" "tool_use"
-        keeper.k_last_proactive_outcome;
+      Alcotest.(check bool) "last outcome is the typed contract value" true
+        (keeper.k_last_proactive_outcome
+         = Some Keeper_meta_contract.Proactive_tool_use);
       Alcotest.(check string) "created at" "2026-08-20T01:02:03Z"
         keeper.k_created_at;
       Alcotest.(check string) "updated at" "2026-08-21T04:05:06Z"

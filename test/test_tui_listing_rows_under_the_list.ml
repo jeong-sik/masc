@@ -1,8 +1,9 @@
-(* Verification draws three rows under its list: the armed approval, the
-   server's last refusal, and a scroll row while the queue overflows. The frame
-   and the keypress read one layout for how many rows the list gets, so that
-   layout has to count them; a row it misses is a row the footer is pushed out
-   by, and finish_surface drops the last row first. *)
+(* Two lists draw rows under themselves. Verification draws the armed approval,
+   the server's last refusal, and a scroll row while the queue overflows;
+   Changes draws a preview and the same scroll row. The frame and the keypress
+   read one layout for how many rows the list gets, so that layout has to count
+   them; a row it misses is a row the footer is pushed out by, and
+   finish_surface drops the last row first. *)
 
 open Masc_tui_types
 
@@ -51,8 +52,34 @@ let test_an_open_detail_is_not_the_list () =
   Alcotest.(check bool) "an open request has no list geometry" true
     (Option.is_none (scrolled_surface_rows detail Verification))
 
+(* Changes: the preview takes what the list leaves over its keep, and the scroll
+   row comes out of the list while the list overflows. *)
+let test_an_overflowing_changes_list_fills_the_body_exactly () =
+  let changes = state () in
+  let shape =
+    match scrolled_surface_rows changes Changes with
+    | Some layout -> layout
+    | None -> Alcotest.fail "the Changes list has no scroll geometry"
+  in
+  Alcotest.(check bool) "an overflowing Changes list reserves its scroll row" true
+    shape.sc_overflow_takes_row;
+  let body_rows = 30 and count = 50 in
+  let total = max 1 (body_rows - shape.sc_chrome) in
+  let preview =
+    match shape.sc_preview_keep with
+    | Some keep -> Masc_tui_scroll.preview_height ~total ~keep
+    | None -> 0
+  in
+  let list_rows =
+    Masc_tui_scroll.content_height ~rows:body_rows ~chrome:shape.sc_chrome
+      ~count ~preview_keep:shape.sc_preview_keep
+      ~overflow_takes_row:shape.sc_overflow_takes_row
+  in
+  Alcotest.(check int) "frame + list + preview + scroll row is the body" body_rows
+    (shape.sc_chrome + list_rows + preview + 1)
+
 let () =
-  Alcotest.run "tui_verification_listing"
+  Alcotest.run "tui_listing_rows_under_the_list"
     [ ( "layout"
       , [ Alcotest.test_case "the rows under the list are counted" `Quick
             test_the_rows_under_the_list_are_counted
@@ -60,5 +87,7 @@ let () =
             test_an_armed_overflowing_queue_fills_the_body_exactly
         ; Alcotest.test_case "an open detail is not the list" `Quick
             test_an_open_detail_is_not_the_list
+        ; Alcotest.test_case "an overflowing Changes list fills the body" `Quick
+            test_an_overflowing_changes_list_fills_the_body_exactly
         ] )
     ]

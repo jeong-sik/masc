@@ -10022,9 +10022,11 @@ def keeper_lanes_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # One k walks the band from Verifier to Librarian, whose run list is
+        # Walk past Workspace Curator from Verifier to Librarian, whose run list is
         # the exact-output summary.
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -10376,6 +10378,8 @@ def keeper_lanes_ia_interaction(
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10429,6 +10433,8 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")

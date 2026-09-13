@@ -150,7 +150,11 @@ def run(binary):
             state["hold_next"] = True
         try:
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3.0)
-            h.send_and_wait(process, fd, output, b"\x1b[Z", b"[>2 button/link] FIRST ACTION")
+            # The followed destination is a fresh document, so selection is
+            # reset to its first readable node. Tab advances to the first
+            # actionable control from there; reverse-tab would wrap to the
+            # last observed action.
+            h.send_and_wait(process, fd, output, b"\t", b"[>2 button/link] FIRST ACTION")
             assert h.wait_for_fixture_event(process, fd, output, subsequent_cadence, timeout=3.0)
             h.send_and_wait(process, fd, output, b"\t", b"[>3 button/link] LAST ACTION VERSION 2")
             record("operator-input-during-slow-refresh", output)

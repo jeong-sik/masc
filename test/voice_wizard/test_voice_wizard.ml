@@ -151,7 +151,8 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
         (function
           | Voice_setup.Put_endpoint (_, endpoint) -> Some endpoint
           | Voice_setup.Remove_endpoint _ | Voice_setup.Set_default_model _
-          | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_agent_voice _ -> None)
+          | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
+          | Voice_setup.Set_agent_voice _ -> None)
         changes
     in
     (match endpoint with
@@ -183,15 +184,17 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
         Alcotest.failf "the draft should be complete: %s"
           (String.concat "; " (List.map Voice_wizard.gap_message gaps))
     in
+    let standalone_path = Filename.concat (Filename.dirname path) "voice_config.json" in
     let revision =
-      match Voice_setup.observe ~runtime_config_path:path with
+      match Voice_setup.observe ~runtime_config_path:path ~standalone_path with
       | Ok (revision, _) -> revision
       | Error error -> Alcotest.fail (Voice_setup.error_message error)
     in
     (match
-       Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes
+       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+         ~expected_revision:revision changes
      with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     match Voice_config.parse_runtime_toml_text (read path) with
     | Error message -> Alcotest.failf "the wizard wrote something that does not load: %s" message

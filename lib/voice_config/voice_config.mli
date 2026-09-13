@@ -204,6 +204,11 @@ val default_elevenlabs_base_url : string
 
 (** {1 Path resolution} *)
 
+val voice_config_file_in : string -> string
+(** The standalone voice source for an explicit workspace, using the same
+    cluster-aware path as {!load_detailed}. A writer must not create a TOML
+    voice section over this active source when that section is absent. *)
+
 val config_path : unit -> string
 (** [config_path ()] returns the resolved config file path —
     first existing candidate from
@@ -249,6 +254,11 @@ val parse_runtime_toml_text : string -> (t option, string) result
     committing it: the parser that will load the file is the one that answers
     whether the edit is loadable, so a voice section cannot reach disk in a
     shape that only fails later, at the first speak or transcribe. *)
+
+val load_standalone_file : string -> (t, string) result
+(** Read and parse the standalone JSON source at [path] exactly as
+    {!load_detailed} does when runtime.toml has no [\[voice\]] section. The
+    error names the read or parse failure. *)
 
 val load_detailed : unit -> (t, load_error) result
 (** [load_detailed ()] distinguishes "voice is not configured"

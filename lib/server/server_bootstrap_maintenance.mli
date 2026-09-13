@@ -11,6 +11,24 @@ val recover_keeper_msg_requests_on_startup :
 (** Settle durable async request rows that cannot have a live owner after a
     process restart. Called synchronously before background server work starts. *)
 
+val recover_keeper_config_journal_on_startup :
+  base_path:string -> Keeper_config_journal.report
+(** Converge an interrupted keeper manifest + runtime assignment composite
+    write (#31180) to its pre-request state and clear the journal. Called
+    synchronously before background server work starts. *)
+
+val with_initial_configuration :
+  base_path:string -> (runtime_config_path:string -> 'a) -> ('a, string) result
+(** Hold the existing configuration lock from the first bootstrap read through
+    publication of the initial owner inventory. Recheck journal admission under
+    that lock: early recovery's [No_journal] is not a later read permit. The
+    callback's own missing/invalid-model result is preserved as its value. *)
+
+val latest_keeper_config_journal_recovery_report :
+  unit -> Keeper_config_journal.report option
+(** Last config-journal startup recovery observed by this process.
+    Read-only process-local projection, not recovery authority. *)
+
 val latest_keeper_msg_recovery_observation :
   unit -> Keeper_msg_async.recovery_report option
 (** Last startup recovery report observed by this process. This is a read-only

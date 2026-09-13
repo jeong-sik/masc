@@ -103,8 +103,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.member "observation_only"
      |> Yojson.Safe.Util.to_bool);
   check int
-    "four fixed lanes"
-    4
+    "five fixed lanes"
+    5
     (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
   let status lane_id =
     lane_by_id json lane_id

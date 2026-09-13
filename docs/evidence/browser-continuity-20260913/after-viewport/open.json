@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "data": {
+    "opened": true,
+    "reused": false,
+    "backend": "firefox-webdriver"
+  }
+}

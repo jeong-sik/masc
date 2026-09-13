@@ -1,0 +1,103 @@
+{
+  "observed_at": "2026-09-12T12:34:11.028314+00:00",
+  "reason": "Original native Gate session authority was not recorded; business reply and calculation replay were preserved. Explicit operator cancellation, not successful recovery and not expiry.",
+  "post_response": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+    "sequence": "11",
+    "created_at": 1789212515.243637,
+    "execution_digest": "dd056eb87bfa269eb6a27e79298e49b553248a41b6f2db523cd6616acab3dbce",
+    "source": {
+      "channel": "agent",
+      "channel_user_id": "",
+      "channel_user_name": "",
+      "channel_workspace_id": "",
+      "continuation_channel": {
+        "keeper_name": "exhibit-editor",
+        "kind": "keeper"
+      },
+      "conversation_id": null,
+      "external_message_id": null,
+      "extra_mentions": [],
+      "schema": "masc.keeper_chat_operation.source.v1",
+      "submitted_by": "exhibit-editor",
+      "surface": {
+        "kind": "agent"
+      },
+      "thread_id": "keeper:exhibit-designer",
+      "user_row_origin": "needs_append",
+      "workspace_id": null
+    },
+    "input": null,
+    "state": "Cancelled",
+    "completed_at": 1789215205.833152
+  },
+  "independent_get": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+    "sequence": "11",
+    "created_at": 1789212515.243637,
+    "execution_digest": "dd056eb87bfa269eb6a27e79298e49b553248a41b6f2db523cd6616acab3dbce",
+    "source": {
+      "channel": "agent",
+      "channel_user_id": "",
+      "channel_user_name": "",
+      "channel_workspace_id": "",
+      "continuation_channel": {
+        "keeper_name": "exhibit-editor",
+        "kind": "keeper"
+      },
+      "conversation_id": null,
+      "external_message_id": null,
+      "extra_mentions": [],
+      "schema": "masc.keeper_chat_operation.source.v1",
+      "submitted_by": "exhibit-editor",
+      "surface": {
+        "kind": "agent"
+      },
+      "thread_id": "keeper:exhibit-designer",
+      "user_row_origin": "needs_append",
+      "workspace_id": null
+    },
+    "input": null,
+    "state": "Cancelled",
+    "completed_at": 1789215205.833152
+  },
+  "semantic_readback": {
+    "created_at": 1789212571.408919,
+    "current_sources": [],
+    "frame": {
+      "active": {
+        "id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+        "kind": "direct_operation"
+      },
+      "schema": "masc.keeper_repetition_scopes.v1",
+      "scopes": [
+        {
+          "id": {
+            "id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+            "kind": "direct_operation"
+          },
+          "observations": []
+        }
+      ]
+    },
+    "id": {
+      "id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+      "kind": "direct_operation"
+    },
+    "input": null,
+    "input_sha256": "dd056eb87bfa269eb6a27e79298e49b553248a41b6f2db523cd6616acab3dbce",
+    "phase": {
+      "kind": "settled",
+      "terminal": {
+        "kind": "cancelled"
+      }
+    },
+    "revision": 4,
+    "schema": "masc.keeper_semantic_execution.v1",
+    "sources": [],
+    "updated_at": 1789215205.833152
+  },
+  "pre_cancel_private_sqlite_sha256": "46c79f80643822d3a1ec71268b0a43a92b47a60ba2ca86f3ca5c92c3016fb057"
+}

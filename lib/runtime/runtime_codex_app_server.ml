@@ -207,7 +207,10 @@ type error =
   | Stopped_by_host of host_stop
   | Turn_interrupted
   | Runtime_shutting_down
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_accepted : bool
+      }
   | Timeout of
       { seconds : float
       ; turn_accepted : bool
@@ -271,7 +274,9 @@ let error_to_string = function
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Runtime_shutting_down ->
     "MASC runtime shutdown interrupted the active Codex turn"
-  | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
+  | Process_exited { detail; turn_accepted } ->
+    Printf.sprintf "Codex app-server exited before completion (turn_accepted=%b): %s"
+      turn_accepted detail
   | Timeout { seconds; turn_accepted } ->
     if turn_accepted
     then
@@ -479,7 +484,8 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
     | Ok items -> result.success, items
     | Error detail -> false,
         [ `Assoc [ "type", `String "inputText"; "text", `String detail ]
-        ; `Assoc [ "type", `String "inputText"; "text", `String result.content ] ]
+        ; `Assoc [ "type", `String "inputText"; "text",
+            `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
   in
   io.send
     (`Assoc
@@ -1102,9 +1108,11 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
 ;;
 
 (* Media types the app-server image item accepts, mirroring the closed set the
-   analyze_image tool and the dashboard composer already use. *)
+   analyze_image tool and the dashboard composer already use. Defined next to
+   the tool-result projection that applies the same set, so the two paths into
+   the same wire item cannot drift. *)
 let supported_image_media_types =
-  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+  Runtime_official_client_tool.official_client_image_media_types
 ;;
 
 (* The app-server README is explicit: the [image] input variant takes an inline
@@ -1136,11 +1144,9 @@ let validate_images images =
                 where
                 image.media_type
                 (String.concat ", " supported_image_media_types)))
-      else if String.trim image.base64_data = ""
-      then Error (Invalid_config (where ^ ".base64_data must not be empty"))
-      else if String.exists (fun c -> c = '\n' || c = '\r') image.base64_data
-      then Error (Invalid_config (where ^ ".base64_data must not contain newlines"))
-      else loop (index + 1) rest
+      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
+        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
+        | Ok () -> loop (index + 1) rest
   in
   loop 0 images
 ;;
@@ -1565,7 +1571,14 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
         then Error Runtime_shutting_down
         else
           let detail = String.trim !stderr_tail in
-          Error (Process_exited (if detail = "" then "stdout closed" else detail))
+          (* Same rule as the timeout above: the transport cannot know
+             whether turn/start was accepted, so it reports the conservative
+             answer and the entry point rewraps it with what it observed. *)
+          Error
+            (Process_exited
+               { detail = (if detail = "" then "stdout closed" else detail)
+               ; turn_accepted = false
+               })
       | Idle_timeout seconds ->
         (* The transport cannot know whether turn/start was already accepted;
            the entry points rewrap with the observed turn state. *)
@@ -1798,6 +1811,15 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
          Error
            (Timeout
               { seconds
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
+       (* A client that dies during initialize, account/read or thread/start
+          submitted no turn, so the next candidate may still be tried. Only
+          the entry point knows which of the two happened. *)
+       | Error (Process_exited { detail; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Process_exited
+              { detail
               ; turn_accepted = dispatch_ambiguous || !turn_accepted
               })
        | other -> other)

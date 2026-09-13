@@ -70,13 +70,16 @@ let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
 ;;
 
+let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
+;;
+
 let list_keeper_ids_for_keepers_dir ~keepers_dir =
   if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
   then []
   else
     Sys.readdir keepers_dir
     |> Array.to_list
-    |> List.filter_map (Filename.chop_suffix_opt ~suffix)
+    |> List.filter_map keeper_id_of_filename
     |> List.sort String.compare
 ;;
 
@@ -382,7 +385,7 @@ let save_snapshot path snapshot =
 
 let trace_id meta = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id
 
-let update_locked ?clock ~keepers_dir ~keeper_id build =
+let update_locked ?clock ~keepers_dir ~keeper_id ~on_commit build =
   Fs_compat.mkdir_p keepers_dir;
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   File_lock_eio.with_lock ?clock path (fun () ->
@@ -394,7 +397,30 @@ let update_locked ?clock ~keepers_dir ~keeper_id build =
         Some snapshot
     in
     let* next, changed = build previous in
-    if changed then save_snapshot path next else Ok next)
+    if changed then (
+      let+ snapshot = save_snapshot path next in
+      on_commit snapshot;
+      snapshot)
+    else Ok next)
+;;
+
+let with_commit_notification ~keepers_dir ~keeper_id write =
+  Fs_compat.mkdir_p keepers_dir;
+  let notification_keepers_dir = Unix.realpath keepers_dir in
+  let committed = ref None in
+  let notify () =
+    Option.iter (fun revision ->
+      Keeper_memory_commit_notifications.notify_committed
+        { keepers_dir = notification_keepers_dir; keeper_id; store = Source_bound; revision }) !committed
+  in
+  (* Mark the authoritative write inside the transaction; dispatch only after
+     its locks unwind, including an exception raised by lock cleanup. *)
+  match write (fun snapshot -> committed := Some snapshot.revision) with
+  | result -> notify (); result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    notify ();
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let upsert_file_fact
@@ -423,6 +449,8 @@ let upsert_file_fact
     | Error failure -> Error (Source_read_failed failure)
     | Ok content ->
       let incoming_source = { path = source_path; sha256 = sha256 content } in
+      with_commit_notification
+        ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
       Keeper_memory_os_aggregate_lock.with_lock
         ?clock
         ~keepers_dir
@@ -432,6 +460,7 @@ let upsert_file_fact
              ?clock
              ~keepers_dir
              ~keeper_id:meta.Keeper_meta_contract.name
+             ~on_commit
              (fun previous ->
       let previous_facts, previous_invalidations, revision, first_seen =
         match previous with
@@ -469,7 +498,7 @@ let upsert_file_fact
           ; facts
           ; invalidations
           }
-        , true )))
+        , true ))))
       |> Result.map_error (fun detail -> Store_write_failed detail)
 ;;
 
@@ -478,10 +507,13 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
   then Error "source-bound memory timestamp must be finite and non-negative"
   else
     let+ snapshot =
+      with_commit_notification
+        ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
       update_locked
         ?clock
         ~keepers_dir
         ~keeper_id:meta.Keeper_meta_contract.name
+        ~on_commit
         (function
         | None ->
           Ok
@@ -549,7 +581,7 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                 ; facts
                 ; invalidations = retained_invalidations @ newly_invalidated
                 }
-              , true ))
+              , true )))
     in
     let snapshot =
       if snapshot.facts = [] && snapshot.invalidations = []

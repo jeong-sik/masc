@@ -1,0 +1,7 @@
+{
+  "target": {
+    "kind": "keeper",
+    "name": "exhibit-designer"
+  },
+  "prompt": "The isolated runtime was upgraded with complete binary artifact handoff. Continue the same exhibition collaboration. Your final poster.png should be 484694 bytes, SHA256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16. Use keeper_artifact_transfer action export for your own poster.png, then masc_keeper_delegate to exhibit-editor with the returned artifacts object. Ask editor to materialize it as received/designer-poster.png, inspect the actual imported image, and report the received byte count and SHA256 in your existing Board conversation. Preserve the original Goal evidence files and its current verifying attempt; do not overwrite the editor poster.png or evidence.json or request Goal completion again. Report any actual blocker through the existing operator request path. Admission or queued status alone is not completed file delivery."
+}

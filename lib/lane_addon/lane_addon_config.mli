@@ -25,6 +25,11 @@ type snapshot = {
     but includes the resolved package and ordered binding values. *)
 val load_file : path:string -> (declaration, string) result
 
+(** Validate edited source bytes using the same contract as [load_file].
+    Relative paths resolve from the final declaration path; no declaration is
+    written. Package manifest reads remain effects owned by the caller. *)
+val load_source : source_path:string -> source_text:string -> (declaration, string) result
+
 (** Read the immediate [.toml] children in deterministic filename order.
     Missing directories are an empty complete configuration. Read failures make
     [complete] false; callers must not infer deletions from that snapshot.

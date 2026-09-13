@@ -149,6 +149,11 @@ val read_journal_tail :
 val read_journal_tail_projection :
   keepers_dir:string -> keeper_id:string -> limit:int -> Yojson.Safe.t list
 
+val keeper_id_of_filename : string -> string option
+(** Parse this store's filename suffix without filesystem access. [None] means
+    another filename kind; [Some id] is the exact stem, which may still require
+    keeper-name validation by the discovery owner. *)
+
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val read_for_keepers_dir :

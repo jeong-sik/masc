@@ -1,8 +1,8 @@
 id = "msx-observer"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "MSX captured frames"
 contributions = ["observe"]
-image = "masc-lane-msx-observer:0.1.0"
+image = "masc-lane-msx-observer:0.2.0"
 command = ["python3", "server.py"]
 
 [world.skills]

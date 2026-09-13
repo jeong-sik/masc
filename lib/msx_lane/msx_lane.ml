@@ -594,12 +594,14 @@ type identified_capture = {
   observation : observation;
   frame : frame;
   input_count : int;
+  input_ledger : entry list;
 }
 
 let capture_with_identity () =
   with_machine (fun st ->
     Ok { incarnation = st.incarnation; observation = observe st;
-         frame = frame_of st; input_count = st.input_count })
+         frame = frame_of st; input_count = st.input_count;
+         input_ledger = st.entries })
 ;;
 
 (* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------

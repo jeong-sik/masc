@@ -1,0 +1,54 @@
+
+ RUN  v4.1.5 /private/tmp/masc-ide-conversation-source-refresh-20260913/dashboard
+
+(node:39685) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+GET http://localhost:3000/api/v1/board?exclude_system=true&exclude_automation=true&voter=dashboard&limit=150 404 (Not Found)
+GET http://localhost:3000/api/v1/dashboard/keeper-decisions?limit=200 404 (Not Found)
+ ❯ src/components/ide/ide-conversation-rail.test.ts (15 tests | 1 failed) 659ms
+     × renders loading before confirming the empty conversation window 22ms
+(node:40721) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/sse-store.test.ts (50 tests | 1 failed) 394ms
+   × refreshes mounted IDE conversation sources independently and unsubscribes cleanly 7ms
+(node:40732) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/sse-store.test.ts > refreshes mounted IDE conversation sources independently and unsubscribes cleanly
+Error: A function to advance timers was called but the timers APIs are not mocked. Call `vi.useFakeTimers()` in the test file first.
+ ❯ src/sse-store.test.ts:1186:6
+    1184|   route.value = { tab: 'code', params: { section: 'ide-shell' }, postI…
+    1185|   sseStore.routeServerPushEvent({ type: 'post_created', post_id: 'conv…
+    1186|   vi.advanceTimersByTime(1_000)
+       |      ^
+    1187|   await flushAsyncWork()
+    1188|   expect(refresh.mock.calls).toEqual([['board']])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/ide/ide-conversation-rail.test.ts > IdeConversationRail > renders loading before confirming the empty conversation window
+AssertionError: expected null to be 'Keeper workspace scope' // Object.is equality
+
+- Expected:
+"Keeper workspace scope"
+
++ Received:
+null
+
+ ❯ src/components/ide/ide-conversation-rail.test.ts:71:84
+     69|     expect(region?.getAttribute('aria-label')).toBe('REACTION THREAD')
+     70|     expect(region?.classList.contains('ide-conversation-panel')).toBe(…
+     71|     expect(container.querySelector('.ide-rail-scope')?.getAttribute('a…
+       |                                                                                    ^
+     72|     expect(container.querySelector('.ide-rail-list')).not.toBeNull()
+     73|     expect(container.textContent).toContain('REACTION THREAD')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  2 failed | 131 passed (133)
+   Start at  03:23:41
+   Duration  3.86s (transform 731ms, setup 546ms, import 1.34s, tests 1.07s, environment 500ms)

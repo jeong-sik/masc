@@ -17,6 +17,121 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* [None] is shared by all Config panes; [Some panes] belongs only to those
+   input handlers. Keep availability beside the binding, not in a second key
+   list inferred from the rendered label. *)
+let config_bindings =
+  [ b Navigate "j/k" "select / scroll", Some
+      [ Config_runtime; Config_models; Config_params; Config_prompts
+      ; Config_presets; Config_themes; Config_voice ]
+  ; b Navigate "p" "next pane"
+      ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b Navigate "PgUp/PgDn" "page"
+      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+             and presets, and moves the selection a page on models and themes",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_presets
+           ; Config_themes; Config_voice ]
+  ; b Navigate "v" "read status"
+      ~help:"runtime.toml: source revision, validation issues, and application/restart details",
+      Some [ Config_runtime ]
+  ; b Navigate "9" "Runtime"
+      ~help:"runtime status, lane routing, probes and connected clients", None
+  ; b Navigate "s" "resources"
+      ~help:"the MCP resource catalog, off the ring under Config", None
+  ; b Navigate "t" "tools"
+      ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
+  ; b Act "e" "edit"
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
+  ; b Act "E" "advanced JSON"
+      ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
+  ; b Act "Enter" "edit / use"
+      ~help:"edit the selected param; on themes, use that colour scheme",
+      Some [ Config_params; Config_themes ]
+  ; b Act "x" "default / clear"
+      ~help:"params return to default; prompts clear override; themes follow terminal colours",
+      Some [ Config_params; Config_prompts; Config_themes ]
+  ; b Act "f" "filter"
+      ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b Act "n" "new"
+      ~help:"on presets, name a preset holding the configuration as it stands",
+      Some [ Config_presets ]
+  ; b Act "u" "restore"
+      ~help:"on presets, put the selected one back; press twice to confirm",
+      Some [ Config_presets ]
+  ; b Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b Act "a" "fragments"
+      ~help:"on prompts, show or hide the internal pieces the main prompts \
+             are built from; not on the runtime assets reading",
+      Some [ Config_prompts ]
+  ; b Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
+  ; b Act "Esc" "overview", None
+  ; b Meta "r" "reload", None
+  ; b Meta "Tab" "next", None
+  ; b Meta "q" "quit", None
+  ]
+
+(* The Runtime keys, by the reading they act on. [p] goes somewhere different
+   from each reading, so the footer names where it goes from here while the
+   cheat sheet names the whole walk. [e] appends to the keeper lane under the
+   cursor, and the all-runtimes reading has no lane row to append to. *)
+type runtime_key =
+  | Every_reading of binding
+  | Keeper_lanes_only of binding
+  | Reading_walk
+
+let runtime_reading_walk_help =
+  "walk the three substrate readings; the third is the standalone Lanes surface"
+
+let runtime_keys =
+  [ Every_reading (b Navigate "j/k" "move / scroll")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading
+      (b Act "Right / Enter" "detail"
+         ~help:"show the full runtime, lane, dispatch, and probe fields")
+  ; Reading_walk
+  ; Every_reading
+      (b Navigate "c" "clients"
+         ~help:"everyone attached to this workspace, off the ring under Runtime")
+  ; Keeper_lanes_only
+      (b Act "e" "add failover"
+         ~help:"append a failover candidate to the lane under the cursor (keeper lanes only)")
+  ; Every_reading (b Act "Left / Esc" "back")
+  ; Every_reading
+      (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
+  ; Every_reading (b Search "n / N" "next / previous match")
+  ]
+
+let runtime_sheet_binding = function
+  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Reading_walk ->
+    b Navigate "p" "keeper lanes / all runtimes / service lanes"
+      ~help:runtime_reading_walk_help
+
+let runtime_footer_binding ~(mode : runtime_mode) = function
+  | Every_reading binding -> Some binding
+  | Keeper_lanes_only binding ->
+    (match mode with
+     | Runtime_lanes -> Some binding
+     | Runtime_all -> None)
+  | Reading_walk ->
+    Some
+      (b Navigate "p"
+         (match mode with
+          | Runtime_lanes -> "all runtimes"
+          | Runtime_all -> "service lanes")
+         ~help:runtime_reading_walk_help)
+
 (* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
    The terminal used to take this byte for flow control -- raw mode clears
    IXON now, which is what makes it bindable at all. A letter would not do:
@@ -107,21 +222,23 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "select / scroll"
+          ~help:"Events, or the server's own log lines; l opens Logs as well"
+      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
+      ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Overview"
-      ; b Navigate "g / G" "newest / oldest"
+      (* One row per action. g and G reach the ends Home and End reach, and
+         l the tab 2 opens; a row for each spent two of the footer's places
+         on actions it already showed, and at 120 columns the fitter dropped
+         Enter -- the key that opens an event -- to keep them. The rows are
+         the spellings every other reader shares; the extras are in help. *)
       ; b Navigate "Home/End" "newest / oldest"
-          ~help:"the same two ends as g and G, under the keys every other \
-                 reader uses; the ring counts back from the newest, so its \
-                 top is now"
-      ; b Navigate "l" "logs"
-          ~help:"the server's own log lines, off the ring under Activity"
-      ; b Act "f" "filter" ~help:"cycle the filter"
+          ~help:"g and G as well; the ring counts back from the newest, so \
+                 its top is now"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -178,6 +295,10 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act "Ctrl-Y" "speak"
+          ~help:"record into the draft; again to stop and keep what was said"
+      ; b Act "Ctrl-A" "keep listening"
+          ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
@@ -197,7 +318,7 @@ let for_surface = function
           ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
-      ; b Act "y / n" "approval" ~help:"answer a tool approval"
+      ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "Q" "leave"
           ~help:"leave with a turn running, without interrupting it \
                  (empty draft, no capture or edit in flight)"
@@ -212,6 +333,8 @@ let for_surface = function
       ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      ; b Navigate "o" "Lane Add-ons"
+          ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
@@ -294,7 +417,8 @@ let for_surface = function
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "c" "complete" ~help:"complete goal"
+      ; b Act "c" "request completion"
+          ~help:"send the goal to the completion judge; press again to submit"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
@@ -378,7 +502,10 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Act "Esc" "clear / back"
+          ~help:"clear the filter, or return to Overview"
+      ; b Search "/" "filter"
+          ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
@@ -429,53 +556,9 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Runtime ->
-      [ b Navigate "j/k" "move / scroll"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Act "Right / Enter" "detail"
-          ~help:"show the full runtime, lane, dispatch, and probe fields"
-      ; b Navigate "p" "keeper lanes / all runtimes / service lanes"
-          ~help:"walk the three substrate readings; the third is the \
-                 standalone Lanes surface"
-      ; b Navigate "c" "clients"
-          ~help:"everyone attached to this workspace, off the ring under \
-                 Runtime"
-      ; b Act "Left / Esc" "back"
-      ; b Search "/" "find"
-          ~help:"jump the cursor to a matching lane id or runtime id"
-      ; b Search "n / N" "next / previous match"
-      ]
-      @ row_list_edges @ listing_meta
+      List.map runtime_sheet_binding runtime_keys @ row_list_edges @ listing_meta
   | Config ->
-      [ b Navigate "j/k" "select / scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-          ~help:"pages the runtime.toml and prompts panes; the other five \
-                 panes take the key and do nothing with it"
-        (* Config combines persisted files, typed live params, and the local
-           theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
-      ; b Navigate "v" "runtime.toml read status"
-          ~help:"source revision, validation issues, and application/restart details"
-      ; b Navigate "9" "Runtime"
-          ~help:"runtime status, lane routing, probes and connected clients"
-      ; b Navigate "s" "resources"
-          ~help:"the MCP resource catalog, off the ring under Config"
-      ; b Navigate "t" "tools"
-          ~help:"the tool catalog, receipts, and usage, off the ring under \
-                 Config"
-      ; b Act "e" "edit"
-          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
-      ; b Act "E" "advanced JSON"
-          ~help:"on params only: edit the exact JSON value"
-      ; b Act "Enter" "edit / use"
-          ~help:"edit the selected param; on themes, use that colour scheme"
-      ; b Act "x" "default / clear"
-          ~help:"params return to default; prompts clear override; themes follow terminal colours"
-      ; b Act "f" "filter"
-          ~help:"on themes, cycle All / Dark / Light schemes"
-      ; b Act "Esc" "overview"
-      ; b Meta "r" "reload"
-      ; b Meta "Tab" "next"
-      ]
+      List.map fst config_bindings
   | Resources ->
       (* Two panes with two meanings, and the keys below say so once rather
          than per row: with the list focused the cursor moves and [/] lands
@@ -607,6 +690,56 @@ let hints_of_bindings bindings =
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
 
+(* A pane's own keys, then the keys all seven panes share. *)
+let config_pane_bindings pane =
+  let own =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with
+        | Some panes when List.mem pane panes -> Some binding
+        | Some _ | None -> None)
+      config_bindings
+  in
+  let shared =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with None -> Some binding | Some _ -> None)
+      config_bindings
+  in
+  (own, shared)
+
+(* The pane's own keys lead the row and the shared ones follow. A cut row
+   gives up its back first, and the shared keys are the ones a reader already
+   met on the pane before -- the reason r, Tab and q close every row. Sorted
+   as one list, the hops to Runtime, Resources and Tools outlived every key a
+   pane answers itself: at 120 columns presets lost n and u, and the runtime
+   assets lost o, their only way back to the registry. *)
+let config_row ~own ~shared =
+  String.concat "  "
+    (List.filter
+       (fun row -> not (String.equal row ""))
+       [ hints_of_bindings own; hints_of_bindings shared ])
+
+let footer_hints_config ~pane =
+  let own, shared = config_pane_bindings pane in
+  config_row ~own ~shared
+
+(* The prompts pane's read-only half. [o] swaps the registry for the assets
+   shipped with the binary, and there [a], [i], [e] and [x] answer with a
+   notice rather than acting (masc_tui.ml), so the row leaves them out and
+   names where [o] goes back to. *)
+let footer_hints_prompt_assets =
+  let registry_only = [ "a"; "i"; "e"; "x" ] in
+  let own, shared = config_pane_bindings Config_prompts in
+  let own =
+    own
+    |> List.filter (fun binding -> not (List.mem binding.key registry_only))
+    |> List.map (fun binding ->
+           if String.equal binding.key "o" then { binding with label = "registry" }
+           else binding)
+  in
+  config_row ~own ~shared
+
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the
    event list. The table stays the SSOT — this projection only relabels
@@ -660,6 +793,18 @@ let footer_hints_code ~pane =
        else b)
   |> hints_of_bindings
 
+(* The Runtime footer is the table's, with the two keys that depend on the
+   reading on screen: [p] names where it goes from here, and [e] exists only on
+   the keeper-lane reading, where a row names a lane to append to. The renderer
+   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
+   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
+   or [Esc], the way back to Config, and called the global refresh a live
+   one. *)
+let footer_hints_runtime ~(mode : runtime_mode) =
+  List.filter_map (runtime_footer_binding ~mode) runtime_keys
+  @ row_list_edges @ listing_meta
+  |> hints_of_bindings
+
 let footer_hints_resources ~detail_focus =
   for_surface Resources
   (* The row search needs a cursor to land on, and with the text focused
@@ -703,10 +848,10 @@ let cancels_two_press ~input_seen ~key ~second_press =
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays
    [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
-   [scroll] is the clamped position the renderer computed, so the footer
-   agrees with what is on screen. *)
-let footer_hints_fusion_detail ~scroll ~max_scroll =
-  Printf.sprintf "%s  (%d/%d)"
+   [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
+   so the footer agrees with what is on screen. *)
+let footer_hints_fusion_detail ~position =
+  Printf.sprintf "%s  %s"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
         ; b Navigate "PgUp/PgDn" "page"
@@ -714,7 +859,7 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
         ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
         ]
         @ listing_meta))
-    scroll max_scroll
+    position
 
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
@@ -728,15 +873,18 @@ let footer_hints_lanes_run_list =
      ]
      @ listing_meta)
 
-let footer_hints_lanes_run_detail ~scroll ~max_scroll =
-  Printf.sprintf "%s  (%d/%d)"
-    (hints_of_bindings
-       ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-        ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-        ; b Act "Left / Esc" "back" ~help:"back to the run list"
-        ]
-        @ listing_meta))
-    scroll max_scroll
+let footer_hints_lanes_run_detail ~position =
+  let hints =
+    hints_of_bindings
+      ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+       ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+       ; b Act "Left / Esc" "back" ~help:"back to the run list"
+       ]
+       @ listing_meta)
+  in
+  match position with
+  | None -> hints
+  | Some position -> hints ^ "  " ^ position
 
 let footer_hints_git_changes =
   hints_of_bindings
@@ -864,14 +1012,43 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 
-(* The compact strip beside the tab row. Same [key:label] spelling the
-   footer uses, and the tab switch leads because it is on every tab. *)
+(* The single keys a binding's key names, in this table's own notation:
+   alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice
+   apart with a space ("u u"), and a chord with "+" ("arrows+enter"). *)
+let key_atoms key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.concat_map (String.split_on_char '+')
+  |> List.filter (fun atom -> not (String.equal atom ""))
+  |> List.sort_uniq String.compare
+
+(* The keys a detail tab's own arms answer before the Keeper controls do.
+   Sandbox takes [s] for the remote_ssh backend and [o] for its container
+   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+let keeper_detail_tab_taken_keys tab =
+  List.concat_map
+    (fun binding -> key_atoms binding.key)
+    (keeper_detail_tab_bindings tab)
+
+(* The keys the detail footer leads with. Same [key:label] spelling as the
+   rest of the row, and the tab switch leads because it is on every tab. *)
 let keeper_detail_tab_hint tab =
   String.concat "  "
     ("[ ]:tab"
      :: List.map
           (fun binding -> binding.key ^ ":" ^ binding.label)
           (keeper_detail_tab_bindings tab))
+
+(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
+   [listing_meta] spells them -- is said once, under Global. Repeated under
+   every surface it took three of the dozen rows an 80x24 sheet shows of the
+   reader's own section. A surface that names one of those keys its own way
+   ([r] reload on Config) keeps that row: it says something Global does not.
+   Footers keep the tail, since a footer is all a surface shows. *)
+let sheet_bindings surface =
+  List.filter
+    (fun binding -> not (List.mem binding listing_meta))
+    (for_surface surface)
 
 let help_sections ?current () =
   let sections =
@@ -896,7 +1073,7 @@ let help_sections ?current () =
                  Masc_tui_types.keeper_detail_tabs
            | _ -> []
          in
-         (surface, (title, entries (for_surface surface) @ tab_entries)))
+         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -923,6 +1100,11 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Keepers header words and the Mode S letters. They were two
+             rows above every roster: an empty roster spent them on columns
+             it had nothing in, a narrow one on columns it did not draw, and
+             beside the Activity pane both rows were cut. *)
+          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)

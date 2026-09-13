@@ -39,6 +39,9 @@ val preflight_keeper_delegate :
 (** Validate one typed delegated invocation before durable submission. *)
 
 module For_testing : sig
+  val resolve_direct_turn_runtime_id : meta:Keeper_meta_contract.keeper_meta ->
+    resume_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    gate_resume:Keeper_direct_gate_continuation.admission option -> (string, string) result
   val direct_owner_conversation_context :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
@@ -51,6 +54,7 @@ module For_testing : sig
     current_task:Keeper_world_observation_inputs.current_task_observation ->
     held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
     task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
+    workspace_memory:Workspace_memory_publication.observation ->
     approval_authority_text:string ->
     recent_direct_conversation_text:string ->
     worktree_text:string ->

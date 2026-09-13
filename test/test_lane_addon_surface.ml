@@ -7,6 +7,7 @@ module Routes = Server_routes_http_routes_lane_addons
 
 let tool_names =
   [ "masc_lane_attach"; "masc_lane_inspect"; "masc_lane_observe";
+    "masc_lane_declaration_read"; "masc_lane_declaration_save";
     "masc_lane_slice"; "masc_lane_detach"; "masc_lane_evidence" ]
 
 let reachable_operations () =

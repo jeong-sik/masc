@@ -1,0 +1,64 @@
+{
+  "source": {
+    "evidence_path": [
+      "change"
+    ],
+    "snapshot_id": "snapshot1",
+    "source_id": "s12"
+  },
+  "snapshot": {
+    "keeper_id": "exhibit-designer",
+    "metadata": {
+      "change": {
+        "added": [
+          {
+            "basis": {
+              "kind": "observed"
+            },
+            "category": "constraint",
+            "claim": "《기억의 정원》 산출물에는 허구의 오프라인 행사임을 간결히 명시해야 하며, 온라인 전용·일정 미정 표기와 제공되지 않은 작가·주최·주소·링크 등 미확정 정보의 과장·추가는 금지된다.",
+            "first_seen": 1789052554.942295,
+            "last_seen": 1789052554.942295,
+            "origin": {
+              "kind": "injected",
+              "trace_id": ""
+            }
+          }
+        ],
+        "invalidated": [],
+        "removed": [],
+        "retained": 10
+      },
+      "revision": 12,
+      "source": {
+        "kind": "librarian",
+        "trace_id": "trace-1789042574909-00000"
+      },
+      "updated_at": 1789052554.94241
+    },
+    "snapshot_id": "snapshot1",
+    "snapshot_sha256": "0089c1643c461bf7ebdcd2bc3bf14e4c44b9fb27f9fcaf10fa67142605795af2",
+    "store": "ordinary"
+  },
+  "resolved_evidence": {
+    "added": [
+      {
+        "basis": {
+          "kind": "observed"
+        },
+        "category": "constraint",
+        "claim": "《기억의 정원》 산출물에는 허구의 오프라인 행사임을 간결히 명시해야 하며, 온라인 전용·일정 미정 표기와 제공되지 않은 작가·주최·주소·링크 등 미확정 정보의 과장·추가는 금지된다.",
+        "first_seen": 1789052554.942295,
+        "last_seen": 1789052554.942295,
+        "origin": {
+          "kind": "injected",
+          "trace_id": ""
+        }
+      }
+    ],
+    "invalidated": [],
+    "removed": [],
+    "retained": 10
+  },
+  "duplicate_current_fact_source": "s11"
+}

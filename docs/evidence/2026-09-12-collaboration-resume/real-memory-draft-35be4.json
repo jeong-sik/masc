@@ -1,0 +1,26 @@
+{
+  "publication": {
+    "observed_at": 1789207296.446869,
+    "id": "9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff",
+    "source_context_sha256": "5a49abd3db186998471f21d46fd2c863d7ecd3c8bd113b670f7a85a40936741c",
+    "proposal_status": "model_proposed",
+    "source_count": 24,
+    "semantic_verification": "not_performed",
+    "canonical_readback_matches": true,
+    "source_proposal_sha256": "9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff",
+    "known_review_findings": [
+      "shared claim8 converts three criteria to three files",
+      "captured revisions are historical"
+    ],
+    "keeper_memory_promoted": false,
+    "actual_keeper_reuse": false,
+    "runtime_instance_id": "01a094fa-ef72-7000-a1d9-eacd6cff9f30"
+  },
+  "after_upgrade_readback_equal": true,
+  "stored_proposal_file": {
+    "bytes": 26319,
+    "sha256": "9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff"
+  },
+  "semantic_verification": "not_performed",
+  "actual_keeper_reuse": false
+}

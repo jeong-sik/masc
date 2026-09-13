@@ -14,7 +14,10 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
+type collaboration_kind = Board_source | Fusion_source
+
 type submitted_evidence_item =
+  | Evidence_collaboration of { reference : string; content : string; sha256 : string }
   | Evidence_note of string
   | Evidence_artifact of
       { reference : string
@@ -104,14 +107,12 @@ val project_root_of_base_path : string -> string
 type reference_form =
   | Artifact_reference of string
   | Note_reference of string
+  | Collaboration_reference of collaboration_kind * string
   | Unresolvable_reference
 
 val classify_evidence_reference : string -> reference_form
-(** Shape of an evidence reference as {!snapshot_submitted_evidence_json} will
-    read it. This module is the only producer of evidence snapshots, so the
-    submit boundaries call this rather than restating the accepted prefixes:
-    a reference cannot be admitted at submit and then be unreadable at review,
-    and a new form added here reaches every caller. *)
+(** Shared submission grammar. Collaboration sources are captured by the
+    application submit boundary before calling the artifact/note snapshotter. *)
 
 val note_reference_form : string
 (** The accepted form for narrative evidence, spelled from the prefix this
@@ -215,3 +216,8 @@ val inspect_submitted_evidence_for_authority :
     authority. The task id and producer must still match the durable request. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
+val collaboration_reference : string -> (collaboration_kind * string) option
+val submitted_evidence_item_to_yojson : submitted_evidence_item -> Yojson.Safe.t
+val submitted_evidence_item_of_yojson : Yojson.Safe.t -> (submitted_evidence_item, string) result
+
+val submitted_evidence_item_metadata_to_yojson : submitted_evidence_item -> Yojson.Safe.t

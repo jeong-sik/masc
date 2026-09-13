@@ -1,5 +1,7 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
+type error = Invalid_manifest of string | Io_failure of string
+let error_to_string = function Invalid_manifest detail | Io_failure detail -> detail
 let output_ports world =
   let parse_port (id, value) =
     let* () = if String.trim id = "" then Error "world.outputs has a blank port name" else Ok () in
@@ -29,7 +31,7 @@ let output_ports world =
         |> Result.map (List.sort (fun (a, _) (b, _) -> String.compare a b))
   | Some _ -> Error "world.outputs must be a table"
 let load ~path =
-  try
+  let parse () =
     let path = Unix.realpath path in
     let document = Otoml.Parser.from_file path in
     let read key convert =
@@ -64,6 +66,30 @@ let load ~path =
           |> Result.map_error (fun error -> "world.skills.directory: " ^ Skill_resource_path.error_to_string error) in
     let* action_tool = nested_text "actions" "tool" in
     let* outputs = output_ports world in
+    let* interface = match Otoml.find_opt document Fun.id ["interface"] with
+      | None -> Ok []
+      | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
+        when List.for_all (fun (key,_) -> List.mem key ["binding_schema";"presentation";"refresh_policy"]) fields -> Ok fields
+      | Some _ -> Error "interface accepts binding_schema, presentation and refresh_policy" in
+    let* refresh_policy = match List.assoc_opt "refresh_policy" interface with
+      | None | Some (Otoml.TomlString "every_hint") -> Ok Every_hint
+      | Some (Otoml.TomlString "source_changes") -> Ok Source_changes
+      | Some _ -> Error "interface.refresh_policy requires every_hint or source_changes" in
+    let json name = match List.assoc_opt name interface with
+      | None -> Ok None
+      | Some (Otoml.TomlString bytes) ->
+          (try Ok (Some (Yojson.Safe.from_string bytes)) with Yojson.Json_error error -> Error error)
+      | Some _ -> Error ("interface." ^ name ^ " must contain JSON text") in
+    let* binding_schema = json "binding_schema" in
+    let* () = match binding_schema with
+      | None -> Ok ()
+      | Some schema ->
+          let* () = Lane_addon_action.validate_value_schema schema in
+          (match schema with `Assoc fields when List.assoc_opt "type" fields=Some (`String "object") -> Ok ()
+           | _ -> Error "binding_schema must describe an object") in
+    let* presentation = json "presentation" in
+    let* presentation = match presentation with None -> Ok Lane_addon_presentation.empty
+      | Some value -> Lane_addon_presentation.of_json value in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in
@@ -93,10 +119,14 @@ let load ~path =
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path; skills_directory; action_tool; outputs;
+      directory = Filename.dirname path; skills_directory; action_tool; outputs; refresh_policy; binding_schema; presentation;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
-  with
-  | Sys_error message -> Error message
-  | Unix.Unix_error (error, call, arg) -> Error (call ^ " " ^ arg ^ ": " ^ Unix.error_message error)
-  | Otoml.Parse_error (_, message) -> Error message
-  | Otoml.Duplicate_key message -> Error message
+  in
+  try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
+  | Sys_error message -> Error (Io_failure message)
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR) as error, call, arg) ->
+      Error (Invalid_manifest (call ^ " " ^ arg ^ ": " ^ Unix.error_message error))
+  | Unix.Unix_error (error, call, arg) ->
+      Error (Io_failure (call ^ " " ^ arg ^ ": " ^ Unix.error_message error))
+  | Otoml.Parse_error (_, message) -> Error (Invalid_manifest message)
+  | Otoml.Duplicate_key message -> Error (Invalid_manifest message)

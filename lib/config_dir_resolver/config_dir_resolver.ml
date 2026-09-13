@@ -57,9 +57,15 @@ let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
     test_config_path_override_env
 
-(* RFC-0085 PR-8 — Route path-derived env reads through Host_config.from_env
-   so the SSOT lives in lib/host_config/ instead of Env_config_core. *)
-let initial_env_base_path = (Host_config.from_env ()).base_path
+(* Startup publishes the admitted canonical owner in MASC_BASE_PATH while
+   preserving the operator spelling in MASC_BASE_PATH_INPUT for diagnostics.
+   Configuration IO must follow that owner, not reinterpret the input alias. *)
+let effective_env_base_path () =
+  match Env_config_core.raw_value_opt Env_config_core.base_path_env_key |> trim_opt with
+  | Some path -> Some (Env_config_core.normalize_masc_base_path_input path)
+  | None -> (Host_config.from_env ()).base_path
+
+let initial_env_base_path = effective_env_base_path ()
 let initial_env_config_dir = (Host_config.from_env ()).config_dir
 let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
 
@@ -113,7 +119,7 @@ let current_env_base_path_opt () =
        workspace. *)
     ~allow_inherited:false
     ~initial:initial_env_base_path
-    ~current:((Host_config.from_env ()).base_path)
+    ~current:(effective_env_base_path ())
     ~home:initial_env_home
 
 let fallback_cwd_from_env () =
@@ -263,10 +269,20 @@ let child_item (root : path_item) name =
   { path; exists; source = root.source }
 
 let inputs_from_env () =
+  let cwd = current_working_dir () in
+  (* An explicit workspace anchors relative config overrides for both global
+     readers and resolve_for_base_path writers. Resolve a relative workspace
+     against the process cwd once, before using it as that shared anchor. *)
+  let cwd, env_base_path = match current_env_base_path_opt () with
+    | None -> cwd, None
+    | Some base_path ->
+      let base_path = Env_config_core.normalize_masc_base_path_input base_path
+        |> absolute_path_from ~cwd in
+      base_path, Some base_path in
   {
-    cwd = current_working_dir ();
+    cwd;
     executable_name = Sys.executable_name;
-    env_base_path = current_env_base_path_opt ();
+    env_base_path;
     env_config_dir = current_env_config_dir_opt ();
   }
 

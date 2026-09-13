@@ -1,0 +1,37 @@
+{
+  "comparison_behavior": "pass",
+  "append_and_changed_created_missing": {
+    "previous_capture": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-state-capture-review-2ce2f2lj/pre.json",
+    "unchanged": [
+      "config/keepers/editor.toml",
+      "config/runtime.toml",
+      "goals.json",
+      "tasks/backlog.json"
+    ],
+    "append_only_jsonl": [
+      "config/keepers/editor.memory-journal.jsonl"
+    ],
+    "changed": [
+      "playground/docker/editor/modified.txt"
+    ],
+    "missing": [
+      "playground/docker/editor/missing.txt"
+    ],
+    "created": [
+      "playground/docker/editor/created.txt"
+    ]
+  },
+  "excluded_paths": [
+    "playground/docker/editor/node_modules",
+    "playground/docker/editor/symlink.txt"
+  ],
+  "mode": "0600",
+  "required_missing": "failed without output as expected",
+  "ancestor_symlink_returncode": 0,
+  "ancestor_symlink_included_required": true,
+  "ancestor_symlink_excluded_paths": [
+    "config/keepers",
+    "playground/docker/editor/node_modules",
+    "playground/docker/editor/symlink.txt"
+  ]
+}

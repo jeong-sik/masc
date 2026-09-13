@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "status": {
+    "kind": "exit",
+    "code": 0
+  },
+  "shim_execution_evidence": {
+    "status": "not_observed",
+    "receipts": []
+  },
+  "output_completeness": "complete",
+  "output": "Warning: failed to launch javaldx - java may not function correctly\nconvert /home/keeper/playground/exhibit-editor/adaptation/experience.pptx -> /home/keeper/playground/exhibit-editor/adaptation/experience.pdf using filter : impress_pdf_Export\n-rw-r--r-- 1 keeper keeper 70992 Sep 12 13:58 adaptation/experience.pdf\n",
+  "typed": true,
+  "execution_time_ms": 1228,
+  "requested_sandbox": "docker",
+  "via": "docker",
+  "sandbox_profile": "docker"
+}

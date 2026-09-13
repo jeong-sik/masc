@@ -8,18 +8,23 @@ type tool =
   | Read_file
   | Search_files
   | Web_fetch
+  | Board_source
+  | Fusion_source
 
 let tool_name = function
   | Read_file -> "tool_read_file"
   | Search_files -> "tool_search_files"
   | Web_fetch -> "masc_web_fetch"
+  | Board_source -> "masc_board_post_get"
+  | Fusion_source -> "masc_fusion_status"
 ;;
 
-let all_tools = [ Read_file; Search_files; Web_fetch ]
+let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_source ]
 
 type t =
   { ownership_root : string
   ; config : Workspace.config
+  ; submitted_evidence : Workspace_verification_store.submitted_evidence_item list
   ; producer_scope : producer_scope
   ; tools : (tool * Keeper_tool_descriptor.t) list
   }
@@ -28,9 +33,57 @@ and producer_scope =
   | Keeper_producer of Keeper_meta_contract.keeper_meta
   | Workspace_producer
 
+(* A Keeper's masc_fusion_status lists its tracked runs when run_id is omitted.
+   This reader has no listing: it reads one exact run. Reusing the Keeper schema
+   advertised {} as a valid call that the reader then refused, so the verifier
+   declares its own input. Dispatch validates against this same descriptor, so
+   the advertised schema is the accepted one. *)
+let exact_fusion_run_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "run_id"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String
+                      "Exact Fusion run id (the run_id returned by masc_fusion) \
+                       whose submission-bound evidence to read." )
+                ] )
+          ] )
+    ; "required", `List [ `String "run_id" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let source_pagination_schema = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* properties = match List.assoc_opt "properties" fields with
+      | Some (`Assoc properties) -> Ok properties
+      | _ -> Error "source descriptor properties must be an object" in
+    let cursor = `Assoc ["type", `String "object";
+      "description", `String "Continue with next_cursor from a source_json_page; keep the same source id and comment pagination. Concatenate content until next_cursor is null to recover exact source JSON. A changed source rejects the cursor.";
+      "properties", `Assoc ["source_sha256", `Assoc ["type", `String "string"];
+        "byte_offset", `Assoc ["type", `String "integer"; "minimum", `Int 1]];
+      "required", `List [`String "source_sha256"; `String "byte_offset"];
+      "additionalProperties", `Bool false] in
+    Ok (`Assoc (("properties", `Assoc (("cursor", cursor) :: properties)) :: List.remove_assoc "properties" fields))
+  | _ -> Error "source descriptor schema must be an object"
+;;
+
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
-  | [ descriptor ] -> Ok (tool, descriptor)
+  | [ descriptor ] ->
+    (match tool with
+     | Fusion_source ->
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema exact_fusion_run_schema)
+     | Board_source ->
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema descriptor.input_schema)
+     | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
   | [] ->
     Error
       (Printf.sprintf
@@ -53,7 +106,7 @@ let rec resolve_tools = function
     Ok (descriptor :: descriptors)
 ;;
 
-let create ~config ~producer =
+let create ~config ~producer ~submitted_evidence =
   let open Result.Syntax in
   let* producer_scope =
     match Keeper_meta_store.read_effective_meta config producer with
@@ -66,7 +119,7 @@ let create ~config ~producer =
     resolve_tools
       (match producer_scope with
        | Keeper_producer _ -> all_tools
-       | Workspace_producer -> [ Read_file; Web_fetch ])
+       | Workspace_producer -> [ Read_file; Web_fetch; Board_source; Fusion_source ])
   in
   let* ownership_root =
     match producer_scope with
@@ -88,7 +141,8 @@ let create ~config ~producer =
   let ownership_root =
     Env_config_core.strip_trailing_slashes ownership_root
   in
-  Ok { ownership_root; config; producer_scope; tools }
+  Ok { ownership_root; config; producer_scope; tools
+     ; submitted_evidence }
 ;;
 
 (* The Goal proof surface. A Goal names no producer: it is a shared intent
@@ -103,9 +157,9 @@ let create ~config ~producer =
    jail here would be a second containment boundary to keep correct. The
    judge navigates from [root_layout] instead, which names the producers and
    the checkouts under them. *)
-let create_goal_proof ~(config : Workspace.config) =
+let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
   let open Result.Syntax in
-  let* tools = resolve_tools [ Read_file; Web_fetch ] in
+  let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source ] in
   let project_root =
     Workspace_verification_store.project_root_of_base_path config.base_path
   in
@@ -113,7 +167,8 @@ let create_goal_proof ~(config : Workspace.config) =
     Env_config_core.strip_trailing_slashes
       (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
   in
-  Ok { ownership_root; config; producer_scope = Workspace_producer; tools }
+  Ok { ownership_root; config; producer_scope = Workspace_producer; tools
+     ; submitted_evidence }
 ;;
 
 (* The listing answers one question for the evaluator: where do the paths the
@@ -257,13 +312,23 @@ let image_delivery_note =
   "Image files are delivered as visual input with byte count and SHA-256; \
    read them without line offset/limit. PDF files are inspected whole with Poppler; \
    the result contains the source SHA-256/bytes, parsed page count and text, \
-   and every rendered page as visual input."
+   and every rendered page as visual input. PPTX files are inspected whole with \
+   python-pptx and LibreOffice: ordered slide text, speaker notes, and every \
+   rendered slide are returned with the original source identity. Animations \
+   and embedded audio/video playback are not inspected. MP4 files are inspected \
+   whole with FFprobe and FFmpeg: original source SHA-256/bytes, stream metadata \
+   and direct complete audio/video decode results are returned. That decode is \
+   not a visual frame inspection or an accessibility verdict."
 
 let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
   { Types_core.name = tool_name tool
   ; description =
       (match tool with
        | Read_file -> descriptor.description ^ " " ^ image_delivery_note
+       | Board_source ->
+         "Read a Board post and its paginated comments frozen in this verification submission, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
+       | Fusion_source ->
+         "Read Fusion panel/judge/source-context evidence frozen in this verification submission and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -330,7 +395,16 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
    keeper and the base path, so the backend attaches to a running one. Neither
    route lets the judge start anything or touch the host outside the
    playground, which is the property [None] is protecting. *)
+type run_error = Runtime_error of string | Collaboration_error of Verification_collaboration_evidence.error
+
 let run t tool ~args =
+  let execution_result execution =
+    result_of_execution execution |> Result.map_error (fun detail -> Runtime_error detail) in
+  let collaboration_read read =
+    read ~submitted_evidence:t.submitted_evidence ~args
+    |> Result.map Yojson.Safe.to_string
+    |> Result.map_error (fun error -> Collaboration_error error)
+  in
   match t.producer_scope, tool with
   | Keeper_producer producer_meta, Read_file ->
     Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
@@ -338,21 +412,21 @@ let run t tool ~args =
       ~config:t.config
       ~meta:producer_meta
       ~args
-    |> result_of_execution
+    |> execution_result
   | Keeper_producer producer_meta, Search_files ->
     Keeper_workspace_ops.handle_tool_search_files_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
       ~meta:producer_meta
       ~args
-    |> result_of_execution
+    |> execution_result
   | Workspace_producer, Read_file ->
     Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
       ~ownership_root:t.ownership_root
       ~args
-    |> result_of_execution
+    |> execution_result
   | Workspace_producer, Search_files ->
-    Error "workspace producers do not expose tool_search_files"
+    Error (Runtime_error "workspace producers do not expose tool_search_files")
   (* Evidence notes carry URLs (a PR, a CI run) the judge must be able to
      dereference itself — a producer's claim about a URL is not inspection
      (masc#28989: three genuinely-completed submissions rejected because the
@@ -362,49 +436,34 @@ let run t tool ~args =
      public internet, not the producer tree, so it is producer-scope
      independent; it dispatches directly because the judge has no turn
      continuation for a Gate to resume. *)
+  | (Keeper_producer _ | Workspace_producer), Board_source ->
+    collaboration_read Verification_collaboration_evidence.read_board
+  | (Keeper_producer _ | Workspace_producer), Fusion_source ->
+    collaboration_read Verification_collaboration_evidence.read_fusion
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     Tool_misc_web_fetch.handle
       ~tool_name:(tool_name Web_fetch)
       ~start_time:(Time_compat.now ())
       args
     |> Keeper_tool_execution.of_tool_result
-    |> result_of_execution
+    |> execution_result
 ;;
 
-let is_pdf path bytes =
-  String.equal (String.lowercase_ascii (Filename.extension path)) ".pdf"
-  || String.starts_with ~prefix:"%PDF-" bytes
 
-let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
-  match Verification_pdf_inspection.inspect
-    ~base_path:t.config.base_path ~max_image_bytes ~bytes with
-  | Error error ->
-    let failure_class = match error with
-      | Verification_pdf_inspection.Image_policy_rejected _ -> Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
-        Tool_result.Runtime_failure in
-    Tool_result.error ~failure_class ~tool_name:name ~start_time
-      (Verification_pdf_inspection.error_to_string error)
-  | Ok inspection ->
-    let page_count = List.length inspection.pages in
-    let pages = List.map (fun (page : Verification_pdf_inspection.page) ->
-      `Assoc ["page",`Int page.number;"width_points",`Float page.width_points;
-              "height_points",`Float page.height_points;"text",`String page.text;
-              "rendered_media_type",`String "image/png";
-              "rendered_bytes",`Int (String.length page.png);
-              "rendered_sha256",`String Digestif.SHA256.(digest_string page.png |> to_hex)]) inspection.pages in
-    let data = `Assoc ["path",`String path;"media_type",`String "application/pdf";
-      "bytes",`Int inspection.source_bytes;"sha256",`String inspection.source_sha256;
-      "page_count",`Int page_count;"pages",`List pages;
-      "inspection",`String "Poppler pdftotext XML and pdftoppm rendering of the same complete captured PDF";
-      "diagnostics",`List (List.map (fun text -> `String text) inspection.diagnostics);
-      "visual_input",`Bool true] in
-    let content_blocks = Llm_provider.Types.Text (Yojson.Safe.to_string data) ::
-      List.concat_map (fun (page : Verification_pdf_inspection.page) ->
-        [Llm_provider.Types.Text (Printf.sprintf "PDF page %d of %d; source sha256=%s"
-          page.number page_count inspection.source_sha256);
-         Llm_provider.Types.image_block ~media_type:"image/png" ~data:(Base64.encode_exn page.png) ()]) inspection.pages in
-    Tool_result.make_ok ~tool_name:name ~start_time ~data ~content_blocks ()
+(* The probe read is bounded, but the whole-file escalation below is what the
+   inspectors hash, copy to disk and decode. Without a ceiling the size is the
+   submitter's choice: the read returns one OCaml string, [inspect] writes it
+   back out and reads it again, so a single oversized artifact costs several
+   times its own length in resident memory before any verdict exists. Reading
+   one byte past the ceiling is what separates "this is the whole file" from
+   "this file is over the limit" without loading the rest of it. Sits above the
+   image byte limit, which stays the binding number for images. *)
+(* One ceiling for every whole-media escalation on this surface. The number is
+   the PDF inspection's, because that is where it was first needed and main now
+   carries it; MP4 escalates through the same read and must not grow a second
+   copy that can drift away from it. The name says media because both formats
+   are bounded here. *)
+let max_media_source_bytes = Verification_pdf_inspection.max_source_bytes
 
 let media_result t tool ~name ~args ~start_time =
   match tool, args with
@@ -418,35 +477,62 @@ let media_result t tool ~name ~args ~start_time =
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
-           (* The bounded probe identifies the format only. Its potentially
-              text-projected body never becomes image input or hash evidence. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+           (* Probe exact bytes so non-UTF-8 box sizes cannot shift the
+              signature before format detection. *)
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
-              (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
+              (match (Verification_media_inspection.is_pdf path probe || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                   ~config:t.config ~meta ~path ?cwd ()))
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd
+                   ~max_bytes:(max_media_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
-            | Ok probe when is_pdf path probe ->
-              Keeper_tool_filesystem_runtime.read_complete_owned_bytes
-                ~ownership_root:t.ownership_root ~path ?cwd ()
+            | Ok probe when Verification_media_inspection.is_pdf path probe || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path probe ->
+              Keeper_tool_filesystem_runtime.read_owned_bytes
+                ~ownership_root:t.ownership_root ~path ?cwd
+                ~max_bytes:(max_media_source_bytes + 1) ()
             | result -> result)
        in
        (match bytes with
-        | Error detail when is_pdf path "" ->
+        | Error detail when Verification_media_inspection.is_pdf path "" || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path "" ->
           Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
-        | Ok bytes when is_pdf path bytes ->
+        (* Only an escalated whole-file read can reach this length: every other
+           path here is already capped at the image byte limit or below. PPTX,
+           MP4 and PDF all escalate to the same ceiling, so the check sits ahead
+           of every one of them. *)
+        | Ok bytes when String.length bytes > max_media_source_bytes ->
+          Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
+            ~tool_name:name ~start_time
+            (Printf.sprintf
+               "media_source_too_large: this verifier inspects at most %d bytes whole"
+               max_media_source_bytes))
+        | Ok bytes when Verification_media_inspection.is_presentation path ->
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+            Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+              ~tool_name:name ~start_time "PPTX files are inspected whole; omit line offset and limit")
+          else Some (Verification_media_inspection.presentation_result
+            ~base_path:t.config.base_path ~name ~path ~bytes ~start_time ~max_image_bytes:limit)
+        | Ok bytes when Verification_media_inspection.is_mp4 path bytes ->
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+            Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+              ~tool_name:name ~start_time "MP4 files are inspected whole; omit line offset and limit")
+          else Some (Verification_media_inspection.video_result
+            ~base_path:t.config.base_path ~name ~path ~bytes ~start_time)
+        | Ok bytes when Verification_media_inspection.is_pdf path bytes ->
           if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
               ~tool_name:name ~start_time "PDFs are inspected whole; omit line offset and limit")
-          else Some (pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes:limit)
+          else Some (Verification_media_inspection.pdf_result
+            ~base_path:t.config.base_path ~name ~path ~bytes ~start_time ~max_image_bytes:limit)
         | Ok bytes ->
           (match Keeper_vision_tool.sniff_image_media_type bytes with
            | Error _ -> None
@@ -470,15 +556,22 @@ let media_result t tool ~name ~args ~start_time =
                    ; Llm_provider.Types.image_block ~media_type
                        ~data:(Base64.encode_exn bytes) () ] ()) ))
      | _ -> None)
-  | (Read_file | Search_files | Web_fetch), _ -> None
+  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source), _ -> None
 ;;
 
 let dispatch t ~name ~args =
   let start_time = Time_compat.now () in
   let text_result = function
     | Ok text -> Tool_result.ok ~tool_name:name ~start_time text
-    | Error detail -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
+    | Error (Runtime_error detail) -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time detail
+    | Error (Collaboration_error error) ->
+      let failure_class = match error with
+        | Verification_collaboration_evidence.Invalid_request _ | Source_unavailable _ -> Tool_result.Workflow_rejection
+        | Access_denied _ -> Tool_result.Policy_rejection
+        | Storage_failed _ -> Tool_result.Runtime_failure in
+      Tool_result.error ~failure_class ~tool_name:name ~start_time
+        (Verification_collaboration_evidence.error_to_string error)
   in
   match List.find_opt (fun (tool, _) -> String.equal (tool_name tool) name) t.tools with
   | None ->
@@ -512,10 +605,11 @@ let dispatch t ~name ~args =
          | Some result -> result
          | None -> text_result (
          match run t tool ~args:prepared_args with
-         | (Ok text | Error text) as result when String_util.is_valid_utf8 text ->
+         | (Ok text | Error (Runtime_error text)) as result when String_util.is_valid_utf8 text ->
            result
-         | Ok bytes | Error bytes ->
-           Error
+         | Error (Collaboration_error _) as result -> result
+         | Ok bytes | Error (Runtime_error bytes) ->
+           Error (Runtime_error
              (Yojson.Safe.to_string
                 (`Assoc
                    [ "code", `String "lookup_output_invalid_utf8"
@@ -525,7 +619,7 @@ let dispatch t ~name ~args =
                      `String Digestif.SHA256.(digest_string bytes |> to_hex)
                    ; "error",
                      `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Binary file bytes are not a visual inspection."
-                   ])))
+                   ]))))
        in
        log_call
          t

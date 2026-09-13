@@ -52,10 +52,13 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
-val short_timestamp_for_terminal : string -> string
-(** Keep at most the first 19 source bytes, then sanitize the result. Slicing
-    before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
-    raw C1 byte. Empty timestamps render as [(never)]. *)
+val short_timestamp_for_terminal :
+  localtime:(float -> Unix.tm) -> string -> string
+(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
+    converts to, then sanitized. A timestamp the codec cannot read keeps at most
+    its first 19 source bytes; slicing before the terminal boundary ensures a
+    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
+    [(never)]. *)
 
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
@@ -1704,10 +1707,11 @@ type keeper_turn_lane =
   | Turn_lane_maintenance
 
 type keeper_turn_preview = {
+  ktp_status_text : string;
   ktp_text_tail : string;
       (** Tail of the newest response text this turn has produced. *)
-  ktp_current_tool : string option;
-      (** The most recent tool call the turn ran, when any. *)
+  ktp_last_tool : string option;
+      (** Most recently observed tool request or return; not execution status. *)
 }
 
 type keeper_turn_state =
@@ -1715,6 +1719,7 @@ type keeper_turn_state =
   | Keeper_turn_running of {
       lane : keeper_turn_lane;
       started_at_unix : float;
+      interrupt_token : string option;
       preview : keeper_turn_preview option;
     }
       (** [started_at_unix] is the server owner clock's epoch reading; derive
@@ -2351,6 +2356,11 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
+val http_status_error : status_code:int -> body:string -> string
+(** A non-2xx answer as one terminal-safe line: [HTTP <status>: ] and then the
+    body's ["error"] sentence when it has one, otherwise the body's head. *)
+(** Transport owns the target URL; keep it before the verbose failure reason. *)
+val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
 
@@ -2727,6 +2737,7 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
     decode rather than rendering as an empty row; [Evidence_access_unavailable]
     is the store-level failure the server states explicitly. *)
 type verification_evidence_item =
+  | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
   | Ev_artifact of {
       ev_reference : string;

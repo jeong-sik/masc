@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
+ (libraries masc masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
  (name masc_reliable_change_g1_check)
@@ -20,12 +20,13 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
  (public_name masc)
  (package masc)
  (libraries
   masc.workspace_connection
   masc.voice_config
+  masc.voice_setup
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -48,6 +49,7 @@
   masc.server
   masc.config
   masc.runtime
+  masc.tool_types
   masc.config_dir_resolver
   masc.embedded_config
   masc.host_config
@@ -316,7 +318,7 @@
  (name masc_tui_server_lifecycle)
  (wrapped false)
  (modules masc_tui_server_lifecycle)
- (libraries masc.masc_process unix))
+ (libraries masc.masc_core masc.fs_compat masc.masc_process unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,
@@ -408,10 +410,16 @@
  (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_lane_declaration)
+ (wrapped false)
+ (modules masc_tui_lane_declaration)
+ (libraries yojson))
+
+(library
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout yojson))
+ (libraries masc masc_tui_message_layout masc_tui_lane_declaration yojson))
 
 (library
  (name masc_tui_command)
@@ -457,6 +465,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_message_layout
   masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
@@ -559,12 +568,17 @@
  ; masc.runtime is here for the write side alone: it owns runtime.toml's
  ; write lock, its validation and its atomic replace, and the [tui] keys are
  ; in the file those already guard.
+ ;
+ ; masc.voice_config owns the [voice] section's schema. One key in that
+ ; section reaches the TUI (send_on_stop), and reading it by raw path would
+ ; be a second definition of a field that already had two.
  (libraries
   masc.config_dir_resolver
   masc.fs_compat
   masc.keeper_toml
   masc.runtime
-  masc.toml_line_editor))
+  masc.toml_line_editor
+  masc.voice_config))
 
 (library
  (name masc_tui_theme_catalog)
@@ -784,7 +798,7 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_table))
+ (libraries masc_tui_message_layout masc_tui_table))
 
 (library
  (name masc_tui_frame_timing)
@@ -801,7 +815,7 @@
  (name masc_tui_help)
  (wrapped false)
  (modules masc_tui_help)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_frame masc_tui_message_layout))
 
 (library
  (name masc_tui_roster_pane)
@@ -850,7 +864,7 @@
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_board_selection)
@@ -1046,9 +1060,13 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries
+ (libraries mtime.clock.os masc_tui_esc_interrupt
+  masc_tui_answering
+  masc.voice_wizard
+  masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
+  masc_tui_lane_declaration
   masc.browser_lane
   masc.sse_wire
   masc_tui_task_flow
@@ -1121,7 +1139,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries yojson))
+ (libraries masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1145,6 +1163,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_message_layout
   masc
   masc_types
   masc_tui_ansi
@@ -1171,6 +1190,7 @@
   masc_tui_chart
   masc_tui_context_inspector
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1238,6 +1258,7 @@
   masc_tui_composer_projection
   masc_tui_roster_pane
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_code_lexer
   masc.masc_goal
   masc_tui_pr_ref
@@ -1285,6 +1306,7 @@
  (modules masc_tui_render_chat)
  (libraries
   masc_tui_render_prim
+  masc_tui_composer
   masc_tui_ansi
   masc_tui_markdown_render_cache
   masc_tui_message_layout
@@ -1324,8 +1346,11 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.voice_wizard
+  masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_lane_declaration
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

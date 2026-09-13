@@ -623,6 +623,16 @@ let test_interrupt_receipt_is_bound_to_the_exact_request () =
       true
       (Astring.String.is_infix ~affix:"request_id mismatch" detail)
 ;;
+let test_observed_interrupt_response_identity () =
+  let decode = Interrupt_signal.decode_observed_interrupt_signal ~expected_token:"observed" in
+  let response token = `Assoc ["interrupt_token", `String token; "signalled", `Bool true] in
+  (match decode (response "observed") with Ok (Interrupt_signal.Signalled _) -> ()
+   | _ -> Alcotest.fail "exact observed receipt rejected");
+  List.iter (fun json -> match decode json with
+    | Error _ -> () | Ok _ -> Alcotest.fail "unbound observed receipt accepted")
+    [response "successor"; `Assoc ["signalled", `Bool true]; `Null]
+;;
+
 let test_enter_during_a_turn_queues () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
@@ -2405,6 +2415,7 @@ let () =
     [ ( "wiring"
       , [ test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names
+        ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
         ; test_case "Enter during a turn queues" `Quick

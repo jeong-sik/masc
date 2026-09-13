@@ -1,0 +1,276 @@
+{
+  "scope": "isolated three-channel website; real live Firefox extension and native host; binary-exported progressive browser instruction and composition with typed TUI default action; persistent native TUI",
+  "steps": [
+    {
+      "label": "03-page",
+      "status": 200,
+      "elapsed_ms": 13.5,
+      "request": {
+        "lane": "live",
+        "clientId": "9f737525-6f16-43ca-9f9d-71936bf096d7"
+      }
+    },
+    {
+      "label": "04-regions",
+      "status": 200,
+      "elapsed_ms": 5.16,
+      "request": {
+        "lane": "live",
+        "clientId": "9f737525-6f16-43ca-9f9d-71936bf096d7",
+        "tabId": 1,
+        "view": "regions"
+      }
+    },
+    {
+      "label": "05-selected-region",
+      "status": 200,
+      "elapsed_ms": 4.14,
+      "request": {
+        "lane": "live",
+        "clientId": "9f737525-6f16-43ca-9f9d-71936bf096d7",
+        "tabId": 1,
+        "view": "content",
+        "scope": {
+          "documentId": "4ba5bae57d22f171c3978ea5f001b5d9",
+          "nodeId": "n1"
+        }
+      }
+    },
+    {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 14.2,
+      "request": {
+        "lane": "live",
+        "clientId": "9f737525-6f16-43ca-9f9d-71936bf096d7",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "14-final-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 16.68,
+      "request": {
+        "lane": "live",
+        "clientId": "9f737525-6f16-43ca-9f9d-71936bf096d7",
+        "tabId": 1
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-46663580-16de-4ea8-9b5e-920a6cd838b9",
+        "keeper_name": "browser-handoff-proof-39143000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-cf45be0a-3bff-4add-b6f8-a29770ae905e"
+        },
+        "trace_id": "trace-1789272239130-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-13T04:05:44Z",
+        "updated_at": "2026-09-13T04:05:44Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned live Firefox profile closed",
+    "owned unique native host manifest removed",
+    {
+      "name": "server",
+      "pid": 71505,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 71504,
+      "exit": 0
+    }
+  ],
+  "composition_source_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+  "composition_distribution": "full package exported by this server binary",
+  "composition_file_sha256": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107",
+  "instruction_sha256": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "build": {
+    "release_version": "0.35.15",
+    "binary_version": "0.35.15",
+    "commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+    "commit_source": "embedded",
+    "binary_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "dee2fe0b4bf7fb0f8490ca10c9ecc6cbb245ad522a947351f671d1a9628c7fc3",
+    "binary_commit_unix_ts": 1789270786.0,
+    "binary_commit_age_seconds": 1447,
+    "executable_path": "/private/tmp/browser-live-context-native-3446/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-live-context-native-3446/runtime",
+    "runtime_instance_id": "01a098ef-927a-7000-88c7-f1965f8704a5",
+    "started_at": "2026-09-13T04:03:52Z",
+    "uptime_seconds": 0
+  },
+  "binary_sha256": "dee2fe0b4bf7fb0f8490ca10c9ecc6cbb245ad522a947351f671d1a9628c7fc3",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 51346,
+  "driver_port": 51345,
+  "live_extension": {
+    "host_name": "masc_browser_proof_289fce8b77ef4e1d9b4cb8ffa6b112e8",
+    "native_host_sha256": "ea6d1564066e17891ef782c40d6c3252f5c148a3e497f0e1576ae8b7bd3c0fdc",
+    "changes": "Only HOST_NAME routes this isolated profile to its private test server; page scripts and manifest are unchanged.",
+    "source_commit": "3446d8a35ee132eebadcadc63fc77d36e4eafead",
+    "files": {
+      "background.js": "cfb341c7e2a7ea69802e2aa3d63f1067a1b4cdf8c84795cbb6d99de2f5444c0e",
+      "manifest.json": "7d1789dd266527efe80a3d769666fb20f23c0f3cf74c66b75b7560637fce206c"
+    },
+    "installed_addon": "browser-lane@masc.local"
+  },
+  "webdriver_bootstrap": {
+    "session_id": "2ee27d02-3351-4e64-aecd-61353967237d",
+    "profile": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/rust_mozprofileHK3m3T"
+  },
+  "assertions": {
+    "selected_region_retained": true,
+    "channel_navigation_present": true,
+    "sidebar_excluded": true
+  },
+  "observed_content": "Channels Alpha Beta Gamma",
+  "clipboard": {
+    "tui_sha256": "48714436edee2adacd49fbd1d234eabd2009993772074c45ca7ff701322d9911",
+    "clipboard_bytes": 947,
+    "clipboard_sha256": "02e6b880f90dddf84b5b3e284db925cea707078346a82acffbeb16b89df43517",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "input_events": [
+        {
+          "monotonic": 1015688.909564791,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 1015688.956420416,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 1015689.08298925,
+          "keys_hex": "79"
+        },
+        {
+          "monotonic": 1015689.083925125,
+          "keys_hex": "73"
+        },
+        {
+          "monotonic": 1015689.2036195,
+          "keys_hex": "73"
+        }
+      ],
+      "refresh_interval": "unmodified product default",
+      "pid": 71731,
+      "started_monotonic": 1015687.692072791,
+      "binary_sha256": "48714436edee2adacd49fbd1d234eabd2009993772074c45ca7ff701322d9911",
+      "copied_monotonic": 1015689.08390625,
+      "copy_offset": 18902,
+      "alive_at_copy": true,
+      "display_selected_monotonic": 1015689.328516583,
+      "display_intent": "unscoped content selected before Keeper starts",
+      "keeper_observation_finished_monotonic": 1015795.964635958,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 1015796.005854875,
+      "capture_errors": []
+    }
+  },
+  "keeper": "browser-handoff-proof-39143000",
+  "turn_started_monotonic": 1015690.261217416,
+  "operation_id": "kmsg-fbe1ded79be3a8272141129083d4c2eb",
+  "operation_state": "Succeeded",
+  "turn_observed_elapsed_seconds": 105.554,
+  "model_tool_calls": [
+    {
+      "id": "call_a631989af0774db7bcf6c975",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789272250635-0001",
+      "success": true
+    },
+    {
+      "id": "call_5fd64c5da73f4ae195a4034a",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789272250637-0002",
+      "success": true
+    },
+    {
+      "id": "call_62b4b3d1cedf424ba19f9d81",
+      "name": "BrowserRead",
+      "execution_id": "exec-1789272264039-0003",
+      "success": true
+    },
+    {
+      "id": "call_631ae3f7f9084132b2d69159",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789272275194-0006",
+      "success": true
+    },
+    {
+      "id": "call_095e122e98434bb284dc5cb7",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789272289173-0009",
+      "success": true
+    },
+    {
+      "id": "call_ad758534c71d457293a9f64b",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789272297315-000c",
+      "success": true
+    }
+  ],
+  "composition_invocations": 3,
+  "chat_envelope_tool_calls": [
+    {
+      "id": "call_a631989af0774db7bcf6c975",
+      "name": "keeper_skill"
+    },
+    {
+      "id": "call_5fd64c5da73f4ae195a4034a",
+      "name": "keeper_skill"
+    },
+    {
+      "id": "call_62b4b3d1cedf424ba19f9d81",
+      "name": "BrowserRead"
+    },
+    {
+      "id": "call_631ae3f7f9084132b2d69159",
+      "name": "keeper_compose_browser-live-click-content"
+    },
+    {
+      "id": "call_095e122e98434bb284dc5cb7",
+      "name": "keeper_compose_browser-live-click-content"
+    },
+    {
+      "id": "call_ad758534c71d457293a9f64b",
+      "name": "keeper_compose_browser-live-click-content"
+    }
+  ],
+  "model_tool_calls_measurement": "typed turn execution_ids joined to durable tool_call records",
+  "result": "operation_completed_pending_evidence_audit"
+}

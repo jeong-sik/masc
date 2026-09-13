@@ -442,6 +442,15 @@ let all =
       ~category:"media"
       "Maximum bytes accepted for one generated-media artifact"
   ; setting
+      ~range:(int_range ~min:1 ~max:268435456 ())
+      ~env_name:"MASC_KEEPER_PEER_ARTIFACT_MAX_BYTES"
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"67108864"
+      ~consumers:[ "Keeper peer artifact export" ]
+      ~category:"media"
+      "Maximum bytes a Keeper may hand to a peer as one exported artifact"
+  ; setting
       ~range:(int_range ~min:1 ~max:5368709120 ())
       ~env_name:"MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES"
       ~exposure:Env_only

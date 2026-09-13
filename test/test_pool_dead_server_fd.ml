@@ -36,6 +36,22 @@ let test_dead_server_fd_flat () =
   in
   let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
   let url = Printf.sprintf "http://127.0.0.1:%d/" (closed_port ()) in
+  (* One request before the baseline. What this case holds is that a refused
+     request keeps no descriptor -- growth per request -- and the first
+     request through a fresh pool also opens the things a first request opens
+     once: the count came out 1 whether the loop ran 5 times or 200, so what
+     was being measured was first use, not a leak. Measured on macOS 26,
+     2026-09-13.
+
+     The warm-up is asserted like the rest: if the first request stopped
+     failing at TCP, the loop below would be measuring a different thing. *)
+  let warm_up =
+    error_message (Masc_http_client.Pool.request pool ~method_:`GET ~url ())
+  in
+  Alcotest.(check bool) "the warm-up request is refused like the rest" true
+    (Astring.String.is_prefix ~affix:"TCP connect failed:" warm_up);
+  Alcotest.(check bool) "and the refusal reads as one line" false
+    (String.contains warm_up '\n');
   let fd_before = (Fd_accountant.fd_snapshot ()).fd_open in
   for _ = 1 to 50 do
     let msg = error_message
@@ -176,6 +192,21 @@ let test_establishment_errors () =
     ("DNS resolution failed: " ^ Printexc.to_string dns_error)
     (error_message (establish ~resolve:(fun () -> raise dns_error)
       ~connect:no_connect ~create:no_create));
+  (* Eio's printer breaks an [Io] error's context onto its own line; the
+     message it goes into is one line. *)
+  let with_context =
+    Eio.Exn.add_context (Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout))
+      "connecting to %s" "tcp:127.0.0.1:8935"
+  in
+  let refused_with_context =
+    error_message (establish ~resolve:(fun () -> [()])
+      ~connect:(fun () -> raise with_context) ~create:no_create)
+  in
+  Alcotest.(check bool) "an Eio error's context stays on the message's line" false
+    (String.contains refused_with_context '\n');
+  Alcotest.(check bool) "and is still there" true
+    (Astring.String.is_suffix ~affix:", connecting to tcp:127.0.0.1:8935"
+       refused_with_context);
   let resource_error = Unix.Unix_error (Unix.EMFILE, "socket", "") in
   Alcotest.(check string) "resource exhaustion is not reported as refusal"
     ("TCP connect failed: " ^ Printexc.to_string resource_error)

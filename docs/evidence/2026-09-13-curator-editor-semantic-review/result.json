@@ -1,0 +1,177 @@
+{
+  "conflicts": [
+    {
+      "description": "s35는 디자이너 게시 인용과 빌드 소스 대조에서 포스터 '초등 고학년과 보호자'와 책자 '초등학교 고학년과 보호자'를 의미는 동일하고 표기는 다를 수 있다고 보고했다. s36은 board 원문을 직접 읽어 인쇄 최종 포스터 표기를 '초등 고학년과 보호자'로 확정하고, 책자와의 실제 표기 차이로 승격했다. 두 표기 중 어느 쪽이 canonical인지 통일 여부는 운영자·디자이너 판단이 대기 상태이므로, 이 draft에서는 어느 쪽을 확정적 canonical로 주장하지 않는다.",
+      "source_ids": [
+        "s35",
+        "s36"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "reason": "snapshot2의 change evidence path만 있는 metadata-only 항목이며, 독립적으로 쓸 수 있는 fact 본문이 없어 shared_claim 또는 conflict의 증거로 사용하지 않는다.",
+      "source_id": "s93"
+    }
+  ],
+  "shared_claims": [
+    {
+      "claim": "exhibit-editor의 ordinary recollection에 따르면 exhibit-designer가 확정한 전시 시각 컨셉은 팔레트 #F7F3E8/#2F5233/#8FAE8B/#A8BCC4/#C9A227, 제목 NanumSquareRound Bold, 본문 NanumBarunGothic이며, 책자·포스터 재생성에 이 컨셉을 반영하기로 했다고 보고한다.",
+      "source_ids": [
+        "s13"
+      ]
+    },
+    {
+      "claim": "행사 기준 정보는 2026-10-17(토) 14:00-17:00, 은빛정류장 전시실, 허구 고지 포함으로 보고된다. 입장료는 chr(0xBB34)+chr(0xB8CC) 코드포인트 표현이 원천 표기로 보고되며, 손상된 '묣료' 표기는 전송 왜곡으로 무효라고 한다. s33은 인쇄 최종 포스터가 아직 미확인 상태였을 때 소스 수준 일관성만 보고했으나, s56은 이후 원천 코드·이미지 전사·PDF 텍스트 3경로에서 '무료'로 일치했다고 보고한다. 대상 표기는 cf-001의 미결 차이로 분리된다.",
+      "source_ids": [
+        "s21",
+        "s33",
+        "s56"
+      ]
+    },
+    {
+      "claim": "task-001 확정 산출물(booklet.pdf 102,608B, poster.png 86,709B, renders/page1~3.png, evidence.json)은 보존하되 불필요한 재생성은 지양했다고 보고한다. task-001과 task-002의 완료·승인도 같은 기록에 포함되어 있다. 최종 포스터 received/designer-poster.png(484,694B, SHA-256 1e4a8fc1…3ebad16)는 수신·해시 일치였으나 s48 시점에는 글리프 검수가 미완이었다. s54는 이후 runtime 복구 후 실제 이미지 분석으로 글리프 결함이 없고, 편집 대조에서 대상 표기 차이만 남았다고 보고하며, s48의 '미완' 상태를 종료 상태로 대체한다.",
+      "source_ids": [
+        "s20",
+        "s48",
+        "s54"
+      ]
+    },
+    {
+      "claim": "task-002 multimedia/ 위치 문제는 s26에서 exhibit-editor 샌드박스에 디렉터리가 없어 계약 미충족 가능성으로 제기했으나, s27에서 multimedia/ 상주는 producer(exhibit-designer) 루트 기준이므로 exhibit-editor 샌드박스 부재는 정상이라는 정정으로 대체된다. 이후 s89에서는 garden.gif 588,811B, garden.mp3 289,689B, garden.wav 2,116,844B 3종을 received/task-002-multimedia/에 materialize하고 wc -c·sha256sum 실측으로 기대값 3/3 일치라고 보고한다.",
+      "source_ids": [
+        "s26",
+        "s27",
+        "s89"
+      ]
+    },
+    {
+      "claim": "Goal exhibition-publication-baseline은 s16에서 검증기가 PNG/PDF 시각 입력을 받지 못하는 도구 한계로 refuted되어, 같은 도구 상태에서 동일 완료 요청을 반복하지 말고 기준과 최신 산출물을 유지하라는 운영자 지시로 보고된다. 이후 s49에서는 검증기가 실제 PNG 4개와 정성 기준 일부를 확인했으나 PDF 바이트·3페이지·evidence 일치가 남은 2차 판정으로 보고되고, s55에서는 3차 판정 proof_proven 5/5·awaiting_confirmation으로 보고된다. s61과 s63은 관련 ask, 예약, 체크리스트를 철회 또는 해결 상태로 정리했다. 따라서 refuted는 과거 상태이고, 이 ordinary recollection의 현재 상태는 사람 확인 대기다.",
+      "source_ids": [
+        "s16",
+        "s49",
+        "s55",
+        "s61",
+        "s63"
+      ]
+    },
+    {
+      "claim": "큐레이터 제안(9b676bb2…)은 model_proposed 상태의 미검증 데이터로 취급되어 원천 대조 후 검토되었다. s51은 s50의 검토 기록을 4건 정정한다: evidence_quality.md는 이번 세션 Read path_not_found로 현재 부재만 확인하고 역사적 진위는 확정 불가, Goal 위상은 executing/직전 refuted, 도구 교훈은 이번 세션 실측과 역사 기록·미재실행으로 분리, 제안 내부 계수 변환('three files…was proven')은 원문 지지 안 됨. 정정판 handoff brief는 s62에서 현재 상태로 갱신되었고, s52에서는 입장료 원문(build_publication.py 28행 FEE=chr(0xBB34)+chr(0xB8CC))과 파일 실측을 디자이너에게 위임 경로로 전달했다고 보고한다.",
+      "source_ids": [
+        "s50",
+        "s51",
+        "s52",
+        "s62"
+      ]
+    },
+    {
+      "claim": "task-003 연작 소설은 세 편 초고 작성, 자기검수, exhibit-designer 동료 검토(반론 10건 전부 채택), serial/story.md v2·continuity.md·review.md·evidence.json 4종 제출, verifier_exact vrf-0267fe2e 승인, 골 memory-garden-serial-fiction proof proven(4/4 기준 충족)으로 보고된다. s65는 이 시점에 두 골이 모두 awaiting_confirmation 상태였다고 보고하며, 재요청·확인 대행은 금지라고 한다.",
+      "source_ids": [
+        "s57",
+        "s58",
+        "s59",
+        "s60",
+        "s64",
+        "s65"
+      ]
+    },
+    {
+      "claim": "task-004 결정 과정은 후보 3종 비교, 상충·불확실성 명시, exhibit-designer 반론 8건 전부 채택, storyboard 공유 원천 확보, 빌더 2종 작성으로 보고된다. fusion 판정은 s70에서 TTL 소실·verdict_insufficient 3/3으로 요약되었으나, s74에서 board 원문 실재로 정정한다: panel GLM/Codex, judge GLM, 권고 'C 주+B 무음 재설계 보조+A 부분 차용(낭독 조건부)'이고, 종전 3/3·TTL 소실·A+C 귀속은 조회 ID 전사 오류로 인한 오기다. 접근성 전제도 '소리를 듣지 못하는 상황' 청각 시나리오이고, '전시장 무음 규칙'은 근거 없는 재해석으로 정정된다.",
+      "source_ids": [
+        "s66",
+        "s67",
+        "s68",
+        "s69",
+        "s70",
+        "s74"
+      ]
+    },
+    {
+      "claim": "task-004 제작·검증 과정은 verify_adaptation.py 사전 작성, MP4 자막 밀도 위반을 115초·24세그먼트로 수정, PPTX/MP4 빌드 성공, 1차 검증에서 인과 앵커③ 누락 발견·수정, 최종 구조/문구/디코딩/프레임 검수 PASS, ▬(U+25AC) 기호 깨짐을 ■(U+25A0)로 교체, soffice 앱 렌더 PDF 실증으로 보고된다. s78의 앱 렌더 실측은 ■ 교체 전 ▬ 포함 버전이며, s79에서 ■ 버전 최종 검증과 evidence.json 완료를 보고한다.",
+      "source_ids": [
+        "s71",
+        "s72",
+        "s73",
+        "s75",
+        "s76",
+        "s77",
+        "s78",
+        "s79"
+      ]
+    },
+    {
+      "claim": "task-004는 제출 후 거절 축에 대응해 single source of truth 표, inspection images, machine-readable evidence bundle, peer-review-evidence.md, PPTX↔MP4 Q3 cross-media 통일, freeze_identity.py 동결→기계 갱신→독립 재해시 mismatch=0 체인으로 4차 재제출되었다. s88에서 최종 승인 vrf-c77fc80f…(2026-09-12T15:23Z, verifier_exact)로 보고되고, 골 memory-garden-participatory-adaptation은 verifying·proof_pending으로 전환됐다. adaptation/ 동결 파일과 identity 증거는 재생성 금지라고 한다.",
+      "source_ids": [
+        "s80",
+        "s81",
+        "s82",
+        "s83",
+        "s84",
+        "s85",
+        "s86",
+        "s87",
+        "s88"
+      ]
+    },
+    {
+      "claim": "지식 라이브러리는 masc_library_add가 docs/library/ 부모 디렉터리 부재로 실패하면서 초안 notes/library-drafts/korean-syllable-transport-corruption.md 보존으로 대체되었고, s46에서 규칙 5까지 초안에 동기화했다. s92는 이후 masc_library_list probe가 정상 빈 목록을 반환하고, 초안(2,980B·전 ASCII)을 masc_library_add로 import해 docs/library/korean-syllable-transport-corruption--shared-field-notes-20260913.md 경로와 list 착신을 확인했다고 보고한다. 초안 원본은 보존되고 라이브러리는 사본으로 보관된다.",
+      "source_ids": [
+        "s17",
+        "s41",
+        "s46",
+        "s92"
+      ]
+    },
+    {
+      "claim": "한글 음절 전송 왜곡은 exhibit-editor 자신의 Write/Edit/board_post_update 출력 경로에서 관측되고, exhibit-designer가 게시한 board 원문은 정상이라고 s19 보고한다. s37은 p-03876c43…와 c-38357855 공개 기록에서 원시 한글('무료', '초등 고학년과 보호자' 등)이 정상 렌더링됨을 재확인했다. 교훈은 기대 문자열은 build_publication.py ast 원천 추출 또는 원문 인용만 사용(규칙 0), 생성용 취약 토큰은 chr() 조립, memory_id는 최신 도구 응답에서 복사하고 철회 id 오류 시 스토어 문제로 결론 내리기 전 keeper_memory_search로 재확보(규칙 5)다.",
+      "source_ids": [
+        "s19",
+        "s37",
+        "s38",
+        "s44"
+      ]
+    },
+    {
+      "claim": "도구 검증 운영 교훈으로, Host Gate replay의 preview는 항상 비어 있어 승인된 호출 출력은 keeper_artifact_read로 실제 바이트를 읽어야 한다고 s14 보고한다. Edit에서 old_string과 new_string이 같으면 is_error=false일 수 있으나 바이트가 안 바뀌므로 편집 전 Read와 편집 후 Grep/Read 검증이 필요하다고 s15 보고한다. memory recall에 손상된 fact 사본이 반복돼도 store 자체는 깨끗할 수 있어 keeper_memory_search로 실재 여부부터 확인하라는 교훈도 있다. verify_evidence.py는 c2 PDF 페이지 체크를 pdfinfo 우선·pypdf 폴백으로 강화하고, 기대 문자열은 build_publication.py 상수 ast 추출로 전환했으며, 체크리스트 A~E절·스크립트·필드노트는 바이트 대조로 동기화됐다고 보고한다. masc_dashboard는 결과 자체가 새 artifact로 저장되는 중첩 regress 함정이 있었고, booklet.pdf 원시 바이트 grep은 Flate 압축 때문에 원리적으로 불가능하며, tesseract는 부재·PIL은 무결했다고 보고한다.",
+      "source_ids": [
+        "s14",
+        "s15",
+        "s23",
+        "s25",
+        "s29",
+        "s30",
+        "s31",
+        "s32",
+        "s34",
+        "s39",
+        "s42",
+        "s45",
+        "s53"
+      ]
+    },
+    {
+      "claim": "예약·안내 운영은 자정 점검 중복 예약 중 원본만 유지하고 복제본을 취소, vision 제공자 403 주간 한도에서는 창 초기화 전 재시도 금지, 예약 참조를 최신 sched로 갱신, dashboard에 승인 대기·운영자 질문·multimedia 요청을 1회만 묶어 안내하고 재게시 금지로 보고된다. 이후 기록에서 일부 예약·ask는 철회됐을 수 있으므로 이 항목들은 시점별 운영 교훈으로 읽어야 한다.",
+      "source_ids": [
+        "s24",
+        "s40",
+        "s43",
+        "s47"
+      ]
+    },
+    {
+      "claim": "운영자 지시와 외부 한계로, 직접 확인하지 않은 파일 내용(재생·음질·이미지 글리프 등)은 확인했다고 주장하지 않는다고 s18 보고한다. askca74072b5232c2fa 답변 도착 전 verify_evidence.py를 실행하지 말라는 s22의 지시는 해당 시점의 제한이다. vision 호출은 제공자 주간(7일) 사용량 한도 HTTP 403 policy_rejection이므로, 같은 호출을 초기화 전 재시도하지 않는다고 s28 보고한다.",
+      "source_ids": [
+        "s18",
+        "s22",
+        "s28"
+      ]
+    },
+    {
+      "claim": "pending approval 재생이 도착해도 task-004 동결 최종 세트가 깨지지 않도록 verify_adaptation.py에 FROZEN 분기를 추가했다. s90에서는 hash 일치 시 프레임 재추출과 soffice 재변환을 건너뛰도록 설계하고, s91에서는 AST_OK, frame 5종 FROZEN, APP_RENDER soffice=SKIP(FROZEN), VERDICT pptx=PASS·mp4=PASS, CROSSMEDIA match=OK, exit=0으로 실구동 검증을 통과했다고 보고한다. identity_report.json·identity_check.log와 동결 산출물은 재실측·재작성 금지다.",
+      "source_ids": [
+        "s90",
+        "s91"
+      ]
+    }
+  ]
+}

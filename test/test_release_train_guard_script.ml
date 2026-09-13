@@ -267,6 +267,29 @@ let test_published_base_rejects_same_major_downgrade () =
         (String_util.contains_substring stderr
            "downgrades package version from base 0.22.0 to 0.21.2 in major 0"))
 
+let test_unreleased_version_correction ~head_version ~allowed () =
+  with_temp_dir "release-train-unreleased-correction" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.35.14" ~message:"published release";
+      git_ok ~cwd:dir [ "tag"; "v0.35.14" ];
+      commit_version ~dir ~version:"0.35.16" ~message:"unreleased metadata";
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"correct-version" ~version:head_version
+           ~message:"correct release metadata");
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "correct-version" |]
+      in
+      check bool (stdout ^ stderr) allowed (code = 0);
+      if allowed then
+        check bool "identifies unreleased correction" true
+          (String_util.contains_substring stdout
+             "Release train guard OK (unreleased correction): base=0.35.16 head=0.35.15 latest_tag_ref=v0.35.14 latest_tag_version=0.35.14"))
+
 let test_prerelease_suffix_does_not_authorize_final_repair () =
   with_temp_dir "release-train-prerelease" (fun dir ->
       git_ok ~cwd:dir [ "init"; "-q" ];
@@ -388,6 +411,18 @@ let () =
             test_older_base_allows_exact_published_tag_repair;
           test_case "published base rejects same-major downgrade" `Quick
             test_published_base_rejects_same_major_downgrade;
+          test_case "unreleased correction stays above published version" `Quick
+            (test_unreleased_version_correction ~head_version:"0.35.15"
+               ~allowed:true);
+          test_case "unreleased correction cannot reuse published version" `Quick
+            (test_unreleased_version_correction ~head_version:"0.35.14"
+               ~allowed:false);
+          test_case "unreleased correction cannot precede published version" `Quick
+            (test_unreleased_version_correction ~head_version:"0.35.13"
+               ~allowed:false);
+          test_case "unreleased correction cannot widen pending train" `Quick
+            (test_unreleased_version_correction ~head_version:"0.35.17"
+               ~allowed:false);
           test_case "prerelease suffix does not authorize final repair" `Quick
             test_prerelease_suffix_does_not_authorize_final_repair;
           test_case "published base rejects prerelease package head" `Quick

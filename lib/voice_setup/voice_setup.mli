@@ -36,6 +36,12 @@ type change =
       (** Required once a section exists, and never blank: every endpoint in
           the section is asked for this model by name. *)
   | Set_tts_default_voice of string
+  | Set_send_on_stop of bool
+      (** [\[voice.stt\]].send_on_stop: whether ending a capture also sends
+          what was heard, instead of leaving it in the draft. Here rather than
+          in a TUI-only key because this is the section a configuring surface
+          writes, and the setting could otherwise only be turned on by editing
+          runtime.toml by hand. *)
   | Set_agent_voice of string * string option
       (** [(agent_id, voice)] in [\[voice.tts.agent_voices\]]. [None] drops the
           mapping, so the agent falls back to [tts.default_voice]. *)
@@ -72,20 +78,38 @@ type error =
           load as a voice configuration and {!observe} refuses it first. It is
           here because the writer underneath can refuse, and swallowing that
           would be the silent failure this module exists to avoid. *)
+  | Standalone_source_active of string
+      (** runtime.toml has no [\[voice\]] section and voice is read from the
+          standalone JSON at this path instead. The first section written into
+          runtime.toml would become the configuration in effect and drop every
+          setting that file carries, so nothing was written. *)
 
 val error_message : error -> string
 
+(** Which file the configuration in effect was read from. The loader prefers
+    runtime.toml's [\[voice\]] section and reads the standalone JSON only
+    when that section is absent ({!Voice_config.load_detailed}). *)
+type source =
+  | Runtime_toml
+  | Standalone_json of string
+
 val observe
   :  runtime_config_path:string
-  -> (string * Voice_config.t option, error) result
-(** The current source revision and the voice configuration that revision
-    carries, from one observation so a caller cannot join a revision to a
-    different read. Hand the revision back as [expected_revision].
+  -> standalone_path:string
+  -> (string * (source * Voice_config.t) option, error) result
+(** The current runtime.toml revision and the voice configuration in effect,
+    from one observation so a caller cannot join a revision to a different
+    read. Hand the revision back as [expected_revision].
 
-    [Ok (revision, None)] means runtime.toml has no [\[voice\]] section yet. *)
+    [standalone_path] is the JSON the loader falls back to. Without it an
+    observation answered "not configured" for a workspace whose voice worked,
+    because only the TOML text was parsed.
+
+    [Ok (revision, None)] means neither source configures voice. *)
 
 val preview
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
   -> (string, error) result
@@ -99,13 +123,43 @@ val preview
 
 val apply
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
-  -> (unit, error) result
+  -> (string, error) result
 (** Apply every change in order, in one commit under the config write lock.
+    [Ok] carries the source revision this commit produced, taken from the
+    commit itself so a caller can keep editing against a revision it has
+    actually observed.
 
     All of them or none. Changes are taken as a list rather than one call each
     because they depend on one another: a first endpoint and the
     [default_model] its section requires have to land together, and applying
     them one at a time would refuse the first half and leave the file in a
     state the loader rejects. *)
+
+type voice_placement =
+  | On_the_section (** the section's default is say's to set: the voice becomes it *)
+  | On_the_endpoint (** another provider shares the section and owns its default *)
+
+val voice_placement : Voice_config.tts_config option -> voice_placement
+(** Where a voice chosen for a local (command-run) endpoint is written, given
+    the TTS section as it is now.
+
+    There are two places because a voice name is provider-shaped: [say] takes a
+    label like ["Yuna"], ElevenLabs a 20-character id. One workspace default
+    cannot serve both, so an endpoint carries its own when it has to.
+
+    But an endpoint voice outranks [voice.tts.agent_voices]
+    ({!Voice_config.voice_for_agent_at_endpoint}), so one written where it is
+    not needed makes every per-keeper voice inert: measured 2026-09-13, a
+    keeper mapped to Eddy spoke in Yuna (85,908 bytes) with it and in Eddy
+    (119,044 bytes) without it.
+
+    So the question is who owns the section's default, not whether a section
+    exists. A section whose endpoints are all [say] -- including one this
+    command wrote on an earlier run -- is say's, and gets the section default;
+    only a section that also holds another provider puts the voice on the
+    endpoint, and accepts that the mappings do not reach it. Asking only
+    whether a section existed sent the second run of the same command to the
+    endpoint. *)

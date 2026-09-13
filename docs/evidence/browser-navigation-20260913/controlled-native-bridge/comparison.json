@@ -1,0 +1,244 @@
+{
+  "before": {
+    "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+    "component_sources": {
+      "server_and_tui": "5334be62fca7e70350cff7e36899ef24f27230dc",
+      "native_host_and_extension": "5334be62fca7e70350cff7e36899ef24f27230dc"
+    },
+    "actual_binary_sha256": {
+      "masc-macos-arm64": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+      "masc-tui-macos-arm64": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+      "masc-browser-host-macos-arm64": "ee1da83847b65178b99632e307866dc1a0582cd34648e70b187a286071106d42"
+    },
+    "operation_id": "kmsg-209e8a70ec6f465214e511ae2393b3cf",
+    "state": "Succeeded",
+    "runtime_id": "codex_subscription.gpt-5.6-luna",
+    "fixture_sha256": "66f48cfe7cdac427efc61f9055eed5dcd1adbcf93d9be3b685e5bf575b015d9a",
+    "request_sha256": "f227ff771d5510c5938ecd30c3ef174133f62d872f9de73a479be61235bbbb26",
+    "packages": {
+      "browser-lanes": {
+        "SKILL.md": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+        "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+        "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+        "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+        "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+        "references/observation.md": "5685ef16c9f0eb4eed1d432d2231211c22495bc9ca8ddbce5be6b4ac5309e0ea",
+        "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+      },
+      "browser-live-click-content": {
+        "SKILL.md": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107"
+      }
+    },
+    "prompt_blocks": [
+      {
+        "block": "keeper_instructions",
+        "bytes": 8225,
+        "digest": "71f36715407c48ac0f9e3746ee411cbcd7e30a858add4a4345ee6e3f1d3f3563"
+      },
+      {
+        "block": "skill_compositions",
+        "bytes": 133,
+        "digest": "fffb01cbd8228da727c34ed1bcdd3694667a5a4339333f3c4aec40eb959b8158"
+      },
+      {
+        "block": "dynamic_context",
+        "bytes": 188,
+        "digest": "287b150e8680674181677655f708cee297c25ef12fc10fc4be198990751507d0"
+      },
+      {
+        "block": "temporal_summary",
+        "bytes": 36,
+        "digest": "b482b8f52dfd33f426bd7cffcaabfd6306ac5b53bdeeafa4c8713affca4956f5"
+      }
+    ],
+    "outer_calls": 9,
+    "outer_errors": 3,
+    "raw_outer_result_bytes": 35711,
+    "successful_compositions": 0,
+    "compositions": [
+      {
+        "success": false,
+        "follow_disposition": "completed",
+        "read_disposition": "failed"
+      },
+      {
+        "success": false,
+        "follow_disposition": "completed",
+        "read_disposition": "failed"
+      },
+      {
+        "success": false,
+        "follow_disposition": "completed",
+        "read_disposition": "failed"
+      }
+    ],
+    "outer_tool_sequence": [
+      {
+        "tool": "keeper_skill",
+        "success": true,
+        "bytes": 6317
+      },
+      {
+        "tool": "keeper_skill",
+        "success": true,
+        "bytes": 2246
+      },
+      {
+        "tool": "BrowserRead",
+        "success": true,
+        "bytes": 1855
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": false,
+        "bytes": 3340
+      },
+      {
+        "tool": "BrowserRead",
+        "success": true,
+        "bytes": 5862
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": false,
+        "bytes": 3334
+      },
+      {
+        "tool": "BrowserRead",
+        "success": true,
+        "bytes": 4718
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": false,
+        "bytes": 3328
+      },
+      {
+        "tool": "BrowserRead",
+        "success": true,
+        "bytes": 4711
+      }
+    ],
+    "observed_elapsed_seconds": 50.179
+  },
+  "after": {
+    "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+    "component_sources": {
+      "server_and_tui": "5334be62fca7e70350cff7e36899ef24f27230dc",
+      "native_host_and_extension": "c082d495b1edc03588142b310177712718c36b49"
+    },
+    "actual_binary_sha256": {
+      "masc-macos-arm64": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+      "masc-tui-macos-arm64": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+      "masc-browser-host-macos-arm64": "bbcf1be0f2d1db1959187a1fbaf81cfce42ec29b009967cd45c804807f9c27e1"
+    },
+    "operation_id": "kmsg-a963209e69626eb3f33d323210496084",
+    "state": "Succeeded",
+    "runtime_id": "codex_subscription.gpt-5.6-luna",
+    "fixture_sha256": "66f48cfe7cdac427efc61f9055eed5dcd1adbcf93d9be3b685e5bf575b015d9a",
+    "request_sha256": "f227ff771d5510c5938ecd30c3ef174133f62d872f9de73a479be61235bbbb26",
+    "packages": {
+      "browser-lanes": {
+        "SKILL.md": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+        "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+        "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+        "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+        "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+        "references/observation.md": "5685ef16c9f0eb4eed1d432d2231211c22495bc9ca8ddbce5be6b4ac5309e0ea",
+        "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+      },
+      "browser-live-click-content": {
+        "SKILL.md": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107"
+      }
+    },
+    "prompt_blocks": [
+      {
+        "block": "keeper_instructions",
+        "bytes": 8225,
+        "digest": "5571ceab8981cd5291f93e40a7edc29f8b35c42fbedfbeb0372ba406c051923f"
+      },
+      {
+        "block": "skill_compositions",
+        "bytes": 133,
+        "digest": "fffb01cbd8228da727c34ed1bcdd3694667a5a4339333f3c4aec40eb959b8158"
+      },
+      {
+        "block": "dynamic_context",
+        "bytes": 188,
+        "digest": "287b150e8680674181677655f708cee297c25ef12fc10fc4be198990751507d0"
+      },
+      {
+        "block": "temporal_summary",
+        "bytes": 36,
+        "digest": "16525e8cbdf654de2e5d6912a6ec7f36ae79ebc85fb6e5d464b33611ab583791"
+      }
+    ],
+    "outer_calls": 6,
+    "outer_errors": 0,
+    "raw_outer_result_bytes": 31597,
+    "successful_compositions": 3,
+    "compositions": [
+      {
+        "success": true,
+        "follow_disposition": "completed",
+        "read_disposition": "completed"
+      },
+      {
+        "success": true,
+        "follow_disposition": "completed",
+        "read_disposition": "completed"
+      },
+      {
+        "success": true,
+        "follow_disposition": "completed",
+        "read_disposition": "completed"
+      }
+    ],
+    "outer_tool_sequence": [
+      {
+        "tool": "keeper_skill",
+        "success": true,
+        "bytes": 6317
+      },
+      {
+        "tool": "keeper_skill",
+        "success": true,
+        "bytes": 2246
+      },
+      {
+        "tool": "BrowserRead",
+        "success": true,
+        "bytes": 1855
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": true,
+        "bytes": 7829
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": true,
+        "bytes": 6681
+      },
+      {
+        "tool": "keeper_compose_browser-live-click-content",
+        "success": true,
+        "bytes": 6669
+      }
+    ],
+    "observed_elapsed_seconds": 65.452
+  },
+  "same_fixture": true,
+  "same_request": true,
+  "same_runtime": true,
+  "same_browser_packages": true,
+  "same_prompt_blocks": false,
+  "delta_after_minus_before": {
+    "outer_calls": -3,
+    "outer_errors": -3,
+    "raw_outer_result_bytes": -4114,
+    "successful_compositions": 3,
+    "observed_elapsed_seconds": 15.272999999999996
+  },
+  "scope": "One run per source. Counts join typed turn IDs, durable tool records and raw outer replies. Prompt/source drift is reported; elapsed time and result bytes are not provider-token or causal speed measurements."
+}

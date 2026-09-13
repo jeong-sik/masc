@@ -744,6 +744,25 @@ module DashboardHealth = struct
   ;;
 end
 
+module KeeperPeerArtifact = struct
+  let clamp_int ~min_value ~max_value value = max min_value (min max_value value)
+  let max_bytes_default = 64 * 1024 * 1024
+  let max_bytes_ceiling = 256 * 1024 * 1024
+
+  (** Largest artifact a Keeper may hand to a peer through
+      [keeper_artifact_transfer]. The Keeper names the path, the whole file is
+      held here while the blob store takes it, and the blob is then durable --
+      so this is the size a Keeper can commit on its own. Default is 64 MiB,
+      above generated media because these are build outputs. Range:
+      [1, 256 MiB].
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_PEER_ARTIFACT_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+end
+
 (* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
    deleted (audit F8): its value was threaded as [?provider_filter] into
    [Keeper_turn_driver.run_named], which silently ignored it after the RFC-0206

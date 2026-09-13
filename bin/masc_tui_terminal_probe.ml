@@ -221,10 +221,15 @@ let finish_apc decoder =
   decoder.mode <- Normal
 ;;
 
+(* The OSC answers the query asked for: [10;] and [11;] for the text and the
+   page, [4;] for each of the sixteen palette slots. Only these are held for
+   {!finish_osc}; anything else is some other program's sequence and goes on.
+   An answer held nowhere reaches the key reader as typed input. *)
 let osc_prefix_match matched byte =
   match matched, byte with
   | 0, '1' -> Some 1
   | 1, ('0' | '1') -> Some 2
+  | 0, '4' -> Some 2
   | 2, ';' -> Some 3
   | 3, _ -> Some 3
   | _ -> None

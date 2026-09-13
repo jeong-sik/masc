@@ -1,0 +1,76 @@
+{
+  "observed_at": "2026-09-12T17:00:36.301453+00:00",
+  "health": {
+    "status": "ok",
+    "overall_status": "ok",
+    "build": {
+      "release_version": "0.35.14",
+      "binary_version": "0.35.14",
+      "commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+      "commit_source": "embedded",
+      "binary_commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "a38ff7f2e6ecbd9efe6dcfbb2469d67e56e837f3cad7eba0fa2f7eed6571643a",
+      "binary_commit_unix_ts": 1789229952.0,
+      "binary_commit_age_seconds": 2484,
+      "executable_path": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d/masc",
+      "executable_dir": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d",
+      "runtime_instance_id": "01a09684-c8f9-7000-bc9b-5e4f84d63395",
+      "started_at": "2026-09-12T16:47:59Z",
+      "uptime_seconds": 756
+    },
+    "keeper_config_error_count": 0,
+    "operator_action_required": false
+  },
+  "executable_sha256_recomputed": "a38ff7f2e6ecbd9efe6dcfbb2469d67e56e837f3cad7eba0fa2f7eed6571643a",
+  "goals": [
+    {
+      "id": "exhibition-publication-baseline",
+      "phase": "awaiting_confirmation",
+      "status": null
+    },
+    {
+      "id": "memory-garden-serial-fiction",
+      "phase": "awaiting_confirmation",
+      "status": null
+    },
+    {
+      "id": "memory-garden-participatory-adaptation",
+      "phase": "awaiting_confirmation",
+      "status": null
+    }
+  ],
+  "restart_preservation": {
+    "scope": "domain files, keeper/runtime configuration, editor/designer source/artifact files excluding build/cache directories and symlink files; regular keeper memory files also included (JSONL prefixes can be checked separately)",
+    "before_files": 98,
+    "unchanged_count": 96,
+    "changed": [
+      {
+        "path": "config/keepers/exhibit-designer.memory-journal.jsonl",
+        "before_sha256": "2c43228644c02cf23058a06df004867aa195f18437285d5161b79d7b999a00a8",
+        "after_sha256": "eb0928db916b6e23d703ff369371ca6232697a5172ed92e10640f643200d0aa9",
+        "before_bytes": 50840,
+        "after_bytes": 51742
+      },
+      {
+        "path": "config/keepers/exhibit-editor.memory-journal.jsonl",
+        "before_sha256": "8460030d0697b5910feacd58fe1eb7611f4ae67dd0c3eb7e84bcf6c1d7b420cf",
+        "after_sha256": "078d8f66d3c6d3668b39b003f62338accd9c80a215ad23a9a144baadb20cb4bd",
+        "before_bytes": 501554,
+        "after_bytes": 502457
+      }
+    ],
+    "missing": [],
+    "append_prefixes": [
+      {
+        "path": "config/keepers/exhibit-designer.memory-journal.jsonl",
+        "original_prefix_preserved": true
+      },
+      {
+        "path": "config/keepers/exhibit-editor.memory-journal.jsonl",
+        "original_prefix_preserved": true
+      }
+    ]
+  }
+}

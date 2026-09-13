@@ -32,8 +32,15 @@ describe('actual Tools observation denominators', () => {
     expect(text).toContain('사용이 관측된 전체 도구50')
     expect(text).toContain('현재 비숨김 도구 103개: 사용 관측 26개 · 현재 집계에 호출 없음 77개')
     expect(text).toContain('숨김 도구 24개 · 현재 카탈로그 밖 도구 0개')
-    expect(text).toContain('현재 프로세스 호출과 복원에 성공한 SQLite 보존 기록')
-    expect(text).toContain('이 응답은 복원·저장 상태를 확인하지 않습니다')
+    expect(text).toContain('현재 프로세스 호출과 SQLite 보존 기록을 합산합니다')
+    // The same sentence used to say the records were "복원에 성공한" and then
+    // that this response does not check restore state. It cannot claim a
+    // success it never reads: startup hydration can fail and the server
+    // carries on with the in-memory snapshot while metrics_source stays the
+    // same, so an empty retention and a failed restore look identical here.
+    expect(text).not.toContain('복원에 성공한')
+    expect(text).toContain('복원·저장 성공 여부를 확인하지 않으므로')
+    expect(text).toContain('보존 기록이 비어 있는 것과 복원이 실패한 것을 구분하지 않습니다')
     expect(text).toContain('보존 범위 밖의 과거 사용 여부는 알 수 없습니다')
     expect(text).not.toContain('등록됨')
     expect(text).not.toContain('모든 MCP 서버')

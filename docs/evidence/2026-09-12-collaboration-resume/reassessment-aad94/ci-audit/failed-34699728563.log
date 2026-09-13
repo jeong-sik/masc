@@ -1,0 +1,803 @@
+lint suite	Blocking lints	﻿2026-09-12T14:36:29.6183879Z ##[group]Run bash scripts/ci/run-lint-suite.sh blocking-pr \
+lint suite	Blocking lints	2026-09-12T14:36:29.6184664Z [36;1mbash scripts/ci/run-lint-suite.sh blocking-pr \[0m
+lint suite	Blocking lints	2026-09-12T14:36:29.6185068Z [36;1m  "f7133fff50a889b4b3d0ab293e9ce38083ed991a"[0m
+lint suite	Blocking lints	2026-09-12T14:36:29.6220797Z shell: /usr/bin/bash -e {0}
+lint suite	Blocking lints	2026-09-12T14:36:29.6221070Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:29.6296677Z ##[group]Installer terminal wizard
+lint suite	Blocking lints	2026-09-12T14:36:30.5147851Z ..............
+lint suite	Blocking lints	2026-09-12T14:36:30.5148409Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:36:30.5148988Z Ran 14 tests in 0.821s
+lint suite	Blocking lints	2026-09-12T14:36:30.5149221Z 
+lint suite	Blocking lints	2026-09-12T14:36:30.5149348Z OK
+lint suite	Blocking lints	2026-09-12T14:36:30.5257637Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:30.5258375Z ##[group]Installer upgrade configuration
+lint suite	Blocking lints	2026-09-12T14:36:30.6177215Z ...
+lint suite	Blocking lints	2026-09-12T14:36:30.6177778Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:36:30.6178368Z Ran 3 tests in 0.045s
+lint suite	Blocking lints	2026-09-12T14:36:30.6178602Z 
+lint suite	Blocking lints	2026-09-12T14:36:30.6178739Z OK
+lint suite	Blocking lints	2026-09-12T14:36:30.6257903Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:30.6258545Z ##[group]Issue taxonomy truth
+lint suite	Blocking lints	2026-09-12T14:36:30.7139825Z issue taxonomy truth: 32 values named in 2 docs
+lint suite	Blocking lints	2026-09-12T14:36:30.7142697Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:30.7143346Z ##[group]Logging consistency
+lint suite	Blocking lints	2026-09-12T14:36:35.9378710Z ─── logging-consistency ───────────────────
+lint suite	Blocking lints	2026-09-12T14:36:35.9381562Z   current:  0
+lint suite	Blocking lints	2026-09-12T14:36:35.9381917Z   baseline: 0
+lint suite	Blocking lints	2026-09-12T14:36:35.9382234Z   status: OK
+lint suite	Blocking lints	2026-09-12T14:36:35.9383027Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:35.9383677Z ##[group]Issue taxonomy parser and reconciliation
+lint suite	Blocking lints	2026-09-12T14:36:35.9647350Z issue-taxonomy-core: parser and reconciliation contracts passed
+lint suite	Blocking lints	2026-09-12T14:36:35.9686934Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:35.9747562Z ##[notice]Skipping OCaml test suite reporter self-test; scripts/ci-run-test-suite.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:35.9756397Z ##[group]Edited-tests selector self-test
+lint suite	Blocking lints	2026-09-12T14:36:36.0535833Z ok   a source edit selects the suites named after it
+lint suite	Blocking lints	2026-09-12T14:36:36.1156384Z ok   an umbrella module selects only the guards that name it
+lint suite	Blocking lints	2026-09-12T14:36:36.1820277Z ok   a watched source reaches the guard that declares it
+lint suite	Blocking lints	2026-09-12T14:36:36.2404708Z ok   a guard that opens its input is selected too
+lint suite	Blocking lints	2026-09-12T14:36:36.2990238Z ok   a package source selects its suites in both test roots
+lint suite	Blocking lints	2026-09-12T14:36:36.3433646Z ok   a doc no suite names selects nothing
+lint suite	Blocking lints	2026-09-12T14:36:36.4019121Z ok   a document a suite reads selects that suite
+lint suite	Blocking lints	2026-09-12T14:36:36.7090934Z ok   past the cap with no asset there is nothing left
+lint suite	Blocking lints	2026-09-12T14:36:37.0414321Z ok   past the cap a tool definition still reaches its guards
+lint suite	Blocking lints	2026-09-12T14:36:37.1018620Z ok   a tool definition reaches every guard over it
+lint suite	Blocking lints	2026-09-12T14:36:37.1600342Z ok   a prompt asset reaches the asset guard and the prompt golden
+lint suite	Blocking lints	2026-09-12T14:36:37.2143680Z ok   an edited test is still selected on its own
+lint suite	Blocking lints	2026-09-12T14:36:37.2980828Z ok   a source and its own suite are one entry
+lint suite	Blocking lints	2026-09-12T14:36:37.2981473Z run-edited-tests self-test: all cases pass
+lint suite	Blocking lints	2026-09-12T14:36:37.2983781Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:37.3023508Z ##[notice]Skipping Prompt source words self-test; scripts/lint/prompt-source-words-agree.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:37.3026581Z ##[group]Prompt source words agree
+lint suite	Blocking lints	2026-09-12T14:36:37.3160636Z prompt source words: the producer, the dashboard, and the TUI name the same three
+lint suite	Blocking lints	2026-09-12T14:36:37.3162563Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:37.3163601Z ##[group]Keeper host_cwd leak gate
+lint suite	Blocking lints	2026-09-12T14:36:38.1408390Z OK: no host_cwd leak in lib/keeper
+lint suite	Blocking lints	2026-09-12T14:36:38.1410656Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:38.1449862Z ##[notice]Skipping Turn-path provider-agnostic self-test; scripts/turn-path-provider-agnostic-gate.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:38.1452068Z ##[group]Turn-path provider-agnostic gate
+lint suite	Blocking lints	2026-09-12T14:36:38.1918771Z turn-path provider-agnostic gate: clean (59 files scanned)
+lint suite	Blocking lints	2026-09-12T14:36:38.1921011Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:38.1960674Z ##[notice]Skipping Dashboard tests type-checked self-test; scripts/lint/dashboard-tests-are-type-checked.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:38.1965965Z ##[group]Dashboard tests type-checked
+lint suite	Blocking lints	2026-09-12T14:36:39.5433544Z dashboard tests type-checked: 0 file(s) with @ts-nocheck across 695 test file(s)
+lint suite	Blocking lints	2026-09-12T14:36:39.5436305Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:39.5474683Z ##[notice]Skipping Test suites declared as tests self-test; scripts/lint/test-suites-are-declared-as-tests.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:39.5477037Z ##[group]Test suites declared as tests
+lint suite	Blocking lints	2026-09-12T14:36:39.5840172Z test suite stanzas: 0 test_-named (executable) across 883 stanza name(s)
+lint suite	Blocking lints	2026-09-12T14:36:39.5842182Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:36:39.5879497Z ##[notice]Skipping Dune suite scope self-test (RFC-0428); scripts/ci/dune_suite_scope.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:39.5914768Z ##[notice]Skipping Test stanza env reader self-test; scripts/ci/stanza_env.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:36:39.5916891Z ##[group]Test stanza env is readable
+lint suite	Blocking lints	2026-09-12T14:37:10.1301210Z stanza env: read all 391 stanza files and 918 suites declared in test/dune and its includes; 22 declare an environment, and the directory block adds 4 variable(s) to every one
+lint suite	Blocking lints	2026-09-12T14:37:10.1384732Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.1387228Z ##[group]Hardcoded model prefix
+lint suite	Blocking lints	2026-09-12T14:37:10.1676780Z no-roadmap-stale-hardcoding: clean (2 roots scanned)
+lint suite	Blocking lints	2026-09-12T14:37:10.1690881Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.1691308Z ##[group]Raw font-size px
+lint suite	Blocking lints	2026-09-12T14:37:10.1813117Z no-raw-font-size-px: clean
+lint suite	Blocking lints	2026-09-12T14:37:10.1816255Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.1817187Z ##[group]Harness connector env ratchet (#28807)
+lint suite	Blocking lints	2026-09-12T14:37:10.2733408Z harness-connector-env-ratchet self-test: pass
+lint suite	Blocking lints	2026-09-12T14:37:10.2749242Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.2749937Z ##[group]OCaml comment terminator trap
+lint suite	Blocking lints	2026-09-12T14:37:10.3097749Z no-ocaml-comment-terminator-trap: clean
+lint suite	Blocking lints	2026-09-12T14:37:10.3100058Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.3103528Z ##[group]Wire-field removal schema gate (#29516/#29601/#29666)
+lint suite	Blocking lints	2026-09-12T14:37:10.4825092Z wire-field-removal-schema-gate self-test: pass
+lint suite	Blocking lints	2026-09-12T14:37:10.4872154Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.4873950Z ##[group]Timeout env knob ceiling (RFC-0138)
+lint suite	Blocking lints	2026-09-12T14:37:10.5150394Z [timeout-env-ceiling] distinct MASC_*_TIMEOUT names in lib/: current=24 baseline=24
+lint suite	Blocking lints	2026-09-12T14:37:10.5151188Z PASS
+lint suite	Blocking lints	2026-09-12T14:37:10.5153043Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.5195191Z ##[notice]Skipping .mli env knob exists self-test; scripts/lint/mli-env-knob-exists.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:10.5197317Z ##[group].mli env knob exists
+lint suite	Blocking lints	2026-09-12T14:37:10.5737471Z [mli-env-knob-exists] OK: 113 knobs named in .mli, every one exercised
+lint suite	Blocking lints	2026-09-12T14:37:10.5739207Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.5780054Z ##[notice]Skipping Guard scan targets exist self-test; scripts/lint/guard-scan-targets-exist.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:10.5782265Z ##[group]Guard scan targets exist
+lint suite	Blocking lints	2026-09-12T14:37:10.6400654Z [guard-scan-targets-exist] OK: 156 declared scan targets, every one present
+lint suite	Blocking lints	2026-09-12T14:37:10.6403122Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.6442961Z ##[notice]Skipping Shim stub set agrees self-test; scripts/lint/shim-stub-set-agrees.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:10.6445258Z ##[group]Shim stub set agrees
+lint suite	Blocking lints	2026-09-12T14:37:10.6645231Z [shim-stub-set] 3 stub(s) agree across all three lists
+lint suite	Blocking lints	2026-09-12T14:37:10.6647787Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.6648444Z ##[group]Opam cache freshness ratchet
+lint suite	Blocking lints	2026-09-12T14:37:10.6850331Z [opam-cache-freshness] wiring OK
+lint suite	Blocking lints	2026-09-12T14:37:10.6852672Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.6892031Z ##[notice]Skipping Opam cache freshness self-test; scripts/ci/opam-cache-freshness.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:10.6894121Z ##[group]No actionable-signal bool context
+lint suite	Blocking lints	2026-09-12T14:37:10.8181886Z no-actionable-signal-bool-context: PASS
+lint suite	Blocking lints	2026-09-12T14:37:10.8184229Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.8185075Z ##[group]Provider name hardcoding ratchet
+lint suite	Blocking lints	2026-09-12T14:37:10.8470540Z metric                                  count
+lint suite	Blocking lints	2026-09-12T14:37:10.8471123Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:10.8472022Z provider_name_literals_current              2
+lint suite	Blocking lints	2026-09-12T14:37:10.8472542Z provider_name_allowlist_entries             2
+lint suite	Blocking lints	2026-09-12T14:37:10.8473049Z provider_name_new_literals                  0
+lint suite	Blocking lints	2026-09-12T14:37:10.8473557Z provider_name_stale_allowlist               0
+lint suite	Blocking lints	2026-09-12T14:37:10.8473897Z 
+lint suite	Blocking lints	2026-09-12T14:37:10.8474097Z [no-provider-name-hardcoding] OK
+lint suite	Blocking lints	2026-09-12T14:37:10.8486165Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.8486831Z ##[group]Keeper behavior hardcoding
+lint suite	Blocking lints	2026-09-12T14:37:10.8981782Z [no-keeper-behavior-hardcoding] OK
+lint suite	Blocking lints	2026-09-12T14:37:10.8996411Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.8997102Z ##[group]Eval tool-selector runtime import
+lint suite	Blocking lints	2026-09-12T14:37:10.9146387Z [no-eval-tool-selector-runtime-import] OK
+lint suite	Blocking lints	2026-09-12T14:37:10.9160204Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.9160826Z ##[group]One process manager in lib
+lint suite	Blocking lints	2026-09-12T14:37:10.9389215Z [one-process-manager] OK
+lint suite	Blocking lints	2026-09-12T14:37:10.9402381Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:10.9402996Z ##[group]Legacy tool surface name
+lint suite	Blocking lints	2026-09-12T14:37:11.1171336Z metric                                      count
+lint suite	Blocking lints	2026-09-12T14:37:11.1171926Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:11.1172462Z legacy_tool_name_literals_current               0
+lint suite	Blocking lints	2026-09-12T14:37:11.1173004Z legacy_tool_name_allowlist_entries              0
+lint suite	Blocking lints	2026-09-12T14:37:11.1173531Z legacy_tool_name_new_literals                   0
+lint suite	Blocking lints	2026-09-12T14:37:11.1174089Z legacy_tool_name_stale_allowlist                0
+lint suite	Blocking lints	2026-09-12T14:37:11.1186643Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:11.1187270Z ##[group]Retired tool husk ratchet
+lint suite	Blocking lints	2026-09-12T14:37:11.2149363Z metric                                  count
+lint suite	Blocking lints	2026-09-12T14:37:11.2150013Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:11.2150566Z retired_tool_husk_hits                      0
+lint suite	Blocking lints	2026-09-12T14:37:11.2150939Z 
+lint suite	Blocking lints	2026-09-12T14:37:11.2151155Z [no-retired-tool-husks] OK
+lint suite	Blocking lints	2026-09-12T14:37:11.2163712Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:11.2164599Z ##[group]Synthetic tool-call residue ratchet
+lint suite	Blocking lints	2026-09-12T14:37:11.3062465Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:37:11.3062972Z ------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:11.3063372Z synthetic_tool_call_residue_hits                    0
+lint suite	Blocking lints	2026-09-12T14:37:11.3063885Z 
+lint suite	Blocking lints	2026-09-12T14:37:11.3064162Z [no-synthetic-tool-call-residue] OK
+lint suite	Blocking lints	2026-09-12T14:37:11.3076623Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:11.3077291Z ##[group]Tool substrate adapter surface
+lint suite	Blocking lints	2026-09-12T14:37:11.5205756Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:37:11.5206385Z ----------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:11.5206951Z tool_substrate_forbidden_current                    0
+lint suite	Blocking lints	2026-09-12T14:37:11.5207532Z tool_substrate_allowlist_entries                    0
+lint suite	Blocking lints	2026-09-12T14:37:11.5208097Z tool_substrate_new_hits                             0
+lint suite	Blocking lints	2026-09-12T14:37:11.5208658Z tool_substrate_stale_allowlist                      0
+lint suite	Blocking lints	2026-09-12T14:37:11.5221021Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:11.5221773Z ##[group]Tool -> Keeper dependency-direction ratchet (RFC-0194)
+lint suite	Blocking lints	2026-09-12T14:37:14.7650120Z [tool-keeper-boundary-ratchet] OK (0 baselined, 0 new).
+lint suite	Blocking lints	2026-09-12T14:37:14.7652250Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:14.7652868Z ##[group]MASC domain ownership ratchet
+lint suite	Blocking lints	2026-09-12T14:37:15.8831242Z [masc-domain-boundary-ratchet] OK (0 baselined, 0 new).
+lint suite	Blocking lints	2026-09-12T14:37:15.8833339Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:15.8872987Z ##[notice]Skipping Keeper turn content boundary self-test; scripts/check-keeper-turn-content-boundary.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:15.8875480Z ##[group]No Tool_result.error + Printexc (RFC-0148)
+lint suite	Blocking lints	2026-09-12T14:37:15.9009413Z OK: no RFC-0148 backsliding sites in lib/tool_*.ml
+lint suite	Blocking lints	2026-09-12T14:37:15.9011638Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:15.9049572Z ##[notice]Skipping Board attention exact-flow boundary self-test; scripts/check-board-attention-exact-flow-boundary.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:15.9052315Z ##[group]Boundary redaction SSOT (RFC-0132 PR-3)
+lint suite	Blocking lints	2026-09-12T14:37:15.9446575Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:37:15.9447548Z --------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:15.9448135Z rfc0132_pr3_scan_files                             13
+lint suite	Blocking lints	2026-09-12T14:37:15.9448771Z rfc0132_pr3_preapproved_entries                     0
+lint suite	Blocking lints	2026-09-12T14:37:15.9449334Z rfc0132_pr3_violations                              0
+lint suite	Blocking lints	2026-09-12T14:37:15.9449908Z rfc0132_pr3_stale_preapproved                       0
+lint suite	Blocking lints	2026-09-12T14:37:15.9450285Z 
+lint suite	Blocking lints	2026-09-12T14:37:15.9450538Z [no-runtime-literal-outside-boundary-redaction] OK
+lint suite	Blocking lints	2026-09-12T14:37:15.9464731Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:15.9465381Z ##[group]No fabricated telemetry
+lint suite	Blocking lints	2026-09-12T14:37:15.9639403Z no-fabricated-telemetry: clean
+lint suite	Blocking lints	2026-09-12T14:37:15.9653254Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:15.9653920Z ##[group]No inline ok-envelope literals
+lint suite	Blocking lints	2026-09-12T14:37:15.9958005Z OK: no inline ok-envelope literals found outside allowlist
+lint suite	Blocking lints	2026-09-12T14:37:15.9971845Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:15.9972535Z ##[group]Tool-subject key lists mirror each other
+lint suite	Blocking lints	2026-09-12T14:37:16.0161663Z subject-keys-mirror: OK — the three lists match in membership and order
+lint suite	Blocking lints	2026-09-12T14:37:16.0163440Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.0164098Z ##[group]No inline error-envelope literals
+lint suite	Blocking lints	2026-09-12T14:37:16.0467197Z OK: no inline error-envelope literals found outside allowlist
+lint suite	Blocking lints	2026-09-12T14:37:16.0480668Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.0481352Z ##[group]No inline json_kind_name
+lint suite	Blocking lints	2026-09-12T14:37:16.0757460Z OK: no inline Yojson kind classifiers outside allowlist
+lint suite	Blocking lints	2026-09-12T14:37:16.0771432Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.0772074Z ##[group]No yojson 3.0 dead arms
+lint suite	Blocking lints	2026-09-12T14:37:16.1217174Z OK: no yojson 3.0 dead arms found
+lint suite	Blocking lints	2026-09-12T14:37:16.1231997Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.1232640Z ##[group]Workflow YAML syntax
+lint suite	Blocking lints	2026-09-12T14:37:16.2609383Z yaml-syntax: 16 workflow file(s) parsed OK
+lint suite	Blocking lints	2026-09-12T14:37:16.2657555Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.2658365Z ##[group]Board SLO extractor fixture
+lint suite	Blocking lints	2026-09-12T14:37:16.4235097Z board-slo-extractor fixture test passed
+lint suite	Blocking lints	2026-09-12T14:37:16.4253460Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.4254138Z ##[group]Feedback-loop metrics fixture
+lint suite	Blocking lints	2026-09-12T14:37:16.5826600Z feedback-loop metrics fixture: OK
+lint suite	Blocking lints	2026-09-12T14:37:16.5842506Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:16.5843183Z ##[group]Agent-core package shape
+lint suite	Blocking lints	2026-09-12T14:37:17.8764920Z agent-core package shape: ok
+lint suite	Blocking lints	2026-09-12T14:37:17.8768040Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:17.8768684Z ##[group]Execute async surface
+lint suite	Blocking lints	2026-09-12T14:37:17.9105716Z execute-async-surface: PASS
+lint suite	Blocking lints	2026-09-12T14:37:17.9108505Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:17.9109165Z ##[group]HITL exact-flow boundary
+lint suite	Blocking lints	2026-09-12T14:37:18.0458482Z HITL exact-flow boundary: OK
+lint suite	Blocking lints	2026-09-12T14:37:18.0461228Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:18.0461846Z ##[group]Turn-records envelope parity
+lint suite	Blocking lints	2026-09-12T14:37:18.0685535Z [turn-records-envelope] OK - 18 keys, server and dashboard agree
+lint suite	Blocking lints	2026-09-12T14:37:18.0726291Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:18.0726908Z ##[group]Feature flag consistency
+lint suite	Blocking lints	2026-09-12T14:37:18.0758453Z === Feature Flag Consistency Check ===
+lint suite	Blocking lints	2026-09-12T14:37:18.1083445Z 
+lint suite	Blocking lints	2026-09-12T14:37:18.1084754Z --- Checking consumer coverage ---
+lint suite	Blocking lints	2026-09-12T14:37:18.1293959Z OK: All literal registry consumers are registered.
+lint suite	Blocking lints	2026-09-12T14:37:18.1294828Z 
+lint suite	Blocking lints	2026-09-12T14:37:18.1295262Z --- Checking for stale literal registry entries ---
+lint suite	Blocking lints	2026-09-12T14:37:18.1503239Z OK: Every literal registry entry has a runtime consumer.
+lint suite	Blocking lints	2026-09-12T14:37:18.1504180Z 
+lint suite	Blocking lints	2026-09-12T14:37:18.1551394Z Summary: 14 literal consumers, 14 registry entries, 0 error(s)
+lint suite	Blocking lints	2026-09-12T14:37:18.1552539Z PASS: Feature flag consistency check passed.
+lint suite	Blocking lints	2026-09-12T14:37:18.1553757Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:18.1558084Z ##[group]Drain loops yield
+lint suite	Blocking lints	2026-09-12T14:37:18.2305664Z check-drain-loop-yields: ok (15/15 drain-caller file(s) verified)
+lint suite	Blocking lints	2026-09-12T14:37:18.2306999Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:18.2307485Z ##[group]Log severity anti-patterns
+lint suite	Blocking lints	2026-09-12T14:37:18.3152403Z OK    L1a (silent + warn): 3
+lint suite	Blocking lints	2026-09-12T14:37:18.3927792Z OK    L1b (logging-only mode + warn): 0
+lint suite	Blocking lints	2026-09-12T14:37:18.4702601Z OK    L2 (operator_broadcast + info): 0
+lint suite	Blocking lints	2026-09-12T14:37:18.5999896Z OK    L4 (watchdog/keepalive/heartbeat + info): 0
+lint suite	Blocking lints	2026-09-12T14:37:18.6751878Z OK    L5 (validation success (coerced) + info): 0
+lint suite	Blocking lints	2026-09-12T14:37:18.7526842Z OK    L6 (outcome-carrying line + static info): 0
+lint suite	Blocking lints	2026-09-12T14:37:18.7527320Z 
+lint suite	Blocking lints	2026-09-12T14:37:18.7527788Z ─── Summary ───────────────────────────────
+lint suite	Blocking lints	2026-09-12T14:37:18.7528379Z   current total:  3
+lint suite	Blocking lints	2026-09-12T14:37:18.7528753Z   baseline total: 3
+lint suite	Blocking lints	2026-09-12T14:37:18.7529089Z   delta:          0
+lint suite	Blocking lints	2026-09-12T14:37:18.7529412Z   status: OK
+lint suite	Blocking lints	2026-09-12T14:37:18.7530042Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:18.7530615Z ##[group]Determinism contract
+lint suite	Blocking lints	2026-09-12T14:37:19.3670579Z === Scan: new deterministic-boundary ratchet ===
+lint suite	Blocking lints	2026-09-12T14:37:23.5799312Z FAIL: new deterministic-boundary debt added:
+lint suite	Blocking lints	2026-09-12T14:37:23.5822404Z origin/main...HEAD: lib/runtime/runtime_official_client_tool.ml:51:   let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
+lint suite	Blocking lints	2026-09-12T14:37:23.5826166Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.5826845Z Wrap non-determinism at the boundary, keep parsing sound-partial, or add a nearby DET-OK/NDT-OK comment with rationale.
+lint suite	Blocking lints	2026-09-12T14:37:23.5829114Z === Scan: deterministic branch on non-deterministic source ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6003631Z === Scan: permissive default on unknown input ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6132652Z WARN: Option.value with default on potentially unknown input (sound partial?):
+lint suite	Blocking lints	2026-09-12T14:37:23.6158039Z lib/mcp_server_eio_call_tool.ml-317-    ~(execution_id : Ids.Execution_id.t) : unit =
+lint suite	Blocking lints	2026-09-12T14:37:23.6158945Z lib/mcp_server_eio_call_tool.ml:318:  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+lint suite	Blocking lints	2026-09-12T14:37:23.6159439Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6159840Z lib/mcp_server_eio_call_tool.ml-323-  in
+lint suite	Blocking lints	2026-09-12T14:37:23.6160562Z lib/mcp_server_eio_call_tool.ml:324:  let turn = Option.value ~default:0 ctx.turn in
+lint suite	Blocking lints	2026-09-12T14:37:23.6161256Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6161705Z lib/mcp_server_eio_protocol.ml-463-       let arguments =
+lint suite	Blocking lints	2026-09-12T14:37:23.6162830Z lib/mcp_server_eio_protocol.ml:464:         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
+lint suite	Blocking lints	2026-09-12T14:37:23.6163371Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6163593Z lib/mcp_server_eio_protocol.ml-1216-        else None)
+lint suite	Blocking lints	2026-09-12T14:37:23.6163980Z lib/mcp_server_eio_protocol.ml:1217:      |> Option.value ~default:0
+lint suite	Blocking lints	2026-09-12T14:37:23.6164327Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6164945Z lib/keeper/keeper_world_observation_message_scope.ml-324-    in
+lint suite	Blocking lints	2026-09-12T14:37:23.6165531Z lib/keeper/keeper_world_observation_message_scope.ml:325:    Option.value ~default:messages (drop messages)
+lint suite	Blocking lints	2026-09-12T14:37:23.6166002Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6166279Z lib/keeper/keeper_memory_os_current.ml-253-         (fun premise_id ->
+lint suite	Blocking lints	2026-09-12T14:37:23.6166935Z lib/keeper/keeper_memory_os_current.ml:254:            let current = Hashtbl.find_opt dependents premise_id |> Option.value ~default:[] in
+lint suite	Blocking lints	2026-09-12T14:37:23.6167479Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6167798Z lib/keeper/keeper_memory_os_current.ml-274-    Hashtbl.find_opt dependents identity
+lint suite	Blocking lints	2026-09-12T14:37:23.6168343Z lib/keeper/keeper_memory_os_current.ml:275:    |> Option.value ~default:[]
+lint suite	Blocking lints	2026-09-12T14:37:23.6168738Z === Scan: catch-all permissive default ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6344181Z WARN: catch-all branch returning Some (possible unsound default):
+lint suite	Blocking lints	2026-09-12T14:37:23.6364065Z lib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate
+lint suite	Blocking lints	2026-09-12T14:37:23.6365484Z lib/telemetry_unified/telemetry_unified.ml-114-
+lint suite	Blocking lints	2026-09-12T14:37:23.6365978Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6366646Z lib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))
+lint suite	Blocking lints	2026-09-12T14:37:23.6367528Z lib/dashboard/dashboard_execution_helpers.ml-44-  in
+lint suite	Blocking lints	2026-09-12T14:37:23.6368144Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6368767Z lib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))
+lint suite	Blocking lints	2026-09-12T14:37:23.6369552Z lib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys
+lint suite	Blocking lints	2026-09-12T14:37:23.6370125Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6370837Z lib/server/server_routes_http_routes_workspace.ml:585:     | _ -> Some (String.concat " " parts))
+lint suite	Blocking lints	2026-09-12T14:37:23.6371645Z lib/server/server_routes_http_routes_workspace.ml-586-  | _ when String.equal added "-" && String.equal deleted "-" -> Some "bin"
+lint suite	Blocking lints	2026-09-12T14:37:23.6372212Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6372572Z lib/server/server_dashboard_http_keeper_api.ml:1079:                  | _ -> Some entry.ts)
+lint suite	Blocking lints	2026-09-12T14:37:23.6373161Z lib/server/server_dashboard_http_keeper_api.ml-1080-                None entries
+lint suite	Blocking lints	2026-09-12T14:37:23.6373546Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6373849Z lib/server/server_dashboard_http_keeper_api.ml:1758:            | _ -> Some r.ts)
+lint suite	Blocking lints	2026-09-12T14:37:23.6374340Z lib/server/server_dashboard_http_keeper_api.ml-1759-          None records
+lint suite	Blocking lints	2026-09-12T14:37:23.6374982Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.6375347Z lib/server/server_dashboard_http_composite_claims.ml:451:          | _ -> Some "runtime_blocked"))
+lint suite	Blocking lints	2026-09-12T14:37:23.6375882Z lib/server/server_dashboard_http_composite_claims.ml-452-  in
+lint suite	Blocking lints	2026-09-12T14:37:23.6376294Z === Scan: unordered iteration in deterministic context ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6538226Z === DET/NDT gate: FAIL ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6554269Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:23.6561329Z ##[error]Determinism contract (exit 1)
+lint suite	Blocking lints	2026-09-12T14:37:23.6562996Z ##[group]TLA variant sync
+lint suite	Blocking lints	2026-09-12T14:37:23.6588145Z === VAR gate: cross-language variant sync (scripts/check-variants.sh) ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6625247Z === Check 1: KeeperStateMachine.phase (OCaml) vs KeeperPhase (TypeScript) ===
+lint suite	Blocking lints	2026-09-12T14:37:23.6835024Z OK: OCaml(all_phases) <-> TypeScript(KeeperPhase) in sync (8 variants)
+lint suite	Blocking lints	2026-09-12T14:37:23.6835478Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.6835674Z === Check 2: turn_phase (OCaml) vs KeeperTurnCycle.tla domain ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7023805Z OK: OCaml(turn_phase) <-> TLA+(TurnPhaseSet) in sync (6 variants)
+lint suite	Blocking lints	2026-09-12T14:37:23.7024320Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7025304Z === Check 4: PHASE_STYLES record coverage vs KeeperPhase type ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7152878Z OK: TypeScript(KeeperPhase) <-> TypeScript(PHASE_STYLES keys) in sync (8 variants)
+lint suite	Blocking lints	2026-09-12T14:37:23.7153540Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7153717Z === check-variants: PASS ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7155750Z Cross-language check: PASS
+lint suite	Blocking lints	2026-09-12T14:37:23.7156195Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7156535Z === Scan: OCaml lifecycle variants ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7228731Z   Found 90 constructors
+lint suite	Blocking lints	2026-09-12T14:37:23.7229069Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7229201Z === Scan: TLA+ lifecycle domain literals ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7329118Z   Found 69 PascalCase literals
+lint suite	Blocking lints	2026-09-12T14:37:23.7329402Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7329513Z === Scan: Event type strings ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7400890Z INFO: lib/keeper_types/keeper_types.ml has no matching keeper_types.tla under specs/ (not required, but note for 3-way sync)
+lint suite	Blocking lints	2026-09-12T14:37:23.7432549Z INFO: lib/keeper/keeper_types_profile.ml has no matching keeper_types_profile.tla under specs/ (not required, but note for 3-way sync)
+lint suite	Blocking lints	2026-09-12T14:37:23.7433297Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7567105Z === Scan: unexplained wildcard _ in match expressions ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7567987Z WARN: unexplained wildcard match arms in keeper lib (add justification comment):
+lint suite	Blocking lints	2026-09-12T14:37:23.7594008Z scripts/ci/check-tla-variant-sync.sh: line 115: echo: write error: Broken pipe
+lint suite	Blocking lints	2026-09-12T14:37:23.7598607Z   lib/keeper/keeper_supervisor_launch.ml:345:               | _ -> Keeper_registry.Exception (Printexc.to_string exn)
+lint suite	Blocking lints	2026-09-12T14:37:23.7600414Z   lib/keeper/keeper_board_attention_partition.ml:260:  | _ -> Error (context ^ " must be a string")
+lint suite	Blocking lints	2026-09-12T14:37:23.7601805Z   lib/keeper/keeper_board_attention_partition.ml:267:  | _ -> Error (context ^ " must be a number")
+lint suite	Blocking lints	2026-09-12T14:37:23.7602566Z   lib/keeper/keeper_board_attention_partition.ml:273:  | _ -> Error (context ^ " must be an integer")
+lint suite	Blocking lints	2026-09-12T14:37:23.7603321Z   lib/keeper/keeper_board_attention_partition.ml:391:     | _ -> Ok (Advancing { execution_anchor; last_from; next }))
+lint suite	Blocking lints	2026-09-12T14:37:23.7604100Z   lib/keeper/keeper_board_attention_partition.ml:527:    | _ -> Error (context ^ ".schema_version must be an integer")
+lint suite	Blocking lints	2026-09-12T14:37:23.7605268Z   lib/keeper/keeper_board_attention_partition.ml:1132:      | _ -> Ok ()
+lint suite	Blocking lints	2026-09-12T14:37:23.7605772Z   lib/keeper/keeper_world_observation_message_scope.ml:97:  | _ ->
+lint suite	Blocking lints	2026-09-12T14:37:23.7606301Z   lib/keeper/keeper_world_observation_message_scope.ml:101:     | _ -> "someone")
+lint suite	Blocking lints	2026-09-12T14:37:23.7606842Z   lib/keeper/keeper_world_observation_message_scope.ml:192:  | _ ->
+lint suite	Blocking lints	2026-09-12T14:37:23.7607336Z   lib/keeper/keeper_world_observation_message_scope.ml:223:      | _ -> []
+lint suite	Blocking lints	2026-09-12T14:37:23.7607918Z   lib/keeper/keeper_skill_activation_ledger.ml:971:  | _ -> Error (Expected_object { field })
+lint suite	Blocking lints	2026-09-12T14:37:23.7608613Z   lib/keeper/keeper_skill_activation_ledger.ml:1044:           | _ -> Error (Expected_object { field = "task_ids" }))
+lint suite	Blocking lints	2026-09-12T14:37:23.7609306Z   lib/keeper/keeper_skill_activation_ledger.ml:1196:  | _ -> Error Invalid_action_identity_field
+lint suite	Blocking lints	2026-09-12T14:37:23.7609870Z   lib/keeper/keeper_skill_activation_ledger.ml:1364:      | _ -> []
+lint suite	Blocking lints	2026-09-12T14:37:23.7610411Z   lib/keeper/keeper_shutdown_store.ml:451:  | _ -> Error (decode_error field "inside an object")
+lint suite	Blocking lints	2026-09-12T14:37:23.7610922Z   lib/keeper/keeper_shutdown_store.ml:527:  | _ -> Ok ()
+lint suite	Blocking lints	2026-09-12T14:37:23.7611438Z   lib/keeper/keeper_shutdown_store.ml:579:         | _ -> Error (decode_error (field ^ "[]") "a string"))
+lint suite	Blocking lints	2026-09-12T14:37:23.7611986Z   lib/keeper/keeper_shutdown_store.ml:982:    | _ -> Ok () in
+lint suite	Blocking lints	2026-09-12T14:37:23.7612430Z   lib/keeper/keeper_shutdown_store.ml:1385:      | _ ->
+lint suite	Blocking lints	2026-09-12T14:37:23.7612954Z   (Consider replacing with exhaustive match; if _ is intentional, add (* justification: ... *))
+lint suite	Blocking lints	2026-09-12T14:37:23.7613347Z 
+lint suite	Blocking lints	2026-09-12T14:37:23.7613783Z === VAR gate: PASS (no critical drift detected) ===
+lint suite	Blocking lints	2026-09-12T14:37:23.7614806Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:23.7615233Z ##[group]SSOT spawn drift
+lint suite	Blocking lints	2026-09-12T14:37:23.7849898Z PASS: legacy CLI Spawn mapping is removed.
+lint suite	Blocking lints	2026-09-12T14:37:23.7852508Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:23.7853045Z ##[group]Silent failure patterns
+lint suite	Blocking lints	2026-09-12T14:37:23.7886117Z === Scan: try/ignore anti-pattern ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8055347Z PASS
+lint suite	Blocking lints	2026-09-12T14:37:23.8055750Z === Scan: wildcard -> () swallow ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8277436Z WARN: wildcard -> () branches without visible logging:
+lint suite	Blocking lints	2026-09-12T14:37:23.8299508Z lib/notify.ml-60-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> Buffer.add_char buf c
+lint suite	Blocking lints	2026-09-12T14:37:23.8300289Z lib/notify.ml:61:    | _ -> ()
+lint suite	Blocking lints	2026-09-12T14:37:23.8300697Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8301378Z lib/voice/voice_bridge.ml-1118-             (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
+lint suite	Blocking lints	2026-09-12T14:37:23.8301992Z lib/voice/voice_bridge.ml:1119:         | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:37:23.8302294Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8302783Z lib/fusion/fusion_official_client.ml-190-        | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
+lint suite	Blocking lints	2026-09-12T14:37:23.8303801Z lib/fusion/fusion_official_client.ml:191:     | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:37:23.8304352Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8304988Z lib/masc_log/console_sink.ml-53-    (try observe () with
+lint suite	Blocking lints	2026-09-12T14:37:23.8305750Z lib/masc_log/console_sink.ml:54:     | _ -> ())
+lint suite	Blocking lints	2026-09-12T14:37:23.8306204Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8306405Z lib/masc_log/console_sink.ml-80-     with
+lint suite	Blocking lints	2026-09-12T14:37:23.8306708Z lib/masc_log/console_sink.ml:81:     | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:37:23.8307307Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8307775Z lib/browser_webdriver.ml-213-        session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
+lint suite	Blocking lints	2026-09-12T14:37:23.8308530Z lib/browser_webdriver.ml:214:        (match result with `List [] -> t.session <- None; release_resources session | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:37:23.8309025Z --
+lint suite	Blocking lints	2026-09-12T14:37:23.8309463Z lib/model_inference_metrics/model_inference_metrics_entry.ml-361-       | Some n when n < 0 -> add "negative_input_tokens"
+lint suite	Blocking lints	2026-09-12T14:37:23.8310134Z lib/model_inference_metrics/model_inference_metrics_entry.ml:362:       | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:37:23.8310602Z === Scan: Hashtbl.find without find_opt fallback ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8571281Z === Scan: naked Option.get ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8753714Z === SIL gate: PASS (no critical silent failures detected) ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8756501Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:23.8757115Z ##[group]Spec Mirrors: references resolve
+lint suite	Blocking lints	2026-09-12T14:37:23.8795987Z === check-spec-truth: scanning TLA+ spec Mirrors: annotations ===
+lint suite	Blocking lints	2026-09-12T14:37:23.8796436Z     Repo root: /home/runner/work/masc/masc
+lint suite	Blocking lints	2026-09-12T14:37:23.8796636Z 
+lint suite	Blocking lints	2026-09-12T14:37:24.0694329Z 
+lint suite	Blocking lints	2026-09-12T14:37:24.0695046Z === check-spec-truth summary ===
+lint suite	Blocking lints	2026-09-12T14:37:24.0695818Z   Refs checked        : 1
+lint suite	Blocking lints	2026-09-12T14:37:24.0696375Z   Skipped (bare block): 0
+lint suite	Blocking lints	2026-09-12T14:37:24.0696821Z   Orphan refs found   : 0
+lint suite	Blocking lints	2026-09-12T14:37:24.0697092Z 
+lint suite	Blocking lints	2026-09-12T14:37:24.0697331Z PASS: all live Mirrors: references resolve to existing OCaml sources.
+lint suite	Blocking lints	2026-09-12T14:37:24.0698439Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:24.0699072Z ##[group]docs/spec names files that exist
+lint suite	Blocking lints	2026-09-12T14:37:24.0951688Z === spec file references: 83 checked ===
+lint suite	Blocking lints	2026-09-12T14:37:24.0952311Z PASS: every referenced source file exists
+lint suite	Blocking lints	2026-09-12T14:37:24.0989704Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:24.0990424Z ##[group]Env-read config floor self-test
+lint suite	Blocking lints	2026-09-12T14:37:24.1473754Z PASS: env-read config-floor self-test
+lint suite	Blocking lints	2026-09-12T14:37:24.1556605Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:24.1557366Z ##[group]Exact-field decoders have a preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9932840Z === exact-field decoder preflight coverage ===
+lint suite	Blocking lints	2026-09-12T14:37:24.9933763Z   keeper_event_queue_persistence                   preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9934937Z   keeper_memory_os_current                         preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9935690Z   keeper_memory_source_current                     preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9936805Z   keeper_multimodal_input                          no store — decodes chat/vision request bodies
+lint suite	Blocking lints	2026-09-12T14:37:24.9937718Z   keeper_official_client_session_store             preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9938370Z   keeper_paused_work_disposition_receipt           preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9939184Z   keeper_paused_work_operator_request              no store — decodes an operator request payload
+lint suite	Blocking lints	2026-09-12T14:37:24.9939877Z   keeper_provider_input_snapshot                   preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9940559Z   keeper_usage_resolution                          via Keeper_meta_store through keeper_meta_json_parse
+lint suite	Blocking lints	2026-09-12T14:37:24.9941192Z   turn_record                                      preflight
+lint suite	Blocking lints	2026-09-12T14:37:24.9941531Z 
+lint suite	Blocking lints	2026-09-12T14:37:24.9941822Z PASS: 10 exact-field decoder(s); 8 read by the preflight, 2 declared file-free.
+lint suite	Blocking lints	2026-09-12T14:37:24.9989590Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:24.9990209Z ##[group]Root dune warning mask
+lint suite	Blocking lints	2026-09-12T14:37:25.0107583Z OCaml compile authority: PASS (root dune sets -w +32, +69 and -warn-error +a in dev and release)
+lint suite	Blocking lints	2026-09-12T14:37:25.0109469Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:25.0110175Z ##[group]Path layout SSOT
+lint suite	Blocking lints	2026-09-12T14:37:25.1075160Z audit-path-ssot: OK (0 violations, 0 stale allowlist entries)
+lint suite	Blocking lints	2026-09-12T14:37:25.1089131Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:25.1089801Z ##[group]odoc references resolve
+lint suite	Blocking lints	2026-09-12T14:37:28.8276075Z [odoc-refs] OK - every {!...} and every private-note [name] in lib/**/*.mli resolves (4500 files scanned)
+lint suite	Blocking lints	2026-09-12T14:37:28.8343027Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:28.8343938Z ##[group]TLA bug models keep their pair
+lint suite	Blocking lints	2026-09-12T14:37:28.8387471Z metric                                     current   baseline   dir
+lint suite	Blocking lints	2026-09-12T14:37:28.8388157Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:28.8388988Z [strict — ratchet enforced]
+lint suite	Blocking lints	2026-09-12T14:37:29.1537392Z bug_model_coverage_specs                        46         46   INC
+lint suite	Blocking lints	2026-09-12T14:37:29.2433413Z domains_without_bug_model                        0          0   DEC
+lint suite	Blocking lints	2026-09-12T14:37:29.6726037Z 
+lint suite	Blocking lints	2026-09-12T14:37:29.6726739Z [tla-bug-model-ratchet] OK
+lint suite	Blocking lints	2026-09-12T14:37:29.6729191Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:29.6729820Z ##[group]TLA ppx coverage floor
+lint suite	Blocking lints	2026-09-12T14:37:29.6773410Z metric                                     current   baseline
+lint suite	Blocking lints	2026-09-12T14:37:29.6774979Z ----------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:37:29.6775625Z [strict — ratchet enforced (monotonic increase)]
+lint suite	Blocking lints	2026-09-12T14:37:29.7174287Z ppx_deriving_tla_modules                        11         11
+lint suite	Blocking lints	2026-09-12T14:37:29.7569638Z ppx_fsm_guard_files                              6          6
+lint suite	Blocking lints	2026-09-12T14:37:29.7952771Z ppx_deriving_tla_attributes                     16         16
+lint suite	Blocking lints	2026-09-12T14:37:29.8343026Z ppx_fsm_guard_attributes                        20         20
+lint suite	Blocking lints	2026-09-12T14:37:29.8343569Z 
+lint suite	Blocking lints	2026-09-12T14:37:29.8344174Z [descriptive — recorded only]
+lint suite	Blocking lints	2026-09-12T14:37:29.8754680Z lib_subdirs_with_ppx                             9          9
+lint suite	Blocking lints	2026-09-12T14:37:30.0276601Z 
+lint suite	Blocking lints	2026-09-12T14:37:30.0277179Z [tla-ppx-ratchet] OK
+lint suite	Blocking lints	2026-09-12T14:37:30.0279786Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:30.0280430Z ##[group]TLA cfg has a parent spec
+lint suite	Blocking lints	2026-09-12T14:37:30.7942032Z ---
+lint suite	Blocking lints	2026-09-12T14:37:30.7942903Z audit-tla-cfg-orphan summary: 87 cfgs with parent scanned / 0 orphans (incl. no-parent)
+lint suite	Blocking lints	2026-09-12T14:37:30.7944804Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:30.7945620Z ##[group]TLA annotation drift
+lint suite	Blocking lints	2026-09-12T14:37:31.0079608Z 
+lint suite	Blocking lints	2026-09-12T14:37:31.0080615Z tla-annotation-drift summary: 9 constructors checked across 2 type/set pairs, 0 new drift(s), 0 baseline-known drift(s); 3 cross-spec set(s) checked, 0 cross-spec drift(s)
+lint suite	Blocking lints	2026-09-12T14:37:31.0083247Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.0083873Z ##[group]Model prefix inheritance
+lint suite	Blocking lints	2026-09-12T14:37:31.0674022Z === runtime exact catalog identities ===
+lint suite	Blocking lints	2026-09-12T14:37:31.0674694Z 
+lint suite	Blocking lints	2026-09-12T14:37:31.0675141Z PASS: 40 runtime provider/model identities; 40 exact catalog rows; 0 recorded provider-base fallback.
+lint suite	Blocking lints	2026-09-12T14:37:31.0728005Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.0728968Z ##[group]Every check script is reached
+lint suite	Blocking lints	2026-09-12T14:37:31.3642559Z guards: 119, reached: 99, not wired: 20
+lint suite	Blocking lints	2026-09-12T14:37:31.3643223Z every check script is reached, or listed as one that is not.
+lint suite	Blocking lints	2026-09-12T14:37:31.3694642Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.3696382Z ##[group]Fun.protect finalizer guard
+lint suite	Blocking lints	2026-09-12T14:37:31.4120287Z Fun.protect finalizer guard passed (0 new Fun.protect line(s)).
+lint suite	Blocking lints	2026-09-12T14:37:31.4178529Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.4179281Z ##[group]ignore justification self-test
+lint suite	Blocking lints	2026-09-12T14:37:31.4499739Z ok: 8 sites reported, 32 lines left alone
+lint suite	Blocking lints	2026-09-12T14:37:31.4546714Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.4547569Z ##[group]Dashboard backend-coupled test detector self-test
+lint suite	Blocking lints	2026-09-12T14:37:31.4860699Z self-test: a coupled test is listed, a fixture-only mention is not (PASS)
+lint suite	Blocking lints	2026-09-12T14:37:31.4906577Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.4907238Z ##[group]Node alias target reader self-test
+lint suite	Blocking lints	2026-09-12T14:37:31.5204133Z self-test: a node rule is a target, a python one is not, and an included rule is owned by the including directory (PASS)
+lint suite	Blocking lints	2026-09-12T14:37:31.5248387Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.5249377Z ##[group]ignore justification (new sites)
+lint suite	Blocking lints	2026-09-12T14:37:31.5809877Z New ignore sites are justified.
+lint suite	Blocking lints	2026-09-12T14:37:31.5823258Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.5823937Z ##[group]Stale-base revert guard self-test (RFC-0235)
+lint suite	Blocking lints	2026-09-12T14:37:31.9402507Z [PASS] fire: stale-base PR reverts main (exit=1, want=1)
+lint suite	Blocking lints	2026-09-12T14:37:31.9403110Z [PASS] pass: PR has main's additions (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:37:31.9403779Z [PASS] pass: PR edits a disjoint file (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:37:31.9404148Z [PASS] pass: intentional revert acked (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:37:31.9404652Z 
+lint suite	Blocking lints	2026-09-12T14:37:31.9404775Z All stale-base guard self-tests passed.
+lint suite	Blocking lints	2026-09-12T14:37:31.9465402Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.9466054Z ##[group]Stale-base revert guard (RFC-0235)
+lint suite	Blocking lints	2026-09-12T14:37:31.9892832Z stale-base guard: no stale-base reversal detected.
+lint suite	Blocking lints	2026-09-12T14:37:31.9954425Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:31.9957955Z ##[group]Release train guard
+lint suite	Blocking lints	2026-09-12T14:37:32.0166131Z release train guard failed: base ref f7133fff50a889b4b3d0ab293e9ce38083ed991a has package version 0.35.13, which is older than latest tag v0.35.14 (package version 0.35.14); sync version truth before merging
+lint suite	Blocking lints	2026-09-12T14:37:32.0168168Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:32.0169414Z ##[error]Release train guard (exit 1)
+lint suite	Blocking lints	2026-09-12T14:37:32.0170484Z ##[group]PR hygiene
+lint suite	Blocking lints	2026-09-12T14:37:32.7073908Z PR hygiene check passed.
+lint suite	Blocking lints	2026-09-12T14:37:32.7088249Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:32.7088916Z ##[group]Boundary-guard .mli pairing
+lint suite	Blocking lints	2026-09-12T14:37:32.7195998Z PAIR-GATE: checked 0 newly-added .mli vs allow-list — OK
+lint suite	Blocking lints	2026-09-12T14:37:32.7198034Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:32.7198768Z ##[group]Wire-field removal schema gate
+lint suite	Blocking lints	2026-09-12T14:37:32.7349845Z WIRE-GATE: no protected persistence module changed vs f7133fff50a889b4b3d0ab293e9ce38083ed991a
+lint suite	Blocking lints	2026-09-12T14:37:32.7351790Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:32.7352426Z ##[group]Cancel guard on wildcard catches
+lint suite	Blocking lints	2026-09-12T14:37:38.5521518Z cancel-guard exemptions: 18 (budget 18)
+lint suite	Blocking lints	2026-09-12T14:37:38.5522103Z No wildcard catch violations found.
+lint suite	Blocking lints	2026-09-12T14:37:38.5524616Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:38.5564612Z ##[notice]Skipping Wildcard-only match self-test; scripts/ci/check-wildcard-only-match.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:38.5567968Z ##[group]Wildcard-only match
+lint suite	Blocking lints	2026-09-12T14:37:39.8999736Z No wildcard-only match expressions found.
+lint suite	Blocking lints	2026-09-12T14:37:39.9060551Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:39.9061494Z ##[group]TUI renderer writes no state
+lint suite	Blocking lints	2026-09-12T14:37:39.9104827Z [tui-render-purity] state writes in bin/masc_tui_render.ml: 0 (budget 0)
+lint suite	Blocking lints	2026-09-12T14:37:39.9105699Z [tui-render-purity] OK
+lint suite	Blocking lints	2026-09-12T14:37:39.9107038Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:37:39.9147169Z ##[notice]Skipping Committed-credential self-test; scripts/ci/check-committed-secrets.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:37:39.9149360Z ##[group]No committed credentials
+lint suite	Blocking lints	2026-09-12T14:38:03.9173588Z check-committed-secrets: no unpinned credential shapes
+lint suite	Blocking lints	2026-09-12T14:38:03.9247379Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:03.9250064Z ##[group]Eio conventions
+lint suite	Blocking lints	2026-09-12T14:38:03.9702456Z Eio convention snapshot:
+lint suite	Blocking lints	2026-09-12T14:38:03.9703013Z   search tool: rg
+lint suite	Blocking lints	2026-09-12T14:38:03.9909609Z   lib/Eio_unix.sleep: 0
+lint suite	Blocking lints	2026-09-12T14:38:04.0107012Z   lib/Unix.sleep*: 2
+lint suite	Blocking lints	2026-09-12T14:38:04.0305777Z   lib/Eio.Mutex.create (): 84
+lint suite	Blocking lints	2026-09-12T14:38:04.0505972Z   lib/Eio.Fiber.fork: 97
+lint suite	Blocking lints	2026-09-12T14:38:04.0767304Z   lib+test/fork_promise: 39
+lint suite	Blocking lints	2026-09-12T14:38:04.0770022Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.0770665Z ##[group]OCaml phase-count drift
+lint suite	Blocking lints	2026-09-12T14:38:04.1107421Z OCaml phase-count audit clean: SSOT=8, no unqualified mismatches.
+lint suite	Blocking lints	2026-09-12T14:38:04.1121687Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.1122098Z ##[group]TLA phase-count drift
+lint suite	Blocking lints	2026-09-12T14:38:04.1409889Z phase-count audit clean: SSOT=8, no unqualified mismatches.
+lint suite	Blocking lints	2026-09-12T14:38:04.1423372Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.1423758Z ##[group]Route tool catalog
+lint suite	Blocking lints	2026-09-12T14:38:04.2285242Z [route-tool-catalog] OK - 30 route tool names, all registered in the catalog
+lint suite	Blocking lints	2026-09-12T14:38:04.2298224Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.2298661Z ##[group]Shell IR structural boundary
+lint suite	Blocking lints	2026-09-12T14:38:04.4998690Z OK (Shell IR remains structural; authorization taxonomy absent)
+lint suite	Blocking lints	2026-09-12T14:38:04.5001047Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.5001481Z ##[group]Base policy
+lint suite	Blocking lints	2026-09-12T14:38:04.6137176Z === Base Policy Audit ===
+lint suite	Blocking lints	2026-09-12T14:38:04.6137512Z 
+lint suite	Blocking lints	2026-09-12T14:38:04.6137647Z   mli_open_base          : 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:38:04.6138303Z   ml_base_stdlib_shadow  : 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:38:04.6138608Z   bin_ml_base_stdlib_shadow: 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:38:04.6138819Z 
+lint suite	Blocking lints	2026-09-12T14:38:04.6138903Z   Status: PASS
+lint suite	Blocking lints	2026-09-12T14:38:04.6141257Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.6141749Z ##[group]Sublib leaf boundary self-test
+lint suite	Blocking lints	2026-09-12T14:38:04.6624705Z self-test: Dune 0.1 describe schema decodes strictly (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6625575Z self-test: clean graph -> no violation (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6626095Z self-test: buggy graph (direct) -> violation ('masc.masc_goal', 'masc') (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6626780Z self-test: buggy graph (transitive) -> violation ('masc.masc_goal', 'masc.mid', 'masc') (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6627755Z self-test: closed source root with external deps -> clean (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6628281Z self-test: closed source root rejects local coordinator dep (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6628796Z self-test: missing required local library fails closed (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6629230Z self-test: dangling UID fails closed (PASS)
+lint suite	Blocking lints	2026-09-12T14:38:04.6629580Z SELF-TEST: ALL PASS
+lint suite	Blocking lints	2026-09-12T14:38:04.6691622Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:04.6692214Z ##[group]SSOT rules
+lint suite	Blocking lints	2026-09-12T14:38:04.6800532Z OK[count-rule-self-test]: single-file include/exclude counts covered.
+lint suite	Blocking lints	2026-09-12T14:38:04.7037423Z OK[R1-masc-path]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.7247756Z OK[R2-loopback-literal]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.7475162Z OK[R4-config-filename]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.7684688Z OK[R5-health-path]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.7928485Z OK[R6-home-masc-root]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.8205041Z OK[R6-home-masc-root-docs]: 58 occurrences (baseline 58).
+lint suite	Blocking lints	2026-09-12T14:38:04.8816073Z OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.8876471Z OK[R9-tui-chat-theme-owner]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.9052664Z OK[R10-pattern-self-test]: owned prefixes and numeric boundary covered.
+lint suite	Blocking lints	2026-09-12T14:38:04.9278215Z OK[R10-tui-projected-background]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:04.9394897Z OK[R11-pattern-self-test]: direct and alias bypasses covered.
+lint suite	Blocking lints	2026-09-12T14:38:04.9634338Z OK[R11-tui-palette-for-testing]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:05.0185555Z OK[R12-pattern-self-test]: direct, member, alias-declaration, and scope boundaries covered.
+lint suite	Blocking lints	2026-09-12T14:38:05.0468040Z OK[R12-tui-theme-for-testing]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:05.0767073Z OK[R13-pattern-self-test]: direct, lower-case, and split footer fact literals covered.
+lint suite	Blocking lints	2026-09-12T14:38:05.0891043Z OK[R13-tui-footer-fact-literal]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:05.1023600Z OK[R14-pattern-self-test]: a windowed read matches, a cursor lookup does not.
+lint suite	Blocking lints	2026-09-12T14:38:05.1165877Z OK[R14-tui-row-walk]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:38:05.1166311Z 
+lint suite	Blocking lints	2026-09-12T14:38:05.1166688Z SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):
+lint suite	Blocking lints	2026-09-12T14:38:05.1167166Z   Script: scripts/check-ssot.sh
+lint suite	Blocking lints	2026-09-12T14:38:05.1167551Z   Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411 #30507 #30520
+lint suite	Blocking lints	2026-09-12T14:38:05.1168642Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:05.1169244Z ##[group]TOML syntax
+lint suite	Blocking lints	2026-09-12T14:38:05.1183211Z Checking TOML syntax...
+lint suite	Blocking lints	2026-09-12T14:38:05.2597436Z All 425 TOML files parsed successfully.
+lint suite	Blocking lints	2026-09-12T14:38:05.2655633Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:05.2656274Z ##[group]YAML syntax
+lint suite	Blocking lints	2026-09-12T14:38:07.2019210Z 33 YAML files validated successfully.
+lint suite	Blocking lints	2026-09-12T14:38:07.2063432Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.2064068Z ##[group]Sandbox dune version
+lint suite	Blocking lints	2026-09-12T14:38:07.2178648Z dune-project requires  : 3.22
+lint suite	Blocking lints	2026-09-12T14:38:07.2179597Z sandbox image installs : 3.24.1  (from masc.opam.locked (via --deps-only))
+lint suite	Blocking lints	2026-09-12T14:38:07.2196273Z OK: sandbox dune 3.24.1 >= dune-project required 3.22
+lint suite	Blocking lints	2026-09-12T14:38:07.2198989Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.2199589Z ##[group]Sandbox OCaml version
+lint suite	Blocking lints	2026-09-12T14:38:07.2275322Z masc.opam requires     : ocaml 5.5.1
+lint suite	Blocking lints	2026-09-12T14:38:07.2276298Z sandbox image installs : ocaml-base-compiler 5.5.1
+lint suite	Blocking lints	2026-09-12T14:38:07.2276934Z OK: sandbox compiler 5.5.1 matches the masc.opam pin
+lint suite	Blocking lints	2026-09-12T14:38:07.2277975Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.2278480Z ##[group]Checkpoint legacy purge
+lint suite	Blocking lints	2026-09-12T14:38:07.3624920Z [checkpoint-installation-legacy-purge] OK
+lint suite	Blocking lints	2026-09-12T14:38:07.3627147Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.3627623Z ##[group]Dashboard nav-event parity
+lint suite	Blocking lints	2026-09-12T14:38:07.3942500Z dashboard nav-event allowlist parity: OK
+lint suite	Blocking lints	2026-09-12T14:38:07.3987438Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.3988093Z ##[group]TLA harness coverage
+lint suite	Blocking lints	2026-09-12T14:38:07.4495010Z === TLA harness coverage: PASS ===
+lint suite	Blocking lints	2026-09-12T14:38:07.4496164Z Known unchecked cfg-backed specs (1):
+lint suite	Blocking lints	2026-09-12T14:38:07.4496678Z   specs/boundary/ContinuationCorrelation.tla
+lint suite	Blocking lints	2026-09-12T14:38:07.4498944Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.4499972Z ##[group]Opam lock covers declared deps
+lint suite	Blocking lints	2026-09-12T14:38:07.4723319Z [opam-lock] OK - 73 declared deps all pinned; 3 shared first-party repo pin(s) agree
+lint suite	Blocking lints	2026-09-12T14:38:07.4759407Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.4760094Z ##[group]Keeper runtime setting registry
+lint suite	Blocking lints	2026-09-12T14:38:07.5463981Z PASS: Keeper runtime settings are registry-backed (38 Keeper env declarations inventoried).
+lint suite	Blocking lints	2026-09-12T14:38:07.5466046Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.5466765Z ##[group]Env snapshot default drift
+lint suite	Blocking lints	2026-09-12T14:38:07.8456303Z === env snapshot default drift: 66 of 120 snapshot entries compared ===
+lint suite	Blocking lints	2026-09-12T14:38:07.8456860Z   54 not compared:
+lint suite	Blocking lints	2026-09-12T14:38:07.8457169Z     9 state a default that is not a quoted literal
+lint suite	Blocking lints	2026-09-12T14:38:07.8457576Z     1 restate a var another entry already declared
+lint suite	Blocking lints	2026-09-12T14:38:07.8457987Z     42 have no reader that states a ~default:
+lint suite	Blocking lints	2026-09-12T14:38:07.8458403Z     2 state a default the reader's form cannot be compared to
+lint suite	Blocking lints	2026-09-12T14:38:07.8458905Z PASS: every stated default matches the reader that applies it
+lint suite	Blocking lints	2026-09-12T14:38:07.8525949Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:07.8526473Z ##[group]Hardcoding and truth audit
+lint suite	Blocking lints	2026-09-12T14:38:07.8565186Z === Hardcoding / Truth Audit ===
+lint suite	Blocking lints	2026-09-12T14:38:07.8568935Z Repo: /home/runner/work/masc/masc
+lint suite	Blocking lints	2026-09-12T14:38:07.8589764Z Head: 9911925abd
+lint suite	Blocking lints	2026-09-12T14:38:07.8590015Z 
+lint suite	Blocking lints	2026-09-12T14:38:07.8590190Z === Typed Boundary Metadata ===
+lint suite	Blocking lints	2026-09-12T14:38:07.8633296Z PASS: legacy checkout follow-up helper surface is absent.
+lint suite	Blocking lints	2026-09-12T14:38:07.8670080Z PASS: generic Tool_catalog effect-domain metadata is absent.
+lint suite	Blocking lints	2026-09-12T14:38:07.8670594Z 
+lint suite	Blocking lints	2026-09-12T14:38:07.8670800Z === Confirmed String/Heuristic Semantics ===
+lint suite	Blocking lints	2026-09-12T14:38:07.8725849Z PASS: legacy Provider_adapter implementation files are absent.
+lint suite	Blocking lints	2026-09-12T14:38:07.8726212Z 
+lint suite	Blocking lints	2026-09-12T14:38:07.8726313Z === Anti-Fake Detector ===
+lint suite	Blocking lints	2026-09-12T14:38:51.8022796Z === Summary ===
+lint suite	Blocking lints	2026-09-12T14:38:51.8023210Z   Good:    1304
+lint suite	Blocking lints	2026-09-12T14:38:51.8023540Z   Suspect: 0
+lint suite	Blocking lints	2026-09-12T14:38:51.8023851Z   Fake:    0
+lint suite	Blocking lints	2026-09-12T14:38:51.8024158Z   Harness: 37
+lint suite	Blocking lints	2026-09-12T14:38:51.8024738Z   Total:   1341
+lint suite	Blocking lints	2026-09-12T14:38:51.8026021Z PASS: anti-fake detector completed without fake-test findings.
+lint suite	Blocking lints	2026-09-12T14:38:51.8026360Z 
+lint suite	Blocking lints	2026-09-12T14:38:51.8026476Z === Broad Active-Source Smell Sample ===
+lint suite	Blocking lints	2026-09-12T14:38:51.8057611Z 
+lint suite	Blocking lints	2026-09-12T14:38:51.8057951Z === Result ===
+lint suite	Blocking lints	2026-09-12T14:38:51.8058347Z Confirmed active issue groups: 0
+lint suite	Blocking lints	2026-09-12T14:38:51.8058769Z Status: pass
+lint suite	Blocking lints	2026-09-12T14:38:51.8061012Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:51.8061501Z ##[group]Boundary guard
+lint suite	Blocking lints	2026-09-12T14:38:52.0564206Z BOUNDARY INFO: V4b-retired-state-protocol-zero-pin — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:52.1321824Z BOUNDARY INFO: V7-retired-command-semantics-gates — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:52.3992953Z BOUNDARY INFO: V7b-retired-authorization-hierarchy — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:52.5349753Z BOUNDARY INFO: V7c-task-completion-semantic-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:52.7929758Z BOUNDARY INFO: V7d-retired-derived-autonomy-and-effect-classes — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.0356492Z BOUNDARY INFO: V7e-retired-pre-tool-alias-blocker — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.2138062Z BOUNDARY INFO: V7f-retired-subprocess-text-retry — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.2564532Z BOUNDARY INFO: V7g-retired-subprocess-message-locale-pin — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.3847160Z BOUNDARY INFO: V7h-retired-keeper-failure-circuit-breaker — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.4153745Z BOUNDARY INFO: V7i-retired-dispatch-tool-search-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.6494872Z BOUNDARY INFO: V7j-retired-consecutive-tool-failure-guard — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.8929339Z BOUNDARY INFO: V7k-retired-dispatch-effect-inference — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9084538Z BOUNDARY INFO: V7l-generic-gate-product-knowledge — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9165026Z BOUNDARY INFO: V7m-mcp-message-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9327335Z BOUNDARY INFO: V7n-generic-ide-product-routes — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9367702Z BOUNDARY INFO: V7o-retired-keeper-payload-outcome-classifier — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9408733Z BOUNDARY INFO: V7p-tool-bridge-message-and-product-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9586115Z BOUNDARY INFO: V7q-timeout-message-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:53.9646532Z BOUNDARY INFO: V7r-terminal-config-auth-substring-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.1130016Z BOUNDARY INFO: V7s-retired-runtime-tool-family-authorization — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.2000974Z BOUNDARY INFO: V7t-retired-completion-trust-cli — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.2579683Z BOUNDARY INFO: V7u-retired-decision-pipeline-diagram — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.3497993Z BOUNDARY INFO: V7v-retired-tool-result-message-inference — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.3541932Z BOUNDARY INFO: V7w-retired-dashboard-embedded-json-coercion — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.4395698Z BOUNDARY INFO: V7x-retired-task-and-recording-message-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.5779911Z BOUNDARY INFO: V7y-retired-keeper-raw-output-reinterpretation — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.6985355Z BOUNDARY INFO: V7z-retired-connector-wake-suppression — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.8129605Z BOUNDARY INFO: V7aa-retired-multimodal-rollout-gates — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:38:54.9041284Z BOUNDARY INFO: V10-provider-filter-ownership — no forbidden matches
+lint suite	Blocking lints	2026-09-12T14:38:54.9042027Z BOUNDARY: all checks within baseline
+lint suite	Blocking lints	2026-09-12T14:38:54.9044069Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:54.9044921Z ##[group]Dashboard env knob count
+lint suite	Blocking lints	2026-09-12T14:38:54.9100881Z Dashboard env var count: 15 (baseline: 15)
+lint suite	Blocking lints	2026-09-12T14:38:54.9103652Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:54.9104115Z ##[group]Silent failure
+lint suite	Blocking lints	2026-09-12T14:38:54.9833080Z check_silent_failure: 0 silent-failure anti-pattern site(s) found.
+lint suite	Blocking lints	2026-09-12T14:38:54.9836258Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:54.9836865Z ##[group]Dashboard styling drift
+lint suite	Blocking lints	2026-09-12T14:38:55.3936286Z Dashboard drift gate: OK
+lint suite	Blocking lints	2026-09-12T14:38:55.3938679Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:55.3939316Z ##[group]Dashboard prompt keys
+lint suite	Blocking lints	2026-09-12T14:38:55.4624333Z [dashboard-prompt-keys] OK - 0 prompt keys named in dashboard code, all present
+lint suite	Blocking lints	2026-09-12T14:38:55.4638088Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:55.4638776Z ##[group]TLA spec line-refs
+lint suite	Blocking lints	2026-09-12T14:38:55.5589439Z line-ref audit clean: 0 prose-form citation(s) verified + 0 colon-form line-ref(s) across 8 spec(s).
+lint suite	Blocking lints	2026-09-12T14:38:55.5591175Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:38:55.5592029Z ##[group]OCaml spec-nav line-refs
+lint suite	Blocking lints	2026-09-12T14:39:00.5010142Z ocaml-spec-nav line-ref audit clean: 0 citation(s) verified across 959 file(s) (0 baselined).
+lint suite	Blocking lints	2026-09-12T14:39:00.5012288Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:39:00.5012858Z 
+lint suite	Blocking lints	2026-09-12T14:39:00.5013369Z FAILED 2/109 lints:
+lint suite	Blocking lints	2026-09-12T14:39:00.5013765Z  - Determinism contract
+lint suite	Blocking lints	2026-09-12T14:39:00.5014129Z  - Release train guard
+lint suite	Blocking lints	2026-09-12T14:39:00.5025894Z ##[error]Process completed with exit code 1.
+dune build @check	Run the tests this pull request edits	﻿2026-09-12T14:42:00.9122046Z ##[group]Run bash scripts/ci/run-edited-tests.sh \
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9122699Z [36;1mbash scripts/ci/run-edited-tests.sh \[0m
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9122970Z [36;1m  "35532"[0m
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9142601Z shell: /usr/bin/bash -e {0}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9142829Z env:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9143015Z   OPAMCOLOR: always
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9143228Z   OPAMCONFIRMLEVEL: unsafe-yes
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9143441Z   OPAMERRLOGLEN: 0
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9143643Z   OPAMEXTERNALSOLVER: builtin-0install
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9143870Z   OPAMRETRIES: 10
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9144063Z   OPAMSOLVERTIMEOUT: 600
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9144277Z   OPAMYES: 1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9144488Z   OPAMSWITCH: ci-5-5-1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9146714Z   GH_TOKEN: ***
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9146908Z   DUNE_JOBS: 4
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9147097Z   MASC_TEST_ALLOW_REAL_DOCKER: 1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:00.9147318Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6714165Z test sources this pull request edits: 1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6723275Z   test/test_verification_authority_tools.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6725338Z suites named after the sources this pull request edits:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6735250Z   test/test_verification_authority_tools.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6756410Z guards that name the sources this pull request edits:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.6766104Z   test/test_verification_authority_tools.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:01.7881142Z == test/test_verification_authority_tools
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7580936Z ##[group]{verification authority tools}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7581333Z Testing `verification authority tools'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7581637Z This run has ID `M8W31F13'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7581774Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7734822Z   [OK]          surface           0   schemas are the descriptor schemas.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.7880080Z   [OK]          surface           1   read translates the advertised argument...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.8004414Z   [OK]          surface           2   search refuses a call without its requi...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.8054920Z   [OK]          surface           3   workspace producer gets owned read surf...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.8126862Z   [OK]          surface           4   binary lookup failure persists as valid...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.8211016Z   [OK]          surface           5   keeper surface uses effective sandbox r...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:47.8262296Z   [FAIL]        dispatch          0   Goal and Task inspect original MP4 meta...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.6403790Z   [OK]          dispatch          1   Goal and Task inspect actual PDF pages,...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.6746548Z   [OK]          dispatch          2   Goal and Task receive complete visual PNG.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7073275Z   [OK]          dispatch          3   Keeper endpoint read keeps exact PNG by...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7140159Z   [OK]          dispatch          4   unknown tool name is an error.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7204102Z   [OK]          dispatch          5   web fetch is offered and dispatches.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7268129Z   [OK]          dispatch          6   web fetch refuses a private target.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7338110Z   [OK]          prompt            0   prompt states the available surface.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7408885Z   [OK]          prompt            1   root_layout reports entries and discove...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7472160Z   [OK]          prompt            2   root_layout fails closed when discovery...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7566700Z   [OK]          prompt            3   root_layout fails closed when checkout ...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7619460Z   [OK]          prompt            4   a workspace producer without a playgrou...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7715654Z   [OK]          prompt            5   prompt states the root instead of imply...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7716095Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7716671Z ┌──────────────────────────────────────────────────────────────────────────────┐
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7717435Z │ [FAIL]        dispatch          0   Goal and Task inspect original MP4 m...  │
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7718094Z └──────────────────────────────────────────────────────────────────────────────┘
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7718694Z [2026-09-12 14:42:47] [INFO] [Workspace] MASC base: /tmp/masc-vat-33204-134229675 (no git root found)
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7719905Z [2026-09-12 14:42:47] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/masc-vat-33204-670611684 for requested path /tmp/masc-vat-33204-134229675
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7720878Z [2026-09-12 14:42:47] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/masc-vat-33204-134229675 for test executable test_verification_authority_tools.exe
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7721639Z [2026-09-12 14:42:47] [INFO] [Misc] workspace broadcast committed from=video-test-merry-cobra mention=none request_id=wmsg-4048cfb36a7d2601057a809c687bdfa6 seq=1 bytes=50
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7722734Z [2026-09-12 14:42:47] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/tmp/masc-vat-33204-134229675/.masc/playground/video-producer argument={"file_path":"clip.mp4"} outcome=rejected
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7723531Z ASSERT video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing ffprobe, ffmpeg
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7724164Z FAIL video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing ffprobe, ffmpeg
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7724748Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7725450Z Called from Dune__exe__Test_verification_authority_tools.test_goal_and_task_inspect_real_mp4.(fun) in file "test/test_verification_authority_tools.ml", line 1036, characters 12-54
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7726077Z Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7726927Z Called from Dune__exe__Test_verification_authority_tools.test_goal_and_task_inspect_real_mp4.(fun) in file "test/test_verification_authority_tools.ml", lines 1015-1043, characters 2-38
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7727665Z Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7728319Z Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7729119Z Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7729835Z Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7730304Z Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7730822Z Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7731509Z Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7732291Z Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7732963Z Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7733627Z Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7734360Z Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7735143Z Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7735877Z Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7736423Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7737232Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7737686Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7738037Z Logs saved to `~/work/masc/masc/_build/default/test/_build/_tests/verification authority tools/dispatch.000.output'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7738744Z  ──────────────────────────────────────────────────────────────────────────────
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7739036Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7739258Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/verification authority tools'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7739629Z 1 failure! in 1.013s. 19 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7740162Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7740355Z ran 0, skipped 0
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7740557Z suites that did not pass:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7740784Z   test/test_verification_authority_tools (run)
+dune build @check	Run the tests this pull request edits	2026-09-12T14:42:48.7744740Z ##[error]Process completed with exit code 1.

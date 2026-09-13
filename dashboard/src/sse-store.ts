@@ -185,6 +185,20 @@ export function registerFusionBoardRefresh(fn: () => void): () => void {
   }
 }
 
+export type IdeConversationSource = 'board' | 'decisions'
+const conversationRefreshers = new Set<(source: IdeConversationSource) => void>()
+export function registerIdeConversationRefresh(fn: (source: IdeConversationSource) => void): () => void {
+  conversationRefreshers.add(fn)
+  return () => { conversationRefreshers.delete(fn) }
+}
+
+function scheduleIdeConversationRefresh(source: IdeConversationSource): void {
+  if (conversationRefreshers.size === 0 || !routeWantsRefreshTarget(route.value, 'ide')) return
+  scheduleRefresh(`ide-conversation-${source}`, () => {
+    for (const refresh of conversationRefreshers) refresh(source)
+  })
+}
+
 // --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
@@ -496,6 +510,8 @@ let latestOperatorSnapshotTerminalSequence: number | null = null
 const retiredOperatorSnapshotEpochs = new Set<string>()
 
 function handleReconnect(): void {
+  scheduleIdeConversationRefresh('board')
+  scheduleIdeConversationRefresh('decisions')
   const disconnectedMs = dashboardWsLastDisconnectedAt.value > 0
     ? Date.now() - dashboardWsLastDisconnectedAt.value
     : 0
@@ -627,6 +643,13 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
+  // Invalidate before hydration: post_created can take the fast prepend return.
+  const conversationType = normalizeSSEDispatchType(event.type)
+  if (SIMPLE_ROUTES[conversationType]?.target === 'board') scheduleIdeConversationRefresh('board')
+  if (sseEventFamily(conversationType) === 'decision'
+    || normalizeMascEventType(conversationType) === 'keeper_turn_complete') {
+    scheduleIdeConversationRefresh('decisions')
+  }
   if (hydrateServerPushEvent(event)) {
     return
   }

@@ -49,6 +49,29 @@ afterEach(() => {
 })
 
 describe('IdeActivityPanel', () => {
+  it.each([false, true])('shows persisted workspace totals separately from the loaded window (compact=%s)', async compact => {
+    const events = Array.from({ length: 50 }, (_, index) => ({
+      seq: index + 1923, ts_ms: Date.now(), workspace_id: 'workspace', kind: 'task.created',
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ events, total_matching_events: 1972 }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { compact }), container)
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-workspace-history-window"]')?.textContent)
+      .toContain('Workspace history: 50 of 1972 loaded'))
+    expect(container.textContent).toContain('older events are not loaded')
+  })
+
+  it.each([undefined, -1, true, '1972'])('does not invent a total from invalid or missing metadata (%s)', async total => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ events: [], total_matching_events: total }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {}), container)
+    await waitFor(() => expect(container.textContent).toContain('Workspace history: 0 loaded · total unavailable'))
+  })
+
   it('keeps global history and planning links while file anchors follow the real scoped IDE response', async () => {
     const requests: string[] = []
     vi.stubGlobal('fetch', vi.fn(async input => {

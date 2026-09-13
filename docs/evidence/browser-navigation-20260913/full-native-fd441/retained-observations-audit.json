@@ -1,0 +1,101 @@
+{
+  "source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "binary_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+  "operation_id": "kmsg-6e072d54642d95879754e37f4179ebcb",
+  "state": "Succeeded",
+  "outer_call_count": 7,
+  "outer_errors": 0,
+  "retained_observation_count": 5,
+  "artifact_reads_observed": 0,
+  "observations": [
+    {
+      "execution_id": "exec-1789268111236-0003",
+      "tool_use_id": "exec-fefe808d-731c-421d-b8df-6a14e70bd741",
+      "reference": {
+        "sha256": "b0ad4c9110d334bba0fdef055da02048a25026b23693be9e28c3431e9833b633",
+        "bytes": 1855,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:51373/index.html",
+      "document_id": "bba1a617810745899d0363453fdde1ed",
+      "source": "live",
+      "client_id": "c5d2b2e8-155f-4343-8d70-3cc9bfb3cfe4",
+      "tab_id": 1,
+      "scope": {
+        "documentId": "bba1a617810745899d0363453fdde1ed",
+        "nodeId": "n1"
+      },
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268115228-0005",
+      "tool_use_id": "composition:36:01a098b0-bf12-7000-9deb-82683757cd01:41:exec-76a7619e-c784-4122-a9fa-225b4c085e16:7:content",
+      "reference": {
+        "sha256": "c0d83a4521e41991c058dae3eb413b9b5face0e89b95af875d1f4b9d10d7e32a",
+        "bytes": 5863,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:51373/alpha.html",
+      "document_id": "66c0713072bf544edfa716523e54077a",
+      "source": "live",
+      "client_id": "c5d2b2e8-155f-4343-8d70-3cc9bfb3cfe4",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268119483-0008",
+      "tool_use_id": "composition:36:01a098b0-cfb4-7000-b7b6-9d6cd93ed608:41:exec-12364e71-73bc-44d2-8c6b-693883e63dfd:7:content",
+      "reference": {
+        "sha256": "d7a94b8c98ebf69ee088f29b60815f32037c074888f910b2f4e1b895edc0784e",
+        "bytes": 4712,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:51373/gamma.html",
+      "document_id": "0909f46462f86e05fadff3f594bfedc2",
+      "source": "live",
+      "client_id": "c5d2b2e8-155f-4343-8d70-3cc9bfb3cfe4",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268123521-000b",
+      "tool_use_id": "composition:36:01a098b0-df7b-7000-892d-033d9542ae1c:41:exec-5a5c6874-b564-4354-8262-f944d020604e:7:content",
+      "reference": {
+        "sha256": "6825ecbafe3e22757459374cb964d62d9a065c51615c51c8241bf08ee6a06653",
+        "bytes": 5863,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:51373/alpha.html",
+      "document_id": "50e61f4203d648b495ee3efa95cd5c20",
+      "source": "live",
+      "client_id": "c5d2b2e8-155f-4343-8d70-3cc9bfb3cfe4",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    },
+    {
+      "execution_id": "exec-1789268127861-000e",
+      "tool_use_id": "composition:36:01a098b0-f06b-7000-8cd2-aa3ded3a6221:41:exec-26216d90-e4fd-493e-84ef-328217408ac1:7:content",
+      "reference": {
+        "sha256": "ecc17075d3905200f535f09cc64b6cc510ea8b91dab1f3db23351bb621a029c3",
+        "bytes": 4719,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:51373/beta.html",
+      "document_id": "0926eb49abe31528014dc442d772be02",
+      "source": "live",
+      "client_id": "c5d2b2e8-155f-4343-8d70-3cc9bfb3cfe4",
+      "tab_id": 1,
+      "scope": null,
+      "truncated": false
+    }
+  ],
+  "proof_scope": "Exact delivered JSON slices match durable blob bytes; no aligned screenshot claim."
+}

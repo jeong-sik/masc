@@ -12,7 +12,7 @@ let row name state : Tui_decode.keeper_turn_row =
 let running ?preview ~lane ~started name =
   row name
     (Tui_decode.Keeper_turn_running
-       { lane; started_at_unix = started; preview })
+       { lane; started_at_unix = started; preview; interrupt_token = None })
 ;;
 
 let texts lines =
@@ -22,7 +22,7 @@ let texts lines =
 let test_running_rows_lead_with_the_chat_target () =
   let lines =
     Masc_tui_answering.overlay ~now:1000.
-      ~chat_target:(Some "analyst") ~error:None ~finishes:[]
+      ~chat_target:(Some "analyst") ~error:None ~observed_at:(Some 988.) ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
       ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:990.
@@ -49,6 +49,7 @@ let test_running_rows_lead_with_the_chat_target () =
 let test_quiet_fleet_says_so () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes:[]
       [ row "echo" Tui_decode.Keeper_turn_idle
       ; row "analyst" Tui_decode.Keeper_turn_idle
@@ -65,23 +66,48 @@ let test_quiet_fleet_says_so () =
 let test_error_keeps_the_last_rows_and_says_why () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "connection refused") ~finishes:[]
+      ~error:(Some "connection refused") ~observed_at:(Some 988.) ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_maintenance ~started:999. "polisher" ]
   in
   match texts lines with
   | [ failed; kept; runner ] ->
       Alcotest.(check bool) "the poll failure is named" true
         (Astring.String.is_infix ~affix:"connection refused" failed);
-      Alcotest.(check bool) "and marked as stale, not fresh" true
-        (Astring.String.is_infix ~affix:"last rows" kept);
+      Alcotest.(check bool) "and marked as stale, with its age" true
+        (Astring.String.is_infix ~affix:"rows read 12s ago" kept);
       Alcotest.(check bool) "the last known runner still shows" true
         (Astring.String.is_infix ~affix:"polisher" runner)
   | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
 ;;
 
+(* Before any poll has answered there are no rows, and "nobody is answering
+   right now" was said about them anyway -- with the server down, next to a
+   poll failure, together with "showing the last rows that arrived". *)
+let test_a_list_no_poll_brought_back_is_not_quiet () =
+  let unread =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:None ~finishes:[] []
+  in
+  Alcotest.(check (list string)) "nothing polled yet says so" [ "not loaded yet" ]
+    (texts unread);
+  let failed =
+    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
+      ~error:(Some "connection refused") ~observed_at:None ~finishes:[] []
+  in
+  match texts failed with
+  | [ only ] ->
+      Alcotest.(check bool) "a first poll that failed names the failure" true
+        (Astring.String.is_infix ~affix:"connection refused" only)
+  | other ->
+      Alcotest.failf
+        "a failed first poll has no rows to keep or call quiet; got %d lines"
+        (List.length other)
+;;
+
 let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes:[]
       [ row "delta" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
   in
@@ -102,6 +128,7 @@ let test_finished_turns_glow_then_expire () =
   let finishes = [ ("echo", 990.) ] in
   let fresh =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+      ~observed_at:(Some 988.)
       ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
@@ -124,7 +151,7 @@ let test_finished_turns_glow_then_expire () =
   let expired =
     Masc_tui_answering.overlay
       ~now:(990. +. Masc_tui_answering.finish_glow_ttl_seconds +. 1.)
-      ~chat_target:None ~error:None ~finishes
+      ~chat_target:None ~error:None ~observed_at:(Some 988.) ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
   in
   match texts expired with
@@ -172,7 +199,7 @@ let test_advance_finishes_tracks_the_transition () =
 let test_target_indexes_skip_prose () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "boom") ~finishes:[ ("analyst", 995.) ]
+      ~error:(Some "boom") ~observed_at:(Some 988.) ~finishes:[ ("analyst", 995.) ]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
       ]
@@ -238,8 +265,10 @@ let test_every_frame_is_one_cell () =
 (* The overlay draws the same mark as the table, so one running turn does not
    wear two different marks depending on which key the reader pressed. *)
 let test_the_overlay_wears_the_same_mark () =
+  List.iter (fun frame ->
   let lines =
-    Masc_tui_answering.overlay ~frame:2 ~now:100. ~chat_target:None ~error:None
+    Masc_tui_answering.overlay ~frame ~now:100. ~chat_target:None ~error:None
+      ~observed_at:(Some 90.)
       ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "echo" ]
   in
@@ -247,10 +276,11 @@ let test_the_overlay_wears_the_same_mark () =
     List.find (fun (line : Masc_tui_answering.line) -> line.tone = Masc_tui_answering.Running) lines
   in
   Alcotest.(check bool)
-    "the overlay row starts with frame 2's mark" true
+    (Printf.sprintf "overlay uses the shared mark for frame %d" frame) true
     (String.starts_with
-       ~prefix:(Masc_tui_answering.running_glyph ~frame:2)
-       running_line.text)
+       ~prefix:(Masc_tui_answering.running_glyph ~frame)
+       running_line.text))
+    [-1; 0; 1; 2; 3]
 ;;
 
 (* The span a surface hands over already measured. A Gate row drew
@@ -326,8 +356,20 @@ let lanes_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
   }
 ;;
 
-let animating ?(turns = []) ?(live_transcript = false) ?lanes () =
+let animating ?(turns = []) ?(live_transcript = false)
+    ?(awaiting_detail_read = false) ?lanes () =
   Masc_tui_answering.anything_running ~turns ~live_transcript ~lanes
+    ~awaiting_detail_read
+;;
+
+(* A Keeper detail tab that is still blank draws how long it has been blank, and
+   the seconds are honest only because something redraws them. Nothing else on a
+   screen like that moves. *)
+let test_a_blank_detail_tab_keeps_the_screen_redrawing () =
+  Alcotest.(check bool) "a read the operator is waiting on" true
+    (animating ~awaiting_detail_read:true ());
+  Alcotest.(check bool) "and nothing once it has landed" false
+    (animating ~awaiting_detail_read:false ())
 ;;
 
 let test_a_quiet_screen_does_not_animate () =
@@ -379,9 +421,42 @@ let test_lanes_that_were_never_loaded_are_not_running () =
     (animating ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ] ())
 ;;
 
+let test_chat_shows_background_work_and_uncertainty () =
+  let preview : Tui_decode.keeper_turn_preview =
+    { ktp_text_tail = "editing the report"; ktp_last_tool = Some "Execute"
+    ; ktp_status_text = "glm · tool activity observed · last observed tool: Execute · last failure: 401" } in
+  let rows =
+    [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
+    ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
+  let lines = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
+    ~error:None rows in
+  Alcotest.(check int) "running status and latest output" 2 (List.length lines);
+  let joined = String.concat "\n" lines in
+  List.iter (fun expected -> Alcotest.(check bool) expected true
+    (Astring.String.is_infix ~affix:expected joined))
+    ["autonomous"; "glm"; "Execute"; "401"; "editing the report"];
+  Alcotest.(check bool) "other Keeper never appears" false
+    (Astring.String.is_infix ~affix:"other" joined);
+  let waiting = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"other"
+    ~error:None rows |> String.concat "\n" in
+  Alcotest.(check bool) "missing events are not invented work" true
+    (Astring.String.is_infix ~affix:"progress has not been reported" waiting);
+  let stale = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
+    ~error:(Some "timeout") rows in
+  Alcotest.(check bool) "failed observation is labelled" true
+    (Astring.String.is_infix ~affix:"Activity unavailable" (List.hd stale));
+  Alcotest.(check bool) "cached progress is marked last observed" true
+    (Astring.String.is_infix ~affix:"Last observed autonomous" (String.concat "\n" stale));
+  Alcotest.(check (list string)) "idle has no stale running preview" []
+    (Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo" ~error:None
+      [row "echo" Tui_decode.Keeper_turn_idle])
+;;
+
 let () =
   Alcotest.run "tui_answering"
-    [ ( "duration"
+    [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
+          test_chat_shows_background_work_and_uncertainty])
+    ; ( "duration"
       , [ Alcotest.test_case "a long wait reads in hours" `Quick
             test_a_long_wait_reads_in_hours
         ; Alcotest.test_case "a negative span clamps" `Quick
@@ -404,6 +479,8 @@ let () =
             test_a_quiet_screen_does_not_animate
         ; Alcotest.test_case "each source alone starts the mark" `Quick
             test_each_source_alone_starts_the_mark
+        ; Alcotest.test_case "a blank detail tab keeps the screen redrawing"
+            `Quick test_a_blank_detail_tab_keeps_the_screen_redrawing
         ; Alcotest.test_case "lanes that were never loaded are not running"
             `Quick test_lanes_that_were_never_loaded_are_not_running
         ] )
@@ -414,6 +491,8 @@ let () =
             test_quiet_fleet_says_so
         ; Alcotest.test_case "an error keeps the last rows and says why"
             `Quick test_error_keeps_the_last_rows_and_says_why
+        ; Alcotest.test_case "a list no poll brought back is not quiet"
+            `Quick test_a_list_no_poll_brought_back_is_not_quiet
         ; Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
             test_unavailable_reads_as_unknown_not_idle
         ; Alcotest.test_case "finished turns glow then expire" `Quick

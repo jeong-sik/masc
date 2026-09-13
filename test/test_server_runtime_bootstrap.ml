@@ -1026,7 +1026,10 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       mkdir_p base_path;
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
-      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+         (fun ~runtime_config_path:_ ->
+           Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path) with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
       let config_root = Filename.concat base_path ".masc/config" in
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
@@ -1046,6 +1049,32 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
         (Sys.file_exists (Filename.concat config_root "keepers"));
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
+
+let test_created_root_populated_before_lock_is_not_fresh_seeded () =
+  with_temp_dir "startup-populated-created-root" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    mkdir_p repo;
+    let seed = make_config_root repo in
+    mkdir_p (Filename.concat seed "keepers-default");
+    write_file (Filename.concat seed "keepers-default/default-imp.toml") "[keeper]";
+    let base_path = Filename.concat dir "base" in
+    let config_root = Filename.concat base_path ".masc/config" in
+    mkdir_p (Filename.dirname config_root);
+    Unix.mkdir config_root 0o755;
+    let runtime_path = Filename.concat config_root "runtime.toml" in
+    (* Startup created the directory, but another writer populated it before
+       startup acquired the configuration lock. The old created flag alone
+       must not turn this into a full fresh install. *)
+    write_file runtime_path "# operator configuration";
+    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_cwd repo @@ fun () ->
+    (match Runtime.with_config_lock ~runtime_config_path:runtime_path (fun () ->
+       Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created:true;
+       Ok ()) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check string) "competing writer bytes survive" "# operator configuration" (read_file runtime_path);
+    Alcotest.(check bool) "populated root does not receive a fresh default roster" false
+      (Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")))
 
 let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
   with_temp_dir "startup-config-preserve" (fun dir ->
@@ -1096,6 +1125,33 @@ let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       Alcotest.(check bool) "base-path config not bootstrapped" false
         (Sys.file_exists (Filename.concat base_path ".masc/config")))
+
+let test_initial_configuration_relative_override_matches_writer_path () =
+  with_temp_dir "startup-relative-override" (fun dir ->
+    let process_cwd = Filename.concat dir "process" in
+    let base_path = Filename.concat dir "workspace" in
+    mkdir_p process_cwd;
+    mkdir_p base_path;
+    let config_root = Filename.concat base_path "relative-config" in
+    mkdir_p config_root;
+    let runtime_path = Filename.concat config_root "runtime.toml" in
+    write_file runtime_path "[runtime]";
+    with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "1") @@ fun () ->
+    with_env "MASC_CONFIG_DIR" (Some "relative-config") @@ fun () ->
+    with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+    with_cwd process_cwd @@ fun () ->
+    Config_dir_resolver.reset ();
+    Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+       (fun ~runtime_config_path ->
+         Alcotest.(check string) "initial lock uses explicit workspace override" runtime_path runtime_config_path;
+         Alcotest.(check (option string)) "runtime initialization and resume use writer path"
+           (Some runtime_path) (Runtime.config_path ());
+         Alcotest.(check string) "generic prompt readers use the same root" config_root
+           (Config_dir_resolver.resolve ()).config_root.path;
+         Alcotest.(check string) "constructor uses the same config root" config_root
+           (Server_runtime_bootstrap.startup_config_resolution ~base_path).config_root.path) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail))
 
 let test_startup_config_resolution_defaults_to_bootstrapped_root () =
   with_temp_dir "startup-config-activate" (fun dir ->
@@ -4499,6 +4555,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
 
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
+      let canonical_base_path = Unix.realpath dir in
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let primary_port = find_free_port () in
       let secondary_port = find_free_port_from (primary_port + 1) in
@@ -4552,6 +4609,11 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
                  (read_file primary_log));
             Alcotest.skip ()
           end;
+          let lease_path =
+            Server_startup_takeover.base_path_lock_path
+              ~run_dir:(Unix.realpath (Host_config.from_env ()).base_path_lease_dir)
+              ~canonical_base_path
+          in
           let secondary_fd = open_log secondary_log in
           let pid =
             Unix.create_process_env exe
@@ -4568,15 +4630,38 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           in
           secondary_pid := Some pid;
           Unix.close secondary_fd;
-          if not (wait_for_process_exit ~pid ~timeout_s:5.0) then
-            Alcotest.failf
-              "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
-              (read_file secondary_log);
+          let deadline = Unix.gettimeofday () +. 5.0 in
+          let rec wait_for_secondary () =
+            match Unix.waitpid [Unix.WNOHANG] pid with
+            | 0, _ ->
+                if Unix.gettimeofday () >= deadline then
+                  Alcotest.failf
+                    "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
+                    (read_file secondary_log);
+                Unix.sleepf 0.1;
+                wait_for_secondary ()
+            | _, status -> secondary_pid := None; status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_secondary ()
+          in
+          Alcotest.(check bool) "secondary refuses startup with a nonzero exit" true
+            (match wait_for_secondary () with
+             | Unix.WEXITED code -> code <> 0
+             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
           let secondary_text = read_file secondary_log in
-          Alcotest.(check bool) "secondary log mentions base-path owner" true
-            (String_util.contains_substring secondary_text "already owns base path");
-          Alcotest.(check bool) "secondary log mentions primary pid" true
-            (String_util.contains_substring secondary_text (string_of_int primary_pid));
+          if not (String_util.contains_substring secondary_text
+              (Printf.sprintf "Base path %s is locked." canonical_base_path)) then
+            Alcotest.failf
+              "secondary exit did not report the base-path owner\nsecondary log:\n%s\nprimary log:\n%s"
+              secondary_text (read_file primary_log);
+          Alcotest.(check bool) "secondary reports the canonical ownership lease" true
+            (String_util.contains_substring secondary_text
+              (Printf.sprintf "Lock file: %s." (Filename.quote lease_path)));
+          Alcotest.(check bool) "secondary log preserves recorded-owner uncertainty" true
+            (String_util.contains_substring secondary_text
+              "its namespace and current holder are unverified");
+          Alcotest.(check bool) "secondary log mentions recorded primary pid" true
+            (String_util.contains_substring secondary_text
+              (Printf.sprintf "The lease records PID %d;" primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true
             (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
 
@@ -5277,6 +5362,10 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "startup json includes runtime resolution" `Quick
             test_startup_state_json_includes_runtime_resolution;
+          Alcotest.test_case "created root populated before lock is not fresh seeded" `Quick
+            test_created_root_populated_before_lock_is_not_fresh_seeded;
+          Alcotest.test_case "initial configuration relative override matches writer path" `Quick
+            test_initial_configuration_relative_override_matches_writer_path;
           Alcotest.test_case
             "create_server_state records runtime resolution"
             `Quick test_create_server_state_records_runtime_resolution;

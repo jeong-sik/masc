@@ -1,0 +1,12 @@
+{
+  "scope": "configuration preparation only; not applied",
+  "runtime_before_sha256": "669508ef120954da200565c13e8bdf64ae44c1610e5adca375cbb7da1ba5a352",
+  "overlay_before_sha256": "f28578c513d09d15fccdcddf1913c076b497b816c1ba83d616a951862bec4378",
+  "existing_exact_target": "ollama.qwen3-8-27b",
+  "model_api_name": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "additions_parse": "passed alone and appended to captured runtime",
+  "existing_default_and_exact_lanes": "preserved in parsed candidate",
+  "native_admission": "not_run",
+  "installed_curator": "not_run",
+  "runtime_mutation": false
+}

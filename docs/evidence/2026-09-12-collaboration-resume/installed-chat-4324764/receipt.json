@@ -1,0 +1,3460 @@
+{
+  "observed_at": "2026-09-12T16:52:39.741Z",
+  "source_commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+  "probe_passed": true,
+  "assertion_failure": null,
+  "runtime_build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "commit_source": "embedded",
+    "binary_commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "a38ff7f2e6ecbd9efe6dcfbb2469d67e56e837f3cad7eba0fa2f7eed6571643a",
+    "binary_commit_unix_ts": 1789229952,
+    "binary_commit_age_seconds": 1985,
+    "executable_path": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d/masc",
+    "executable_dir": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d",
+    "runtime_instance_id": "01a09684-c8f9-7000-bc9b-5e4f84d63395",
+    "started_at": "2026-09-12T16:47:59Z",
+    "uptime_seconds": 257
+  },
+  "runtime_status": "ok",
+  "keeper": "exhibit-editor",
+  "execution_id": "exec-1789223431021-0129",
+  "tool_use_id": "call_d491c2b69f294f52b940bb6e",
+  "edit_output_source": {
+    "kind": "verified_manifest",
+    "sha256": "3bf7744345cac4b2177363c4b2532b88dd2bb3b57fc3bb810a677fb8cc0f44bc",
+    "bytes": 1345
+  },
+  "originals": [
+    {
+      "side": "before",
+      "sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+      "bytes": 12602
+    },
+    {
+      "side": "after",
+      "sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+      "bytes": 12641
+    }
+  ],
+  "rendered": {
+    "before_sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+    "after_sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+    "diff_sha256": "7a83bed9daf8e1aa305c6068992b5869ebdf6b0bfe91edfc321197e46cf4d5f7",
+    "patch_reconstructs_after": true
+  },
+  "assets": [
+    {
+      "name": "index.html",
+      "status": 200,
+      "bytes": 621,
+      "sha256": "c4588c610ee5c11c4858ed699701856931e2668b1f079caa82e8429d687943ac"
+    },
+    {
+      "name": "assets/index-DGcCp0tr.js",
+      "status": 200,
+      "bytes": 766874,
+      "sha256": "7fbc7a1372605452306923948f5e2ccdc0bee53e731d9839f487adb67746672d"
+    },
+    {
+      "name": "assets/vendor-DoibHDuM.js",
+      "status": 200,
+      "bytes": 30250,
+      "sha256": "c48c1e4f60608ec27faf09ab584d8aaf596a9a0f9acf8cbf9d6fc7932c8db1ff"
+    },
+    {
+      "name": "assets/index-Dt0fLdQb.css",
+      "status": 200,
+      "bytes": 1324101,
+      "sha256": "dd457a4b6da7bdd71bbc7b9a21dc5e6fe59d460bd8822875ef7de4848894a48a"
+    },
+    {
+      "name": "assets/preload-helper-cC-D59TZ.js",
+      "status": 200,
+      "bytes": 1264,
+      "sha256": "a0fe96b42dde4d53a567a44fbb1a4be77056bcf2fe4826166d0809bb1cefe465"
+    },
+    {
+      "name": "assets/actions-4FRdtrix.js",
+      "status": 200,
+      "bytes": 4821,
+      "sha256": "f9ebe60be874febacebd06220c2faf0d5ac00c9c3ccb025b87f0bedc0ed3fa79"
+    },
+    {
+      "name": "assets/trash-2-j1VJAaqS.js",
+      "status": 200,
+      "bytes": 325,
+      "sha256": "fa3a1b71507e5d9a1aaa52282b35820ebc250536306e9797b309d2b295a13d59"
+    },
+    {
+      "name": "assets/keeper-runtime-trace-D2YN_L5I.js",
+      "status": 200,
+      "bytes": 9929,
+      "sha256": "6211cd6cd49a5e9776ce45d0830f412eb46ec6bc50b4ba7914da36d6cbafb327"
+    },
+    {
+      "name": "assets/checkbox-BXTRFzpf.js",
+      "status": 200,
+      "bytes": 2770,
+      "sha256": "3126b95a1f5268d36d006da43662806652e2f4cd318195c30155fb9313c6ca06"
+    },
+    {
+      "name": "assets/keeper-utils-BOkNvwHa.js",
+      "status": 200,
+      "bytes": 197,
+      "sha256": "b5eeaa2fc22ce8fa9439d4f3d31318a08c44c0ab1fb8479dbcac10c405e35cd3"
+    },
+    {
+      "name": "assets/keeper-classifiers-BH5bjVlF.js",
+      "status": 200,
+      "bytes": 1023,
+      "sha256": "b5bcba2a97718f45be1ea82836f033211eac43139e92bdab5fe1ef671da80441"
+    },
+    {
+      "name": "assets/keeper-detail-page-CvOAbRly.js",
+      "status": 200,
+      "bytes": 265252,
+      "sha256": "1ceb83a45625c9c93bec1b7225b473710f4f67136cc9c273b74bd6a74623179d"
+    },
+    {
+      "name": "assets/keeper-workspace-shared-DBFe0qFu.js",
+      "status": 200,
+      "bytes": 4784,
+      "sha256": "e9ce83f8d8afae6b9ee7fa08435f5f91f4bace36ca428207ac6b9d2311e11b56"
+    },
+    {
+      "name": "assets/virtual-list-DP5-D9tg.js",
+      "status": 200,
+      "bytes": 4221,
+      "sha256": "9a26d8dc71913c7daacb9dd0aace571f91181371eba1c229d42a6bcf01558f6e"
+    },
+    {
+      "name": "assets/keeper-composite-lookup-BkEMofyR.js",
+      "status": 200,
+      "bytes": 126,
+      "sha256": "8bf75d8d6e135fb0365f5ac73d16ae43d30bc153c7ee3ec21f60955a3a1fdb03"
+    },
+    {
+      "name": "assets/search-Bj0sh3h6.js",
+      "status": 200,
+      "bytes": 171,
+      "sha256": "6adea66df716d3569a1c95101e6837915bdcb0b0bf270749d4abf9a320a60773"
+    },
+    {
+      "name": "assets/markdown-DaTgz2Tg.js",
+      "status": 200,
+      "bytes": 2992,
+      "sha256": "e85d0476082afe3f0349210d11c0f342ef2ca3b5ab479456590af653c8eb9df1"
+    },
+    {
+      "name": "assets/dompurify-DkZSzPUi.js",
+      "status": 200,
+      "bytes": 887,
+      "sha256": "b80fcd1c23487e732f5ab18152e1058d70fd555b7e79ad974a51849cd1e41e96"
+    },
+    {
+      "name": "assets/settings-DUFIRKRz.js",
+      "status": 200,
+      "bytes": 597,
+      "sha256": "32cfc4971aeeefa69754a0c06a3a318ec99f33349bfd3836fd46668b856022c2"
+    },
+    {
+      "name": "assets/dashboard-runtime-CM8uky9p.js",
+      "status": 200,
+      "bytes": 34045,
+      "sha256": "ef6f686728e8268d6de9994cf4eb87fa8dd7779d0ebad0cd445cbf01284fa8e0"
+    },
+    {
+      "name": "assets/chevron-left-Cn-tp3_4.js",
+      "status": 200,
+      "bytes": 127,
+      "sha256": "45b7b327de4bf5c7df513d01299a7092d9830afb3c74e4d316ccd7f25e5a8187"
+    },
+    {
+      "name": "assets/runtime-provider-summary-j4VDvnxS.js",
+      "status": 200,
+      "bytes": 10891,
+      "sha256": "de9a2cb67faf0734f19aa6240bc5a29f55dc05fbab6d6f9471ffdbefb224f09d"
+    },
+    {
+      "name": "assets/message-square-BIuhRwq_.js",
+      "status": 200,
+      "bytes": 230,
+      "sha256": "2f2d013bdb4b9893622325272f3c84de458d36be01f4763f29a39b0c63de0121"
+    },
+    {
+      "name": "assets/voice-input-Be7l6UIp.js",
+      "status": 200,
+      "bytes": 5881,
+      "sha256": "b16ba10413a4c29326183c0e84b7348a26aee85bc1fd36f7ae57f9017733214a"
+    },
+    {
+      "name": "assets/json-viewer-By3QZDGB.js",
+      "status": 200,
+      "bytes": 3841,
+      "sha256": "d8a32ca43d02e180cc78f91cca77e3ab9afb8f35db3d9c26683b7bc15aa50eb1"
+    },
+    {
+      "name": "assets/fusion-constants-4XyMnNgK.js",
+      "status": 200,
+      "bytes": 270,
+      "sha256": "63562fa284445ba0d9a5f4ba03abcf6f27f10341cb577d4e353c12791ea393e9"
+    },
+    {
+      "name": "assets/fsm-hub-types-CMqtJmGb.js",
+      "status": 200,
+      "bytes": 4696,
+      "sha256": "4c6ebf1921f604ddbd9b8bdc75cc1c98242a15db39a1c865aa78f6def8304d9b"
+    },
+    {
+      "name": "assets/purify.es-P3vI1IgJ.js",
+      "status": 200,
+      "bytes": 28972,
+      "sha256": "f64478476a43c91f82d5e4b69ba20003400de4d3ac79fae234ceb19235bce845"
+    },
+    {
+      "name": "assets/keeper-lane-strip-D36AI3OD.js",
+      "status": 200,
+      "bytes": 23598,
+      "sha256": "0398a716a7f7d50fe3725be0360f605537d08d3cf31738dc9dc4c09efdc89542"
+    },
+    {
+      "name": "assets/tool-blob-Bc2FtOgM.js",
+      "status": 200,
+      "bytes": 138,
+      "sha256": "8d170991b8af8884337376ecba2d87ede24fcbcd52fcc25c586d1f1c692e13b7"
+    },
+    {
+      "name": "assets/lane-queue-panel-Gp0siyGC.js",
+      "status": 200,
+      "bytes": 34219,
+      "sha256": "40fb8eaf3d12b0e541696d5009751cd927fcf7c1c14dea90b1500fa691524d25"
+    },
+    {
+      "name": "assets/fusion-meta-Bnv4zfyo.js",
+      "status": 200,
+      "bytes": 2971,
+      "sha256": "76b1d5f1bfb6746ed0bb7349b45a4b40093f150826b310922f6dcf30f32d7fe1"
+    },
+    {
+      "name": "assets/schedule-state-D0hD-FyS.js",
+      "status": 200,
+      "bytes": 5548,
+      "sha256": "bd5ec8f4a6bf8131045f2bd1ce51c3685b32226477b21d9a08dacc1f9a869f4e"
+    },
+    {
+      "name": "assets/now-signal-BZaxDEYR.js",
+      "status": 200,
+      "bytes": 121,
+      "sha256": "6ecd5998739e814f95041a5e8bd19d874a087b425ec63eb858af898f80bbd582"
+    },
+    {
+      "name": "assets/queue-drain-status-BTx-riyH.js",
+      "status": 200,
+      "bytes": 2051,
+      "sha256": "ea9d91c3881a7c62f8f2d7e951fcd6141ffd4b0de774f2bf531262df36a58f0f"
+    },
+    {
+      "name": "assets/fonts/JetBrainsMono-400-latin.woff2",
+      "status": 200,
+      "bytes": 31340,
+      "sha256": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4"
+    },
+    {
+      "name": "assets/chevron-right-Ct3vM1fe.js",
+      "status": 200,
+      "bytes": 127,
+      "sha256": "afe3b99ba5243fcb821437c729e159bd66c263bb506c0514fcc1ea21cceb2659"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-119.woff2",
+      "status": 200,
+      "bytes": 16668,
+      "sha256": "994289a67b5f65801130b59217ecc8ce98e963cd1c34bbe56c984e829db71a1f"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-118.woff2",
+      "status": 200,
+      "bytes": 14668,
+      "sha256": "0136b09150b3ef19b74dd55e2fc73a9e267a4da4ed3615542a191485da5afbf4"
+    },
+    {
+      "name": "assets/fonts/Cinzel-Regular.ttf",
+      "status": 200,
+      "bytes": 125468,
+      "sha256": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-117.woff2",
+      "status": 200,
+      "bytes": 14420,
+      "sha256": "e89faf36222bbb664dd5c28e8969d6817faaf100d1ca532f294084591cc9c9b7"
+    },
+    {
+      "name": "assets/task-detail-state-BVl87D9x.js",
+      "status": 200,
+      "bytes": 5285,
+      "sha256": "3ba7fb182cc97810f33f782d8e49b00b49c67df79097e2c851be5c86343fa047"
+    },
+    {
+      "name": "assets/mission-actions-CHQiRmhB.js",
+      "status": 200,
+      "bytes": 5730,
+      "sha256": "3d015211cdf4d1f86096e702928a5050738029d77a6a12cc459ff4d7ec92ecab"
+    },
+    {
+      "name": "assets/mission-signals-DTi59uph.js",
+      "status": 200,
+      "bytes": 247,
+      "sha256": "29e0ba7525cba3cfb9064a02199483d6d8f39d0076d0f2465d9c215f6da337ae"
+    },
+    {
+      "name": "assets/tab-refresh-Cnpd-6yD.js",
+      "status": 200,
+      "bytes": 4530,
+      "sha256": "bf16b3b60b2c5d2f03ce9586c598684f85984b281fef3d922e69ae08c6f6ef25"
+    },
+    {
+      "name": "assets/gate-refresh--pwpn23c.js",
+      "status": 200,
+      "bytes": 374,
+      "sha256": "c69f016a9875b781ab6292e75f7bd3afde1776fcf5526cdae87b83cf3f3f0b00"
+    },
+    {
+      "name": "assets/goal-helpers-G7IxHPHw.js",
+      "status": 200,
+      "bytes": 3004,
+      "sha256": "5d5a83ed47a52aa54e46c7303c0abbc3c71c53e405e5d2bff64a37b0a7e41e50"
+    },
+    {
+      "name": "assets/operator-actions-n_gaF4B9.js",
+      "status": 200,
+      "bytes": 1772,
+      "sha256": "bed43e5ee0b05e0a6c744a85b4cd994ef618d197028e0297e1be49a648fd8942"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-116.woff2",
+      "status": 200,
+      "bytes": 16172,
+      "sha256": "afc33bf7e12515219591d71d3adbb65f167652833878dc0e8da579884c7d6c39"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-114.woff2",
+      "status": 200,
+      "bytes": 16176,
+      "sha256": "746cbcb44fd668936a78967f7f7bd8bb9fe0e891a378487c8d0d99c563c9590e"
+    },
+    {
+      "name": "assets/dashboard-mission-Cul5EDti.js",
+      "status": 200,
+      "bytes": 533,
+      "sha256": "930622c1b2219f41bd31cf2f669f9514a0cb3c214d68e059f6fc8ee22ea8f3a6"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-115.woff2",
+      "status": 200,
+      "bytes": 16288,
+      "sha256": "cfa10935430d3a4f42fe20bc87c7c00a0db62f9c1c5232ca78dab85c7582e2fc"
+    },
+    {
+      "name": "assets/dashboard-config-BnwZvwKa.js",
+      "status": 200,
+      "bytes": 2948,
+      "sha256": "3f8562ecdcebf7eb9468e09eb1d40cde2c22ec213767b2f9a63e0c0ba5b8b838"
+    },
+    {
+      "name": "assets/effect-http-CXJ8aUlS.js",
+      "status": 200,
+      "bytes": 567,
+      "sha256": "2d37d98bf8301f2abe36aa46bd4e5af77eafbc6284e06815784706ae87074c0d"
+    },
+    {
+      "name": "assets/effect-runtime-DW5GioGO.js",
+      "status": 200,
+      "bytes": 175131,
+      "sha256": "5f8243ba795d5c106bb744481436e35bf6e3f00d43f03c0eb7f666ac9efbc1d8"
+    },
+    {
+      "name": "assets/runtime-probe-DontOQN5.js",
+      "status": 200,
+      "bytes": 2298,
+      "sha256": "20b88d8a235bdabef8c7bcf1b9922f3b01bf8afff523fb0572664038cdb13b6b"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-109.woff2",
+      "status": 200,
+      "bytes": 17988,
+      "sha256": "fe94b8bb12395b3ae8b2af3949c9e7728d2a4166af989481e07f1ba1558c5b0c"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-98.woff2",
+      "status": 200,
+      "bytes": 12232,
+      "sha256": "1398f9e025188301142d3ee01db91185db0091a26d9c56ce5decbf120e2dd9e8"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-113.woff2",
+      "status": 200,
+      "bytes": 16492,
+      "sha256": "78b1216a934a85e788a0f22cb4d8c73a681111edbe121e3d34428ab85209dadf"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-112.woff2",
+      "status": 200,
+      "bytes": 16444,
+      "sha256": "bd4ba71c927a5394c7e4488d6e36a6f79b85fa5829d22a459e2e658819788934"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-103.woff2",
+      "status": 200,
+      "bytes": 24396,
+      "sha256": "8e5f236bf493a9af95a2cb9db373ee846144ad821634785654a5dcf180a0d1e9"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-110.woff2",
+      "status": 200,
+      "bytes": 17604,
+      "sha256": "bcd2f60fc886a27757d803cdaaf2cd6c68c357127dcda6979f6737c9ebd0e72d"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-101.woff2",
+      "status": 200,
+      "bytes": 26020,
+      "sha256": "6349313e6c3ba551d7ae45ccd871dd9a17bb61f3d8c88dd36bd5c9ed40ec2314"
+    },
+    {
+      "name": "assets/drift-error-CVnbVe91.js",
+      "status": 200,
+      "bytes": 478,
+      "sha256": "0e805faa4b0c01113fae36de9d4a5de94707f19e158963d117772bd0eb4fa24d"
+    },
+    {
+      "name": "assets/index-C0kuVBZN.js",
+      "status": 200,
+      "bytes": 10798,
+      "sha256": "3c67f5396a6d304f1e14e45345b6b111e78470d2aff49e8746891e3afc31f706"
+    },
+    {
+      "name": "assets/keeper-composite-DIDxWbZT.js",
+      "status": 200,
+      "bytes": 3555,
+      "sha256": "53fe7b45d53d5b32afef9bdfaae9a2dd60deaf13e536fd750d5c197bccfa9c7f"
+    },
+    {
+      "name": "assets/keeper-transitions-Dz_Ie_Yd.js",
+      "status": 200,
+      "bytes": 622,
+      "sha256": "ee1fa7773488db3b2d0b1a7e7bfca9af2486e4e2910435ebacdc0ba8ce8ce43f"
+    },
+    {
+      "name": "assets/keeper-chat-history-yWUv17tn.js",
+      "status": 200,
+      "bytes": 3101,
+      "sha256": "2d3d807391fd58ae7d383784f2cb088544e0c4cc2af35eab0613a681b74f3ae5"
+    },
+    {
+      "name": "assets/keeper-chat-delivery-provenance-D2iT1UzA.js",
+      "status": 200,
+      "bytes": 1688,
+      "sha256": "3484831930a1cad20a4ff988892f668b5f5dce88b5a9362ec6c0907e8d3c55a5"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-107.woff2",
+      "status": 200,
+      "bytes": 18396,
+      "sha256": "74dee26bd44d7ef81e0bf839afbc4d5f9c73f9bcf4caf98f84f21aa75a2d0d21"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-111.woff2",
+      "status": 200,
+      "bytes": 17416,
+      "sha256": "01c12e158ee141ecc24a7a240d316690d91b856e434258ad791e51b1d2026f6d"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-108.woff2",
+      "status": 200,
+      "bytes": 19664,
+      "sha256": "70b946e9c71306d7109c25f2c88d4f85414d3fb2183f4df8585ee8d2e32cd6cc"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-100.woff2",
+      "status": 200,
+      "bytes": 26208,
+      "sha256": "182c3a89c922e2237510ca82c4dc867790d2aad3a40542a6911c95ad00f6782e"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-43.woff2",
+      "status": 200,
+      "bytes": 21492,
+      "sha256": "2920a24f34cfe40b36d84dd4b5e9b487dddbf8970c009279dd984ea82184edde"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-102.woff2",
+      "status": 200,
+      "bytes": 25560,
+      "sha256": "317c6d57b06a76e04eb213541b1d490e78b240a770c325805c4cbe1f11f82bd0"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-99.woff2",
+      "status": 200,
+      "bytes": 16920,
+      "sha256": "0ad9814ec2b80cf29bea8fd81ab58f577ea296278c3ab18233d03e2f4a11927e"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-latinext.woff2",
+      "status": 200,
+      "bytes": 10056,
+      "sha256": "0dc284327277c1762c4b5301d4ab0c5da815f86c4092d9dd2b2dfacd7ec5231f"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-105.woff2",
+      "status": 200,
+      "bytes": 25208,
+      "sha256": "120423813669c4943e90b31a1f4051ea954bbf5e17ea82c452c6e1a6bee2d69b"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-24.woff2",
+      "status": 200,
+      "bytes": 25488,
+      "sha256": "6704301fafc4e6a503e79cba089f199edfa93b18eef47a27be5012877dd0b66d"
+    },
+    {
+      "name": "assets/markdown-blocks-C-JE2zyV.js",
+      "status": 200,
+      "bytes": 4366,
+      "sha256": "84f51bc22134401b740ce24769868029ea68feee68cf950b6351cbb97944c88a"
+    },
+    {
+      "name": "assets/marked.esm-BFoLNhrf.js",
+      "status": 200,
+      "bytes": 41549,
+      "sha256": "f72ab9a642dbecd4550be9d7eb9c7f7f1111413405c302a3363341e93a8aae26"
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-104.woff2",
+      "status": 200,
+      "bytes": 28612,
+      "sha256": "b0bf9a93c6542a98a6b6e452d40d202644dc20a5f6d7adda5b6e698fc62c2944"
+    },
+    {
+      "name": "assets/edit-snapshot-diff.worker-lXf_9trE.js",
+      "status": 200,
+      "bytes": 7940,
+      "sha256": "de308f05bd46a136c18f52ed2fc0b0b35d1768fedf63f7a201477dbe8b144b01"
+    }
+  ],
+  "events": [
+    {
+      "method": "GET",
+      "path": "/dashboard/",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-DGcCp0tr.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/vendor-DoibHDuM.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-Dt0fLdQb.css",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/preload-helper-cC-D59TZ.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/actions-4FRdtrix.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/trash-2-j1VJAaqS.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-runtime-trace-D2YN_L5I.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/checkbox-BXTRFzpf.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-utils-BOkNvwHa.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-classifiers-BH5bjVlF.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-detail-page-CvOAbRly.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-workspace-shared-DBFe0qFu.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/virtual-list-DP5-D9tg.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-composite-lookup-BkEMofyR.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/search-Bj0sh3h6.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/markdown-DaTgz2Tg.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dompurify-DkZSzPUi.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/settings-DUFIRKRz.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-runtime-CM8uky9p.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/chevron-left-Cn-tp3_4.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/runtime-provider-summary-j4VDvnxS.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/message-square-BIuhRwq_.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/voice-input-Be7l6UIp.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/json-viewer-By3QZDGB.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fusion-constants-4XyMnNgK.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fsm-hub-types-CMqtJmGb.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/purify.es-P3vI1IgJ.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-lane-strip-D36AI3OD.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/tool-blob-Bc2FtOgM.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/lane-queue-panel-Gp0siyGC.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fusion-meta-Bnv4zfyo.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/schedule-state-D0hD-FyS.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/now-signal-BZaxDEYR.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/queue-drain-status-BTx-riyH.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/JetBrainsMono-400-latin.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/chevron-right-Ct3vM1fe.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-119.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-118.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/Cinzel-Regular.ttf",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-117.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/task-detail-state-BVl87D9x.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-actions-CHQiRmhB.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-signals-DTi59uph.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/tab-refresh-Cnpd-6yD.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/gate-refresh--pwpn23c.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/goal-helpers-G7IxHPHw.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/operator-actions-n_gaF4B9.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "query": "?full=1",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/gate",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-116.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-114.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-mission-Cul5EDti.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-115.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/dev-token",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/project-snapshot",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-config-BnwZvwKa.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-http-CXJ8aUlS.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/shell",
+      "query": "?light=true",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-runtime-DW5GioGO.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/execution",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/briefing",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/mcp",
+      "query": "",
+      "rpc_method": "tools/call",
+      "tool": "masc_pause_status",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/runtime-probe-DontOQN5.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/tool-approvals",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/transitions",
+      "query": "?limit=1",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/providers",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/waiting-inventory",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/composite",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/config",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/config",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-109.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-98.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-113.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-112.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-103.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-110.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-101.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/drift-error-CVnbVe91.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-C0kuVBZN.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-composite-DIDxWbZT.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-transitions-Dz_Ie_Yd.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/runtime-trace",
+      "query": "?limit=200",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/chat/history",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-chat-history-yWUv17tn.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-chat-delivery-provenance-D2iT1UzA.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-107.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-111.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-108.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-100.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-43.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-102.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-99.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-latinext.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?limit=200",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/f4be65cc5ca69dcd6365e755a5f4e9c727c4fff6de59dade6120409d5c6b13b2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/d462dc537831c1ab521de759df2a3315996c1161d05dd0ac0e3535c5d00030b1",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/4d776a72fa8eddc905d484e977524cb51b4dd20ad9b3b3cf217394109d22e711",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/e6d01d2876ea9ccfc2c54e2382ebc131397c3e83d9460f4be8e844f05bef28f3",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/b594c19c257a494fe7ab0921ac5b87d39eadfd0f0b25247089cfca37df7006c5",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/34c2e2e6faa1266be9f6066ec62dbb7efb32d145669e911480c13ac0cd9f79d3",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/5f3e1b6a013f5d2dc5728de8ec68e5ed805fb6535cd9ea7608adacd8962b2e62",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/97a7e71ff8782f4244f665186a76c38ce181359dbfb80ee19215e488c9356715",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/1d55d4b57b2c7ed4e94c4ae022c249369d033c5ab843c0bf62bda6ce779dac02",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/e231f5f07278cdbb975fcdb26bd3e75234fa793df0b80f5a8c25e9c87f0e36e4",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/66f4b8c4f456ac4805852768c997f85af3e1543dbe40f2de310184d2c32af1e7",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/fffc214b4ebb615dda0f71f0613c9f1aac4527c190fe02bf36c94488071619ee",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/f04d4317e66f0584dcd7153ed34016fb8b3ee6fabc4af7f721f74ca30f398a88",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/f46a0aa225b61ae7fcd913182d0e8a2c3c7bb87a5e04a5c535ca38a0f7a0b88e",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/f41a4aeda613d7a026e788f73ee28c12ae6322ee21e7fc304a890bd1d327fdb6",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/96e9d74209d1682ed63c5c6ce0f67286df0254f05965dd156be4c42c0b902a3b",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789179578478-017c",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/mcp",
+      "query": "",
+      "rpc_method": "tools/call",
+      "tool": "masc_keeper_status",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789179908114-017e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789179900039-017d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-105.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789180247811-017f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-24.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/markdown-blocks-C-JE2zyV.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/marked.esm-BFoLNhrf.js",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789185584925-0180",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789185590094-0181",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789185598560-0182",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789186614244-0184",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789186570867-0183",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789187301450-0187",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789187310460-0188",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789187294579-0186",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789187287988-0185",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/8d88e4f09071c9cc1b557d7cfe5def92a10ebe22ba318deeede0c96377bf4ade",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789188269505-0189",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789194008768-018b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789193992721-018a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789194027467-018c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789194713322-0195",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195355804-0196",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195363061-0197",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195690019-0199",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195683877-0198",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195696458-019a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789195706091-019b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/ed36515168bd4e60d45644def05a792b47909231875633a4b6003d461b2dcbbd",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789196669885-019c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789199539179-019d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789201471208-019e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789201784915-019f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789202411041-01a0",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789202498723-01a1",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789204382850-0003",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789204369500-0001",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789204376549-0002",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789204392882-0006",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/1d29e7d7214ead8b885b8ac8ae41b761ae8f7bab1015e342df9c713d919dc218",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789205055199-0024",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789205378153-0025",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789205389202-0026",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206349014-0011",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206441736-0017",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206321014-000f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206357771-0012",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206348708-0010",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206425125-0014",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206640724-001a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206371728-0013",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206964959-001b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789206964960-001c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207322783-001d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207322783-001e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207543472-0001",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207760931-000f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207756353-000e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207815738-0011",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207761205-0010",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207837871-0014",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789207896058-001c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208243336-0022",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208243381-0023",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208560663-0024",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208758399-0028",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208809961-0029",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208817810-002a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208829858-002b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208688336-0025",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208688337-0026",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208841063-002c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208757829-0027",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208903758-0032",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208903101-0030",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789208903457-0031",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/2686033982fae5b20d850fc8b4d80730c720bede2f63c00a492525d1b02c3b28",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/115eac90ff20a69dd02ad783566df1fb89603d4081d7dfd6701760c83749d37b",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/bd5b40df34b48b743209f090279f58e8796bfa156a060670b1f951ca3eabb826",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209136893-003b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209095068-0038",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209156142-003d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209094849-0037",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209120825-003a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209114470-0039",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209248582-0047",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209350233-0052",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209425511-0055",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209565507-0056",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209920281-0057",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789209920281-0058",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210035685-0059",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210035689-005a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210206794-0001",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210585758-0008",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210585760-0009",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210585751-0007",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210602046-000b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210602045-000a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210942056-000c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789210942060-000d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211257584-000f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211257583-000e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211600620-0012",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211600617-0010",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211600619-0011",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789211951673-0013",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212625885-000f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212665879-0010",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212684698-0012",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212699261-0015",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212699260-0014",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212699257-0013",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212708932-0016",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212864959-0024",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212849414-0023",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212875497-0025",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212923441-002a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212923480-002b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789212923378-0029",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213344310-0030",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213283327-002f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213421925-0031",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213244673-002d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213244669-002c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213244675-002e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213589860-003d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213554723-003a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213575248-003c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213560305-003b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213858435-0046",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213909442-004a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213887259-0047",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213793720-0044",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213800866-0045",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789213920375-004b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214045965-0058",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214037049-0057",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214184825-005b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214194269-005c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214439880-0061",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214414870-0060",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214460779-0063",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214450664-0062",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214414867-005f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789214414863-005e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215120338-0065",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215098118-0064",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/b49cb38026e01ea77500b272c399868e59afe7e5ef60f26a4c30931ea7f2d936",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215128628-0066",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215139071-0067",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/be9a0a5cbae243d8217afaf5975e3cb9c98bbb58eb29bbba4bbbe935e3c6a0a4",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215489382-0069",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215498835-006a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215474255-0068",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/819fe29ee4070d3bb65e315a9374808abce39a5028e6a975b1f02dc989dea8ed",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215829819-006b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215847802-006c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215868372-006e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789215858863-006d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789216485238-006f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789216503109-0070",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789216512840-0071",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789217168727-0072",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789217818749-0074",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789217844941-0075",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789217800993-0073",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218534399-0078",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218495281-0076",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218541519-0079",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218502319-0077",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218558908-007b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218541615-007a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218565129-007c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218589644-007e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218577233-007d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218949257-008e",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218907654-008a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218935309-008d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219030887-0092",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219046405-0094",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219030789-0091",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218967303-008f",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789218975197-0090",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219030934-0093",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/64df7dbaad3b865edf68e6b7e9d9b6d7b0441da22a093474c9a3e92cad850566",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/39740a896ab408ffff63c54e41c4c38492ba76977a23b32e1b72fe7ad69f3168",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/ea98b38252e5b1b3ff4159555f60d7d06e0cd53a6993f03ae4b9bb4a43707e79",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219219478-0097",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219247839-0098",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219421106-009c",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219247839-0099",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219351687-009a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219428862-009d",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219351784-009b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/b8795c545febc31fe26a1b148b53f02c1cbf60ec3ee12ea62fb47b97398c2656",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/c233399ccddf025f0f1276a54bf62495d042f642985fa2e6a8cee5c94b481c99",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219520108-00a1",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219549755-00a3",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219539700-00a2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219880766-00a4",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789219889505-00a5",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220394477-00aa",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220327163-00a7",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220327088-00a6",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220407345-00ab",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220353739-00a9",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220347768-00a8",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/393535d8efae7b4dd6b90ca5b52dcb1f43a8d99953d22a377e3cb71a57945a6d",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/fe33e95538ae568fd1268874f8401bd00e9cbe2f709c5d5b8ef93df28179a0a5",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/bbc1bc6bce8d67e913f37ea783e907ede178210ee669dc0b0ac661e70ab72528",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/6cff1facb8b038c8360505fcaba1960c052d0de6c31dbff0813c37ea74efae58",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220839127-00ae",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-104.woff2",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220911758-00b1",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220890207-00af",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220936581-00b2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/tool-calls",
+      "query": "?execution_id=exec-1789220903765-00b0",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/63f77f19be8fbd19d2a89433165d58e56499950e2c648cc9bac93856ca525017",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/5c108427e3605d36902f63ee027dff47db2e2a44de60249683b1dcfdfaf5cc3f",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/11cb0a4c5f31e5101067f264f728db8c0630a57bc268151bd3caa190803ded45",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/bfe06e110a33b40cdd40a5f3a828be70f79996e4c74eac3420fec4cf91d889e0",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/f89a4ffcff52560e6513964a8f408aa6ecdedd0474bd6290b589ff3919223119",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/3bf7744345cac4b2177363c4b2532b88dd2bb3b57fc3bb810a677fb8cc0f44bc",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artifacts/18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+      "query": "",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/edit-snapshot-diff.worker-lXf_9trE.js",
+      "query": "",
+      "status": 200
+    }
+  ],
+  "matched_receipts": [
+    {
+      "ts": 1789223431.021743,
+      "record_kind": "tool_call",
+      "keeper": "exhibit-editor",
+      "tool": "Edit",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "(선택 카드는 29~34초 별도 구간 — 카드 프레임은 이후 별도 추출해 §3 최종 재검수로 확정했다).",
+        "old_string": "(선택 카드는 29~34초 별도 구간 — 카드 프레임 추출 검수 진행 중)."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "3bf7744345cac4b2177363c4b2532b88dd2bb3b57fc3bb810a677fb8cc0f44bc",
+          "bytes": 1345,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "success": true,
+      "duration_ms": 6.06989860534668,
+      "runtime_contract": {
+        "keeper_name": "exhibit-editor",
+        "trace_id": "trace-1789042595401-00001",
+        "session_id": "trace-1789042595401-00001",
+        "generation": null,
+        "keeper_turn_id": 428,
+        "task_id": "task-004",
+        "goal_ids": [],
+        "sandbox_profile": "docker",
+        "sandbox_root": "/home/keeper/playground/exhibit-editor",
+        "sandbox_roots": [
+          ".masc/playground/docker/exhibit-editor/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "glm-coding.glm-5.3"
+      },
+      "action_radius": {
+        "tool_name": "Edit",
+        "action_key": "Edit",
+        "target_kind": "path",
+        "target_path": "adaptation/review.md",
+        "sandbox_target": "docker",
+        "observed_paths": [
+          "adaptation/review.md"
+        ],
+        "success": true,
+        "duration_ms": 6.06989860534668,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "agent.edit_file",
+        "capability_id": "tool_edit_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Edit",
+        "canonical_name": "tool_edit_file",
+        "description": "Patch an existing file by replacing an exact string. Prefer Edit over sed -i/awk/perl via Execute for file changes: the exact-match check and the 'not found' error keep a failed edit from writing anything. Each call replaces one exact string (every occurrence with replace_all=true); apply several disjoint changes as successive Edit calls. Read the file first and copy old_string verbatim from its current bytes, including leading whitespace, indentation, and newlines; the match is exact and byte-sensitive. On 'old_string not found', re-Read the file to get the current text instead of retrying the same string.",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_edit_file",
+        "execution": "serial",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "json",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "bytes_written": {
+                "type": "integer"
+              },
+              "via": {
+                "type": "string"
+              },
+              "changed": {
+                "type": "boolean"
+              },
+              "occurrences": {
+                "type": "integer"
+              },
+              "replace_all": {
+                "type": "boolean"
+              },
+              "edit_snapshots": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "before": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": true
+                  },
+                  "after": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": true
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "ok",
+              "path",
+              "mode",
+              "bytes_written"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "receipt_labels": {
+          "descriptor_id": "agent.edit_file",
+          "capability_id": "tool_edit_file",
+          "keeper_model_projection": "preferred_public_name",
+          "public_name": "Edit",
+          "canonical_name": "tool_edit_file",
+          "executor": "filesystem",
+          "backend": "sandbox_process",
+          "sandbox": "backend_selected",
+          "runtime_handler": "tool_edit_file",
+          "execution": "serial",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": false,
+        "cwd_scope": "keeper_sandbox",
+        "polling_read": false,
+        "tool_name": "Edit"
+      },
+      "agent_name": "exhibit-editor",
+      "model": "runtime",
+      "runtime_profile": "glm-coding.glm-5.3",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "8251141f9934fc7e4730baed71728ddfaa5d4e14bf4747dd64f4a07e968f488c",
+      "execution_id": "exec-1789223431021-0129",
+      "tool_use_id": "call_d491c2b69f294f52b940bb6e",
+      "planned_index": 1,
+      "batch_index": 1,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "disposition": "completed",
+      "artifact_refs": [
+        {
+          "_blob": {
+            "sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+            "bytes": 12641,
+            "mime": "application/octet-stream",
+            "preview": ""
+          }
+        },
+        {
+          "_blob": {
+            "sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+            "bytes": 12602,
+            "mime": "application/octet-stream",
+            "preview": ""
+          }
+        }
+      ],
+      "file_change_evidence": {
+        "kind": "edit",
+        "occurrence_count": 1,
+        "occurrences": [
+          {
+            "old_range": {
+              "start_line": 64,
+              "end_line": 64
+            },
+            "new_range": {
+              "start_line": 64,
+              "end_line": 64
+            }
+          }
+        ]
+      },
+      "trace_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001",
+      "turn": 848,
+      "keeper_turn_id": 428,
+      "task_id": "task-004",
+      "sandbox_profile": "docker",
+      "network_mode": "none",
+      "result_bytes": 598,
+      "definition_source": "tools/Edit.toml"
+    }
+  ],
+  "navigation": [
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오전 11:19:18"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2\n오전 11:24:47"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_write\n오전 11:30:17"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오전 11:35:49"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오전 11:40:52"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오전 11:46:09"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오전 11:51:24"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오전 11:56:44"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:01:58"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:07:11"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:12:17"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:17:31"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:22:34"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:27:52"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:33:08"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:38:19"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:43:46"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:48:55"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 12:54:08"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search×2 memory_retract\n오후 12:59:27"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:05:00"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:10:25"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search memory_write\n오후 01:15:37"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:21:53"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead Edit Read memory_write\n오후 01:27:35"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:33:31"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:38:49"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_list\n오후 01:44:11"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:49:31"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:54:40"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 01:59:51"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:05:03"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:10:12"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:15:25"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:20:55"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:26:06"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:31:14"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:36:35"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:42:06"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:47:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:52:24"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 02:57:40"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:03:18"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:08:44"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:14:02"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2 memory_retract\n오후 03:19:13"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search×7 memory_retract\n오후 03:25:29"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 03:31:29"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:36:55"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search memory_retract\n오후 03:42:00"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead Edit Read memory_write\n오후 03:47:44"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:53:28"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 03:58:53"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nask_status\n오후 04:04:08"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:09:31"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:15:09"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:20:30"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:25:41"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:30:58"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:36:13"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:41:24"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:46:45"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_list\n오후 04:52:05"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 04:57:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:02:30"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:08:08"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:13:15"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:18:40"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_write\n오후 05:23:50"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search\n오후 05:29:32"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:34:46"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_search memory_retract\n오후 05:39:49"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:46:39"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:52:01"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 05:57:25"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:02:44"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:08:19"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead Edit Read memory_write\n오후 06:12:23"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:18:15"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nsurface_post\n오후 06:23:33"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nsurface_read memory_write\n오후 06:29:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:34:51"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:39:01"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 06:44:23"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nsurface_post\n오후 06:49:38"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get surface_read\n오후 06:55:41"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get surface_read\n오후 07:01:05"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead\n오후 07:05:00"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead×2\n오후 07:16:37"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead\n오후 07:22:27"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nEdit×3\n오후 07:27:43"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nmemory_write\n오후 07:33:28"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ntool_search\n오후 07:35:21"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get\n오후 07:36:23"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 07:39:09"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2\n오후 07:44:22"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nask_status artifact_read\n오후 07:45:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 07:48:35"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ngoal_list ask_status board_post_get\n오후 07:54:53"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2\n오후 07:56:26"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nask_status goal_list\n오후 08:01:43"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2\n오후 08:07:23"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nask_status goal_list board_post_get\n오후 08:12:39"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get\n오후 08:18:23"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 08:24:14"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 08:31:39"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×3 board_post_get keeper_delegate_status tool_search +2\n오후 08:31:49"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get board_comment memory_write\n오후 08:33:53"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ntool_search Read×2\n오후 08:34:35"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get schedule_list tasks_list×2 task_claim +13\n오후 08:40:24"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get×2 Write×3 Execute Grep +6\n오후 08:49:40"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_comment memory_write\n오후 08:53:21"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_comment memory_write\n오후 08:56:09"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nschedule_list ask_status board_post_get tool_search +2\n오후 08:59:07"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 09:06:03"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead Edit×2 memory_write\n오후 09:11:07"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nRead Edit memory_write\n오후 09:17:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ngoal_list tool_search goal_transition memory_write\n오후 09:23:19"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 09:29:30"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ngoal_list board_comment memory_write\n오후 09:34:33"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 09:40:14"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nsurface_post\n오후 09:45:15"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 09:51:10"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ntasks_list task_claim run_init\n오후 09:56:33"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 10:02:28"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nrun_plan Execute Write artifact_transfer +5\n오후 10:07:32"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get×2 Write memory_write\n오후 10:12:22"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_comment Write memory_write\n오후 10:14:00"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get surface_read Edit×3 surface_post\n오후 10:15:49"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read×2 Edit×2 Write Execute +3\n오후 10:20:20"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nboard_post_get Write memory_write\n오후 10:24:55"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nWrite memory_write\n오후 10:30:51"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nEdit×3 Grep Edit Execute +2\n오후 10:36:29"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\n오후 10:43:28"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read\n오후 10:47:01"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read Execute Read memory_write\n오후 10:48:05"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\ntasks_list Execute Edit×3\n오후 11:05:31"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": ""
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nartifact_read board_list\n오후 11:17:30"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nEdit Grep\n오후 11:23:40"
+    },
+    {
+      "action": "expand_autonomous_history",
+      "label": "▸\n자율턴\n1개\nEdit×2\n오후 11:29:59"
+    },
+    {
+      "action": "reveal_execution",
+      "execution_id": "exec-1789223431021-0129"
+    }
+  ],
+  "workers": [
+    "http://127.0.0.1:18951/dashboard/assets/edit-snapshot-diff.worker-lXf_9trE.js"
+  ],
+  "errors": [],
+  "failures": [],
+  "blocked": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event",
+      "query": ""
+    }
+  ],
+  "scope": "Read-only installed Dashboard acceptance probe. Original-byte equality and diff reconstruction are established only when probe_passed and rendered are present. Domain writes and WebSockets blocked. No fresh model turn, Gate replay, or general Dashboard health claim."
+}

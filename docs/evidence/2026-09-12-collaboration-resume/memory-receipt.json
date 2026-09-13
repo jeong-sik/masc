@@ -1,0 +1,29 @@
+{
+  "started_at": "2026-09-10T14:25:28.759669+00:00",
+  "context_source": {
+    "kind": "file"
+  },
+  "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+  "endpoint": "http://127.0.0.1:11434",
+  "semantic_verification": "not_performed",
+  "runtime_mutation": false,
+  "context_sha256": "5a49abd3db186998471f21d46fd2c863d7ecd3c8bd113b670f7a85a40936741c",
+  "workspace_pass": {
+    "group_count": 2,
+    "completed_group_ids": [
+      "keeper-ff26205ac753d89688a52850b54dff440a4839371a764ffc170c34605d91dfc9",
+      "keeper-bc87119183cc5bff915fa42bac3d29b2489242a3bf39aa85e508e9f7ecdbe58b"
+    ],
+    "resumed_group_ids": []
+  },
+  "measurement_scope": "final_synthesis_completion_request",
+  "status": "proposed",
+  "source_count": 24,
+  "model_digest": "c66cf836b05b503a80e2c488e800dd4f1c1ad2497cb93c212cd41582373b8dda",
+  "prompt_eval_count": 2834,
+  "eval_count": 15418,
+  "chunks": 15416,
+  "content_characters": 7528,
+  "thinking_characters": 56448,
+  "elapsed_seconds": 5123.962599916034
+}

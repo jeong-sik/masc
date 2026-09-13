@@ -6,12 +6,15 @@ runtime journals or fabricates model tool calls. Raw responses stay private.
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import socket
 import signal
+import stat
 import subprocess
+import tempfile
 import time
 import tomllib
 from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
@@ -21,6 +24,72 @@ from urllib.error import HTTPError
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def read_config_bytes(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('Runtime configuration is not a regular file')
+        return stream.read()
+
+
+def prepare_runtime_config(path, replacement_path=None, expected_sha256=None):
+    if (replacement_path is None) != (expected_sha256 is None):
+        raise ValueError('Replacement configuration and expected current hash must be supplied together')
+    original = read_config_bytes(path)
+    if replacement_path is None:
+        return tomllib.loads(original.decode()), None
+    if hashlib.sha256(original).hexdigest() != expected_sha256:
+        raise ValueError('Runtime configuration changed before restart preparation')
+    replacement = read_config_bytes(replacement_path)
+    parsed = tomllib.loads(replacement.decode())
+    return parsed, (original, replacement)
+
+
+def validate_runtime_config_intent(state, replacement):
+    """Validate a retained intent after explicit candidate/current-hash preparation.
+
+    replacement is None or the (currently observed bytes, candidate bytes) pair
+    returned by prepare_runtime_config. This function does not mutate state.
+    """
+    intent = state.get('runtime_config_update')
+    if intent is None or intent.get('status') != 'intent':
+        return
+    if replacement is None:
+        raise ValueError('Pending runtime configuration intent requires the same explicit replacement')
+    original, candidate = replacement
+    if hashlib.sha256(candidate).hexdigest() != intent.get('after_sha256'):
+        raise ValueError('Replacement differs from the pending runtime configuration intent')
+    if hashlib.sha256(original).hexdigest() not in {
+            intent.get('before_sha256'), intent.get('after_sha256')}:
+        raise ValueError('Current runtime configuration matches neither side of the pending intent')
+
+
+def replace_stopped_runtime_config(path, original, replacement):
+    """Called only after the owned process and listener have both disappeared.
+
+    A failure after rename leaves the durable operator intent for reconciliation;
+    callers must inspect the actual file before retrying, never blindly roll back.
+    """
+    if read_config_bytes(path) != original:
+        raise ValueError('Runtime configuration changed while the owned server stopped')
+    descriptor, temporary = tempfile.mkstemp(prefix='.runtime-replacement-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(replacement)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        if read_config_bytes(path) != replacement:
+            raise ValueError('Runtime configuration replacement readback mismatch')
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def observe_process_rows(command):
@@ -33,15 +102,46 @@ def observe_process_rows(command):
     raise RuntimeError(f'{command[0]} process observation failed (exit {result.returncode}); no restart authorized')
 
 
+def candidate_binary(args):
+    if args.installed_prefix is not None:
+        prefix = args.installed_prefix.resolve()
+        spec = importlib.util.spec_from_file_location(
+            'release_dashboard_bundle', Path(__file__).with_name('release-dashboard-bundle.py'))
+        bundle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bundle)
+        if (prefix / bundle.TRANSACTION).exists():
+            raise ValueError('Uncommitted installed release transaction')
+        binary = (prefix / 'masc').resolve(strict=True)
+        root = binary.parent
+        if binary.name != 'masc' or root.parent != prefix / '.masc-releases':
+            raise ValueError('Binary is not in this prefix immutable release tree')
+        receipt = bundle.verify_tree(root, 'masc-macos-arm64')
+        if (receipt['source_commit'] != args.expected_commit
+                or bundle.binary_commit(binary) != args.expected_commit):
+            raise ValueError('Installed release source mismatch')
+        return binary, receipt['binary_sha256']
+    manifest = json.loads((args.artifact_dir / 'manifest.json').read_text())
+    binary = (args.artifact_dir / 'main_eio.exe').resolve()
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    if (manifest['commit'] != args.expected_commit or manifest['arch'] != 'macos-arm64'
+            or manifest['sha256']['main_eio.exe'] != digest):
+        raise ValueError('CI manifest mismatch')
+    return binary, digest
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base', type=Path, required=True)
     p.add_argument('--expected-commit', required=True)
     sub = p.add_subparsers(dest='command', required=True)
     start = sub.add_parser('start')
-    start.add_argument('--artifact-dir', type=Path, required=True)
     restart = sub.add_parser('restart-owned')
-    restart.add_argument('--artifact-dir', type=Path, required=True)
+    restart.add_argument('--runtime-config-file', type=Path)
+    restart.add_argument('--expected-runtime-sha256')
+    for command in (start, restart):
+        source = command.add_mutually_exclusive_group(required=True)
+        source.add_argument('--artifact-dir', type=Path)
+        source.add_argument('--installed-prefix', type=Path)
     call = sub.add_parser('call')
     call.add_argument('tool')
     call.add_argument('--arguments-file', type=Path, required=True)
@@ -110,17 +210,19 @@ def main():
     if args.command in ['start', 'restart-owned']:
         if args.command == 'start' and state_file.exists():
             raise ValueError('Existing operator state; refusing a second server start')
-        manifest = json.loads((args.artifact_dir / 'manifest.json').read_text())
-        binary = (args.artifact_dir / 'main_eio.exe').resolve()
-        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-        if manifest['commit'] != args.expected_commit or manifest['arch'] != 'macos-arm64' or manifest['sha256']['main_eio.exe'] != digest:
-            raise ValueError('CI manifest mismatch')
+        binary, digest = candidate_binary(args)
         binary.chmod(binary.stat().st_mode | 0o100)
         env = {key: value for key, value in os.environ.items() if not any(part in key for part in ['TOKEN', 'SECRET', 'API_KEY']) and not key.startswith('MASC_')}
-        runtime_config = tomllib.loads((base / '.masc/config/runtime.toml').read_text())
+        runtime_path = base / '.masc/config/runtime.toml'
+        runtime_config, replacement = prepare_runtime_config(
+            runtime_path, getattr(args, 'runtime_config_file', None),
+            getattr(args, 'expected_runtime_sha256', None))
+        validate_runtime_config_intent(state, replacement)
         for provider in runtime_config['providers'].values():
-            if provider.get('protocol') == 'codex-app-server' and 'credentials' not in provider:
-                continue  # The configured CLI owns its existing subscription authentication.
+            if provider.get('protocol') in ('codex-app-server', 'ollama-http') and 'credentials' not in provider:
+                # Codex owns its subscription authentication. An explicitly
+                # credential-free Ollama connection needs no secret injected.
+                continue
             credential = provider.get('credentials', {})
             if credential.get('type') != 'env':
                 raise ValueError('This scenario expects explicit environment credential references')
@@ -154,6 +256,18 @@ def main():
                 time.sleep(0.2)
             else:
                 raise TimeoutError('Owned process has not finished stopping; no forced kill or new process')
+            if replacement is not None:
+                original, updated = replacement
+                validate_runtime_config_intent(state, replacement)
+                retained = state.get('runtime_config_update')
+                if retained is None or retained.get('status') != 'intent':
+                    state['runtime_config_update'] = {
+                        'status': 'intent', 'before_sha256': hashlib.sha256(original).hexdigest(),
+                        'after_sha256': hashlib.sha256(updated).hexdigest()}
+                persist_state()
+                replace_stopped_runtime_config(runtime_path, original, updated)
+                state['runtime_config_update']['status'] = 'applied'
+                persist_state()
             state.pop('session', None)
             state['counter'] += 1
         with socket.socket() as sock:

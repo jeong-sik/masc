@@ -137,6 +137,7 @@ val build_prompt :
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, string) result ->
+  ?workspace_memory:Workspace_memory_publication.observation ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
@@ -173,6 +174,7 @@ val build_prompt_preview :
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, string) result ->
+  ?workspace_memory:Workspace_memory_publication.observation ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
@@ -196,3 +198,8 @@ end
 val answered_ask_inputs : Keeper_world_observation.world_observation -> (string * string) list
 (** Ask correlation identity and the same attributed, quoted row used in the
     ordinary user turn. Excludes all other world observations. *)
+
+val format_workspace_memory_observation :
+  Workspace_memory_publication.observation -> string option
+(** Discovery metadata only. Captured proposal facts are not injected or
+    compared with current memory. Read failures carry no model-facing IO text. *)

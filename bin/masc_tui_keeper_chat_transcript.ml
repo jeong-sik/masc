@@ -116,7 +116,7 @@ type awaiting_approval =
   ; tool_name : string
   ; question : string
   ; (* Why the call was held. attached under the question so the reader who
-       answers [y]/[n] from this pane sees the reason the approval list
+       answers /approve or /deny from this pane sees the reason the approval list
        screen shows. *)
     because : string
   }
@@ -299,6 +299,7 @@ let settled_at t = t.settled_at
 let attempt t = t.attempt
 let reply t = t.reply
 let phase t = t.phase
+let admission t = t.admission
 let interrupt t = t.interrupt
 let note_interrupt t interrupt =
   t.interrupt <- interrupt;
@@ -443,11 +444,8 @@ let render_activity_rows (activities : tool_activity list) =
                activity.duration))
     activities
 
-let plural count noun =
-  Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
-
 let omitted_steps_row count =
-  Printf.sprintf "(%s not carried by the transcript)" (plural count "step")
+  Printf.sprintf "(%s not carried by the transcript)" (Masc_tui_message_layout.count_noun count "step")
 
 
 
@@ -762,7 +760,7 @@ let skill_rows ~full (activity : skill_activity) =
       (skill_state_label activity.state)
       activity.skill_name
       (if action_count = 0 then ""
-       else Printf.sprintf " \xc2\xb7 %s" (plural action_count "action"))
+       else Printf.sprintf " \xc2\xb7 %s" (Masc_tui_message_layout.count_noun action_count "action"))
   in
   if not full then [ summary ]
   else
@@ -1080,7 +1078,7 @@ let phase_text ~now t =
       | None -> "waiting for the run to start"
       | Some (Live.Queued, queue_length) ->
           Printf.sprintf "queued \xc2\xb7 %s in the keeper's queue"
-            (plural queue_length "message")
+            (Masc_tui_message_layout.count_noun queue_length "message")
       | Some (Live.Running, _) -> "accepted; the run is starting"
       | Some (Live.Settled, _) ->
           (* The server had already run this operation and replayed its
@@ -1224,7 +1222,7 @@ let phase_text ~now t =
             | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"
-            runtime_tag (plural calls "tool") running in_this_call
+            runtime_tag (Masc_tui_message_layout.count_noun calls "tool") running in_this_call
             (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
@@ -1290,7 +1288,7 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "[y] allow  [n] deny · approval for %s: %s"
+      let base = Printf.sprintf "/approve · /deny · approval for %s: %s"
         awaiting.tool_name awaiting.question in
       match awaiting.because with
       | "" -> base

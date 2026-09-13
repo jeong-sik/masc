@@ -1,0 +1,131 @@
+Skip to main content
+작업
+2 실행 가능
+◌ Runtime health warning
+◷ 예약
+Reconnecting...
+Client WS · disconnected
+Emergency Stop
+Verified @admin · admin
+Chat
+⌘J
+v0.35.13 · 2578d7fec3
+Tweaks
+M
+WORK
+PLANS & GOALS
+REPOSITORIES
+VERIFICATION
+목표 관리자
+백로그
+ROUTE FOCUS
+GOAL exhibition-publication-baseline
+가상 전시 출판물 완성
+awaiting_confirmation
+CLEAR
+전체
+점유 지연
+0
+책임 원장
+0
+책임 매트릭스
+0
+목표 관리자
+모두 펼치기
+모두 접기
+새로고침
+목표 단계
+전체
+1
+실행 중
+0
+검증 중
+0
+사람 확인 대기
+1
+완료
+0
+중단
+0
+1
+전체 목표
+0
+실행
+0
+완료
+0
+검증 중
+1
+승인 대기
+▶
+사람 확인 대기
+GOAL FSM · 사람 확인 대기
+가상 전시 출판물 완성
+★★★☆☆
+1/1
+Task 1/1
+↗ /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다. · 5개 기준 모두 충족
+exhibit-editor · turn 389
+7초 전
+selected
+연결된 태스크
+task-001
+가상 전시 안내 책자와 포스터 제작
+exhibit-editor
+완료
+목표 상세
+가상 전시 출판물 완성
+사람 확인 대기
+GOAL FSM · 사람 확인 대기
+metric/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.·5개 기준 모두 충족
+detail 새로고침
+GOAL-TASK 관계
+1/1 done · 100%
+OPEN
+0
+AWAITING VERIFY
+0
+CANCELLED
+0
+UNASSIGNED
+0
+검증 · 증명됨 · 최종 확인 대기
+목표 최종 확인
+현재 성공 기준
+가상 전시 출판물 완성 · /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다. · 목표 5개 기준 모두 충족
+기준 revision
+c36f5a9061458b3efbeb8cbb2cacfc6b
+Verifier 증거
+실제 측정값은 5/5 기준 충족이다: booklet.pdf는 102608 bytes, SHA256 ebabc3f7...로 정확히 3페이지이며 page1~3 PNG의 bytes/SHA256이 PDF 렌더 및 evidence.json과 모두 일치했고, poster.png도 86709 bytes, SHA256 2b2f022a...로 기록과 일치했다. 직접 연 시각물에서 제목·대상·일시·장소·입장료가 일치하고 한글 누락·겹침·잘림이 없으며 가상 행사임을 명시해 target인 5개 모두 충족에 도달했다.
+검증자
+verifier_exact · 2026-09-12T10:50:26Z
+검증 요청 / 실행
+03d1e4d404bc00f3e2c475e9ccf023d4 / 01a0953c-5e01-7000-9ed9-1003a66990c1
+
+위 기준과 verifier 증거를 검토했습니다. 이 증명을 기준으로 목표 완료를 최종 확인합니다.
+
+이 증명으로 목표 완료 확인현재 증거 다시 조회
+SUMMARY
+TASKS
+EVIDENCE
+GOAL FSM
+goal.phase
+STATE
+사람 확인 대기
+ACTIVITY
+runtime evidence
+drop
+reopen
+작업
+1/1
+연결된 키퍼
+1
+승인 대기
+0
+최근 활동
+0h idle
+GOAL 범위 태스크
+이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.
+goal 가상 전시 출판물 완성에 직접 연결된 backlog 태스크를 생성합니다.
+태스크 추가
+Chat

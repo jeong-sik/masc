@@ -514,14 +514,20 @@ let find_clip ~dir ~token =
       if exists path then Some (path, format) else None)
     clip_formats
 
-(* The token a clip filename carries, for the reverse direction: the speak
-   path has a path and needs the URL the dashboard fetches it by. *)
-let clip_token_of_path path =
+(* The reverse of [find_clip]: the speak path has written a file and needs both
+   halves of what it wrote -- the token, to build the URL the dashboard fetches
+   it by, and the format, to say what the bytes are.
+
+   They come back together because determining one determines the other, and a
+   caller holding only the token has to guess the rest. One did: the keeper's
+   spoken reply announced [audio/mpeg] for every clip, so a say reply -- WAV,
+   which is what a fresh mac has -- was announced as MP3. *)
+let clip_of_path path =
   let name = Filename.basename path in
   List.find_map
     (fun format ->
       match Filename.chop_suffix_opt ~suffix:(clip_extension format) name with
-      | Some token when token <> "" -> Some token
+      | Some token when token <> "" -> Some (token, format)
       | Some _ | None -> None)
     clip_formats
 

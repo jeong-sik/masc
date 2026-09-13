@@ -1,0 +1,125 @@
+Skip to main content
+작업
+2 실행 가능
+✓ 정상
+◷ 예약
+Reconnecting...
+Client WS · disconnected
+Emergency Stop
+Verified @admin · admin
+Chat
+⌘J
+v0.35.13 · 35be4eaa6b
+Tweaks
+대시보드 아티팩트가 없거나 검증할 수 없습니다. 같은 소스 커밋의 CI 서버·대시보드 아티팩트를 설치한 뒤 새로고침
+M
+WORK
+PLANS & GOALS
+REPOSITORIES
+VERIFICATION
+목표 관리자
+백로그
+ROUTE FOCUS
+GOAL exhibition-publication-baseline
+가상 전시 출판물 완성
+executing
+CLEAR
+전체
+점유 지연
+0
+책임 원장
+0
+책임 매트릭스
+0
+목표 관리자
+모두 펼치기
+모두 접기
+새로고침
+목표 단계
+전체
+1
+실행 중
+1
+검증 중
+0
+사람 확인 대기
+0
+완료
+0
+중단
+0
+1
+전체 목표
+1
+실행
+0
+완료
+0
+검증 중
+4
+승인 대기
+▶
+실행 중
+GOAL FSM · 실행 중
+가상 전시 출판물 완성
+★★★☆☆
+1/1
+Task 1/1
+↗ /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다. · 5개 기준 모두 충족
+exhibit-editor · turn 379
+3분 전
+selected
+연결된 태스크
+task-001
+가상 전시 안내 책자와 포스터 제작
+exhibit-editor
+완료
+목표 상세
+가상 전시 출판물 완성
+실행 중
+GOAL FSM · 실행 중
+metric/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/evidence.json 및 여기에 기록된 실제 PDF/PNG 파일을 열어 출판 기준 충족 수를 확인한다. exhibit-editor 작업공간의 evidence.json 및 해당 파일이 참조하는 booklet.pdf, renders/page1.png, renders/page2.png, renders/page3.png, poster.png를 읽어 충족된 출판 기준 수를 측정한다. 기준: 한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.; 인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.; 본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.; 가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.; 검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다.·5개 기준 모두 충족
+detail 새로고침
+GOAL-TASK 관계
+1/1 done · 100%
+OPEN
+0
+AWAITING VERIFY
+0
+CANCELLED
+0
+UNASSIGNED
+0
+검증 · 반증됨
+
+실제 PNG 4개를 열어 확인한 결과 포스터-책자의 제목·대상·행사 정보 일치, 한글 누락 글리프·겹침·잘림 없음, 가상 행사 명시는 확인되어 5개 중 3개 기준만 확정됐다. evidence.json의 PNG 파일명·바이트·SHA256은 실제 파일과 일치했지만 booklet.pdf 조회가 lookup_output_invalid_utf8 런타임 실패로 끝나 PDF의 실제 바이트·SHA256과 정확히 3페이지인지 검증할 수 없어, PDF 3페이지 기준과 evidence 기록의 전체 실제 일치 기준은 미확인이고 target 5/5에 도달하지 못했다.
+
+검증 실행 01a09514-cec9-7000-8d8c-a54c4b98c7df · 기준 c36f5a9061458b3efbeb8cbb2cacfc6b
+
+GOAL LIFECYCLE
+executing
+Request completion
+SUMMARY
+TASKS
+EVIDENCE
+GOAL FSM
+goal.phase
+STATE
+실행 중
+ACTIVITY
+runtime evidence
+request_complete
+drop
+작업
+1/1
+연결된 키퍼
+1
+승인 대기
+0
+최근 활동
+0h idle
+GOAL 범위 태스크
+이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.
+goal 가상 전시 출판물 완성에 직접 연결된 backlog 태스크를 생성합니다.
+태스크 추가
+Chat

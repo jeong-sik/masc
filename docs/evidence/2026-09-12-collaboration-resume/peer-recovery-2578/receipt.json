@@ -1,0 +1,24 @@
+{
+  "runtime_source_supplied_by_operator": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "process_observation": "  PID  PPID STAT COMMAND\n89912     1 Ss   [ISOLATED_BASE]/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183/masc --base-path [ISOLATED_BASE] --port 18951\n",
+  "editor_operation_id": "kmsg-290f18125241cc7094ae744f136c574a",
+  "reply_operation_id": "kmsg-07110a5ab15f29dd31f83f2eb29f6543",
+  "delegate_prompt_equals_designer_received_prompt": true,
+  "current_file_measurement": {
+    "path": "[ISOLATED_BASE]/.masc/playground/docker/exhibit-editor/build_publication.py",
+    "bytes": 15999,
+    "sha256": "178ff1f3638a9cb9e7516c0abeec1df59173f2ee7e250824754cf741f7ef5af3",
+    "line28_ascii": "FEE = chr(0xBB34) + chr(0xB8CC)",
+    "lines24_32_bytes": 232,
+    "matches_actual_Read_content": true
+  },
+  "board_comment_id": "c-5b0bfe9d8e0806a2f7b3b08d731d6b75",
+  "comment_found_in_subsequent_Board_read": true,
+  "board_read_source": "[ISOLATED_BASE]/.masc/keepers/exhibit-designer/raw-traces/turn-1789212571855-5f38-000003.jsonl",
+  "limits": [
+    "Editor Read was limited to nine lines; complete file byte count and SHA came from successful wc/sha256sum, independently matched by this read-only audit.",
+    "The designer Python codepoint command was deferred at Host Gate, not observed executing. The Board claim of independent environment calculation is not supported by that tool receipt.",
+    "The reply operation is still queued with Gate checkpoint reconciliation; prompt receipt and Board publication do not prove its terminal completion.",
+    "Missing original direct-operation checkpoint was terminalized, not reconstructed or successfully resumed."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "session_id": 87530,
+  "commands": [
+    "./node_modules/.bin/tsc --noEmit",
+    "./node_modules/.bin/eslint src/api/dashboard-exact-lane-runs.ts src/api/dashboard-standalone-lanes.ts src/api/dashboard-standalone-lanes.test.ts src/components/internal-agents-monitor.ts src/components/internal-agents-monitor.test.ts"
+  ],
+  "exit_code": 0,
+  "output": "",
+  "capture": "final tool completion; shell stdout was not separately redirected"
+}

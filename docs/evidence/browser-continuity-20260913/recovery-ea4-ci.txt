@@ -1,0 +1,1639 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_keeper_tool_dispatch_runtime.exe test/test_browser_observation_composition.exe test/test_keeper_skill_composition_evidence.exe test/fixtures/browser-webdriver-script.cjs bin/main_eio.exe
+[targeted] test/test_keeper_tool_dispatch_runtime: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_tool_dispatch_runtime: start 2026-09-12T21:18:13Z
+::group::{Keeper_tool_dispatch_runtime}
+Testing `Keeper_tool_dispatch_runtime'.
+This run has ID `69JNMSVJ'.
+
+[2026-09-12 21:18:13] [INFO] [Workspace] MASC base: /tmp/peer-artifact6f2c31 (no git root found)
+[2026-09-12 21:18:13] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/peer-artifact6f2c31 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:13] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/peer-artifact6f2c31 phase=running
+ASSERT model receives durable export manifest
+ASSERT model-visible export preserves complete binary size
+ASSERT model-visible export preserves complete binary digest
+[2026-09-12 21:18:13] [INFO] [Keeper/receiving-peer] internal playground write authorized by confined capability path=/tmp/peer-artifact6f2c31/.masc/playground/docker/receiving-peer/received.png
+[2026-09-12 21:18:13] [INFO] [Keeper] WRITE_AUDIT: keeper=receiving-peer fs_edit path=/tmp/peer-artifact6f2c31/.masc/playground/docker/receiving-peer/received.png mode=overwrite bytes=8650853
+ASSERT write completed
+ASSERT binary exact
+ASSERT escape refused
+[2026-09-12 21:18:14] [ERROR] [Misc] tool_bridge: result manifest persistence failed: Sys_error("tool_blob_store.put_durable: save_file_atomic /tmp/peer-artifact6f2c31/.masc/tool_blobs/bd/bd182973bef96a20dfb88590e4bf3e66d871611a27dd96f9138cea993c9bc97c: Sys_error(\"Is a directory\")")
+[2026-09-12 21:18:14] [ERROR] [Keeper] exported peer artifact result manifest unavailable: Sys_error("tool_blob_store.put_durable: save_file_atomic /tmp/peer-artifact6f2c31/.masc/tool_blobs/bd/bd182973bef96a20dfb88590e4bf3e66d871611a27dd96f9138cea993c9bc97c: Sys_error(\"Is a directory\")")
+[2026-09-12 21:18:14] [ERROR] [Keeper] tool keeper_artifact_transfer returned error result: The artifact was exported, but its result manifest could not be stored. Read the recorded artifact; do not repeat the export.
+ASSERT exported effect remains explicit
+ASSERT post-effect failure retains one exported artifact
+ASSERT post-effect failure retains exact exported bytes
+ASSERT terminal boundary retains applied export
+ASSERT corrupt reference refused
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/peer-artifact6f2c31
+  [OK]          peer_artifacts                                 0   materializ...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/peer-delegate-schema9e217c (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/peer-artifact6f2c31 for requested path /tmp/peer-delegate-schema9e217c
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/peer-delegate-schema9e217c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/peer-delegate-schema9e217c phase=running
+ASSERT artifact items are objects in the declared tool contract
+ASSERT target keeper kind constraint is declared
+ASSERT client session identity detects lost nested artifact contract
+ASSERT same delegate contract has one client session identity
+ASSERT actual Keeper bundle retains full delegate schema at Agent Core tool
+ASSERT actual Keeper bundle retains full delegate schema at OpenAI request
+ASSERT actual Keeper bundle retains full delegate schema at official-client dynamic definition
+ASSERT plain MASC bridge retains full delegate schema at Agent Core tool
+ASSERT plain MASC bridge retains full delegate schema at OpenAI request
+ASSERT plain MASC bridge retains full delegate schema at official-client dynamic definition
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/peer-delegate-schema9e217c
+  [OK]          peer_delegate_schema                           0   nested art...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/binary-write-reference4ce19c (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/peer-delegate-schema9e217c for requested path /tmp/binary-write-reference4ce19c
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/binary-write-reference4ce19c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/binary-write-reference4ce19c phase=running
+ASSERT binary never enters approval JSON
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-329f-7000-b9fa-a32b9054ba98 sequence=1 keeper=keeper-exec-tools tool=filesystem_write
+ASSERT deferred file absent
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-329f-7000-b9fa-a32b9054ba98 keeper=keeper-exec-tools tool=filesystem_write decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-329f-7000-b9fa-a32b9054ba98 signal=signaled phase=running
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/binary-write-reference4ce19c/.masc/playground/docker/keeper-exec-tools/received.png
+[2026-09-12 21:18:14] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/binary-write-reference4ce19c/.masc/playground/docker/keeper-exec-tools/received.png mode=overwrite bytes=68
+ASSERT recipient PNG bytes exact
+ASSERT replay fails on corrupt content
+ASSERT corrupt replay leaves recipient intact
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/binary-write-reference4ce19c
+  [OK]          binary_write                                   0   reference ...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_history2a6936 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/binary-write-reference4ce19c for requested path /tmp/direct_gate_current_history2a6936
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_history2a6936 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history2a6936 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-32ca-7000-b61d-58350e8670af sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:14] [WARN] [Keeper] Gate operation retained for checkpoint reconciliation: /tmp/direct_gate_current_history2a6936: injected unavailable Gate authority
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT producer approval identity retained before lookup
+ASSERT runtime assignment retained without checkpoint authority
+ASSERT runtime suffix retained without checkpoint authority
+ASSERT retention failure preserves original input
+ASSERT unconfirmed checkpoint is explicit nonterminal state
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-32ca-7000-b61d-58350e8670af keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-32ca-7000-b61d-58350e8670af signal=signaled phase=running
+ASSERT approval cannot authorize missing checkpoint replay
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history2a6936
+  [OK]          direct_gate_resume                             0   unavailabl...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_historyba0da2 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_history2a6936 for requested path /tmp/direct_gate_current_historyba0da2
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_historyba0da2 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historyba0da2 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-32ef-7000-bd07-5b2c87be06a4 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:14] [WARN] [Keeper] Gate operation retained for checkpoint reconciliation: Gate checkpoint retention is not durably confirmed
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT producer approval identity retained before lookup
+ASSERT runtime assignment retained without checkpoint authority
+ASSERT runtime suffix retained without checkpoint authority
+ASSERT retention failure preserves original input
+ASSERT unconfirmed checkpoint is explicit nonterminal state
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-32ef-7000-bd07-5b2c87be06a4 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-32ef-7000-bd07-5b2c87be06a4 signal=signaled phase=running
+ASSERT approval cannot authorize missing checkpoint replay
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historyba0da2
+  [OK]          direct_gate_resume                             1   unretained...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_history69e066 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_historyba0da2 for requested path /tmp/direct_gate_current_history69e066
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_history69e066 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history69e066 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3313-7000-a8d9-29d436031c58 sequence=1 keeper=keeper-exec-tools tool=network_read
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT no resolution invented
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3313-7000-a8d9-29d436031c58 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3313-7000-a8d9-29d436031c58 signal=signaled phase=running
+ASSERT same operation and complete original input
+ASSERT newer history survives
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3313-7000-a8d9-29d436031c58
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3313-7000-a8d9-29d436031c58
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3313-7000-a8d9-29d436031c58
+ASSERT all Gate obligations accounted
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history69e066
+  [OK]          direct_gate_resume                             2   channel-sc...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_historye3c5c9 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_history69e066 for requested path /tmp/direct_gate_current_historye3c5c9
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_historye3c5c9 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historye3c5c9 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3353-7000-936a-4a50bbde8364 sequence=1 keeper=keeper-exec-tools tool=network_read
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT no resolution invented
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3353-7000-936a-4a50bbde8364 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3353-7000-936a-4a50bbde8364 signal=signaled phase=running
+ASSERT same operation and complete original input
+ASSERT same frozen runtime assignment survives approval
+ASSERT frozen candidate suffix survives approval
+ASSERT newer history survives
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3353-7000-936a-4a50bbde8364
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3353-7000-936a-4a50bbde8364
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3353-7000-936a-4a50bbde8364
+ASSERT all Gate obligations accounted
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historye3c5c9
+  [OK]          direct_gate_resume                             3   new Gate a...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_historyf401a1 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_historye3c5c9 for requested path /tmp/direct_gate_current_historyf401a1
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_historyf401a1 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historyf401a1 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3392-7000-a5df-1e77c4349af8 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:14] [WARN] [Keeper] Gate operation retained for checkpoint reconciliation: Gate checkpoint retention is not durably confirmed
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT producer approval identity retained before lookup
+ASSERT retention failure preserves original input
+ASSERT unconfirmed checkpoint is explicit nonterminal state
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3392-7000-a5df-1e77c4349af8 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3392-7000-a5df-1e77c4349af8 signal=signaled phase=running
+ASSERT approval cannot authorize missing checkpoint replay
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_historyf401a1
+  [OK]          direct_gate_resume                             4   checkpoint...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_history8c8960 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_historyf401a1 for requested path /tmp/direct_gate_current_history8c8960
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_history8c8960 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history8c8960 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-33b6-7000-acfa-818d440834c6 sequence=1 keeper=keeper-exec-tools tool=network_read
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT no resolution invented
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-33b6-7000-acfa-818d440834c6 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-33b6-7000-acfa-818d440834c6 signal=signaled phase=running
+ASSERT same operation and complete original input
+ASSERT newer history survives
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-33b6-7000-acfa-818d440834c6
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-33b6-7000-acfa-818d440834c6
+[2026-09-12 21:18:14] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-33b6-7000-acfa-818d440834c6
+ASSERT all Gate obligations accounted
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history8c8960
+  [OK]          direct_gate_resume                             5   approved G...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/direct_gate_current_history948ac6 (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_history8c8960 for requested path /tmp/direct_gate_current_history948ac6
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct_gate_current_history948ac6 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history948ac6 phase=running
+ASSERT original claim
+[2026-09-12 21:18:14] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-33f6-7000-b6c8-099c530d1d0f sequence=1 keeper=keeper-exec-tools tool=network_read
+ASSERT actual yield parks the same operation
+ASSERT unresolved request is not claimable
+ASSERT no resolution invented
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-33f6-7000-b6c8-099c530d1d0f keeper=keeper-exec-tools tool=network_read decision=reject:declined by authority
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-33f6-7000-b6c8-099c530d1d0f signal=signaled phase=running
+[2026-09-12 21:18:14] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-33f6-7000-b6c8-099c530d1d0f keeper=keeper-exec-tools tool=network_read decision=reject:declined by authority
+[2026-09-12 21:18:14] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-33f6-7000-b6c8-099c530d1d0f signal=signaled phase=running
+ASSERT same operation and complete original input
+ASSERT newer history survives
+ASSERT all Gate obligations accounted
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct_gate_current_history948ac6
+  [OK]          direct_gate_resume                             6   denied Gat...
+[2026-09-12 21:18:14] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa (no git root found)
+[2026-09-12 21:18:14] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct_gate_current_history948ac6 for requested path /tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa
+[2026-09-12 21:18:14] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa phase=running
+[2026-09-12 21:18:14] [INFO] [ToolValidation] tool_input_validation rejected Read: Tool 'Read' received unsupported field(s): start_line; accepted: file_path, cwd, offset, limit
+ASSERT runtime outcome
+ASSERT error mentions unsupported field
+ASSERT error mentions start_line
+ASSERT validation source
+ASSERT failure class
+ASSERT dispatch does not add a tutor
+ASSERT did not reach file runtime
+[2026-09-12 21:18:14] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa
+  [OK]          execute_keeper_tool_call_with_outcome          0   public Rea...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_read_rejects_range_fieldsad02aa for requested path /tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473 phase=running
+ASSERT offset Read ok
+ASSERT offset is a 1-based line coordinate
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473
+  [OK]          execute_keeper_tool_call_with_outcome          1   public Rea...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_read_accepts_offsetab4473 for requested path /tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423 phase=running
+ASSERT duplicate fields produce validation output
+ASSERT duplicate mode is named
+ASSERT duplicate channel produces validation output
+ASSERT duplicate channel is not silently selected
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423
+  [OK]          execute_keeper_tool_call_with_outcome          2   surface Re...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_missing_file2d0f23 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_surface_read_rejects_duplicates0b6423 for requested path /tmp/keeper_tool_dispatch_runtime_missing_file2d0f23
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_missing_file2d0f23 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_missing_file2d0f23 phase=running
+ASSERT missing file outcome
+ASSERT input path preserved
+ASSERT raw error remains explicit
+ASSERT no inferred path advice
+ASSERT no inferred repository list
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_missing_file2d0f23
+  [OK]          execute_keeper_tool_call_with_outcome          3   missing fi...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_recovery_initializing963a45 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_missing_file2d0f23 for requested path /tmp/keeper_tool_dispatch_recovery_initializing963a45
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_recovery_initializing963a45 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_initializing963a45 phase=running
+ASSERT non-file tool continues
+ASSERT read continues
+ASSERT non-file and read-only tools perform no recovery acquisition
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/existing.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/existing.txt mode=append bytes=11
+ASSERT append to an existing file remains recovery-independent
+ASSERT append publishes exact bytes while recovery initializes
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/append-created.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/append-created.txt mode=append bytes=17
+ASSERT append-create remains recovery-independent
+ASSERT append-create publishes exact bytes while recovery initializes
+ASSERT append and append-create do not read the recovery provider
+ASSERT invalid Write is rejected
+ASSERT invalid Write performs no recovery acquisition
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/must-not-exist.txt
+ASSERT Write outcome
+ASSERT Write concise message
+ASSERT Write typed error
+ASSERT Write exact state
+ASSERT Write stable category
+ASSERT Write write not executed
+ASSERT Write keeper remains active
+ASSERT Write reads provider exactly once
+ASSERT Write created no file
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_initializing963a45/.masc/playground/docker/keeper-exec-tools/existing.txt
+ASSERT Edit outcome
+ASSERT Edit concise message
+ASSERT Edit typed error
+ASSERT Edit exact state
+ASSERT Edit stable category
+ASSERT Edit write not executed
+ASSERT Edit keeper remains active
+ASSERT Edit reads provider exactly once
+ASSERT Edit preserved exact bytes
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_initializing963a45
+  [OK]          execute_keeper_tool_call_with_outcome          4   initializi...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_observation_exact_invocationb05408 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_recovery_initializing963a45 for requested path /tmp/keeper_tool_observation_exact_invocationb05408
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_observation_exact_invocationb05408 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_observation_exact_invocationb05408 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper] keeper:keeper-exec-tools tool_call tool=keeper_surface_read source=tools/keeper_surface_read.toml params=[surface,limit] input_shape=[limit=int,surface=string:9] outcome=ok out_len=335
+[2026-09-12 21:18:15] [INFO] [Keeper] keeper:keeper-exec-tools tool_call tool=keeper_surface_read source=tools/keeper_surface_read.toml params=[surface,limit] input_shape=[limit=int,surface=string:9] outcome=ok out_len=335
+ASSERT production dispatch creates distinct invocation objects
+ASSERT provider ids are structurally identical
+ASSERT turns are structurally identical
+ASSERT planned indices are structurally identical
+ASSERT schedules are structurally identical
+ASSERT completion contracts are structurally identical
+ASSERT externalized result is smaller than its original payload
+ASSERT externalized result is smaller than its original payload
+ASSERT identical reads externalize the same original byte count
+ASSERT both production completions reach the bridge
+ASSERT each occurrence keeps a distinct execution id
+ASSERT both calls reach the durable tool log
+ASSERT result-ready callbacks observe their committed rows
+ASSERT one result-ready callback per execution
+ASSERT callback preserves opaque provider id
+ASSERT callback preserves Agent Core turn
+ASSERT callback preserves planned index
+ASSERT callback preserves opaque provider id
+ASSERT callback preserves Agent Core turn
+ASSERT callback preserves planned index
+ASSERT callback and durable-log joins agree
+ASSERT event and durable-log joins agree
+ASSERT handler original-byte observation reaches durable row
+ASSERT handler original-byte observation reaches durable row
+ASSERT post hooks consume both handler observations
+ASSERT bridge consumes both exact joins
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_observation_exact_invocationb05408
+  [OK]          execute_keeper_tool_call_with_outcome          5   identical ...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/native-filesystem-approval-boundary75c517 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_observation_exact_invocationb05408 for requested path /tmp/native-filesystem-approval-boundary75c517
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/native-filesystem-approval-boundary75c517 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/native-filesystem-approval-boundary75c517 phase=running
+[2026-09-12 21:18:15] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/native-filesystem-approval-boundary75c517/.masc/playground/docker/keeper-exec-tools/result.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/native-filesystem-approval-boundary75c517/.masc/playground/docker/keeper-exec-tools/result.txt mode=overwrite bytes=5
+ASSERT confined write authorized by producer
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/native-filesystem-approval-boundary75c517/.masc/playground/docker/keeper-exec-tools/result.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/native-filesystem-approval-boundary75c517/.masc/playground/docker/keeper-exec-tools/result.txt mode=patch op=replace replace_all=false occurrences=1 bytes=6
+ASSERT confined edit authorized by producer
+ASSERT actual file changed
+ASSERT native delegation never bypasses confinement
+ASSERT external file untouched
+[2026-09-12 21:18:15] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3811-7000-b8c4-c04d6f7dfdb3 sequence=1 keeper=keeper-exec-tools tool=filesystem_write
+ASSERT durable approval identity exists
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/native-filesystem-approval-boundary75c517
+  [OK]          execute_keeper_tool_call_with_outcome          6   native fil...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/edit-model-manifest50f075 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/native-filesystem-approval-boundary75c517 for requested path /tmp/edit-model-manifest50f075
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/edit-model-manifest50f075 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/edit-model-manifest50f075 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/edit-model-manifest50f075/.masc/playground/docker/keeper-exec-tools/manifest-edit.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/edit-model-manifest50f075/.masc/playground/docker/keeper-exec-tools/manifest-edit.txt mode=patch op=replace replace_all=false occurrences=1 bytes=6
+ASSERT edit happened exactly once
+ASSERT model receives durable manifest
+ASSERT both snapshot handles retained
+ASSERT snapshots retain exact before and after
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/edit-model-manifest50f075
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/edit-model-manifesta3bc02 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/edit-model-manifest50f075 for requested path /tmp/edit-model-manifesta3bc02
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/edit-model-manifesta3bc02 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/edit-model-manifesta3bc02 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/edit-model-manifesta3bc02/.masc/playground/docker/keeper-exec-tools/manifest-edit.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/edit-model-manifesta3bc02/.masc/playground/docker/keeper-exec-tools/manifest-edit.txt mode=patch op=replace replace_all=false occurrences=1 bytes=6
+ASSERT file applied before manifest failure
+[2026-09-12 21:18:15] [ERROR] [Misc] tool_bridge: result manifest persistence failed: Unix.Unix_error(Unix.ENOTDIR, "mkdir", "/tmp/edit-model-manifesta3bc02/.masc/tool_blobs/ac")
+[2026-09-12 21:18:15] [ERROR] [Keeper] applied filesystem change result manifest unavailable: Unix.Unix_error(Unix.ENOTDIR, "mkdir", "/tmp/edit-model-manifesta3bc02/.masc/tool_blobs/ac")
+[2026-09-12 21:18:15] [ERROR] [Keeper] tool tool_edit_file returned error result: The file change was applied, but its result manifest could not be stored. Read the recorded snapshots or current file; do not repeat the edit.
+ASSERT edit happened exactly once
+ASSERT known applied effect reaches model error
+ASSERT failure injection reached the manifest store
+ASSERT terminal boundary retains applied effect
+ASSERT both snapshot handles retained
+ASSERT snapshots retain exact before and after
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/edit-model-manifesta3bc02
+  [OK]          execute_keeper_tool_call_with_outcome          7   Edit manif...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/edit-model-manifesta3bc02 for requested path /tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6 phase=running
+[2026-09-12 21:18:15] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+ASSERT Manual Gate memory write outcome
+ASSERT Manual Gate memory write created its snapshot
+ASSERT internal memory write persisted the exact claim
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6
+  [OK]          execute_keeper_tool_call_with_outcome          8   Manual Gat...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_recovery_crash_redactione6147c (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_manual_memory_write_no_gate981db6 for requested path /tmp/keeper_tool_dispatch_recovery_crash_redactione6147c
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_recovery_crash_redactione6147c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_crash_redactione6147c phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_crash_redactione6147c/.masc/playground/docker/keeper-exec-tools/crash-must-not-write.txt
+ASSERT crash message is concise and redacted
+ASSERT crash data contains only the public typed projection
+ASSERT exception payload is absent from message
+ASSERT exception payload is absent from data
+ASSERT backtrace is absent from message
+ASSERT backtrace is absent from data
+ASSERT crashed initialization created no file
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_crash_redactione6147c
+  [OK]          execute_keeper_tool_call_with_outcome          9   initializa...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_recovery_crash_redactione6147c for requested path /tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f/.masc/playground/docker/keeper-exec-tools/must-not-write.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] publication recovery lane acquisition failed category=lane_reconciliation_blocked evidence=publication recovery reconciliation blocks this owner: owner="keeper-exec-tools" ready=false rows=[transition_failed(prepared,c3f1589a-e8d4-4a91-aad2-5b6bc54528a7,effect=active_record_durable failure=(operation=decode_record subject=forensic("keeper-exec-tools")/c3f1589a-e8d4-4a91-aad2-5b6bc54528a7 cause=existing record does not match)); corrupt_record(forensic,c3f1589a-e8d4-4a91-aad2-5b6bc54528a7,invalid_record_json,payload(canonical_json_bytes=773,sha256=e2714eec6b2e094d35aa9a7a126f18fab7eaa2c97eb21df1fd295745c94051da))]
+ASSERT blocked recovery outcome
+ASSERT blocked recovery stable message
+ASSERT blocked recovery typed error
+ASSERT blocked recovery data failure class
+ASSERT blocked recovery state
+ASSERT blocked recovery category
+ASSERT blocked recovery write not executed
+ASSERT blocked recovery keeper remains active
+ASSERT blocked recovery allowed-root path is absent from tool output
+ASSERT blocked recovery operation ID is absent from tool output
+ASSERT blocked recovery created no file
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f
+  [OK]          execute_keeper_tool_call_with_outcome         10   reconcilia...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_recovery_evidence_redactionb2706f for requested path /tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b/.masc/playground/docker/keeper-exec-tools/registry-must-not-write.txt
+ASSERT unavailable registry outcome
+ASSERT unavailable registry stable message
+ASSERT unavailable registry typed error
+ASSERT unavailable registry data failure class
+ASSERT unavailable registry state
+ASSERT unavailable registry category
+ASSERT unavailable registry write not executed
+ASSERT unavailable registry keeper remains active
+ASSERT unavailable registry registry path evidence is absent from tool output
+ASSERT unavailable registry created no file
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b
+  [OK]          execute_keeper_tool_call_with_outcome         11   registry e...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_recovery_transitione6d502 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_registry_evidence_redactiona7c85b for requested path /tmp/keeper_tool_dispatch_recovery_transitione6d502
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_recovery_transitione6d502 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_transitione6d502 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_transitione6d502/.masc/playground/docker/keeper-exec-tools/after-initialization.txt
+ASSERT initializing Write outcome
+ASSERT initializing Write concise message
+ASSERT initializing Write typed error
+ASSERT initializing Write exact state
+ASSERT initializing Write stable category
+ASSERT initializing Write write not executed
+ASSERT initializing Write keeper remains active
+ASSERT initializing Write created no file
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_transitione6d502/.masc/playground/docker/keeper-exec-tools/after-initialization.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_recovery_transitione6d502/.masc/playground/docker/keeper-exec-tools/after-initialization.txt mode=overwrite bytes=9
+ASSERT next Write uses available provider
+ASSERT next Write published exact bytes
+ASSERT provider was reread once for each Write
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_recovery_transitione6d502/.masc/playground/docker/keeper-exec-tools/after-initialization.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_recovery_transitione6d502/.masc/playground/docker/keeper-exec-tools/after-initialization.txt mode=patch op=replace replace_all=false occurrences=1 bytes=6
+ASSERT next Edit uses available provider
+ASSERT next Edit published exact bytes
+ASSERT Edit performs exactly one additional provider read
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_recovery_transitione6d502
+  [OK]          execute_keeper_tool_call_with_outcome         12   publicatio...
+ASSERT cancellation occurred inside the real store borrow
+ASSERT cancelled write reads provider exactly once
+ASSERT cancelled write preserves target
+ASSERT next write reacquires the same owner exactly once
+ASSERT next write succeeds after cancellation cleanup
+  [OK]          execute_keeper_tool_call_with_outcome         13   publicatio...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_release_failure_effect_truthd88494 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_recovery_transitione6d502 for requested path /tmp/keeper_tool_dispatch_release_failure_effect_truthd88494
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt mode=overwrite bytes=6
+ASSERT warmup Write succeeds
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt mode=overwrite bytes=9
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt write_execution=completed evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT committed effect and cleanup failure are both explicit
+ASSERT committed cleanup failure has the exact typed public projection
+ASSERT committed bytes reached the real target
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt mode=overwrite bytes=9
+ASSERT same Keeper lane recovers on the next Write
+ASSERT recovered Write publishes exact bytes
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: filesystem publication operation failed path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt stage=sync_parent error=Injected_write_failure("private-write-failure-evidence") backtrace=Raised at Fs_compat_internal__Atomic_write.scoped_replace_dispatch.(fun) in file "lib/fs_compat/atomic_write.ml", line 334, characters 42-69
+Called from Fs_compat_internal__Atomic_write.sync_parent_capability in file "lib/fs_compat/atomic_write.ml", line 907, characters 4-22
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt write_execution=effect_observed evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT post-replace callback and cleanup failures remain explicit
+ASSERT post-replace cleanup failure preserves exact typed effect truth
+ASSERT post-replace failure retains the bytes observed on disk
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt mode=overwrite bytes=32
+ASSERT same Keeper lane recovers after callback and cleanup failure
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: filesystem publication operation failed path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt stage=publish_replace error=Eio.Io Fs Not_found Unix_error (No such file or directory, "renameat", "payload"),
+  renaming <.masc_atomic_stage_d8550fad-cec7-4def-90b4-4593bbb2a833.dir:payload> to <keeper-exec-tools:release-effect.txt> backtrace=Raised at Eio_linux__Low_level.rename.(fun) in file "lib_eio_linux/low_level.ml", line 481, characters 44-78
+Called from Eio_unix__Rcfd.use in file "lib_eio/unix/rcfd.ml", line 170, characters 10-14
+Re-raised at Eio_unix__Rcfd.use in file "lib_eio/unix/rcfd.ml", line 175, characters 6-41
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_unix__Rcfd.use in file "lib_eio/unix/rcfd.ml", line 170, characters 10-14
+Re-raised at Eio_unix__Rcfd.use in file "lib_eio/unix/rcfd.ml", line 175, characters 6-41
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio__Path.rename in file "lib_eio/path.ml", line 208, characters 6-55
+Re-raised at Eio__core__Exn.reraise_with_context.(fun) in file "lib_eio/core/exn.ml", line 34, characters 4-57
+Called from Fs_compat_internal__Atomic_write.replace_capability_file_with.(fun).publish.(fun) in file "lib/fs_compat/atomic_write.ml", line 1671, characters 17-50
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: filesystem publication operation failed path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt stage=cleanup_verify_identity error=Eio.Io Fs Not_found Unix_error (No such file or directory, "statx", "payload"),
+  examining <.masc_atomic_stage_d8550fad-cec7-4def-90b4-4593bbb2a833.dir:payload> backtrace=Raised at Eio_linux__Low_level.statx_raw in file "lib_eio_linux/low_level.ml", line 442, characters 19-79
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_linux.Dir.stat in file "lib_eio_linux/eio_linux.ml", line 424, characters 6-66
+Called from Eio__Path.stat in file "lib_eio/path.ml", line 112, characters 6-29
+Re-raised at Eio__core__Exn.reraise_with_context.(fun) in file "lib_eio/core/exn.ml", line 34, characters 4-57
+Called from Fs_compat_internal__Atomic_write.cleanup_owned_staging_directory.(fun) in file "lib/fs_compat/atomic_write.ml", line 1211, characters 27-60
+Called from Fs_compat_internal__Atomic_write.capture_cleanup in file "lib/fs_compat/atomic_write.ml", line 773, characters 4-8
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt write_execution=indeterminate evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT unknown target effect is not guessed as executed or unchanged
+ASSERT unknown target effect remains indeterminate in the public projection
+ASSERT failed real rename preserves the prior target bytes
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/release-effect.txt mode=overwrite bytes=23
+ASSERT same Keeper lane recovers after indeterminate target observation
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/created-parent-effect/child.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication outcome path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/created-parent-effect/child.txt component=created-parent-effect target_effect=directory_created_requested_mode child_sync={"status":"succeeded"} parent_sync={"status":"succeeded"}
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: filesystem publication operation failed path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/created-parent-effect/child.txt stage=publish_replace error=Injected_write_failure("private-before-publish-evidence") backtrace=Raised at Fs_compat_internal__Atomic_write.scoped_replace_dispatch.(fun) in file "lib/fs_compat/atomic_write.ml", line 334, characters 42-69
+Called from Fs_compat_internal__Atomic_write.run_stage in file "lib/fs_compat/atomic_write.ml", line 755, characters 4-22
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494/.masc/playground/docker/keeper-exec-tools/created-parent-effect/child.txt write_execution=effect_observed evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT created parent remains an observed effect when target is unchanged
+ASSERT created-parent effect joins with the unchanged target effect
+ASSERT created parent remains on disk
+ASSERT failed pre-publish target remains absent
+ASSERT each real Write reads the provider exactly once
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494
+  [OK]          execute_keeper_tool_call_with_outcome         14   committed ...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_release_failure_effect_truthd88494 for requested path /tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973 phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt mode=overwrite bytes=6
+ASSERT directory matrix warmup succeeds
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-unchanged/child.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication outcome path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-unchanged/child.txt component=directory-unchanged target_effect=directory_unchanged child_sync={"status":"not_attempted"} parent_sync={"status":"not_attempted"}
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication operation failed path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-unchanged/child.txt stage=create_directory error=Injected_directory_failure("directory-unchanged") backtrace=Raised at Masc__Keeper_tool_filesystem_runtime.create_and_commit_directory_component.(fun) in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1039, characters 45-72
+Called from Masc__Keeper_tool_filesystem_runtime.created_directory_operation in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1010, characters 9-15
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-unchanged/child.txt write_execution=not_executed evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-directory-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT directory-unchanged message
+ASSERT directory-unchanged exact typed projection
+ASSERT directory-unchanged directory state
+ASSERT directory-unchanged target remains absent
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt mode=overwrite bytes=35
+ASSERT same Keeper lane recovers between directory cases
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-state-unknown/child.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication outcome path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-state-unknown/child.txt component=directory-state-unknown target_effect=directory_state_unknown child_sync={"status":"not_attempted"} parent_sync={"status":"succeeded"}
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication operation failed path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-state-unknown/child.txt stage=inspect_created_directory error=Injected_directory_failure("directory-state-unknown") backtrace=Raised at Masc__Keeper_tool_filesystem_runtime.create_and_commit_directory_component.(fun) in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1039, characters 45-72
+Called from Masc__Keeper_tool_filesystem_runtime.created_directory_operation in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1010, characters 9-15
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-state-unknown/child.txt write_execution=indeterminate evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-directory-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT directory-state-unknown message
+ASSERT directory-state-unknown exact typed projection
+ASSERT directory-state-unknown directory state
+ASSERT directory-state-unknown target remains absent
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/lane-warmup.txt mode=overwrite bytes=33
+ASSERT same Keeper lane recovers between directory cases
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-created-validated/child.txt
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication outcome path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-created-validated/child.txt component=directory-created-validated target_effect=directory_created_validated child_sync={"status":"succeeded"} parent_sync={"status":"succeeded"}
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: directory publication operation failed path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-created-validated/child.txt stage=apply_directory_permissions error=Injected_directory_failure("directory-created-validated") backtrace=Raised at Masc__Keeper_tool_filesystem_runtime.create_and_commit_directory_component.(fun) in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1039, characters 45-72
+Called from Masc__Keeper_tool_filesystem_runtime.created_directory_operation in file "lib/keeper/keeper_tool_filesystem_runtime.ml", line 1010, characters 9-15
+
+[2026-09-12 21:18:15] [ERROR] [Keeper/keeper-exec-tools] WRITE_AUDIT: publication recovery lane release failed after callback path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973/.masc/playground/docker/keeper-exec-tools/directory-created-validated/child.txt write_execution=effect_observed evidence=operation=close_directory subject=lane("keeper-exec-tools") cause=Injected_release_failure("private-directory-release-failure-evidence") backtrace=Raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 138, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Fs_compat_internal__Eio_resource_scope.run_resource_only in file "lib/fs_compat/eio_resource_scope.ml", lines 47-49, characters 6-10
+
+ASSERT directory-created-validated message
+ASSERT directory-created-validated exact typed projection
+ASSERT directory-created-validated directory state
+ASSERT directory-created-validated target remains absent
+ASSERT each directory matrix Write reads the provider exactly once
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973
+  [OK]          execute_keeper_tool_call_with_outcome         15   directory ...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper-workspace-memory-read100412 (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_directory_release_effect_truth1f9973 for requested path /tmp/keeper-workspace-memory-read100412
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper-workspace-memory-read100412 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper-workspace-memory-read100412 phase=running
+ASSERT empty workspace ok
+ASSERT missing store is empty
+ASSERT list proposal ok
+ASSERT discover saved ID
+ASSERT read proposal ok
+ASSERT dispatcher preserves complete conflicting evidence
+ASSERT missing proposal ok
+ASSERT missing is explicit
+ASSERT invalid ID is failure
+ASSERT corrupt store is failure
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper-workspace-memory-read100412
+  [OK]          execute_keeper_tool_call_with_outcome         16   workspace ...
+[2026-09-12 21:18:15] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_model_tools7cffab (no git root found)
+[2026-09-12 21:18:15] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper-workspace-memory-read100412 for requested path /tmp/keeper_tool_dispatch_runtime_model_tools7cffab
+[2026-09-12 21:18:15] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:15] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab phase=running
+[2026-09-12 21:18:15] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab/.masc/playground/docker/keeper-exec-tools/model-visible.txt
+[2026-09-12 21:18:15] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab/.masc/playground/docker/keeper-exec-tools/model-visible.txt mode=overwrite bytes=11
+ASSERT Write ok
+ASSERT Write changed disk
+ASSERT Read ok
+ASSERT Read returns file content
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab/.masc/playground/docker/keeper-exec-tools/model-visible.txt
+[2026-09-12 21:18:16] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab/.masc/playground/docker/keeper-exec-tools/model-visible.txt mode=patch op=replace replace_all=false occurrences=1 bytes=11
+ASSERT Edit ok
+ASSERT Edit changed disk
+ASSERT Grep ok
+ASSERT Grep translates to rg op
+ASSERT Grep returns real match
+ASSERT Grep match includes content
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:16] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=55
+ASSERT Execute ok
+ASSERT Execute used typed Shell IR
+ASSERT Execute ran in requested cwd
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:16] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=57
+ASSERT Execute cwd roundtrip ok
+ASSERT the returned cwd can be used verbatim on the next call
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:16] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=59
+ASSERT Execute nested visible cwd ok
+ASSERT a directory below the returned cwd stays in the sandbox
+[2026-09-12 21:18:16] [WARN] [Keeper/keeper-exec-tools] execute cwd resolution rejected code=cwd_outside_sandbox detail=path_outside_sandbox: /home/keeper/playground/outside-fixture-owner
+ASSERT visible cwd projection does not widen the sandbox
+[2026-09-12 21:18:16] [WARN] [Keeper/keeper-exec-tools] execute cwd resolution rejected code=cwd_outside_sandbox detail=path_outside_sandbox: /tmp/keeper_tool_dispatch_runtime_model_tools7cffab/.masc/playground/docker/keeper-exec-tools/escape-link
+ASSERT visible cwd projection does not widen the sandbox
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab
+  [OK]          execute_keeper_tool_call_with_outcome         17   model-visi...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_constitutioncc999a (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_model_tools7cffab for requested path /tmp/keeper_tool_dispatch_runtime_constitutioncc999a
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_constitutioncc999a for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_constitutioncc999a phase=running
+ASSERT keeper_constitution_write ok
+ASSERT the write returns a minted article id
+ASSERT the world holds the norm
+ASSERT keeper_constitution_remove ok
+ASSERT taking it back empties the world
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_constitutioncc999a
+  [OK]          execute_keeper_tool_call_with_outcome         18   constituti...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_specific_task_claima900e2 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_constitutioncc999a for requested path /tmp/keeper_tool_dispatch_specific_task_claima900e2
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_specific_task_claima900e2 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_specific_task_claima900e2 phase=running
+[2026-09-12 21:18:16] [INFO] [Misc] workspace broadcast committed from=keeper-exec-tools mention=none request_id=wmsg-8f067bbe68ae044397d5b92a31ee5b28 seq=1 bytes=45
+[2026-09-12 21:18:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-da46f48a153bbb0436bb43e664b76077 seq=2 bytes=31
+[2026-09-12 21:18:16] [INFO] [Misc] workspace broadcast committed from=system mention=none request_id=wmsg-1125a8b99747d1e7d700fa1097c0a260 seq=3 bytes=25
+[2026-09-12 21:18:16] [INFO] [Misc] workspace broadcast committed from=keeper-exec-tools mention=none request_id=wmsg-44bf695dfbe28252f3e9a1fc3970f2c6 seq=4 bytes=16
+[2026-09-12 21:18:16] [INFO] [Misc] workspace broadcast committed from=keeper-exec-tools mention=none request_id=wmsg-9b249eee1b1262a41ff1874447c40cd4 seq=5 bytes=16
+ASSERT specific claim outcome
+ASSERT claimed requested task
+ASSERT assignee
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_specific_task_claima900e2
+  [OK]          execute_keeper_tool_call_with_outcome         19   keeper_tas...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_specific_task_claima900e2 for requested path /tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d phase=running
+ASSERT runtime outcome
+ASSERT exact unknown tool error
+ASSERT requested tool preserved
+ASSERT no guessed suggestions
+ASSERT no tutor
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d
+  [OK]          execute_keeper_tool_call_with_outcome         20   unknown to...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_web_search31d8ed (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_unknown_tool72b01d for requested path /tmp/keeper_tool_dispatch_web_search31d8ed
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_web_search31d8ed for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_search31d8ed phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=keeper_always_allow
+ASSERT web search outcome
+ASSERT status
+ASSERT query preserved
+ASSERT fallback provider selected
+ASSERT simulated provider url
+ASSERT result count
+ASSERT hit title
+ASSERT snippet cleaned
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_search31d8ed
+  [OK]          execute_keeper_tool_call_with_outcome         21   model-visi...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_web_fetch513c4e (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_web_search31d8ed for requested path /tmp/keeper_tool_dispatch_web_fetch513c4e
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_web_fetch513c4e for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_fetch513c4e phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=keeper_always_allow
+ASSERT timeout forwarded
+ASSERT max response bytes forwarded
+ASSERT url forwarded
+ASSERT user agent header present
+ASSERT web fetch alias outcome
+ASSERT status
+ASSERT url
+ASSERT http status
+ASSERT extract mode
+ASSERT not truncated
+ASSERT title
+ASSERT description
+ASSERT heading rendered as markdown
+ASSERT body text cleaned
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_fetch513c4e
+  [OK]          execute_keeper_tool_call_with_outcome         22   model-visi...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_masc_askbff6d9 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_web_fetch513c4e for requested path /tmp/keeper_tool_dispatch_masc_askbff6d9
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_masc_askbff6d9 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_masc_askbff6d9 phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper] keeper_ask: keeper=keeper-exec-tools ask_id=askd1b6a7b64c5e24be questions=1 open=1
+ASSERT masc_ask outcome
+ASSERT recorded under the asking keeper
+ASSERT the reply says one question is open
+ASSERT the store row names the keeper
+ASSERT the row is still open
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_masc_askbff6d9
+  [OK]          execute_keeper_tool_call_with_outcome         23   model-visi...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_masc_askbff6d9 for requested path /tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=keeper_always_allow
+ASSERT web fetch local outcome
+ASSERT localhost rejection is a workflow error
+ASSERT localhost rejection names the loopback boundary
+ASSERT localhost never reaches HTTP
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c
+  [OK]          execute_keeper_tool_call_with_outcome         24   public Web...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_manual_web_gatee9ce3d (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_web_fetch_reaches_localhost93976c for requested path /tmp/keeper_tool_dispatch_manual_web_gatee9ce3d
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_manual_web_gatee9ce3d for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_web_gatee9ce3d phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3c45-7000-9df6-61a5ebb05cd0 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3c49-7000-87ec-c48bdff22c83 sequence=2 keeper=keeper-exec-tools tool=network_read
+ASSERT Manual Gate outcome
+ASSERT Manual Gate outcome
+ASSERT Manual Gate executes no WebFetch callback
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_web_gatee9ce3d
+  [OK]          execute_keeper_tool_call_with_outcome         25   Manual Gat...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_approved_web_search3cb224 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_manual_web_gatee9ce3d for requested path /tmp/keeper_tool_dispatch_approved_web_search3cb224
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_approved_web_search3cb224 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_approved_web_search3cb224 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3c5e-7000-89da-209d4331d404 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3c5e-7000-89da-209d4331d404 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3c5e-7000-89da-209d4331d404 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+ASSERT approved WebSearch executes
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_approved_web_search3cb224
+  [OK]          execute_keeper_tool_call_with_outcome         26   approved W...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_replayed_web_search2a94f5 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_approved_web_search3cb224 for requested path /tmp/keeper_tool_dispatch_replayed_web_search2a94f5
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_replayed_web_search2a94f5 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_replayed_web_search2a94f5 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3c7b-7000-87dc-8026017bf3a0 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3c7b-7000-87dc-8026017bf3a0 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3c7b-7000-87dc-8026017bf3a0 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:16] [INFO] [Keeper] gate replay approval=appr_01a0977c-3c7b-7000-87dc-8026017bf3a0 applied operation=network_read journal=recorded output_bytes=288 output_sha256=ecd286fd59617bb7321e73795b08bc94ed8bdb2989cbc937b410c8e0f1bfd3ef
+ASSERT stored WebSearch effect executed
+ASSERT replayed WebSearch output survives behind the durable reference
+[2026-09-12 21:18:16] [INFO] [Keeper] approved Gate replay result already durable approval=appr_01a0977c-3c7b-7000-87dc-8026017bf3a0
+ASSERT durable replay output stays outside the provider-only projection
+ASSERT provider-only projection keeps the durable replay identity
+ASSERT model is forbidden to request the consumed operation again
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_replayed_web_search2a94f5
+  [OK]          execute_keeper_tool_call_with_outcome         27   approved W...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_durable_connector_replay_terminale8a953 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_replayed_web_search2a94f5 for requested path /tmp/keeper_durable_connector_replay_terminale8a953
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_durable_connector_replay_terminale8a953 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_durable_connector_replay_terminale8a953 phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3c9e-7000-83f8-c562c2eb1765 sequence=1 keeper=keeper-exec-tools tool=connector_post
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3c9e-7000-83f8-c562c2eb1765 keeper=keeper-exec-tools tool=connector_post decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3c9e-7000-83f8-c562c2eb1765 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper] gate replay approval=appr_01a0977c-3c9e-7000-83f8-c562c2eb1765 applied operation=connector_post journal=already_recorded output_bytes=39 output_sha256=277bfaec88c5a6a98e79649e513994ca48852b07bd424fb58985c378dd66624a
+ASSERT durable replay settles the exact approved target
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_durable_connector_replay_terminale8a953
+  [OK]          execute_keeper_tool_call_with_outcome         28   durable co...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_gate_replay_blob_repair96aa1c (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_durable_connector_replay_terminale8a953 for requested path /tmp/keeper_gate_replay_blob_repair96aa1c
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_gate_replay_blob_repair96aa1c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_blob_repair96aa1c phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3cbe-7000-bf4e-cec1faea5aa3 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3cbe-7000-bf4e-cec1faea5aa3 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3cbe-7000-bf4e-cec1faea5aa3 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+ASSERT journal-only repair persisted the exact prior outcome
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_blob_repair96aa1c
+  [OK]          execute_keeper_tool_call_with_outcome         29   blob failu...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_gate_replay_journal_repaire8f410 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_gate_replay_blob_repair96aa1c for requested path /tmp/keeper_gate_replay_journal_repaire8f410
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_gate_replay_journal_repaire8f410 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_journal_repaire8f410 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3ce1-7000-ab8d-e38989429954 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3ce1-7000-ab8d-e38989429954 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3ce1-7000-ab8d-e38989429954 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_journal_repaire8f410
+  [OK]          execute_keeper_tool_call_with_outcome         30   journal fa...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_gate_replay_unknown_effect2ab675 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_gate_replay_journal_repaire8f410 for requested path /tmp/keeper_gate_replay_unknown_effect2ab675
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_gate_replay_unknown_effect2ab675 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unknown_effect2ab675 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3d01-7000-9d69-57751c6dce38 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3d01-7000-9d69-57751c6dce38 keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3d01-7000-9d69-57751c6dce38 signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] external effect authorized operation=network_read source=one_shot_resolution
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unknown_effect2ab675
+  [OK]          execute_keeper_tool_call_with_outcome         31   unknown ef...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_gate_replay_unknown_restartce2247 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_gate_replay_unknown_effect2ab675 for requested path /tmp/keeper_gate_replay_unknown_restartce2247
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_gate_replay_unknown_restartce2247 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unknown_restartce2247 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3d21-7000-a446-e7886beec97f sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3d21-7000-a446-e7886beec97f keeper=keeper-exec-tools tool=network_read decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3d21-7000-a446-e7886beec97f signal=signaled phase=running
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unknown_restartce2247
+  [OK]          execute_keeper_tool_call_with_outcome         32   consumed o...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_gate_replay_unsupported70971f (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_gate_replay_unknown_restartce2247 for requested path /tmp/keeper_gate_replay_unsupported70971f
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_gate_replay_unsupported70971f for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unsupported70971f phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3d49-7000-ba73-8f24b92a145c sequence=1 keeper=keeper-exec-tools tool=unreplayed_operation
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_RESOLVED: id=appr_01a0977c-3d49-7000-ba73-8f24b92a145c keeper=keeper-exec-tools tool=unreplayed_operation decision=approve
+[2026-09-12 21:18:16] [INFO] [Keeper/keeper-exec-tools] hitl resolution committed approval=appr_01a0977c-3d49-7000-ba73-8f24b92a145c signal=signaled phase=running
+ASSERT unsupported exact input remains in the model-issued path
+ASSERT unsupported approval does not invent operator repair
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_gate_replay_unsupported70971f
+  [OK]          execute_keeper_tool_call_with_outcome         33   unsupporte...
+  [OK]          execute_keeper_tool_call_with_outcome         34   task FSM e...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_gate_replay_unsupported70971f for requested path /tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4 phase=running
+[2026-09-12 21:18:16] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:16] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3d7b-7000-85ed-8789f4dbddae sequence=1 keeper=keeper-exec-tools tool=tool_execute
+ASSERT Gate decision remains typed domain evidence
+ASSERT Manual Gate starts no process
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4
+  [OK]          execute_keeper_tool_call_with_outcome         35   Manual Gat...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_manual_execute_gate0b1ff4 for requested path /tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf phase=running
+ASSERT cmd is refused by the parser, which names script
+ASSERT typed marker
+ASSERT cmd is refused by the parser, which names script
+ASSERT typed marker
+ASSERT cmd is refused by the parser, which names script
+ASSERT typed marker
+ASSERT cmd is refused by the parser, which names script
+ASSERT typed marker
+ASSERT repeated failures stay byte-identical
+ASSERT repeated failures stay byte-identical
+ASSERT repeated failures stay byte-identical
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf
+  [OK]          execute_keeper_tool_call_with_outcome         36   tool_execu...
+[2026-09-12 21:18:16] [INFO] [Workspace] MASC base: /tmp/tool_execute_script_form_runsd8fd64 (no git root found)
+[2026-09-12 21:18:16] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/tool_execute_raw_cmd_requires_typed_shell_ir0a4baf for requested path /tmp/tool_execute_script_form_runsd8fd64
+[2026-09-12 21:18:16] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/tool_execute_script_form_runsd8fd64 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:16] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_script_form_runsd8fd64 phase=running
+[2026-09-12 21:18:17] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:17] [INFO] [Keeper] shell_costume keeper=keeper-exec-tools shell=sh finding=representable lowered=false cmd=sh -c printf begin- && printf end
+[2026-09-12 21:18:17] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=57
+ASSERT script form executes
+ASSERT the and-chain ran both commands
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_script_form_runsd8fd64
+  [OK]          execute_keeper_tool_call_with_outcome         37   tool_execu...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/tool_execute_empty_input_names_forms5017c3 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/tool_execute_script_form_runsd8fd64 for requested path /tmp/tool_execute_empty_input_names_forms5017c3
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/tool_execute_empty_input_names_forms5017c3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_empty_input_names_forms5017c3 phase=running
+ASSERT no-source refusal names every form
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/tool_execute_empty_input_names_forms5017c3
+  [OK]          execute_keeper_tool_call_with_outcome         38   tool_execu...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/agent-core-handler-eio-contextb59a2b (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/tool_execute_empty_input_names_forms5017c3 for requested path /tmp/agent-core-handler-eio-contextb59a2b
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/agent-core-handler-eio-contextb59a2b for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/agent-core-handler-eio-contextb59a2b phase=running
+ASSERT keeper dispatch tool
+ASSERT handler succeeds
+ASSERT handler preserves producer data without a second outcome envelope
+ASSERT turn switch reaches keeper dispatch
+ASSERT clock reaches keeper dispatch
+ASSERT live provider reaches keeper dispatch
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/agent-core-handler-eio-contextb59a2b
+  [OK]          execute_keeper_tool_call_with_outcome         39   Agent Core...
+ASSERT probe has no masc_ prefix
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_registered_dispatch2888a2 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/agent-core-handler-eio-contextb59a2b for requested path /tmp/keeper_tool_dispatch_registered_dispatch2888a2
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_registered_dispatch2888a2 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registered_dispatch2888a2 phase=running
+ASSERT registered tool name
+ASSERT registered route
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registered_dispatch2888a2
+  [OK]          execute_keeper_tool_call_with_outcome         40   registered...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_registered_dispatch2888a2 for requested path /tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4 phase=running
+ASSERT error message preserved
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4
+  [OK]          execute_keeper_tool_call_with_outcome         41   registered...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/keeper_typed_success_error_dataf93a1a (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_registered_workflow_rejectionf2b8a4 for requested path /tmp/keeper_typed_success_error_dataf93a1a
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_typed_success_error_dataf93a1a for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_success_error_dataf93a1a phase=running
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_success_error_dataf93a1a
+ASSERT producer success remains success
+ASSERT opaque success payload preserved
+  [OK]          execute_keeper_tool_call_with_outcome         42   success pa...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/keeper_typed_success_malformed_payloadb68098 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_typed_success_error_dataf93a1a for requested path /tmp/keeper_typed_success_malformed_payloadb68098
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_typed_success_malformed_payloadb68098 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_success_malformed_payloadb68098 phase=running
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_success_malformed_payloadb68098
+ASSERT producer success ignores payload syntax
+ASSERT malformed-looking payload preserved
+  [OK]          execute_keeper_tool_call_with_outcome         43   malformed ...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/keeper_typed_failure_success_payload727d8c (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_typed_success_malformed_payloadb68098 for requested path /tmp/keeper_typed_failure_success_payload727d8c
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_typed_failure_success_payload727d8c for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_failure_success_payload727d8c phase=running
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_typed_failure_success_payload727d8c
+ASSERT producer failure remains failure
+ASSERT success-looking failure payload preserved
+ASSERT typed failure class preserved
+  [OK]          execute_keeper_tool_call_with_outcome         44   only typed...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/cooperative_boundary_result009c82 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_typed_failure_success_payload727d8c for requested path /tmp/cooperative_boundary_result009c82
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/cooperative_boundary_result009c82 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_result009c82 phase=running
+[2026-09-12 21:18:17] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=0
+ASSERT one actual provider call
+ASSERT one completed local tool
+ASSERT exact yielded turn survives adapter
+ASSERT exact SDK stage survives adapter
+ASSERT boundary joins returned checkpoint turn
+ASSERT the tool-result stage is carried
+ASSERT sink presence remains distinct from boundary presence
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_result009c82
+  [OK]          execute_keeper_tool_call_with_outcome         45   SDK yield ...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/cooperative_boundary_result0f39c7 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/cooperative_boundary_result009c82 for requested path /tmp/cooperative_boundary_result0f39c7
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/cooperative_boundary_result0f39c7 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_result0f39c7 phase=running
+[2026-09-12 21:18:17] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=0
+ASSERT one actual provider call
+ASSERT one completed local tool
+ASSERT exact yielded turn survives adapter
+ASSERT exact SDK stage survives adapter
+ASSERT boundary joins returned checkpoint turn
+ASSERT the tool-result stage is carried
+ASSERT sink presence remains distinct from boundary presence
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_result0f39c7
+  [OK]          execute_keeper_tool_call_with_outcome         46   in-memory ...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/cooperative_boundary_resultba5c66 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/cooperative_boundary_result0f39c7 for requested path /tmp/cooperative_boundary_resultba5c66
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/cooperative_boundary_resultba5c66 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_resultba5c66 phase=running
+ASSERT one actual provider call
+ASSERT one completed local tool
+ASSERT failed sink never reaches cooperative boundary
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/cooperative_boundary_resultba5c66
+  [OK]          execute_keeper_tool_call_with_outcome         47   failed che...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/deferred_web_search_yield8837ed (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/cooperative_boundary_resultba5c66 for requested path /tmp/deferred_web_search_yield8837ed
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/deferred_web_search_yield8837ed for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/deferred_web_search_yield8837ed phase=running
+[2026-09-12 21:18:17] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:17] [INFO] [Keeper] HITL_APPROVAL_PENDING: id=appr_01a0977c-3f83-7000-b37a-a14824298258 sequence=1 keeper=keeper-exec-tools tool=network_read
+[2026-09-12 21:18:17] [INFO] [Telemetry] runtime candidate terminal: model=runtime outcome=success latency_ms=12
+ASSERT the turn continued past the parked effect
+ASSERT parked call does not invent a cooperative yield
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/deferred_web_search_yield8837ed
+  [OK]          execute_keeper_tool_call_with_outcome         48   deferred W...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/surface_post_invalid_input785093 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/deferred_web_search_yield8837ed for requested path /tmp/surface_post_invalid_input785093
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/surface_post_invalid_input785093 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/surface_post_invalid_input785093 phase=running
+[2026-09-12 21:18:17] [WARN] [Keeper] tool keeper_surface_post returned error result: {"error":"content is required and must be non-empty."}
+[2026-09-12 21:18:17] [WARN] [Misc] [keeper_chat_store] persistence read drop (entry_load_error) path=/tmp/surface_post_invalid_input785093/.masc/keeper_chat/keeper-exec-tools.jsonl: Value too large for defined data type
+[2026-09-12 21:18:17] [WARN] [Keeper] keeper_chat_store: assistant append failed for keeper-exec-tools: Unix.Unix_error(Unix.EISDIR, "open", "/tmp/surface_post_invalid_input785093/.masc/keeper_chat/keeper-exec-tools.jsonl")
+[2026-09-12 21:18:17] [ERROR] [Keeper] tool keeper_surface_post returned error result: {"error":"Unix.Unix_error(Unix.EISDIR, \"open\", \"/tmp/surface_post_invalid_input785093/.masc/keeper_chat/keeper-exec-tools.jsonl\")"}
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/surface_post_invalid_input785093
+  [OK]          execute_keeper_tool_call_with_outcome         49   invalid su...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/surface_post_append_failurea853c3 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/surface_post_invalid_input785093 for requested path /tmp/surface_post_append_failurea853c3
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/surface_post_append_failurea853c3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/surface_post_append_failurea853c3 phase=running
+[2026-09-12 21:18:17] [WARN] [Misc] [keeper_chat_store] persistence read drop (entry_load_error) path=/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl: Value too large for defined data type
+[2026-09-12 21:18:17] [WARN] [Keeper] keeper_chat_store: assistant append failed for keeper-exec-tools: Unix.Unix_error(Unix.EISDIR, "open", "/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl")
+[2026-09-12 21:18:17] [ERROR] [Keeper] tool keeper_surface_post returned error result: {"error":"Unix.Unix_error(Unix.EISDIR, \"open\", \"/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl\")"}
+ASSERT append failure is an Agent Core runtime error
+ASSERT raw append failure retains the exact full chat target
+ASSERT failed append emits no keeper chat broadcast
+ASSERT terminal failure retains the runtime failure class
+ASSERT terminal failure retains unknown effect outcome
+ASSERT terminal failure retains the exact full chat target
+ASSERT first terminal failure is not overwritten
+[2026-09-12 21:18:17] [WARN] [Misc] [keeper_chat_store] persistence read drop (entry_load_error) path=/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl: Value too large for defined data type
+[2026-09-12 21:18:17] [WARN] [Keeper] keeper_chat_store: assistant append failed for keeper-exec-tools: Unix.Unix_error(Unix.EISDIR, "open", "/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl")
+[2026-09-12 21:18:17] [ERROR] [Keeper] tool keeper_surface_post returned error result: {"error":"Unix.Unix_error(Unix.EISDIR, \"open\", \"/tmp/surface_post_append_failurea853c3/.masc/keeper_chat/keeper-exec-tools.jsonl\")"}
+ASSERT terminal failure makes exactly one provider call
+ASSERT Runtime_agent error retains the exact full chat target
+ASSERT runtime terminal state retains Runtime_failure
+ASSERT runtime terminal state retains unknown effect outcome
+ASSERT runtime terminal state retains the exact full chat target
+ASSERT runtime failure emits no keeper chat broadcast
+ASSERT runtime terminal delivery failure is not auto-recoverable
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/surface_post_append_failurea853c3
+  [OK]          execute_keeper_tool_call_with_outcome         50   surface ap...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/frozen-surface-direct-excluded13763a (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/surface_post_append_failurea853c3 for requested path /tmp/frozen-surface-direct-excluded13763a
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/frozen-surface-direct-excluded13763a for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-direct-excluded13763a phase=running
+ASSERT registered-only fallback outcome
+ASSERT registered-only fallback is a policy rejection
+ASSERT registered-only fallback is proven pre-effect
+ASSERT registered-only fallback typed error
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-direct-excluded13763a
+  [OK]          execute_keeper_tool_call_with_outcome         51   frozen sur...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/frozen-surface-direct-included7e1120 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/frozen-surface-direct-excluded13763a for requested path /tmp/frozen-surface-direct-included7e1120
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/frozen-surface-direct-included7e1120 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-direct-included7e1120 phase=running
+ASSERT included descriptor completes
+ASSERT included exposed name completes
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-direct-included7e1120
+  [OK]          execute_keeper_tool_call_with_outcome         52   frozen sur...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/frozen-surface-counterfeit-descriptor7bb285 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/frozen-surface-direct-included7e1120 for requested path /tmp/frozen-surface-counterfeit-descriptor7bb285
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/frozen-surface-counterfeit-descriptor7bb285 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-counterfeit-descriptor7bb285 phase=running
+ASSERT counterfeit retains the registered id
+ASSERT counterfeit is not canonical
+ASSERT counterfeit descriptor outcome
+ASSERT counterfeit descriptor is a policy rejection
+ASSERT counterfeit descriptor is proven pre-effect
+ASSERT counterfeit descriptor typed error
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-counterfeit-descriptor7bb285
+  [OK]          execute_keeper_tool_call_with_outcome         53   frozen sur...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/frozen-surface-production-readc61fad (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/frozen-surface-counterfeit-descriptor7bb285 for requested path /tmp/frozen-surface-production-readc61fad
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/frozen-surface-production-readc61fad for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-production-readc61fad phase=running
+ASSERT production capability bundle returns fixture content
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-production-readc61fad
+  [OK]          execute_keeper_tool_call_with_outcome         54   production...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/frozen-surface-name-alias9c36f8 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/frozen-surface-production-readc61fad for requested path /tmp/frozen-surface-name-alias9c36f8
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/frozen-surface-name-alias9c36f8 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-name-alias9c36f8 phase=running
+ASSERT Read descriptor is active in the fixture
+ASSERT non-exposed internal alias outcome
+ASSERT non-exposed internal alias is a policy rejection
+ASSERT non-exposed internal alias is proven pre-effect
+ASSERT non-exposed internal alias typed error
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/frozen-surface-name-alias9c36f8
+  [OK]          execute_keeper_tool_call_with_outcome         55   frozen sur...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/composition-canonical-descriptor7b5e82 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/frozen-surface-name-alias9c36f8 for requested path /tmp/composition-canonical-descriptor7b5e82
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-canonical-descriptor7b5e82 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-canonical-descriptor7b5e82 phase=running
+ASSERT canonical concurrent schedule
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-canonical-descriptor7b5e82
+  [OK]          execute_keeper_tool_call_with_outcome         56   compositio...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/composition-first-class-tool61995e (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-canonical-descriptor7b5e82 for requested path /tmp/composition-first-class-tool61995e
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-first-class-tool61995e for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-first-class-tool61995e phase=running
+ASSERT catalog description reaches model-visible schema
+[2026-09-12 21:18:17] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_clock run=01a0977c-413e-7000-b260-7384fec0c5bb error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT outer composition identity
+ASSERT nested node identity
+ASSERT nested tool identity
+ASSERT nested planned index
+ASSERT nested result exposes typed data
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-first-class-tool61995e
+  [OK]          execute_keeper_tool_call_with_outcome         57   catalog co...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/composition-closed-turn-descriptorsea74f6 (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-first-class-tool61995e for requested path /tmp/composition-closed-turn-descriptorsea74f6
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-closed-turn-descriptorsea74f6 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-closed-turn-descriptorsea74f6 phase=running
+ASSERT bundle resolves supplied descriptor to canonical authority
+ASSERT keeper_compose_off-surface-memory returns a deterministic policy refusal
+ASSERT keeper_compose_off-surface-memory preserves exact outer identity
+ASSERT keeper_compose_off-surface-memory preserves typed rejection kind
+ASSERT keeper_compose_off-surface-memory preserves typed plan cause
+ASSERT keeper_compose_off-surface-memory-async returns a deterministic policy refusal
+ASSERT keeper_compose_off-surface-memory-async preserves exact outer identity
+ASSERT keeper_compose_off-surface-memory-async preserves typed rejection kind
+ASSERT keeper_compose_off-surface-memory-async preserves typed plan cause
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-closed-turn-descriptorsea74f6
+  [OK]          execute_keeper_tool_call_with_outcome         58   compositio...
+[2026-09-12 21:18:17] [INFO] [Workspace] MASC base: /tmp/composition-shell-ir-output6772fa (no git root found)
+[2026-09-12 21:18:17] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-closed-turn-descriptorsea74f6 for requested path /tmp/composition-shell-ir-output6772fa
+[2026-09-12 21:18:17] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-shell-ir-output6772fa for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:17] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-shell-ir-output6772fa phase=running
+[2026-09-12 21:18:17] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:18] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=58
+[2026-09-12 21:18:18] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_shell-output run=01a0977c-4166-7000-a546-8bc89433cf8c error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT Shell IR node
+ASSERT Shell IR typed result
+ASSERT Shell IR exact output
+ASSERT later node receives typed Shell IR output
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-shell-ir-output6772fa
+  [OK]          execute_keeper_tool_call_with_outcome         59   compositio...
+[2026-09-12 21:18:18] [INFO] [Workspace] MASC base: /tmp/composition-shell-ir-artifactbfbfc3 (no git root found)
+[2026-09-12 21:18:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-shell-ir-output6772fa for requested path /tmp/composition-shell-ir-artifactbfbfc3
+[2026-09-12 21:18:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-shell-ir-artifactbfbfc3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-shell-ir-artifactbfbfc3 phase=running
+[2026-09-12 21:18:18] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:18] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=59
+ASSERT oversized output is not retained inline
+ASSERT combined output equals stdout
+ASSERT empty stderr is still explicit
+ASSERT artifact retains every output byte
+ASSERT durable action log owns a preview-free artifact root
+ASSERT durable action evidence roots the stream artifacts
+ASSERT maintenance preserves the referenced output
+ASSERT later node receives the artifact identity
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-shell-ir-artifactbfbfc3
+  [OK]          execute_keeper_tool_call_with_outcome         60   compositio...
+[2026-09-12 21:18:18] [INFO] [Workspace] MASC base: /tmp/direct-shell-ir-artifact438f56 (no git root found)
+[2026-09-12 21:18:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-shell-ir-artifactbfbfc3 for requested path /tmp/direct-shell-ir-artifact438f56
+[2026-09-12 21:18:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct-shell-ir-artifact438f56 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct-shell-ir-artifact438f56 phase=running
+[2026-09-12 21:18:18] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:18] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=59
+ASSERT direct checkpoint roots manifest and child streams
+ASSERT direct Execute child survives both maintenance passes
+ASSERT manifest itself survives both maintenance passes
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct-shell-ir-artifact438f56
+  [OK]          execute_keeper_tool_call_with_outcome         61   direct Exe...
+[2026-09-12 21:18:18] [INFO] [Workspace] MASC base: /tmp/direct-shell-ir-post-effect-artifact-failurecf03c3 (no git root found)
+[2026-09-12 21:18:18] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct-shell-ir-artifact438f56 for requested path /tmp/direct-shell-ir-post-effect-artifact-failurecf03c3
+[2026-09-12 21:18:18] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:18] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3 phase=running
+[2026-09-12 21:18:18] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:19] [INFO] [Keeper] shell_costume keeper=keeper-exec-tools shell=sh finding=representable lowered=false cmd=sh -c printf x >> execute-invocations; printf %s 'pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...
+[2026-09-12 21:18:19] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=61
+[2026-09-12 21:18:19] [WARN] [Keeper/keeper-exec-tools] execute output artifact persistence failed after process completion: output publication failed: tool_blob_store.put_file_durable /tmp/direct-shell-ir-post-effect-artifact-failurecf03c3/.masc/execute_output/redacted-ec697e.output: Unix.Unix_error(Unix.ENOTDIR, "mkdir", "/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3/.masc/tool_blobs/e3")
+[2026-09-12 21:18:19] [ERROR] [Keeper] tool tool_execute returned error result: {"error":"Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output.","typed":true,"code":"execute_output_externalization_failed","status":{"kind":"exit","code":0},"output":"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...(truncated)
+[2026-09-12 21:18:19] [ERROR] [Misc] tool_bridge: blob externalization failed: Unix.Unix_error(Unix.ENOTDIR, "mkdir", "/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3/.masc/tool_blobs/3c")
+ASSERT artifact persistence failure is visible
+ASSERT the process effect occurs exactly once before settlement
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3
+  [OK]          execute_keeper_tool_call_with_outcome         62   direct Exe...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/direct-pre-effect-correction4a10f1 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct-shell-ir-post-effect-artifact-failurecf03c3 for requested path /tmp/direct-pre-effect-correction4a10f1
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/direct-pre-effect-correction4a10f1 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/direct-pre-effect-correction4a10f1 phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool tool_execute returned error result: {"error":"argv[0] is empty — provide a non-empty program token","typed":true,"cwd":"/home/keeper/playground/keeper-exec-tools","execution_location":{"cwd":"/home/keeper/playground/keeper-exec-tools","cwd_source":"default_playground_root","scope":"playground_root","playground_root":"/home/keeper/playground/keeper-exec-tools","relative_cwd":".","repo_name":null,"repo_root":null}}
+ASSERT invalid Execute is a failure
+ASSERT pre-effect Execute failure keeps the turn open
+[2026-09-12 21:18:19] [WARN] [Keeper] tool tool_write_file returned error result: {"error":"path is required. Good: path='lib/foo.ml'. Bad: path=''."}
+ASSERT invalid Write is a failure
+ASSERT unaudited ordinary producer keeps its prior correction behavior
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_artifact_read returned error result: {"ok":false,"error":"invalid_artifact_read","message":"artifact does not exist"}
+ASSERT missing artifact is a failure
+ASSERT read-only failure keeps the turn open
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/direct-pre-effect-correction4a10f1
+  [OK]          execute_keeper_tool_call_with_outcome         63   direct pre...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/stale-spawn-handle-correction608fff (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/direct-pre-effect-correction4a10f1 for requested path /tmp/stale-spawn-handle-correction608fff
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/stale-spawn-handle-correction608fff for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/stale-spawn-handle-correction608fff phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_spawn_read returned error result: no process is held under previous-turn-1. It ended with the turn that spawned it, or the handle came from an earlier one -- spawn again to get a live handle.
+ASSERT keeper_spawn_read reports the stale handle
+ASSERT keeper_spawn_read keeps the provider loop correction-capable
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_spawn_wait returned error result: no process is held under previous-turn-1. It ended with the turn that spawned it, or the handle came from an earlier one -- spawn again to get a live handle.
+ASSERT keeper_spawn_wait reports the stale handle
+ASSERT keeper_spawn_wait keeps the provider loop correction-capable
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_spawn_stop returned error result: no process is held under previous-turn-1. It ended with the turn that spawned it, or the handle came from an earlier one -- spawn again to get a live handle.
+ASSERT keeper_spawn_stop reports the stale handle
+ASSERT keeper_spawn_stop keeps the provider loop correction-capable
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/stale-spawn-handle-correction608fff
+  [OK]          execute_keeper_tool_call_with_outcome         64   stale spaw...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-action-commit-refresh736b72 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/stale-spawn-handle-correction608fff for requested path /tmp/composition-action-commit-refresh736b72
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-action-commit-refresh736b72 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-action-commit-refresh736b72 phase=running
+ASSERT committed nested row is immediately readable
+ASSERT committed nested row preserves the runtime model bucket
+ASSERT committed nested row has canonical execution identity
+ASSERT committed nested row has producer byte count
+ASSERT run summary records terminal success
+ASSERT run summary records total duration
+ASSERT run summary joins the node run
+ASSERT durable revision advances before refresh
+ASSERT one physical tool execution event
+ASSERT commit refresh has a distinct event type
+ASSERT commit refresh carries node success
+ASSERT commit refresh carries node duration
+ASSERT tool_use_id joins committed row and refresh event
+ASSERT composition_run_id joins committed row and refresh event
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-action-commit-refresh736b72
+  [OK]          execute_keeper_tool_call_with_outcome         65   compositio...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-telemetry-best-effort901bc4 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-action-commit-refresh736b72 for requested path /tmp/composition-telemetry-best-effort901bc4
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-telemetry-best-effort901bc4 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-telemetry-best-effort901bc4 phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_clock node=time error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_clock run=01a0977c-464f-7000-9d38-e5d324a4194b error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT unavailable store does not fabricate a durable revision
+ASSERT no durable-commit refresh is emitted without a durable commit
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-telemetry-best-effort901bc4
+  [OK]          execute_keeper_tool_call_with_outcome         66   compositio...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-terminal-surfacef2c8a3 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-telemetry-best-effort901bc4 for requested path /tmp/composition-terminal-surfacef2c8a3
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-terminal-surfacef2c8a3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-terminal-surfacef2c8a3 phase=running
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-terminal-surfacef2c8a3
+  [OK]          execute_keeper_tool_call_with_outcome         67   terminal c...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-typed-plan-failure3c02f5 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-terminal-surfacef2c8a3 for requested path /tmp/composition-typed-plan-failure3c02f5
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-typed-plan-failure3c02f5 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-typed-plan-failure3c02f5 phase=running
+[2026-09-12 21:18:19] [INFO] [ToolValidation] tool_input_validation rejected keeper_time_now: Tool 'keeper_time_now' declares no input fields but received arguments
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_invalid-clock-input run=01a0977c-4679-7000-bd46-15104b9425bf error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT failed outer composition identity
+ASSERT typed executor cause
+ASSERT typed plan failure
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-typed-plan-failure3c02f5
+  [OK]          execute_keeper_tool_call_with_outcome         68   compositio...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recoverya4094a (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-typed-plan-failure3c02f5 for requested path /tmp/composition-read-recoverya4094a
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recoverya4094a for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoverya4094a phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_read returned error result: Missing host permission for the tab
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+ASSERT next read succeeds in the same materialized provider turn
+ASSERT navigation is never replayed
+ASSERT only the failed read is retried
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoverya4094a
+  [OK]          execute_keeper_tool_call_with_outcome         69   durable or...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recovery43c61e (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recoverya4094a for requested path /tmp/composition-read-recovery43c61e
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recovery43c61e for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery43c61e phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_read returned error result: Missing host permission for the tab
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery43c61e
+  [OK]          execute_keeper_tool_call_with_outcome         70   no observe...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recoveryd7b31d (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recovery43c61e for requested path /tmp/composition-read-recoveryd7b31d
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recoveryd7b31d for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoveryd7b31d phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_read returned error result: Missing host permission for the tab
+[2026-09-12 21:18:19] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_navigate-read-recovery node=read error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_navigate-read-recovery run=01a0977c-46c1-7000-a1ce-2950dc06634e error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoveryd7b31d
+  [OK]          execute_keeper_tool_call_with_outcome         71   missing re...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recovery3aae0e (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recoveryd7b31d for requested path /tmp/composition-read-recovery3aae0e
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recovery3aae0e for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery3aae0e phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_read returned error result: Missing host permission for the tab
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery3aae0e
+  [OK]          execute_keeper_tool_call_with_outcome         72   terminal g...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recoveryf1fcb4 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recovery3aae0e for requested path /tmp/composition-read-recoveryf1fcb4
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recoveryf1fcb4 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoveryf1fcb4 phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_read returned error result: Missing host permission for the tab
+[2026-09-12 21:18:19] [WARN] [Keeper] Skill composition evidence publication failed: tool=keeper_compose_navigate-read-recovery run=01a0977c-46f2-7000-a728-b4a45c7fcb4f error=Skill composition evidence directory preparation failed
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+ASSERT broken evidence fixture reaches the directory preparation fence
+ASSERT storage failure remains a typed runtime failure
+ASSERT canonical failed result is not a schema refusal
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recoveryf1fcb4
+  [OK]          execute_keeper_tool_call_with_outcome         73   recovery e...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-read-recovery7c1e2f (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recoveryf1fcb4 for requested path /tmp/composition-read-recovery7c1e2f
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-read-recovery7c1e2f for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery7c1e2f phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool masc_browser_goto returned error result: navigation result unknown
+ASSERT composition still reports failure
+ASSERT aggregate effect evidence is unchanged
+ASSERT only acknowledged ordinary read failures preserve the provider turn
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-read-recovery7c1e2f
+  [OK]          execute_keeper_tool_call_with_outcome         74   unknown na...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-post-effect-terminal-failure6adc2a (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-read-recovery7c1e2f for requested path /tmp/composition-post-effect-terminal-failure6adc2a
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-post-effect-terminal-failure6adc2a for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-post-effect-terminal-failure6adc2a phase=running
+[2026-09-12 21:18:19] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:19] [INFO] [ToolValidation] tool_input_validation rejected keeper_surface_post: Tool 'keeper_surface_post' received an empty input object: the arguments did not arrive with the call. Required field(s): surface, content. Re-emit the tool call with the input object populated.
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_write-then-invalid-post run=01a0977c-4720-7000-a92d-05a943ef2cbe error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT terminal node failure is visible
+ASSERT aggregate effect disposition
+ASSERT invalid node is rejected before dispatch
+ASSERT plan failure retains input validation kind
+ASSERT plan failure retains the typed policy rejection
+ASSERT official-client terminal tool
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-post-effect-terminal-failure6adc2a
+  [OK]          execute_keeper_tool_call_with_outcome         75   post-effec...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-unknown-effect-terminal-failure1d054f (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-post-effect-terminal-failure6adc2a for requested path /tmp/composition-unknown-effect-terminal-failure1d054f
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-unknown-effect-terminal-failure1d054f for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-unknown-effect-terminal-failure1d054f phase=running
+[2026-09-12 21:18:19] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:19] [WARN] [Keeper] explicit current Memory write failed keeper=keeper-exec-tools: Sys_error("Value too large for defined data type")
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_memory_write returned error result: {"ok":false,"error_kind":"persistence_failed","detail":"Sys_error(\"Value too large for defined data type\")"}
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_unknown-write-before-post run=01a0977c-473c-7000-b708-6bd3d921f8a8 error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT ordinary writable failure is visible
+ASSERT producer-owned unknown disposition
+ASSERT official-client unknown-effect terminal tool
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-unknown-effect-terminal-failure1d054f
+  [OK]          execute_keeper_tool_call_with_outcome         76   unknown-ef...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-conditional-read-completion4602e3 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-unknown-effect-terminal-failure1d054f for requested path /tmp/composition-conditional-read-completion4602e3
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-conditional-read-completion4602e3 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-conditional-read-completion4602e3 phase=running
+[2026-09-12 21:18:19] [WARN] [Misc] MASC observation event was not published: event bus is not initialized
+[2026-09-12 21:18:19] [WARN] [Board] backend() called before server init, auto-initializing JSONL
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_write-then-conditional-read run=01a0977c-4756-7000-9f6c-2078fbd4aedd error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT conditional-read composition completes
+ASSERT read reused the exact conditional revision
+ASSERT unchanged read does not abort the provider turn
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-conditional-read-completion4602e3
+  [OK]          execute_keeper_tool_call_with_outcome         77   write then...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-async-param-durable-status037f12 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-conditional-read-completion4602e3 for requested path /tmp/composition-async-param-durable-status037f12
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-async-param-durable-status037f12 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-async-param-durable-status037f12 phase=running
+ASSERT async acceptance mode
+ASSERT async acceptance exposes run identity
+[2026-09-12 21:18:19] [WARN] [Keeper] composition run summary telemetry degraded without changing execution: tool=keeper_compose_memory-background run=01a0977c-476f-7000-aad2-a65563a9381f error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT durable terminal status
+ASSERT durable structured composition result
+ASSERT bound param reaches worker action input
+ASSERT worker tool executes with bound query
+[2026-09-12 21:18:19] [INFO] [Keeper/keeper-exec-tools] composition result committed request_id=kmsg-fa1b7441bd6df03f2048f85f3c41da5f tool=keeper_compose_memory-background outcome=succeeded
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-async-param-durable-status037f12
+  [OK]          execute_keeper_tool_call_with_outcome         78   async comp...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-async-artifact-status2b2c18 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-async-param-durable-status037f12 for requested path /tmp/composition-async-artifact-status2b2c18
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-async-artifact-status2b2c18 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-async-artifact-status2b2c18 phase=running
+ASSERT artifact status remains terminal
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-async-artifact-status2b2c18
+  [OK]          execute_keeper_tool_call_with_outcome         79   async comp...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/composition-terminal-outer-contractdeb596 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-async-artifact-status2b2c18 for requested path /tmp/composition-terminal-outer-contractdeb596
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/composition-terminal-outer-contractdeb596 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/composition-terminal-outer-contractdeb596 phase=running
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/composition-terminal-outer-contractdeb596
+  [OK]          execute_keeper_tool_call_with_outcome         80   terminal c...
+ASSERT unknown Board route is explicit
+  [OK]          exact_registered_dispatch                      0   raw Board ...
+ASSERT board tool is named
+ASSERT voice tool is named
+ASSERT task tool is named
+ASSERT surface read is named
+ASSERT tools_list is named
+ASSERT Grep is named
+ASSERT Read is named
+ASSERT memory tool is named
+ASSERT MASC task tool tracks the model schemas
+ASSERT MASC plan tool tracks the model schemas
+ASSERT a board-looking name nobody registered is absent
+ASSERT the internal Grep route is not a model name
+ASSERT tools_list schema authority is the TOML registry
+ASSERT discovery_fields internal name
+ASSERT discovery_fields leaves active_names to shared runtime
+ASSERT Execute public name
+ASSERT Execute executor
+ASSERT Execute internal route is not a model name
+ASSERT Execute active public name listed
+ASSERT Execute model projection
+ASSERT Execute policy group omitted
+ASSERT Execute schema properties include argv
+ASSERT Execute schema properties omit retired executable
+ASSERT Execute schema properties omit retired pipeline
+ASSERT Execute schema properties include script
+ASSERT Execute schema has no shape errors
+ASSERT example input property is declared: argv
+ASSERT example input property is declared: cwd
+ASSERT Execute has one neutral typed example
+ASSERT Execute example uses an opaque program identity
+ASSERT Execute example excludes product identity gh
+ASSERT Execute example excludes product identity git
+ASSERT Execute example excludes product identity rg
+ASSERT Execute examples use neutral cwd placeholders
+ASSERT non-execute descriptor omits examples field
+ASSERT Grep policy group omitted
+ASSERT Grep internal route is not a model name
+ASSERT Grep preferred model name listed
+ASSERT malformed schema surfaces property error
+ASSERT malformed schema surfaces required error
+ASSERT malformed schema surfaces whitespace required error
+ASSERT malformed schema surfaces oneOf case error
+ASSERT malformed schema surfaces oneOf required-shape error
+ASSERT oneOf shape keeps both branches
+ASSERT oneOf argv branch retained
+ASSERT oneOf empty-required branch retained
+ASSERT empty schema has no properties
+ASSERT empty schema has no required names
+ASSERT empty schema has no shape errors
+ASSERT list query rejection is typed
+ASSERT compatibility search requires frozen authority
+  [OK]          keeper_tools_list_json                         0   names the ...
+ASSERT complete inventory list completes
+ASSERT operator-only list availability
+ASSERT operator-only list has no active names
+ASSERT operator-only inventory search completes
+ASSERT operator-only Tool search retains typed availability
+  [OK]          keeper_tools_list_json                         1   lists and ...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/tools-search-agent-core-error4e9afa (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/composition-terminal-outer-contractdeb596 for requested path /tmp/tools-search-agent-core-error4e9afa
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/tools-search-agent-core-error4e9afa for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/tools-search-agent-core-error4e9afa phase=running
+[2026-09-12 21:18:19] [WARN] [Keeper] tool keeper_capability_search returned error result: Keeper capability search rejected the query.
+ASSERT policy rejection remains deterministic
+ASSERT Agent Core receives the typed search error kind
+[2026-09-12 21:18:19] [INFO] [ToolValidation] tool_input_validation rejected keeper_capability_search: Your call to "keeper_capability_search":
+{"query":3}
+
+Errors (fix these and call again):
+  "query": wrong type — expected: string, got: integer(3)
+ASSERT policy rejection remains deterministic
+ASSERT descriptor validation reaches Agent Core as typed data
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/tools-search-agent-core-error4e9afa
+  [OK]          keeper_tools_list_json                         2   Agent Core...
+ASSERT descriptor route miss is not ok
+ASSERT descriptor route miss has typed error
+ASSERT descriptor route miss is a runtime failure
+ASSERT descriptor identity is retained
+ASSERT executor identity is retained
+ASSERT runtime handler identity is retained
+  [OK]          keeper_tools_list_json                         3   descriptor...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/lane-status-composable-observationsff9e94 (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/tools-search-agent-core-error4e9afa for requested path /tmp/lane-status-composable-observationsff9e94
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/lane-status-composable-observationsff9e94 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/lane-status-composable-observationsff9e94 phase=running
+ASSERT status observation completes without a guest
+ASSERT the selected profile reaches the producer
+ASSERT the profile-specific observation is present
+ASSERT status observation completes without a guest
+ASSERT the selected profile reaches the producer
+ASSERT the profile-specific observation is present
+ASSERT status observation completes without a guest
+ASSERT the selected profile reaches the producer
+ASSERT the profile-specific observation is present
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/lane-status-composable-observationsff9e94
+  [OK]          composable_output_contract                     0   lane obser...
+  [OK]          composable_output_contract                     1   every comp...
+[2026-09-12 21:18:19] [INFO] [Workspace] MASC base: /tmp/keeper_tool_dispatch_runtime_composable_output15accc (no git root found)
+[2026-09-12 21:18:19] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/lane-status-composable-observationsff9e94 for requested path /tmp/keeper_tool_dispatch_runtime_composable_output15accc
+[2026-09-12 21:18:19] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/keeper_tool_dispatch_runtime_composable_output15accc for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:19] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc phase=running
+[2026-09-12 21:18:19] [INFO] [Misc] workspace broadcast committed from=keeper-exec-tools mention=none request_id=wmsg-7fca6448a85b1327df69f4d81417c07b seq=1 bytes=45
+[2026-09-12 21:18:19] [INFO] [Keeper/keeper-exec-tools] Execute result authorization operation=tool_execute source=keeper_always_allow
+[2026-09-12 21:18:19] [INFO] [Keeper] shell_ir dispatch keeper=keeper-exec-tools sandbox=docker status=exit=0 elapsed_ms=58
+[2026-09-12 21:18:20] [INFO] [Misc] workspace broadcast committed from=composable-output-probe mention=none request_id=wmsg-15cdc0ba07ac4cb40e05cd6d78bb5041 seq=2 bytes=34
+[2026-09-12 21:18:20] [INFO] [Misc] workspace broadcast committed from=composable-output-probe mention=none request_id=wmsg-c7d0885e860cabeb7a9156fe54147859 seq=3 bytes=48
+[2026-09-12 21:18:20] [INFO] [Board] Board flusher actor started
+[2026-09-12 21:18:20] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc/.masc/playground/docker/keeper-exec-tools/composable-output-probe.txt
+[2026-09-12 21:18:20] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc/.masc/playground/docker/keeper-exec-tools/composable-output-probe.txt mode=overwrite bytes=24
+[2026-09-12 21:18:20] [INFO] [Keeper/keeper-exec-tools] internal playground write authorized by confined capability path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc/.masc/playground/docker/keeper-exec-tools/composable-output-probe.txt
+[2026-09-12 21:18:20] [INFO] [Keeper] WRITE_AUDIT: keeper=keeper-exec-tools fs_edit path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc/.masc/playground/docker/keeper-exec-tools/composable-output-probe.txt mode=patch op=replace replace_all=false occurrences=1 bytes=33
+[2026-09-12 21:18:20] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/keeper_tool_dispatch_runtime_composable_output15accc
+  [OK]          composable_output_contract                     2   real produ...
+  [OK]          agent_core_descriptor                          0   catalog fl...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/model_visible_agent_core_descriptors24b92f (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/keeper_tool_dispatch_runtime_composable_output15accc for requested path /tmp/model_visible_agent_core_descriptors24b92f
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/model_visible_agent_core_descriptors24b92f for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:20] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/model_visible_agent_core_descriptors24b92f phase=running
+[2026-09-12 21:18:20] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/model_visible_agent_core_descriptors24b92f
+  [OK]          agent_core_descriptor                          1   model-visi...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/surface_post_model_description9db581 (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/model_visible_agent_core_descriptors24b92f for requested path /tmp/surface_post_model_description9db581
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/surface_post_model_description9db581 for test executable test_keeper_tool_dispatch_runtime.exe
+[2026-09-12 21:18:20] [INFO] [Keeper] registry: registering keeper name=keeper-exec-tools base_path=/tmp/surface_post_model_description9db581 phase=running
+ASSERT help and Agent Core projections use the same description
+ASSERT projected description contains "read by a person"
+ASSERT projected description contains "unchanged status reposted every cycle"
+ASSERT projected description contains "the turn ends without a post"
+[2026-09-12 21:18:20] [INFO] [Keeper] registry: unregistering keeper name=keeper-exec-tools base_path=/tmp/surface_post_model_description9db581
+  [OK]          agent_core_descriptor                          2   surface po...
+
+Test Successful in 6.550s. 102 tests run.
+::endgroup::
+[targeted] test/test_keeper_tool_dispatch_runtime: OK in 7s
+[targeted] test/test_browser_observation_composition: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_browser_observation_composition: start 2026-09-12T21:18:20Z
+::group::{browser observation composition}
+Testing `browser observation composition'.
+This run has ID `KV4XDST2'.
+
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-43a005 (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-43a005 for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+[2026-09-12 21:18:20] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_observed-page node=page error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+  [OK]          production observer          0   receipt failure prevents com...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-71a5fe (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-43a005 for requested path /tmp/browser-composition-observation-71a5fe
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-71a5fe for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+[2026-09-12 21:18:20] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_observed-page node=page error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+  [OK]          production observer          1   schema rejection still requi...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-5c5caa (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-71a5fe for requested path /tmp/browser-composition-observation-5c5caa
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-5c5caa for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+ASSERT node log records schema rejection
+ASSERT node receipt preserves composition identity
+ASSERT retained producer root survives output schema rejection
+ASSERT successful composition payload stays inline
+ASSERT committed node roots retain the observation
+ASSERT retained observation is not a GC candidate
+  [OK]          production observer          2   success preserves inline pay...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-2d28c4 (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-5c5caa for requested path /tmp/browser-composition-observation-2d28c4
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-2d28c4 for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+ASSERT node log records schema rejection
+ASSERT node receipt preserves composition identity
+ASSERT retained producer root survives output schema rejection
+ASSERT committed node roots retain the observation
+ASSERT retained observation is not a GC candidate
+  [OK]          production observer          3   schema rejection preserves o...
+
+Test Successful in 0.025s. 4 tests run.
+::endgroup::
+[targeted] test/test_browser_observation_composition: OK in 0s
+[targeted] test/test_keeper_skill_composition_evidence: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_skill_composition_evidence: start 2026-09-12T21:18:20Z
+::group::{keeper_skill_composition_evidence}
+Testing `keeper_skill_composition_evidence'.
+This run has ID `TK5IXVUK'.
+
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/failed-composition-evidence5e8b94 (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/failed-composition-evidence5e8b94 for test executable test_keeper_skill_composition_evidence.exe
+ASSERT failed top-level result round-trips exactly
+ASSERT failed node result round-trips exactly
+ASSERT unrelated registered tool identity is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT failed top-level result round-trips exactly
+ASSERT failed node result round-trips exactly
+ASSERT unrelated registered tool identity is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT failed top-level result round-trips exactly
+ASSERT failed node result round-trips exactly
+ASSERT unrelated registered tool identity is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+ASSERT missing or ambiguous failure phase is rejected
+  [OK]          latest authority          0   canonical failed results and st...
+[2026-09-12 21:18:20] [INFO] [Workspace] MASC base: /tmp/masc_skill_composition_evidenced0b627 (no git root found)
+[2026-09-12 21:18:20] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/failed-composition-evidence5e8b94 for requested path /tmp/masc_skill_composition_evidenced0b627
+[2026-09-12 21:18:20] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/masc_skill_composition_evidenced0b627 for test executable test_keeper_skill_composition_evidence.exe
+ASSERT latest run
+ASSERT blank provider id remains opaque
+ASSERT parent turn
+ASSERT all later batches remain published
+ASSERT each published batch keeps its schedule
+ASSERT another reference remains absent
+  [OK]          latest authority          1   replaces only the exact reference.
+
+Test Successful in 0.011s. 2 tests run.
+::endgroup::
+[targeted] test/test_keeper_skill_composition_evidence: OK in 0s

@@ -176,3 +176,9 @@ module For_testing : sig
     -> (unit -> 'a)
     -> 'a
 end
+
+val read_sandbox_raw_prefix :
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  path:string -> ?cwd:string -> max_bytes:int -> unit -> (string, string) result
+(** Contained raw binary prefix, bounded before endpoint or Docker capture. *)

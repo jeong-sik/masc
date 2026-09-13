@@ -682,11 +682,19 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
            let events = Runtime_event_bus.drain sub in
            (* A wake is optional, coalesced metadata. It never moves source
               bodies into this relay or waits for an Add-on to observe them. *)
-           if List.exists (fun (event : Agent_core.Event_bus.event) ->
-                match event.payload with
-                | Agent_core.Event_bus.ToolCompleted _ -> true
-                | _ -> false) events
-           then Lane_addon_runtime.notify_activity ~config;
+           let activities = List.filter_map (fun (event : Agent_core.Event_bus.event) ->
+             match event.payload with
+             | Agent_core.Event_bus.ToolCompleted {tool_name;_} ->
+                 let activity = match Tool_schemas_misc.misc_operation_of_tool_name tool_name with
+                   | Some (Misc_msx_load | Misc_msx_eject | Misc_msx_restore
+                     | Misc_msx_change_disk | Misc_msx_press | Misc_msx_step
+                     | Misc_msx_step_until_change) -> Lane_addon_sources.Msx_changed
+                   | Some (Misc_browser_session | Misc_browser_goto | Misc_browser_act
+                     | Misc_browser_interact) -> Lane_addon_sources.Browser_changed
+                   | Some _ | None -> Lane_addon_sources.Tool_completed in
+                 Some activity
+             | _ -> None) events |> List.sort_uniq Stdlib.compare in
+           List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);
          update_relay_queue_depth !pending

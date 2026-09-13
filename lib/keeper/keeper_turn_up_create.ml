@@ -47,19 +47,13 @@ let write_initial_meta ~intake_token config meta =
   | Ok None -> Error "Keeper owner removed metadata during create"
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
-let with_config_warnings warnings result =
-  match warnings with
-  | [] -> result
-  | warnings ->
-    Tool_result.with_metadata
-      (`Assoc
-         [ ( "keeper_config_warnings"
-           , `List
-               (List.map
-                  Keeper_turn_up_config_persistence.warning_to_yojson
-                  warnings) )
-         ])
-      result
+let with_committed_config ~revision ~warnings result =
+  Tool_result.with_metadata
+    (`Assoc ["keeper_config_write", `Assoc
+        ["revision", Keeper_turn_up_config_persistence.config_revision_to_yojson revision;
+         "applied", `Bool true;
+         "warnings", `List (List.map Keeper_turn_up_config_persistence.warning_to_yojson warnings)]])
+    result
 
 let create_keeper ~expected_config_revision (ctx : _ context)
     (p : parsed_args) : tool_result =
@@ -206,12 +200,13 @@ let create_keeper ~expected_config_revision (ctx : _ context)
       in
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
-         Keeper_turn_up_config_persistence.persist_with_publication
+         Keeper_turn_up_config_persistence.commit_configuration
            ~expected_revision:expected_config_revision
            ~config:ctx.config
            ~parsed:p
            ~meta
-           ~publish:(fun runtime_transaction _outcome ->
+           ~publish:(fun _outcome revision ->
+           let publish () =
              let base_dir = session_base_dir ctx.config in
              ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
              let bundle_paths =
@@ -275,41 +270,18 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              in
              match checkpoint_result with
              | Error detail ->
-               Keeper_turn_up_config_persistence.Rollback
-                 (Error (`Checkpoint detail))
+               Error (`Checkpoint detail)
              | Ok _ ->
                Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-               (match
-                  Runtime.commit_keeper_assignment ?egress_allow:p.egress_allow_opt runtime_transaction
-                    ~runtime_id:
-                      (match p.runtime_id_opt with
-                       | Some runtime_id -> Some runtime_id
-                       | None ->
-                         (* Starting a declared Keeper is not an unassign action.
-                            Read the assignment under the publication transaction's
-                            lock so the wizard's explicit lane survives first boot. *)
-                         (match Runtime.keeper_assignment_revision runtime_transaction with
-                          | Runtime.Runtime_config_missing -> None
-                          | Runtime.Runtime_config_present { assignment; _ } ->
-                            (match assignment with
-                             | Runtime.Assignment_missing -> None
-                             | Runtime.Assignment_present runtime_id -> Some runtime_id)))
-                with
-                | Error error ->
-                  Keeper_turn_up_config_persistence.Rollback
-                    (Error (`Runtime_assignment error))
-                | Ok runtime_write ->
-                  let runtime_warnings =
-                    Keeper_turn_up_config_persistence
-                    .warnings_of_runtime_assignment_write runtime_write
-                  in
-                  (match write_initial_meta ~intake_token ctx.config meta with
-                   | Ok () ->
-                     Keeper_turn_up_config_persistence.Commit_with_warnings
-                       (Ok (), runtime_warnings)
-                   | Error error ->
-                     Keeper_turn_up_config_persistence.Rollback
-                       (Error (`Metadata error)))))
+               Result.map_error (fun detail -> `Metadata detail)
+                 (write_initial_meta ~intake_token ctx.config meta)
+           in
+           let published =
+             try publish () with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (`Metadata (Printexc.to_string exn))
+           in
+           (published, revision))
            ()
        with
        | Error e ->
@@ -325,7 +297,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
          Progress.stop_tracking task_id;
          tool_result_error ~class_:Tool_result.Runtime_failure
            (Printf.sprintf "declarative keeper config write failed: %s" detail)
-       | Ok { value = Error (`Checkpoint detail); warnings } ->
+       | Ok { value = (Error (`Checkpoint detail), revision); warnings } ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
            ~labels:
@@ -341,9 +313,9 @@ let create_keeper ~expected_config_revision (ctx : _ context)
          Progress.stop_tracking task_id;
          tool_result_error
            ~class_:Tool_result.Runtime_failure
-           (Printf.sprintf "initial checkpoint save failed: %s" detail)
-         |> with_config_warnings warnings
-       | Ok { value = Error (`Metadata e); warnings } ->
+           (Printf.sprintf "configuration saved, but initial checkpoint save failed: %s" detail)
+         |> with_committed_config ~revision ~warnings
+       | Ok { value = (Error (`Metadata e), revision); warnings } ->
          Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
          Log.Keeper.error
@@ -351,17 +323,10 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            p.name
            e;
          Progress.stop_tracking task_id;
-         tool_result_error ~class_:Tool_result.Runtime_failure e
-         |> with_config_warnings warnings
-       | Ok { value = Error (`Runtime_assignment e); warnings } ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string LifecycleDispatchRejections)
-           ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
-           ();
-         Progress.stop_tracking task_id;
-         tool_result_error ~class_:Tool_result.Runtime_failure e
-         |> with_config_warnings warnings
-       | Ok { value = Ok (); warnings } ->
+         tool_result_error ~class_:Tool_result.Runtime_failure
+           ("configuration saved, but owner publication failed: " ^ e)
+         |> with_committed_config ~revision ~warnings
+       | Ok { value = (Ok (), revision); warnings } ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
@@ -396,7 +361,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected)))
-        |> with_config_warnings warnings))
+        |> with_committed_config ~revision ~warnings))
                    with
                    | result, None -> result
                    | result, Some operation_id ->

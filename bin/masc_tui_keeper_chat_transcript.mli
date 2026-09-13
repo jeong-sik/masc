@@ -256,6 +256,9 @@ val revision : t -> int
     transcript. *)
 
 val phase : t -> phase
+val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
+(** Server acceptance and queue length observed at acceptance, if received.
+    This remains historical after the run starts; inspect [phase] alongside it. *)
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string

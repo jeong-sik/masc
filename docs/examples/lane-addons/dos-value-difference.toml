@@ -1,0 +1,16 @@
+# Install beside addons/dos-world/install.toml. Adjust manifest paths when
+# copying declarations into the active configuration directory.
+id = "dos-value-difference"
+run_id = "dos-demo"
+manifest_path = "../../../addons/value-difference/lane.toml"
+
+[binding]
+field = "counter"
+unit = "count"
+
+[[binding.sources]]
+source_id = "guest"
+kind = "lane_output"
+installation_id = "dos-demo"
+output_id = "guest"
+selection = "latest_completed"

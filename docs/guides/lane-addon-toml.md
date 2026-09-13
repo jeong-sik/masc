@@ -14,6 +14,10 @@ Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나�
 저장소의 `config/`를 실행 중 설정으로 자동 사용하지 않는다. Dashboard의 **TOML configuration**에
 실제로 읽는 디렉터리가 표시된다.
 
+Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같은 파일을
+읽고 저장한다. 원문 편집·충돌 확인·저장 영수증은
+[공통 선언 편집 가이드](lane-declaration-editor.md)를 따른다.
+
 [MSX 설치 예제](../examples/lane-addons/msx-frames.toml)는 현재 지원하는 형식이다.
 다음 순서로 설치한다.
 

@@ -1,0 +1,10 @@
+{
+  "source_commit": "2855bbad1d0775f8f5ee4abfa75331852662b47b",
+  "binary_sha256": "d3ff0132359915e8106c20e73c7cba4d410a31ec0600f1d25c845c968aca1ef3",
+  "prefix": "/tmp/masc-2855-installed-candidate-20260912",
+  "binary": "/private/tmp/masc-2855-installed-candidate-20260912/.masc-releases/6ca8434aab1bee58ef85b26cb2de39d1c8e4cebbb8e78617fed129f78fae211b/masc",
+  "paired_tree_verified": true,
+  "live_server_started": false,
+  "replaces_active_runtime": false,
+  "known_ci_gap": "wrong Gate binding classified as storage integrity; candidate inspection only"
+}

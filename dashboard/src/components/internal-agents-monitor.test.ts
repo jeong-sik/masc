@@ -95,6 +95,34 @@ describe('InternalAgentsMonitor', () => {
     })
   })
 
+  it('shows workspace curator runs without inventing a Keeper owner or evidence link', async () => {
+    const actor = '/workspace/shared-evidence'
+    const run = {
+      runId: 'workspace-curator-test', runKind: 'exact_output', lane: 'workspace_curator_exact',
+      subjectId: null, actor, startedAt: 1786200000, status: 'succeeded', elapsedSeconds: 1,
+    }
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [run], count: 1, total: 1, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRun.mockResolvedValue({ ...run,
+      input: { kind: 'exact', payload: { sources: [] } },
+      output: { semantic_verification: 'not_performed' },
+      payloadAvailability: { input: { state: 'available' }, output: { state: 'available' } },
+      skillEvidence: { state: 'no_keeper_skills' },
+    })
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const row = await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
+    fireEvent.click(row)
+    expect(await screen.findByText(/model-proposed; semantic verification not performed/)).toBeTruthy()
+    expect(container.textContent).toContain(actor)
+    expect(container.textContent).toContain('1 runs · 0 Keeper owners')
+    expect(screen.queryByRole('link', { name: /Keeper 전체 evidence/ })).toBeNull()
+    expect(Array.from(container.querySelectorAll('option')).some(option => option.value === actor)).toBe(false)
+    expect(Array.from(container.querySelectorAll('a')).some(link => link.href.includes(encodeURIComponent(actor)))).toBe(false)
+    expect(memoryApi.fetchKeeperMemoryJournal).not.toHaveBeenCalled()
+    expect(rawApi.fetchKeeperRawTraces).not.toHaveBeenCalled()
+  })
+
   it('shows configured, running, and no-retained-observation lanes without controlling them', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
@@ -194,7 +222,7 @@ describe('InternalAgentsMonitor', () => {
 
     const owner = await screen.findByRole('link', { name: 'full-cycle-probe' })
     expect(owner.closest('tr')?.textContent).toContain('없음')
-    expect(screen.getByText('0 runs · 1 owners')).toBeTruthy()
+    expect(screen.getByText('0 runs · 1 Keeper owners')).toBeTruthy()
   })
 
   it('expands a verification run and shows its ordered tool evidence', async () => {

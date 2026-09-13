@@ -21,6 +21,18 @@ let test_operation_roundtrip () =
     (Identity.delivery_key_equal key decoded)
 ;;
 
+let test_native_operation_roundtrip () =
+  let operation_id = Identity.Request_id.of_string "original-operation" |> expect_ok in
+  let continuation_id = Identity.Request_id.of_string "native-turn-fingerprint" |> expect_ok in
+  let key = Identity.Operation_native {operation_id; continuation_id} in
+  let decoded = Identity.delivery_key_of_yojson (Identity.delivery_key_to_yojson key) |> expect_ok in
+  check bool "native attempt roundtrips" true (Identity.delivery_key_equal key decoded);
+  check bool "native attempt differs from original operation" false
+    (Identity.delivery_key_equal key (Identity.Operation operation_id));
+  let other = Identity.Request_id.of_string "next-native-turn-fingerprint" |> expect_ok in
+  check bool "another captured turn has distinct tool ordinals" false
+    (Identity.delivery_key_equal key (Identity.Operation_native {operation_id; continuation_id=other}))
+
 let test_fusion_roundtrip () =
   let request_id =
     Identity.Request_id.of_string "fus-async-test" |> expect_ok
@@ -169,6 +181,7 @@ let () =
     "keeper chat delivery identity"
     [ ( "identity"
       , [ test_case "operation roundtrip" `Quick test_operation_roundtrip
+        ; test_case "native operation roundtrip" `Quick test_native_operation_roundtrip
         ; test_case
             "Fusion run roundtrip"
             `Quick

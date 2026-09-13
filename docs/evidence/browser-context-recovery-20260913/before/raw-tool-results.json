@@ -1,0 +1,32 @@
+[
+  {
+    "trace_version": 4,
+    "worker_run_id": "wr-1a0970874b6-055a-0000",
+    "seq": 3,
+    "ts": 1789240325.820143,
+    "agent_name": "browser-handoff-proof-95380000",
+    "record_type": "tool_execution_finished",
+    "session_id": "trace-1789240308267-00000",
+    "tool_use_id": "exec-22ee9eea-4b47-4030-b836-da4a33d3ce50",
+    "tool_name": "keeper_compose_browser-live-click-content",
+    "tool_turn": 1,
+    "tool_planned_index": 0,
+    "tool_result": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240325782-0001\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":16.888856887817383},\"tool_use_id\":\"composition:36:01a09708-b695-7000-916c-69adf0dd9418:41:exec-22ee9eea-4b47-4030-b836-da4a33d3ce50:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+    "tool_error": true
+  },
+  {
+    "trace_version": 4,
+    "worker_run_id": "wr-1a0970874b6-055a-0000",
+    "seq": 5,
+    "ts": 1789240329.766963,
+    "agent_name": "browser-handoff-proof-95380000",
+    "record_type": "tool_execution_finished",
+    "session_id": "trace-1789240308267-00000",
+    "tool_use_id": "exec-c65599e7-93dd-4d73-8129-2ccd7f898129",
+    "tool_name": "keeper_compose_browser-live-click-content",
+    "tool_turn": 1,
+    "tool_planned_index": 1,
+    "tool_result": "{\"composition_tool\":\"keeper_compose_browser-live-click-content\",\"tool_kind\":\"composition\",\"cause\":{\"kind\":\"tool_did_not_complete\",\"node\":{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}},\"effect_disposition\":\"proven_pre_effect\",\"settled\":[{\"node_id\":\"click\",\"execution_id\":\"exec-1789240329754-0003\",\"tool_name\":\"BrowserInteract\",\"input\":{\"lane\":\"live\",\"action\":\"follow_link\",\"clientId\":\"6b280dd5-cee2-4cdb-ac13-32263ff418c3\",\"tabId\":1,\"documentId\":\"f9888aafb576a0fbfd44a6dbc4698e87\",\"nodeId\":\"n1\",\"expectedUrl\":\"http://127.0.0.1:53476/index.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"effect_disposition\":\"proven_pre_effect\",\"failure_class\":\"workflow_rejection\",\"disposition\":\"failed\",\"data\":null,\"message\":\"scene_link_not_observed\",\"tool_name\":\"masc_browser_interact\",\"duration_ms\":7.457971572875977},\"tool_use_id\":\"composition:36:01a09708-c61a-7000-99f5-96a33177b891:41:exec-c65599e7-93dd-4d73-8129-2ccd7f898129:5:click\",\"failure_effect_disposition\":\"proven_pre_effect\",\"deferred_kind\":null,\"result_bytes\":23,\"truncated_to\":null}]}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes.",
+    "tool_error": true
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "controls": [
+    {
+      "name": "DOS replaced after statistics removal",
+      "rejected": true,
+      "semantic_check": null
+    },
+    {
+      "name": "Missing metric reported as zero count",
+      "rejected": true,
+      "semantic_check": null
+    },
+    {
+      "name": "Frozen row absent from final Slice",
+      "rejected": true,
+      "semantic_check": null
+    },
+    {
+      "name": "Endpoint source differs from binding",
+      "rejected": true,
+      "semantic_check": "endpoint source differs from metric binding"
+    },
+    {
+      "name": "Endpoint upstream coverage is empty",
+      "rejected": true,
+      "semantic_check": "endpoint upstream coverage is empty"
+    }
+  ],
+  "scope": "In-memory corrupted inputs only, not runtime observations. Endpoint controls rehash the retained observation, frozen bundle and HTTP receipt, and require the exact semantic rejection."
+}

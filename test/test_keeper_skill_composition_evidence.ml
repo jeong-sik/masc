@@ -155,13 +155,71 @@ let test_latest_exact_reference_replaces_prior_publication () =
           |> Option.is_none))
 ;;
 
+let test_canonical_failed_results () =
+  let module E = Keeper_skill_composition_evidence in
+  let base = Filename.temp_dir "failed-composition-evidence" "" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let config = Workspace.default_config base in
+    let reference = make_reference "failed-read" 'b' in
+    let replace key value = function
+      | `Assoc fields -> `Assoc ((key,value) :: List.remove_assoc key fields)
+      | _ -> Alcotest.fail "expected object" in
+    List.iter (fun phase ->
+      let failure tool_name = Tool_result.make_err ~tool_name ~start_time:(Time_compat.now ())
+        ~class_:Tool_result.Workflow_rejection ~effect_disposition:phase
+        "Missing host permission for the tab" in
+      let node_result = Tool_result.to_json (failure "masc_browser_read") in
+      let settled = node ~node_id:"read" ~schedule:{planned_index=1;batch_index=1;
+        batch_size=1;execution_mode=Agent_core.Tool_contract.Serial} ()
+        |> replace "tool_name" (`String "BrowserRead")
+        |> replace "result" node_result in
+      let result = failure "keeper_compose_failed-read" in
+      let evidence = E.make ~reference
+        ~composition_run_id:(Keeper_tool_plan.Composition_run_id.fresh ())
+        ~parent_invocation:(parent_invocation ()) ~request_id:None ~keeper_name:"delta"
+        ~composition_tool:"keeper_compose_failed-read"
+        ~composition_execution:Keeper_tool_composition_catalog.Inline
+        ~result ~executor_settlements:[settled] |> Result.get_ok in
+      E.save_latest config evidence |> Result.get_ok |> ignore;
+      let loaded = E.load_latest config reference |> Result.get_ok |> Option.get |> E.to_yojson in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool) "failed top-level result round-trips exactly" true
+        (member "result" loaded = Tool_result.to_json result);
+      Alcotest.(check bool) "failed node result round-trips exactly" true
+        (member "executor_settlements" loaded |> to_list = [settled]);
+      let wrong_node = replace "result"
+        (Tool_result.to_json (failure "masc_browser_act")) settled in
+      Alcotest.(check bool) "unrelated registered tool identity is rejected" true
+        (Result.is_error (E.of_yojson
+           (replace "executor_settlements" (`List [wrong_node]) loaded)));
+      let fields = member "result" loaded |> to_assoc in
+      List.iter (fun malformed ->
+        Alcotest.(check bool) "missing or ambiguous failure phase is rejected" true
+          (Result.is_error (E.of_yojson (replace "result" malformed loaded))))
+        [`Assoc (List.remove_assoc "effect_disposition" fields);
+         replace "effect_disposition" (`String "invented") (`Assoc fields);
+         `Assoc (("effect_disposition",`String "proven_pre_effect") :: fields)];
+      (* Canonical failed evidence must reach storage, where the occupied
+         directory fails independently of result schema validation. *)
+      let path = Filename.concat (Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
+      Fs_compat.remove_tree path;
+      Out_channel.with_open_bin path (fun channel -> output_string channel "occupied");
+      (match E.save_latest config evidence with
+       | Error (E.Directory_prepare_failed _) -> ()
+       | Error error -> Alcotest.fail ("expected directory IO refusal: " ^ E.error_to_string error)
+       | Ok _ -> Alcotest.fail "occupied evidence directory accepted a write");
+      Sys.remove path)
+      [Tool_result.Proven_pre_effect; Tool_result.Proven_post_effect; Tool_result.Effect_outcome_unknown])
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Alcotest.run
     "keeper_skill_composition_evidence"
     [ ( "latest authority"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "canonical failed results and storage refusal" `Quick test_canonical_failed_results
+        ; Alcotest.test_case
             "replaces only the exact reference"
             `Quick
             test_latest_exact_reference_replaces_prior_publication

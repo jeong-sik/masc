@@ -1,0 +1,21 @@
+{
+  "status": "ok",
+  "overall_status": "ok",
+  "build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "commit_source": "embedded",
+    "binary_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "ec8e45b98440645b975959060e81a1cb69495f78835d7e42c400ffd4c793e2ef",
+    "binary_commit_unix_ts": 1789210878.0,
+    "binary_commit_age_seconds": 9351,
+    "executable_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183/masc",
+    "executable_dir": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183",
+    "runtime_instance_id": "01a0955f-9536-7000-b3ef-639e00e0d2bb",
+    "started_at": "2026-09-12T11:27:44Z",
+    "uptime_seconds": 7765
+  }
+}

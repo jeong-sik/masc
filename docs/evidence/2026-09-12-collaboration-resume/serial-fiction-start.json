@@ -1,0 +1,60 @@
+{
+  "created_at": "2026-09-12T11:37:31.419162+00:00",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "goal": {
+    "status": "ok",
+    "action": "created",
+    "goal_id": "memory-garden-serial-fiction",
+    "goal": {
+      "id": "memory-garden-serial-fiction",
+      "criterion_revision": "46694c469406f3422f1f87d93f22ccfa",
+      "title": "기억의 정원: 서로의 선택을 이어가는 세 편의 연작 소설",
+      "metric": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/serial/evidence.json 및 /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/serial/story.md, /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/serial/continuity.md, /Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/serial/review.md의 실제 원문을 열어 다음 네 기준을 검사한다. 1. serial/story.md에 한국어 완결 연작 소설이 정확히 세 편 있고, 각 편에 제목·사건·인물의 선택·결과가 있으며 앞 편의 선택이 다음 편의 사건에 영향을 준다. 개요나 제작 보고서로 본문을 대신하지 않는다. 2. serial/continuity.md에 핵심 인물·관계·시간 순서·중요 물건·미해결 약속 다섯 항목을 정리하고 세 편의 실제 문장을 근거로 대조한다. 설명되지 않은 모순은 수정하거나 서사 안에서 설명한다. 3. serial/review.md에 동료가 실제 초고를 읽고 제기한 구체적 반론, 작성자의 응답, 반영된 본문 변경 전후를 기록한다. 적어도 한 건은 독자 이해나 인물의 선택에 영향을 주는 실질 수정이며, 실제 전달·Board 기록의 식별자를 포함한다. 4. serial/evidence.json에 위 세 파일의 실제 이름·바이트 수·SHA256과 각 기준의 검사 결과를 기록한다. 원래 전시 산출물과 기존 Goal 증거는 보존하고 소설은 허구임을 명시한다.",
+      "target_value": "4개 기준 모두 충족",
+      "due_date": null,
+      "priority": 3,
+      "phase": "executing",
+      "last_review_note": null,
+      "last_review_at": null,
+      "created_at": "2026-09-12T11:35:42Z",
+      "updated_at": "2026-09-12T11:35:42Z"
+    },
+    "task_goal_id_example": "masc_add_task({title: \"Implement 기억의 정원: 서로의 선택을 이어가는 세 편의 연작 소설\", goal_id: \"memory-garden-serial-fiction\"})",
+    "task_link_field": "goal_id",
+    "task_link_mode": "structured_goal_id",
+    "linked_task_title_example": "[child] 기억의 정원: 서로의 선택을 이어가는 세 편의 연작 소설"
+  },
+  "task": {
+    "ok": true,
+    "task_id": "task-003",
+    "summary": "Added task-003: 기억의 정원 세계에서 이어지는 세 편의 완결 소설과 동료 검토",
+    "title": "기억의 정원 세계에서 이어지는 세 편의 완결 소설과 동료 검토",
+    "priority": 3,
+    "description": "전시 안내물 다음으로 같은 공간의 세계를 확장하는 창작 과제다. 초등 고학년과 보호자가 함께 읽을 세 편의 연작 소설을 완성한다. 중심 갈등은 기억을 지키는 선택과 다른 사람의 선택을 존중하는 태도가 충돌하는 상황이며, 결말이나 해결법은 정해져 있지 않다. 팀은 독자·인물·기존 공간의 기억을 살펴 작업 분담과 창작 판단을 맡는다. 작성·검토·수정·증거 정리까지 완성하되 외부 전송이나 공개 게시 없이 이 workspace에서 진행한다. 이전 전시 Goal의 사람 확인 대기는 이 새 과제의 착수 조건이 아니다. 최종 파일은 exhibit-editor의 serial/ 디렉터리에 모은다.",
+    "goal_id": "memory-garden-serial-fiction",
+    "predecessor_task_id": null,
+    "skills": []
+  },
+  "designer_before": {
+    "keeper": {
+      "sandbox_image": "masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64",
+      "name": "exhibit-designer",
+      "instructions": "전시 안내물의 시각 디자인과 접근성 검토를 담당한다. 동료의 요청을 받으면 구체적인 산출물과 근거를 돌려준다. 이 작업 공간은 가상 전시 준비용이다. 외부 사람에게 메시지를 보내거나 공개 게시하지 않는다. 사용 가능한 동료는 exhibit-editor와 exhibit-designer다.",
+      "sandbox_profile": "docker",
+      "network_mode": "none",
+      "mention_targets": [
+        "exhibit-designer"
+      ],
+      "activation_mode": "on_demand"
+    }
+  },
+  "designer_update": {
+    "name": "exhibit-designer",
+    "activation_mode": "autonomous",
+    "instructions": "전시 안내물과 같은 세계를 확장하는 창작물의 시각 디자인·접근성·독자 관점 검토를 담당한다. 공간의 Goal과 Task, 동료 작업을 살펴 필요한 작업을 선택하고 구체적인 산출물과 근거를 제공한다. 동료와 판단이 다르면 이유를 제시하고 결과물에 반영될 때까지 협의한다. 이 작업 공간은 가상 전시 및 연관 창작 준비용이다. 외부 사람에게 메시지를 보내거나 공개 게시하지 않는다. 사용 가능한 동료는 exhibit-editor와 exhibit-designer다."
+  },
+  "config_verified_exact": true,
+  "direct_kickoff_request_sent": false,
+  "completion_claimed": false,
+  "observation_intent": "Observe Keeper discovery, ownership, collaboration and sustained progress from Goal/Task creation, without per-tool operator prompting."
+}

@@ -1,0 +1,10 @@
+{
+  "pdf_sha256": "d2c682cd60dba9246478cf3ddfe4f4729c29f80d097e1da5770b0bb846bf407f",
+  "pdf_pages_inspected": 8,
+  "pdf_observation": "Korean text and fictional notice render; no obvious clipping or overlap in captured slides. This is not formal accessibility certification or proof of every note in a presentation app.",
+  "first_video_sha256": "ac2f405b102b3a6bee1e5344b141ae0389f6551f937150a298d80ed9437b67a3",
+  "first_video_visual_outcome": "missing second-choice glyph at31/58/85seconds; playback passed separately",
+  "revised_video_sha256": "e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283",
+  "revised_video_observation": "Solid-square choice glyph appears at31/58/85seconds; readable Korean choices and normal decoding/browser playback. Producer changed this before additional operator feedback on this glyph was sent.",
+  "dashboard_acceptance": false
+}

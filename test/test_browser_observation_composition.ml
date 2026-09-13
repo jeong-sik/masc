@@ -49,6 +49,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         ~completion:Continue_after_success in
       let cell = Masc.Keeper_tool_call_log_context.create_cell () in
       let observe_node_result = Surface.For_testing.observe_node_result
+        ?on_receipt_committed:None
         ~composition_tool:"keeper_compose_observed-page" ~composition_execution:Catalog.Inline
         ~composition_tool_kind:Masc.Keeper_tool_descriptor.Composition_tool
         ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation ~meta

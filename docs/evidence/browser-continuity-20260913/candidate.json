@@ -1,0 +1,86 @@
+{
+  "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+  "worktree": "/private/tmp/masc-browser-continuity-native",
+  "branch": "test/browser-continuity-native",
+  "base": "5b3ade8f4bc4058457de71e4b54ac1f1fd225172",
+  "composition_recovery": "ea4b446430dc6247dd442e6afc589f85f6e90785",
+  "viewport_cadence": "9d3403a1df",
+  "native_run": 34719307922,
+  "test_run": null,
+  "status": "native_live_recovery_and_tui_viewport_verified_shortest_path_gap_remains",
+  "prs": [
+    35703,
+    35704,
+    35708
+  ],
+  "evidence_pr": 35706,
+  "evidence_head": "1bd61125ce361466fbe591341ea0561a55f45365",
+  "viewport_head": "9d3403a1df",
+  "read_recovery_test": {
+    "run": 34719306501,
+    "source_commit": "ea4b446430dc6247dd442e6afc589f85f6e90785",
+    "status": "dispatched"
+  },
+  "remaining": [
+    "complete current-head viewport and fixture PR checks/reviews/merges",
+    "replace immediate dynamic injection race with observed document lifecycle for shortest navigation-read route"
+  ],
+  "prior_candidates": [
+    {
+      "source_commit": "b079feb43d99827daebfd104b27ad8fb283635ed",
+      "native_run": 34717951491,
+      "test_run": 34717953055,
+      "status": "cancelled after confirmed optional-callback compiler error",
+      "compiler_log": "/tmp/composition-read-recovery-ci.log"
+    }
+  ],
+  "viewport_follow": "411c6eb5c86aa7ea4b774d6e8edd9705427ea369",
+  "proof_checkout": null,
+  "viewport_check_failure": {
+    "run": 34717901606,
+    "job": 103618325466,
+    "head": "9d3403a1dfa544adb597453e2667c7202a4980d3",
+    "scenario": "existing keyboard gate badge fixture",
+    "log": "/tmp/browser-viewport-cadence-check.log"
+  },
+  "viewport_candidate": {
+    "source_commit": "20f45f0119ad59f96b9ea70876ef3990b79917e2",
+    "proof_checkout": "/private/tmp/masc-browser-continuity-candidate-20f",
+    "native_run": 34718635528,
+    "test_run": 34718636492,
+    "test_conclusion": "success",
+    "test_log": "/tmp/browser-continuity-20f-tests/ci-run-tests.log",
+    "limitation": "does not include canonical failure evidence repair; cannot prove same-turn recovery"
+  },
+  "gate_fixture_pr": 35713,
+  "gate_fixture_head": "decb4278e4e479943fe379cc0305d01248409978",
+  "native_status": "success",
+  "recovery_test_status": "success",
+  "native_root": "/tmp/browser-continuity-native-5334",
+  "verified_binaries": {
+    "source_commit": "5334be62fca7e70350cff7e36899ef24f27230dc",
+    "runtime": "/tmp/browser-continuity-native-5334/runtime",
+    "sha256": {
+      "masc-macos-arm64": "fc5ea6a5451056b0542c0b337b9e3c62392a872dbc75f5d693eb22041fe4a9c3",
+      "masc-tui-macos-arm64": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+      "masc-browser-host-macos-arm64": "ee1da83847b65178b99632e307866dc1a0582cd34648e70b187a286071106d42"
+    }
+  },
+  "actual_viewport_trial": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/tui-gesture-evidence-1789262123355915000",
+  "actual_live_trial": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/live-content-evidence-1789262164452788000",
+  "actual_live_summary": {
+    "state": "Succeeded",
+    "outer_calls": 9,
+    "outer_errors": 3,
+    "successful_compositions": 0,
+    "read_recoveries": 3,
+    "retained_scenes": 4,
+    "tui_frames": 59,
+    "all_three_channels": true
+  },
+  "read_recovery_merge": {
+    "head": "ea4b446430dc6247dd442e6afc589f85f6e90785",
+    "merge": "6d6c1b61cd5ce4e7ec14f4ee9a04051fb1f7d6c3",
+    "merged_at": "2026-09-13T00:07:28Z"
+  }
+}

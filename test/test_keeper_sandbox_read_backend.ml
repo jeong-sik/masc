@@ -1803,6 +1803,38 @@ let test_run_command_preserves_bare_command_argv () =
       Alcotest.(check string) "preserves bare head argv"
         "head -n 1 /home/keeper/playground/acme-sandbox/scratch/demo.txt\n" out
 
+(* [max_bytes] used to be a trim of a finished answer: [cat] wrote the whole
+   file, the drainer read every byte to EOF, and only then was the prefix cut.
+   The limit travels to the producer now, which is what this pins -- the
+   returned value is the same bounded prefix either way, so restoring the
+   [cat] argv passes every assertion except this one. *)
+let test_read_asks_the_sandbox_for_a_bounded_prefix () =
+  with_fake_docker fake_docker_echo_command_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "acme-sandbox" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_path = Filename.concat host_root "scratch/oversize.bin" in
+  ensure_dir (Filename.dirname host_path);
+  write_file host_path (String.make 8192 'x');
+  let container_path =
+    match
+      Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+    with
+    | Ok mapped -> mapped
+    | Error detail -> Alcotest.fail detail
+  in
+  match
+    Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+  | Ok echoed_command ->
+      Alcotest.(check string) "the sandbox is asked for the prefix, not the file"
+        (Printf.sprintf "head -c 4096 %s\n" container_path)
+        echoed_command
+
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -2589,9 +2621,35 @@ let test_complete_binary_failure_has_safe_diagnostic () =
           (String_util.contains_substring detail "binary_bytes=4");
         Alcotest.(check bool) "exit preserved" true (String_util.contains_substring detail "exit=1")))
 
+let test_raw_prefix_bounds_command_and_preserves_binary () =
+  let script = {|#!/bin/sh
+case "$1" in
+  info|image) printf '[]\n'; exit 0;;
+  run)
+    while [ "$#" -gt 0 ] && [ "$1" != head ]; do shift; done
+    [ "$#" -eq 4 ] && [ "$2" = -c ] && [ "$3" = 4 ] || exit 2
+    printf '\377PNG'
+    exit 0;;
+  *) exit 2;;
+esac
+|} in
+  with_fake_docker script (fun () ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Workspace.default_config base_path in
+      let meta = { (make_meta ~name:"raw-prefix" ~sandbox:Keeper_types_profile_sandbox.Docker)
+        with sandbox_image = Some "alpine:test" } in
+      let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "capture" in
+      match Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta ~host_path:path
+          ~max_bytes:4 ~timeout_sec:5. () with
+      | Ok bytes -> Alcotest.(check string) "binary prefix unchanged" "\255PNG" bytes
+      | Error detail -> Alcotest.fail detail))
+
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
+      ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick
+            test_raw_prefix_bounds_command_and_preserves_binary] );
       ( "should_route_read",
         [
           Alcotest.test_case "docker keeper routes" `Quick
@@ -2683,6 +2741,8 @@ let run_tests ~clock () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
+          Alcotest.test_case "read asks the sandbox for a bounded prefix" `Quick
+            test_read_asks_the_sandbox_for_a_bounded_prefix;
           Alcotest.test_case "fallback uses Docker_spawn slot" `Quick
             (test_run_command_fallback_uses_docker_spawn_slot ~clock);
           Alcotest.test_case "projects keeper secret directory" `Quick

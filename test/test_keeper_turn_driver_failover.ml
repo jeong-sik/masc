@@ -1206,6 +1206,15 @@ let test_current_image_checkpoint_survives_text_fallback () =
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
     Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
       true (restored.messages = history @ [ canonical_input ] @ suffix);
+    let sidecar = `Assoc ["original_task",`String "image-fallback-task"] in
+    let failed = Driver.For_testing.project_provider_attempt_result
+      ~checkpoint_after:{provider_checkpoint with working_context=Some sidecar}
+      ~replay_prefix_projection:projection (Error (retryable_network_error "checkpoint persistence failed")) in
+    let failed_checkpoint = Driver.For_testing.produced_checkpoint failed |> Option.get in
+    Alcotest.(check bool) "failed producer keeps canonical pixels and exact suffix"
+      true (failed_checkpoint.messages=restored.messages);
+    Alcotest.(check bool) "failed producer keeps its working context"
+      true (failed_checkpoint.working_context=Some sidecar);
     let persisted = ref [] in
     let sink = Driver.For_testing.canonical_checkpoint_sink
         ~replay_prefix_projection:projection
@@ -2046,6 +2055,12 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let native_settlement_fixture runtime_id : Masc.Keeper_official_client_session_store.t =
+  {client_kind=Masc.Keeper_official_client_session_store.Codex;runtime_id;
+   phase=Masc.Keeper_official_client_session_store.Settled {session_id="winning-session";turn_id="winning-turn"};
+   turn_count=1;tool_surface_sha256=String.make 64 'a';last_recovery_resolution=None;
+   last_transient_release=None;updated_at=1.}
+
 let test_cross_owner_fallback_returns_winning_runtime_authority () =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     let runtime runtime_id =
@@ -2064,7 +2079,10 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
           if String.equal runtime_id primary.id
           then
             attempt_without_effect
-              (Error (retryable_network_error "primary failed"))
+              (Driver.For_testing.selected_runtime_result
+                 ~official_client_settlement:(native_settlement_fixture primary.id)
+                 runtime ~lane_attempt_index:idx
+                 (Error (retryable_network_error "primary failed")))
               None
           else
             attempt_without_effect
@@ -2081,6 +2099,8 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         "expected fallback success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "failed native candidate cannot transfer its receipt to Core fallback"
+        true (selected.official_client_settlement = None);
       Alcotest.(check string)
         "selected runtime id"
         "primary.test_model"
@@ -2114,6 +2134,7 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
           attempt_without_effect
             (Driver.For_testing.selected_runtime_result
+               ~official_client_settlement:(native_settlement_fixture runtime.id)
                runtime
                ~lane_attempt_index:idx
                (Ok (completed_run_result ())))
@@ -2126,6 +2147,8 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         "expected first-candidate success, got %s"
         (Agent_core.Error.to_string error)
     | Ok selected ->
+      Alcotest.(check bool) "winning native candidate keeps its exact producer settlement"
+        true (selected.official_client_settlement = Some (native_settlement_fixture primary.id));
       Alcotest.(check int)
         "no rotation: lane_attempt_index stays 0"
         0
@@ -3059,14 +3082,14 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
         | "small.test_model" ->
           attempt_without_effect
             (Error (context_overflow_error "prompt exceeds context window"))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | "fallback.test_model" ->
           attempt_without_effect
             (Error
                (Agent_core.Error.Api
                   (Agent_core.Retry.RateLimited
                      { retry_after = None; message = "weekly usage limit" })))
-            None
+            (Some (checkpoint_with_session_id runtime_id))
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "fallback.test_model" ]
   in
@@ -3098,6 +3121,8 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
        the last dispatched fallback"
       "small.test_model"
       terminal.origin_runtime_id;
+    Alcotest.(check string) "checkpoint belongs to earlier terminal-error origin, not last candidate"
+      "small.test_model" (Option.get terminal.checkpoint_after).session_id;
     Alcotest.(check int) "origin attempt index is the first walk index" 0 terminal.origin_attempt;
     Alcotest.(check bool)
       "the reported lane error is the overflow itself"
@@ -3461,9 +3486,28 @@ let access_error_from_http code =
        { code; body = "candidate access denied"; retry_after_header = None })
 ;;
 
+(* Exercise the lane with both API and official-client error carriage. Codex
+   uses its real boundary projection so a configuration-error regression cannot
+   be hidden by constructing the expected core error in the fixture. *)
+let candidate_access_errors =
+  [ "HTTP 401", access_error_from_http 401
+  ; "HTTP 403", access_error_from_http 403
+  ; "Claude authentication",
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError
+         { provider = "claude_code"; detail = "login required" })
+  ; "Claude authorization",
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError
+         { provider = "claude_code"; detail = "access denied" })
+  ; "Codex subscription",
+    Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
+      (Runtime_codex_app_server.Subscription_required "login required")
+  ]
+;;
+
 let test_candidate_access_denial_reaches_the_next_declared_runtime () =
-  List.iter (fun code ->
-    let denied = access_error_from_http code in
+  List.iter (fun (label, denied) ->
     let attempts = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
@@ -3475,13 +3519,13 @@ let test_candidate_access_denial_reaches_the_next_declared_runtime () =
       ["denied"; "available"] in
     (match result with
      | Ok selected -> Alcotest.(check string) "available candidate finishes" "available" selected
-     | Error error -> Alcotest.failf "HTTP%d stopped the lane: %s" code (Agent_core.Error.to_string error));
+     | Error error -> Alcotest.failf "%s stopped the lane: %s" label (Agent_core.Error.to_string error));
     Alcotest.(check (list string)) "walk stays inside declared candidates"
-      ["denied"; "available"] (List.rev !attempts)) [401;403]
+      ["denied"; "available"] (List.rev !attempts)) candidate_access_errors
 ;;
 
 let test_access_failover_preserves_effect_and_caller_authority () =
-  List.iter (fun code ->
+  List.iter (fun (_label, denied) ->
     List.iter (fun disposition ->
       let attempts = ref 0 in
       let result = Driver.For_testing.attempt_runtime_candidates
@@ -3490,7 +3534,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
           incr attempts;
           if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
-          ( Error (access_error_from_http code)
+          ( Error denied
           , None
           , disposition
           , Masc.Keeper_attempt_dispatch.Dispatched ))
@@ -3514,17 +3558,23 @@ let test_access_failover_preserves_effect_and_caller_authority () =
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
-        incr attempts; attempt_without_effect (Error (access_error_from_http code)) None)
+        incr attempts; attempt_without_effect (Error denied) None)
       ["denied"; "available"] in
     Alcotest.(check bool) "caller denial remains an error" true (Result.is_error result);
     Alcotest.(check int) "caller denies immediate second attempt" 1 !attempts;
     Alcotest.(check int) "existing deferred retry path retains the successor" 1 (List.length !deferred))
-    [401;403]
+    candidate_access_errors
 ;;
 
 let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
-  List.iter (fun code ->
-    let denied = access_error_from_http code in
+  let cases =
+    (access_error_from_http 400, ["first"])
+    :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
+          (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
+    :: List.map (fun (_, error) -> error, ["first"; "last"])
+         candidate_access_errors
+  in
+  List.iter (fun (denied, expected) ->
     let attempts = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
@@ -3532,13 +3582,12 @@ let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
         attempts := runtime_id :: !attempts; attempt_without_effect (Error denied) None)
       ["first"; "last"] in
-    let expected = if code = 400 then ["first"] else ["first"; "last"] in
     Alcotest.(check (list string)) "no candidate beyond the declared suffix"
       expected (List.rev !attempts);
     match result with
     | Error error -> Alcotest.(check string) "original terminal diagnostic retained"
         (Agent_core.Error.to_string denied) (Agent_core.Error.to_string error)
-    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") [400;401;403]
+    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") cases
 ;;
 
 let () =

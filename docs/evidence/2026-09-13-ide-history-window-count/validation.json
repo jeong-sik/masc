@@ -1,0 +1,26 @@
+{
+  "scope": "Source component and synthetic API fixtures only; no native build, installed runtime acceptance, persistence or pagination implementation claimed.",
+  "commands": [
+    {
+      "command": "node scripts/ide-history-window-browser-probe.mjs dashboard FRESH_OUTPUT",
+      "exit_code": 0
+    },
+    {
+      "command": "dashboard/node_modules/.bin/tsc --noEmit (cwd dashboard)",
+      "exit_code": 0
+    },
+    {
+      "command": "dashboard/node_modules/.bin/eslint src/components/ide/ide-activity-panel.ts (cwd dashboard)",
+      "exit_code": 0
+    },
+    {
+      "command": "dashboard/node_modules/.bin/vitest run src/components/ide/ide-activity-panel.test.ts (cwd dashboard)",
+      "exit_code": 0,
+      "tests_passed": 29
+    }
+  ],
+  "production_sources": {
+    "dashboard/src/components/ide/ide-activity-panel.ts": "7bac8d4138e538fdc2f184b40d01e316d30c18ec46736d1c36df3871d56e686a",
+    "dashboard/src/components/ide/ide-activity-panel.test.ts": "5cd654d6fa8578e20fa9b9e286be666efe4eae7f4a7d246af02c08f68e2d4d00"
+  }
+}

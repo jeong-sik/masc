@@ -1,0 +1,584 @@
+{
+  "scope": "real native TUI keystrokes/mouse reports; unchanged HTTP forwarding; real automation Firefox",
+  "columns": 130,
+  "rows": 35,
+  "inputs": [
+    {
+      "keys_hex": "3a676f2042726f77736572204c616e650d",
+      "monotonic": 988096.616913625
+    },
+    {
+      "keys_hex": "61",
+      "monotonic": 988096.634441791
+    },
+    {
+      "keys_hex": "0f",
+      "monotonic": 988096.651654
+    },
+    {
+      "keys_hex": "1b5b3c303b36313b354d1b5b3c303b36313b356d",
+      "monotonic": 988096.821046625
+    },
+    {
+      "keys_hex": "1b5b3c303b32393b31314d1b5b3c303b39323b31316d",
+      "monotonic": 988097.022741
+    },
+    {
+      "keys_hex": "6a",
+      "monotonic": 988097.184849208
+    },
+    {
+      "keys_hex": "1b",
+      "monotonic": 988097.344068
+    },
+    {
+      "keys_hex": "73",
+      "monotonic": 988097.4073185
+    }
+  ],
+  "images": [
+    {
+      "name": "initial",
+      "png_sha256": "74e45d5e04797e3b3b1cb563bdd6b86114921ad442435d30e70b330e64794961",
+      "pixel_width": 1366,
+      "pixel_height": 683,
+      "placement_rows": 30,
+      "pty_prefix_bytes": 77310
+    },
+    {
+      "name": "clicked",
+      "png_sha256": "d92d916affce20c73440e0ad13a6f96a85ade6d84db58d9652568beb2c8d7bf6",
+      "pixel_width": 1366,
+      "pixel_height": 683,
+      "placement_rows": 30,
+      "pty_prefix_bytes": 139546
+    },
+    {
+      "name": "dragged",
+      "png_sha256": "5bd378450cb15e73953b92b9a36e589f77363a21fefef2a4afd404d90a1da571",
+      "pixel_width": 1366,
+      "pixel_height": 683,
+      "placement_rows": 30,
+      "pty_prefix_bytes": 204550
+    },
+    {
+      "name": "scrolled",
+      "png_sha256": "5bd378450cb15e73953b92b9a36e589f77363a21fefef2a4afd404d90a1da571",
+      "pixel_width": 1366,
+      "pixel_height": 683,
+      "placement_rows": 30,
+      "pty_prefix_bytes": 269554
+    }
+  ],
+  "receipts": [
+    {
+      "path": "/api/v1/dashboard/browser-lane/clients",
+      "method": "GET",
+      "input": null,
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "clients": []
+        }
+      },
+      "completed_monotonic": 988096.619029166
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "method": "POST",
+      "input": {
+        "lane": "automation"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "tabs": [
+            {
+              "id": 1,
+              "title": "Gesture Lab",
+              "url": "http://127.0.0.1:55623/index.html",
+              "active": true
+            }
+          ],
+          "page": {
+            "tabId": 1,
+            "url": "http://127.0.0.1:55623/index.html",
+            "title": "Gesture Lab",
+            "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 — visible context\n\nMessage row 1 — visible context\n\nMessage row 2 — visible context\n\nMessage row 3 — visible context\n\nMessage row 4 — visible context\n\nMessage row 5 — visible context\n\nMessage row 6 — visible context\n\nMessage row 7 — visible context\n\nMessage row 8 — visible context\n\nMessage row 9 — visible context\n\nMessage row 10 — visible context\n\nMessage row 11 — visible context\n\nMessage row 12 — visible context\n\nMessage row 13 — visible context\n\nMessage row 14 — visible context\n\nMessage row 15 — visible context\n\nMessage row 16 — visible context\n\nMessage row 17 — visible context\n\nMessage row 18 — visible context\n\nMessage row 19 — visible context\n\nGesture Lab; Pane scroll=0",
+            "chars": 746,
+            "truncated": false
+          },
+          "source": "automation",
+          "clientId": null,
+          "elapsed_ms": 7.123958
+        }
+      },
+      "completed_monotonic": 988096.64332225
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/screenshot",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "source": "automation",
+          "clientId": null,
+          "tabId": 1,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html",
+          "mimeType": "image/png",
+          "data": {
+            "sha256": "74e45d5e04797e3b3b1cb563bdd6b86114921ad442435d30e70b330e64794961",
+            "bytes": 44193
+          },
+          "viewport": {
+            "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+            "width": 1366.0,
+            "height": 683.0,
+            "scrollX": 0.0,
+            "scrollY": 0.0
+          },
+          "elapsed_ms": 51.079959
+        }
+      },
+      "completed_monotonic": 988096.706444916
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/interact",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "action": "click_at",
+        "point": {
+          "x": 0.5041666666666667,
+          "y": 0.05
+        },
+        "viewport": {
+          "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+          "width": 1366.0,
+          "height": 683.0,
+          "scrollX": 0.0,
+          "scrollY": 0.0
+        },
+        "expectedUrl": "http://127.0.0.1:55623/index.html"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "tabId": 1,
+          "urlBefore": "http://127.0.0.1:55623/index.html",
+          "action": "click_at",
+          "scrollX": 0,
+          "scrollY": 0,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details"
+        }
+      },
+      "completed_monotonic": 988096.86346225
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/screenshot",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "source": "automation",
+          "clientId": null,
+          "tabId": 1,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details",
+          "mimeType": "image/png",
+          "data": {
+            "sha256": "d92d916affce20c73440e0ad13a6f96a85ade6d84db58d9652568beb2c8d7bf6",
+            "bytes": 46131
+          },
+          "viewport": {
+            "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+            "width": 1366.0,
+            "height": 683.0,
+            "scrollX": 0.0,
+            "scrollY": 0.0
+          },
+          "elapsed_ms": 15.017209
+        }
+      },
+      "completed_monotonic": 988096.881026416
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/interact",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "action": "drag",
+        "from": {
+          "x": 0.2375,
+          "y": 0.25
+        },
+        "to": {
+          "x": 0.7625,
+          "y": 0.25
+        },
+        "viewport": {
+          "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+          "width": 1366.0,
+          "height": 683.0,
+          "scrollX": 0.0,
+          "scrollY": 0.0
+        },
+        "expectedUrl": "http://127.0.0.1:55623/index.html#details"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "tabId": 1,
+          "urlBefore": "http://127.0.0.1:55623/index.html#details",
+          "action": "drag",
+          "scrollX": 0,
+          "scrollY": 0,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details"
+        }
+      },
+      "completed_monotonic": 988097.032501125
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/screenshot",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "source": "automation",
+          "clientId": null,
+          "tabId": 1,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details",
+          "mimeType": "image/png",
+          "data": {
+            "sha256": "5bd378450cb15e73953b92b9a36e589f77363a21fefef2a4afd404d90a1da571",
+            "bytes": 48205
+          },
+          "viewport": {
+            "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+            "width": 1366.0,
+            "height": 683.0,
+            "scrollX": 0.0,
+            "scrollY": 0.0
+          },
+          "elapsed_ms": 16.924084
+        }
+      },
+      "completed_monotonic": 988097.051953416
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/interact",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "action": "scroll_at",
+        "point": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "viewport": {
+          "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+          "width": 1366.0,
+          "height": 683.0,
+          "scrollX": 0.0,
+          "scrollY": 0.0
+        },
+        "x": 0,
+        "y": 120,
+        "expectedUrl": "http://127.0.0.1:55623/index.html#details"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "tabId": 1,
+          "urlBefore": "http://127.0.0.1:55623/index.html#details",
+          "action": "scroll_at",
+          "scrollX": 0,
+          "scrollY": 0,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details"
+        }
+      },
+      "completed_monotonic": 988097.191673708
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/screenshot",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "source": "automation",
+          "clientId": null,
+          "tabId": 1,
+          "title": "Gesture Lab",
+          "url": "http://127.0.0.1:55623/index.html#details",
+          "mimeType": "image/png",
+          "data": {
+            "sha256": "5bd378450cb15e73953b92b9a36e589f77363a21fefef2a4afd404d90a1da571",
+            "bytes": 48205
+          },
+          "viewport": {
+            "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+            "width": 1366.0,
+            "height": 683.0,
+            "scrollX": 0.0,
+            "scrollY": 0.0
+          },
+          "elapsed_ms": 14.681292
+        }
+      },
+      "completed_monotonic": 988097.212544666
+    },
+    {
+      "path": "/api/v1/dashboard/browser-lane/scene",
+      "method": "POST",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "data": {
+          "tabId": 1,
+          "chars": 213,
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+          "documentId": "8e2608e6b47bb0e33de989fc8377a744",
+          "nodes": [
+            {
+              "clickable": true,
+              "color": "rgb(0, 0, 238)",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "fontSize": 22,
+              "fontWeight": "400",
+              "href": "http://127.0.0.1:55623/index.html#details",
+              "kind": "control",
+              "nodeId": "n1",
+              "rects": [
+                {
+                  "height": 68.30000305175781,
+                  "width": 1092.800048828125,
+                  "x": 136.60000610351562,
+                  "y": 6.8166656494140625
+                }
+              ],
+              "sourceContext": null,
+              "tag": "a",
+              "text": "Details opened by link click",
+              "whiteSpace": "normal"
+            },
+            {
+              "clickable": true,
+              "color": "rgb(19, 36, 56)",
+              "controlType": "div",
+              "disabled": false,
+              "editable": false,
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "control",
+              "nodeId": "n2",
+              "rects": [
+                {
+                  "height": 156.25,
+                  "width": 306.51666259765625,
+                  "x": 177.56666564941406,
+                  "y": 102.4499969482422
+                }
+              ],
+              "sourceContext": null,
+              "tag": "div",
+              "text": "Drag card",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n3",
+              "rects": [
+                {
+                  "height": 27,
+                  "width": 95.90000915527344,
+                  "x": 993.2000122070312,
+                  "y": 167.06666564941406
+                }
+              ],
+              "sourceContext": null,
+              "tag": "div",
+              "text": "Drop zone",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 18,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n4",
+              "rects": [
+                {
+                  "height": 23,
+                  "width": 372.25,
+                  "x": 136.60000610351562,
+                  "y": 259.5333251953125
+                }
+              ],
+              "sourceContext": null,
+              "tag": "p",
+              "text": "Card moved; down trusted=true; up trusted=true",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n6",
+              "rects": [
+                {
+                  "height": 19,
+                  "width": 297.26666259765625,
+                  "x": 148.60000610351562,
+                  "y": 307.3500061035156
+                }
+              ],
+              "sourceContext": null,
+              "tag": "p",
+              "text": "Message row 1 — visible context",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n7",
+              "rects": [
+                {
+                  "height": 27,
+                  "width": 301.1499938964844,
+                  "x": 148.60000610351562,
+                  "y": 399.3500061035156
+                }
+              ],
+              "sourceContext": null,
+              "tag": "p",
+              "text": "Message row 2 — visible context",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n9",
+              "rects": [
+                {
+                  "height": 27,
+                  "width": 301.2166748046875,
+                  "x": 148.60000610351562,
+                  "y": 499.3500061035156
+                }
+              ],
+              "sourceContext": null,
+              "tag": "p",
+              "text": "Message row 3 — visible context",
+              "whiteSpace": "normal"
+            },
+            {
+              "color": "rgb(19, 36, 56)",
+              "fontSize": 22,
+              "fontWeight": "400",
+              "kind": "text",
+              "nodeId": "n8",
+              "rects": [
+                {
+                  "height": 27,
+                  "width": 266.76666259765625,
+                  "x": 136.60000610351562,
+                  "y": 614.7000122070312
+                }
+              ],
+              "sourceContext": null,
+              "tag": "p",
+              "text": "Gesture Lab; Pane scroll=120",
+              "whiteSpace": "normal"
+            }
+          ],
+          "schema": "masc.browser.scene.v1",
+          "scope": null,
+          "title": "Gesture Lab",
+          "truncated": false,
+          "url": "http://127.0.0.1:55623/index.html#details",
+          "view": "content",
+          "viewport": {
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1366
+          },
+          "source": "automation",
+          "clientId": null,
+          "elapsed_ms": 5.009291
+        }
+      },
+      "completed_monotonic": 988097.414095583
+    }
+  ],
+  "pid": 27126,
+  "tui_sha256": "55dbd26ba13bd874a851d8ce26aaa402b204fbb8bb79eec752e8a1d1cebb6e9c",
+  "result": "failed",
+  "tui_exit": null,
+  "cleanup_errors": [
+    {
+      "stage": "wait-terminated-tui",
+      "error": "TimeoutExpired(['/private/tmp/browser-progressive-native-0e06/runtime/masc-tui-macos-arm64', '--base-path', '/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h', '--workspace', 'masc-browser-handoff-yq3d680h', '--port', '55648'], 10)"
+    },
+    {
+      "stage": "kill-tui",
+      "error": "PermissionError(1, 'Operation not permitted')"
+    },
+    {
+      "stage": "wait-killed-tui",
+      "error": "TimeoutExpired(['/private/tmp/browser-progressive-native-0e06/runtime/masc-tui-macos-arm64', '--base-path', '/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h', '--workspace', 'masc-browser-handoff-yq3d680h', '--port', '55648'], 5)"
+    },
+    {
+      "stage": "tui-exit",
+      "error": "None"
+    }
+  ]
+}

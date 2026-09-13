@@ -57,6 +57,11 @@ type verdict =
   | Approve of string
   | Reject of string
 
+type reviewer_reply =
+  { selected_runtime_id : string
+  ; verdict : verdict option
+  }
+
 let outcome_observer_fn
   : (outcome:string -> runtime:string -> unit) Atomic.t
   = Atomic.make (fun ~outcome:_ ~runtime:_ -> ())
@@ -76,7 +81,7 @@ let run_llm_reviewer_fn
         -> dispatch:Runtime_attempt_dispatch.t
         -> Agent_core.Error.t
         -> unit) ->
-     unit -> (verdict option, Agent_core.Error.t) result) Atomic.t
+     unit -> (reviewer_reply, Agent_core.Error.t) result) Atomic.t
   = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
@@ -532,7 +537,7 @@ let run
        in
        let rec attempt ~retryable_error_seen slot remaining =
          match run_attempt slot with
-         | Ok (Some verdict), _nested_retryable_error_seen ->
+         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_error_seen ->
            (match verdict with
             | Approve reason ->
               task_info
@@ -552,7 +557,7 @@ let run
              ; fallback_reason = None
              ; evaluator_error_retryable = None
              }
-         | Ok None, nested_retryable_error_seen ->
+         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_error_seen ->
            let detail =
              "evaluator did not call report_review_verdict exactly once"
            in

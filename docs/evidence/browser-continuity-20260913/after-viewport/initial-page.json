@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "data": {
+    "tabs": [
+      {
+        "id": 1,
+        "title": "Gesture Lab",
+        "url": "http://127.0.0.1:60151/index.html",
+        "active": true
+      }
+    ],
+    "page": {
+      "tabId": 1,
+      "url": "http://127.0.0.1:60151/index.html",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 — visible context\n\nMessage row 1 — visible context\n\nMessage row 2 — visible context\n\nMessage row 3 — visible context\n\nMessage row 4 — visible context\n\nMessage row 5 — visible context\n\nMessage row 6 — visible context\n\nMessage row 7 — visible context\n\nMessage row 8 — visible context\n\nMessage row 9 — visible context\n\nMessage row 10 — visible context\n\nMessage row 11 — visible context\n\nMessage row 12 — visible context\n\nMessage row 13 — visible context\n\nMessage row 14 — visible context\n\nMessage row 15 — visible context\n\nMessage row 16 — visible context\n\nMessage row 17 — visible context\n\nMessage row 18 — visible context\n\nMessage row 19 — visible context\n\nGesture Lab; Pane scroll=0",
+      "chars": 746,
+      "truncated": false
+    },
+    "source": "automation",
+    "clientId": null,
+    "elapsed_ms": 7.808875
+  }
+}

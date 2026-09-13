@@ -1,0 +1,18 @@
+{
+  "default_runtime_id": "kimi_coding.kimi-for-coding",
+  "declared_runtime": {
+    "id": "ollama.qwen3-8-27b",
+    "provider_id": "ollama",
+    "display_name": "Local Ollama",
+    "protocol": "ollama-http",
+    "model": "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL",
+    "max_context": 262144,
+    "tools": true,
+    "streaming": true,
+    "endpoint": "http://localhost:11434",
+    "provider_kind": "ollama",
+    "request_path": "/api/chat",
+    "credential_kind": "none"
+  },
+  "verified_model_behavior": false
+}

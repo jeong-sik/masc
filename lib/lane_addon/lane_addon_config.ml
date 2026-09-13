@@ -107,13 +107,17 @@ let decode ~source_path ~id fields =
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
   let manifest_path = absolute_from ~directory manifest_path in
-  let* package = Lane_addon_manifest.load ~path:manifest_path in
+  let* package = Lane_addon_manifest.load ~path:manifest_path
+    |> Result.map_error Lane_addon_manifest.error_to_string in
   let* binding = match List.assoc_opt "binding" fields with
     | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
         json_of_toml ~path:"binding" value
     | _ -> Error "binding requires a table" in
   let binding = resolve_snapshot_paths ~directory binding in
   let* () = Lane_addon_sources.validate binding in
+  let* () = match package.binding_schema with
+    | None -> Ok ()
+    | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in
   let manifest_path = Unix.realpath manifest_path in
   let canonical =
     `Assoc ["id", `String id; "run_id", `String run_id;
@@ -124,13 +128,10 @@ let decode ~source_path ~id fields =
   let revision = Digestif.SHA256.(to_hex (digest_string canonical)) in
   Ok { id; run_id; manifest_path; package; binding; revision; source_path }
 
-let read_declaration ~path =
-  let source_path = absolute path in
+let parse_declaration ~source_path bytes =
   let failure ?id ~unreadable message =
     Error { issue = {source_path; id; message}; unreadable } in
-  match read_document source_path with
-  | Error message -> failure ~unreadable:true message
-  | Ok bytes ->
+  try
       (match Otoml.Parser.from_string_result bytes with
        | Error message -> failure ~unreadable:false message
        | Ok (Otoml.TomlTable fields) ->
@@ -144,6 +145,17 @@ let read_declaration ~path =
                 with (Sys_error _ | Unix.Unix_error _) as exn ->
                   failure ~id ~unreadable:true (io_message exn))
        | Ok _ -> failure ~unreadable:false "declaration requires a TOML table")
+  with Otoml.Duplicate_key message -> failure ~unreadable:false message
+
+let load_source ~source_path ~source_text =
+  parse_declaration ~source_path:(absolute source_path) source_text
+  |> Result.map_error (fun failure -> failure.issue.message)
+
+let read_declaration ~path =
+  let source_path = absolute path in
+  match read_document source_path with
+  | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
+  | Ok bytes -> parse_declaration ~source_path bytes
 
 let load_file ~path =
   read_declaration ~path |> Result.map_error (fun failure -> failure.issue.message)

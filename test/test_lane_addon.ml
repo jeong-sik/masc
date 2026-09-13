@@ -2,7 +2,12 @@
     package supplies barriers; no model response or Docker daemon is involved. *)
 open Alcotest
 open Masc
-module Runtime = Lane_addon_runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
 
@@ -78,7 +83,7 @@ let make_backend () =
       | Some _ | None -> Error "owner mismatch")
   } in state, backend
 
-let manifest dir mode =
+let manifest ?refresh_policy dir mode =
   let path = Filename.concat dir (mode ^ ".toml") in
   write path (Printf.sprintf {|id = %S
 revision = "fixture-1"
@@ -91,7 +96,8 @@ cpus = 0.5
 memory_bytes = 67108864
 pids = 16
 max_reply_bytes = 4096
-|} mode);
+|} mode ^ Option.fold ~none:"" ~some:(fun policy ->
+      "\n[interface]\nrefresh_policy = " ^ Printf.sprintf "%S" policy ^ "\n") refresh_policy);
   path
 
 let dispatch config operation fields = Runtime.dispatch ~config ~operation (`Assoc fields)
@@ -108,7 +114,7 @@ let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
-let with_fixture f =
+let with_fixture ?acquire f =
   let dir = Filename.temp_file "lane-runtime-" ".fixture" in
   Sys.remove dir; Unix.mkdir dir 0o700;
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
@@ -120,6 +126,7 @@ let with_fixture f =
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
               let state, backend = make_backend () in
+              let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
                 f env sw (Workspace.default_config dir) dir state))))))
 
@@ -136,9 +143,8 @@ let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env s
     "primary action completed" (Eio.Promise.await_exn primary);
   check Alcotest.int "blocked observation has not been released" 0
     (Option.value ~default:0 (Hashtbl.find_opt state.stops blocked));
-  Runtime.notify_activity ~config;
-  Runtime.notify_activity ~config;
-  Runtime.notify_activity ~config;
+  List.iter (fun () -> ignore (unwrap (dispatch config Runtime.Observe
+    ["instance_id", `String blocked]))) [();();()];
   check bool "coalesced notifications are visible" true
     (int "coalesced_wakes" (instance config blocked) >= 2);
   detach config blocked;
@@ -236,7 +242,159 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
 
+let test_request_refusals_preserve_runtime_failure_distinction () =
+  with_fixture (fun _env _sw config dir _state ->
+    let dispatch operation fields = Lane_addon_runtime.dispatch ~config ~operation (`Assoc fields) in
+    let rejected label = function
+      | Error (Lane_addon_runtime.Request_rejected _) -> ()
+      | Error (Runtime_failed detail) -> failf "%s became runtime failure: %s" label detail
+      | Ok _ -> failf "%s was accepted" label in
+    rejected "missing active instance" (dispatch Runtime.Observe ["instance_id", `String "absent"]);
+    rejected "missing retained instance" (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    rejected "missing evidence instance" (dispatch Runtime.Evidence
+      ["instance_id", `String "absent"; "row_ids", `List []]);
+    rejected "missing action request" (dispatch Runtime.Action_status
+      ["instance_id", `String "absent"; "request_id", `String "absent"]);
+    rejected "missing manifest" (dispatch Runtime.Attach
+      ["manifest_path", `String (Filename.concat dir "missing.toml");
+       "run_id", `String "fixture-run"; "binding", `Assoc []]);
+    rejected "missing action fields" (dispatch Runtime.Act []);
+    let action_fields = ["instance_id", `String "absent";
+      "expected_incarnation", `String "absent"; "request_id", `String "request";
+      "action", `Assoc []] in
+    rejected "missing action target" (Lane_addon_runtime.dispatch ~caller:"fixture-caller"
+      ~config ~operation:Runtime.Act (`Assoc action_fields));
+    rejected "invalid slice timestamp" (dispatch Runtime.Slice ["since", `String "bad"]);
+    rejected "reversed slice range" (dispatch Runtime.Slice ["since", `Int 2; "until", `Int 1]);
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    Fs_compat.mkdir_p root;
+    write (Filename.concat root "bindings") "a file cannot be a binding directory";
+    let runtime_failed = function
+      | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+      | Error (Request_rejected detail) -> failf "unreadable store became input refusal: %s" detail
+      | Ok _ -> fail "unreadable store was accepted" in
+    runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    runtime_failed (dispatch Runtime.Slice []))
+
+let test_direct_attach_validates_package_binding () =
+  with_fixture (fun env _sw config dir state ->
+    let path = manifest dir "binding-contract" in
+    write path (Fs_compat.load_file path ^ {|
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}},"limit":{"type":"integer","minimum":1}},"required":["sources","limit"],"additionalProperties":false}'''
+|});
+    let attach_binding binding = Lane_addon_runtime.dispatch ~config
+      ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;
+        "run_id",`String "binding-run";"binding",`Assoc binding]) in
+    List.iter (fun binding ->
+      (match attach_binding binding with
+       | Error (Lane_addon_runtime.Request_rejected _) -> ()
+       | Error (Runtime_failed detail) -> failf "invalid binding became runtime failure: %s" detail
+       | Ok _ -> fail "direct attach bypassed the package binding schema");
+      check Alcotest.int "invalid binding starts no worker" 0 (Hashtbl.length state.modes);
+      check Alcotest.int "invalid binding creates no instance" 0
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length))
+      [["sources",`List []]; ["sources",`List [];"limit",`Int 0];
+       ["sources",`List [];"limit",`String "2"]];
+    let accepted = attach_binding ["sources",`List [];"limit",`Int 2]
+      |> Result.map_error Lane_addon_runtime.error_to_string |> unwrap in
+    let id = text "instance_id" accepted in
+    let clock = Eio.Stdenv.clock env in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    detach config id;
+    await_phase clock config id "detached")
+
+let test_file_activity_preserves_explicit_observation () =
+  with_fixture ~acquire:Lane_addon_sources.acquire (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    let snapshot cursor = `Assoc ["source_id",`String "file";"incarnation",`String "export";
+      "cursor",`String cursor;"complete",`Bool true;"detail",`Null;"observations",`List []] in
+    let replace cursor = write source_path (Yojson.Safe.to_string (snapshot cursor)) in
+    replace "first";
+    let file_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
+    let owned_id = attach config dir "owned-observer" in
+    let stateful_id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest dir "stateful-file-observer");"run_id",`String "files";
+       "binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "file";
+         "kind",`String "snapshot_file";"path",`String source_path]]]]) |> text "instance_id" in
+    let sequence id = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence file_id=1 && sequence owned_id=1 && sequence stateful_id=1);
+    let refresh () = Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed in
+    refresh ();
+    await clock (fun () -> int "unchanged_source_refreshes" (instance config file_id)=1 && sequence stateful_id=2);
+    check Alcotest.int "unchanged capture adds no retained output" 1 (sequence file_id);
+    check Alcotest.int "unrelated tool completion does not sample an owned environment" 1 (sequence owned_id);
+    check Alcotest.int "default file observer still receives equal captures" 2 (sequence stateful_id);
+    refresh ();
+    ignore (unwrap (dispatch config Runtime.Observe ["instance_id",`String file_id]));
+    await clock (fun () -> sequence file_id=2);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=3);
+    write source_path "truncated source";
+    refresh ();
+    await clock (fun () -> sequence file_id=4);
+    replace "second";
+    refresh ();
+    await clock (fun () -> sequence file_id=5);
+    (* A recovered source must be observed even when its bytes equal those
+       before the intervening unavailable capture. *)
+    let retained = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let records = Store.observations retained ~instance_id:file_id |> unwrap in
+    check Alcotest.int "changed, failed and recovered captures are all retained" 5 (List.length records);
+    let sources,_ = List.nth records 3 in
+    check bool "capture failure reaches the worker as incomplete input" true
+      (match sources with `List [`Assoc fields] -> List.assoc_opt "complete" fields=Some (`Bool false) | _ -> false);
+    detach config file_id; detach config owned_id; detach config stateful_id;
+    await_phase clock config file_id "detached";
+    await_phase clock config owned_id "detached";
+    await_phase clock config stateful_id "detached")
+
+let test_capture_cannot_rewrite_detach_failure () =
+  let entered, enter = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let returned, return = Eio.Promise.create () in
+  let captures = ref 0 in
+  let acquire ~store ~package ~resolve_lane_output ~binding =
+    incr captures;
+    if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
+    let result = Lane_addon_sources.acquire ~store ~package ~resolve_lane_output ~binding in
+    if !captures=2 then Eio.Promise.resolve return ();
+    result in
+  with_fixture ~acquire (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let source_path = Filename.concat dir "source.json" in
+    write source_path {|{"source_id":"file","incarnation":"export","cursor":"1","complete":true,"detail":null,"observations":[]}|};
+    let id = unwrap (dispatch config Runtime.Attach
+      ["manifest_path",`String (manifest ~refresh_policy:"source_changes" dir "stop-retry");
+       "run_id",`String "files";"binding",`Assoc ["sources",`List [`Assoc
+         ["source_id",`String "file";"kind",`String "snapshot_file";"path",`String source_path]]]])
+      |> text "instance_id" in
+    await clock (fun () -> int "observation_seq" (instance config id)=1);
+    Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed;
+    Eio.Promise.await entered;
+    detach config id;
+    await_phase clock config id "failed";
+    Eio.Promise.resolve release ();
+    Eio.Promise.await returned;
+    check string "capture does not overwrite cleanup failure with attached" "failed" (phase (instance config id));
+    check Alcotest.int "retired worker receives no additional observation" 1 (Hashtbl.find state.calls id);
+    detach config id;
+    await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a capture yielding to detach preserves cleanup ownership" `Quick
+    test_capture_cannot_rewrite_detach_failure;
+  test_case "activity probes exact file captures while explicit observes remain stateful" `Quick
+    test_file_activity_preserves_explicit_observation;
+  test_case "direct attach enforces package binding before worker startup" `Quick
+    test_direct_attach_validates_package_binding;
+  test_case "missing targets refuse while storage failures remain faults" `Quick
+    test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;

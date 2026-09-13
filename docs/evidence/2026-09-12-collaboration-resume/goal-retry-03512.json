@@ -1,0 +1,5 @@
+{
+  "goal_id": "exhibition-publication-baseline",
+  "action": "request_complete",
+  "note": "The isolated runtime has been upgraded to source 703ce088c8548e5c2e74a4f682a5ccf6a9a586c4 with typed image lookup. The original criterion revision c36f5a9061458b3efbeb8cbb2cacfc6b and the same publication artifacts are preserved. Read the original evidence.json and its five actual files. Inspect renders/page1.png, renders/page2.png, renders/page3.png and poster.png as visual input without line offset/limit. The PDF remains 102608 bytes with SHA256 ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb; the earlier independent PDF renders matched these images. Judge all original criteria using actual evidence; do not substitute a script or a claimed report for visual inspection. Human final confirmation has not been given."
+}

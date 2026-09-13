@@ -1,0 +1,178 @@
+{
+  "observed_at": "2026-09-12T14:50:24.963396+00:00",
+  "prs": [
+    {
+      "baseRefName": "main",
+      "headRefOid": "3d3c094ab7e83f8985c61a185f6a1052462ae16b",
+      "number": 35515,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:27:55Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699111292/job/103567602190",
+          "name": "lint suite",
+          "startedAt": "2026-09-12T14:24:19Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:31:45Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699111292/job/103567602038",
+          "name": "dune build @check",
+          "startedAt": "2026-09-12T14:23:18Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:27:56Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699111292/job/103567602174",
+          "name": "dune build --profile release @check",
+          "startedAt": "2026-09-12T14:23:21Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:25:40Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699111292/job/103567602177",
+          "name": "dashboard typecheck",
+          "startedAt": "2026-09-12T14:24:26Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        }
+      ],
+      "url": "https://github.com/jeong-sik/masc/pull/35515"
+    },
+    {
+      "baseRefName": "feat/verification-pdf-inspection",
+      "headRefOid": "e45362b582fa1d683c72f89d4843f2e6b84b6901",
+      "number": 35532,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:39:03Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699728563/job/103569233305",
+          "name": "lint suite",
+          "startedAt": "2026-09-12T14:35:43Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:42:50Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699728563/job/103569233326",
+          "name": "dune build @check",
+          "startedAt": "2026-09-12T14:36:15Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:41:28Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699728563/job/103569233284",
+          "name": "dune build --profile release @check",
+          "startedAt": "2026-09-12T14:36:09Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:37:19Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699728563/job/103569233302",
+          "name": "dashboard typecheck",
+          "startedAt": "2026-09-12T14:36:06Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        }
+      ],
+      "url": "https://github.com/jeong-sik/masc/pull/35532"
+    },
+    {
+      "baseRefName": "fix/fusion-durable-result-lookup",
+      "headRefOid": "bc39fb61950a5e4b51b053240d4c5e38735bf718",
+      "number": 35536,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:43:55Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699949318/job/103569822297",
+          "name": "lint suite",
+          "startedAt": "2026-09-12T14:40:34Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:46:40Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699949318/job/103569822385",
+          "name": "dune build @check",
+          "startedAt": "2026-09-12T14:40:55Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:45:17Z",
+          "conclusion": "FAILURE",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699949318/job/103569822370",
+          "name": "dune build --profile release @check",
+          "startedAt": "2026-09-12T14:40:41Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-09-12T14:42:18Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/jeong-sik/masc/actions/runs/34699949318/job/103569822414",
+          "name": "dashboard typecheck",
+          "startedAt": "2026-09-12T14:41:06Z",
+          "status": "COMPLETED",
+          "workflowName": "PR check"
+        }
+      ],
+      "url": "https://github.com/jeong-sik/masc/pull/35536"
+    }
+  ],
+  "runs": [
+    {
+      "conclusion": "success",
+      "headSha": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+      "status": "completed",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34697880885"
+    },
+    {
+      "conclusion": "success",
+      "headSha": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+      "status": "completed",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34697882117"
+    },
+    {
+      "conclusion": "success",
+      "headSha": "e45362b582fa1d683c72f89d4843f2e6b84b6901",
+      "status": "completed",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34699728493"
+    },
+    {
+      "conclusion": "",
+      "headSha": "bc39fb61950a5e4b51b053240d4c5e38735bf718",
+      "status": "in_progress",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34699957943"
+    }
+  ]
+}

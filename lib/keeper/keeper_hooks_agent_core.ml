@@ -514,8 +514,8 @@ let make_hooks
            cannot drift apart. *)
         Keeper_turn_preview.note_tool
           ~keeper_name:(!meta_ref).name
-          ~now:(Unix.gettimeofday ())
-          (Some tool_name);
+          ~now:(Time_compat.now ())
+          tool_name;
         incr tool_call_count_ref;
         (* AGENT_CORE exposes the provider-facing tool body here as text.  It is not a
            semantic authority: JSON-looking bytes must stay opaque.  A future
@@ -629,10 +629,9 @@ let make_hooks
            from current state. Supplying [on_committed] forces this row through the
            synchronous append boundary; only that acknowledgement removes the
            invocation-scoped carrier. *)
+        (* Every execution row must be readable before ToolCompleted can lead
+           to a TurnRecord/chat notification, including autonomous plain tools. *)
         let on_log_committed =
-          match file_change_evidence, on_tool_result_ready, retained_artifacts with
-          | None, None, [] -> None
-          | _ ->
             Some
               (fun () ->
                  log_committed := true;
@@ -857,6 +856,8 @@ let make_hooks
       | Agent_core.Hooks.PostToolUseFailure
           { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
+        Keeper_turn_preview.note_tool ~keeper_name:meta.name
+          ~now:(Time_compat.now ()) tool_name;
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
            is already emitted at ERROR by keeper_tools_agent_core before this
@@ -913,16 +914,12 @@ let make_hooks
                 ?keeper_turn_id:tctx.keeper_turn_id
                 ?task_id:tctx.task_id
                 ~result_bytes:(String.length error)
-                ?on_committed:
-                  (Option.map
-                     (fun notify () ->
-                        log_committed := true;
-                        notify
-                          ~tool_call_id:tool_use_id
-                          ~turn
-                          ~planned_index:schedule.planned_index
-                          ~execution_id)
-                     on_tool_result_ready)
+                ~on_committed:(fun () ->
+                  log_committed := true;
+                  Option.iter
+                    (fun notify -> notify ~tool_call_id:tool_use_id ~turn
+                      ~planned_index:schedule.planned_index ~execution_id)
+                    on_tool_result_ready)
                 ()
             with
             | Eio.Cancel.Cancelled _ as e ->

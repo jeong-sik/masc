@@ -1,0 +1,27 @@
+{
+  "actor": "owned probe, outside TUI",
+  "input": {
+    "lane": "automation",
+    "tabId": 1,
+    "action": "scroll_at",
+    "point": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "viewport": {
+      "documentId": "442202ffb8e14d68f66638a565c4d4e1",
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "x": 0,
+    "y": 120,
+    "expectedUrl": "http://127.0.0.1:60151/index.html#details"
+  },
+  "status": 400,
+  "response": {
+    "ok": false,
+    "error": "javascript error: Error: page_url_changed"
+  }
+}

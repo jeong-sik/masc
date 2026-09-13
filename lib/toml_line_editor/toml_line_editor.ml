@@ -517,6 +517,10 @@ let edit_table_int content ~path ~key ~value =
   edit_table_value content ~path ~key ~value:(Some (Int value))
 ;;
 
+let edit_table_bool content ~path ~key ~value =
+  edit_table_value content ~path ~key ~value:(Some (Bool value))
+;;
+
 (* Replace (or append) a multi-line array inside a section. An existing
    single-line array collapses to the multi-line form; comments between array
    elements are not preserved (elements are data, RFC-0306 §7.1). Comments

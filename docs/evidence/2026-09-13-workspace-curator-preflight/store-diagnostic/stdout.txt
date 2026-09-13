@@ -1,0 +1,8 @@
+keeper meta rows=2 refused=0
+official-client session state rows=11 refused=0
+memory OS current snapshot rows=2 refused=0
+memory-source current claims rows=0 refused=0
+paused-work disposition receipts rows=0 refused=0
+board posts rows=23 refused=0
+keeper provider-input snapshots rows=560 refused=0
+keeper turn records rows=707 refused=0

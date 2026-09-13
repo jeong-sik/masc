@@ -249,3 +249,9 @@ end
 module DashboardHealth : sig
   val runtime_warning_ctx_ratio : float
 end
+
+(** {1 Peer artifact handoff} *)
+
+module KeeperPeerArtifact : sig
+  val max_bytes : unit -> int
+end

@@ -1,0 +1,272 @@
+{
+  "scope": "isolated three-channel website; verified live Firefox extension, native host, server and TUI; separately recorded browser instruction provenance; typed TUI default action and composition",
+  "steps": [
+    {
+      "label": "03-page",
+      "status": 200,
+      "elapsed_ms": 205.08,
+      "request": {
+        "lane": "live",
+        "clientId": "b57138fb-2fab-4344-aa8e-3486546993f8"
+      }
+    },
+    {
+      "label": "04-regions",
+      "status": 200,
+      "elapsed_ms": 21.85,
+      "request": {
+        "lane": "live",
+        "clientId": "b57138fb-2fab-4344-aa8e-3486546993f8",
+        "tabId": 1,
+        "view": "regions"
+      }
+    },
+    {
+      "label": "05-selected-region",
+      "status": 200,
+      "elapsed_ms": 41.75,
+      "request": {
+        "lane": "live",
+        "clientId": "b57138fb-2fab-4344-aa8e-3486546993f8",
+        "tabId": 1,
+        "view": "content",
+        "scope": {
+          "documentId": "588a4a489fd29c14bd11ed9a424cbe6a",
+          "nodeId": "n1"
+        }
+      }
+    },
+    {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 37.71,
+      "request": {
+        "lane": "live",
+        "clientId": "b57138fb-2fab-4344-aa8e-3486546993f8",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "14-final-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 14.73,
+      "request": {
+        "lane": "live",
+        "clientId": "b57138fb-2fab-4344-aa8e-3486546993f8",
+        "tabId": 1
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-3d02c2cd-3657-4896-a7fd-613a25c9f2db",
+        "keeper_name": "browser-handoff-proof-75289000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-1dc3f86a-fdbe-482d-be15-08227401f83d"
+        },
+        "trace_id": "trace-1789268401952-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-13T03:00:44Z",
+        "updated_at": "2026-09-13T03:00:44Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned live Firefox profile closed",
+    "owned unique native host manifest removed",
+    {
+      "name": "server",
+      "pid": 18238,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 18225,
+      "exit": 0
+    }
+  ],
+  "instruction_distribution": "Baseline binary-exported full package with explicitly recorded filesystem SKILL.md override",
+  "instruction_source_commit": "9109071810955b29163077ba3837e586d0118739",
+  "instruction_source_proof": {
+    "source_commit": "9109071810955b29163077ba3837e586d0118739",
+    "baseline_export_source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "modified_paths": [
+      "SKILL.md"
+    ],
+    "old_sha256": "8277e8b890542117d8f748967bf2c019cccf444bd8fa8a4aa4613d421f684671",
+    "new_sha256": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+    "package_sha256": {
+      "SKILL.md": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+      "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+      "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+      "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+      "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+      "references/observation.md": "5685ef16c9f0eb4eed1d432d2231211c22495bc9ca8ddbce5be6b4ac5309e0ea",
+      "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+    },
+    "scope": "Filesystem instruction override only; baseline bundle.json remains the original binary export. All other package files and binaries are unchanged."
+  },
+  "composition_source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "composition_distribution": "full package exported by this server binary",
+  "composition_file_sha256": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107",
+  "instruction_sha256": "1d6005337db068c11c049f0a3aef0559b6298fa62215cb08581f169fef9e1a02",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "build": {
+    "release_version": "0.35.15",
+    "binary_version": "0.35.15",
+    "commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "commit_source": "embedded",
+    "binary_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+    "binary_commit_unix_ts": 1789266265.0,
+    "binary_commit_age_seconds": 2127,
+    "executable_path": "/private/tmp/browser-navigation-native-fd441/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-navigation-native-fd441/runtime",
+    "runtime_instance_id": "01a098b4-f721-7000-a5e3-5d75ed158487",
+    "started_at": "2026-09-13T02:59:51Z",
+    "uptime_seconds": 1
+  },
+  "binary_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 54537,
+  "driver_port": 54536,
+  "live_extension": {
+    "host_name": "masc_browser_proof_70074d30edb64454847a4af619272a04",
+    "native_host_sha256": "2523802569bddd783ffd7f1c1150a4a76685cd742c1a10d8cc7f1815062d0d19",
+    "changes": "Only HOST_NAME routes this isolated profile to its private test server; page scripts and manifest are unchanged.",
+    "source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "files": {
+      "background.js": "3131454256d1fe50f4146b93dea6ea1b7f4ee70362487545f5f0deac5094be97",
+      "manifest.json": "7d1789dd266527efe80a3d769666fb20f23c0f3cf74c66b75b7560637fce206c"
+    },
+    "installed_addon": "browser-lane@masc.local"
+  },
+  "webdriver_bootstrap": {
+    "session_id": "8a7a3ace-1a0f-42df-a4e5-95d042a2f3f0",
+    "profile": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/rust_mozprofileF9bP6m"
+  },
+  "assertions": {
+    "selected_region_retained": true,
+    "channel_navigation_present": true,
+    "sidebar_excluded": true
+  },
+  "observed_content": "Channels Alpha Beta Gamma",
+  "clipboard": {
+    "tui_sha256": "4c6d0179a02b767c2ed0b53f9eb29559adef0908b5e436f9b1a45a14d5466ed3",
+    "clipboard_bytes": 947,
+    "clipboard_sha256": "c62faf7b0d2cd141dcd8afcbb20fc94ce460182dbab998419514e1c33b717edd",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "input_events": [
+        {
+          "monotonic": 1011851.474751458,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 1011851.560298333,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 1011851.628186583,
+          "keys_hex": "79"
+        },
+        {
+          "monotonic": 1011851.641770875,
+          "keys_hex": "73"
+        },
+        {
+          "monotonic": 1011851.685815541,
+          "keys_hex": "73"
+        }
+      ],
+      "refresh_interval": "unmodified product default",
+      "pid": 20092,
+      "started_monotonic": 1011850.963904,
+      "binary_sha256": "4c6d0179a02b767c2ed0b53f9eb29559adef0908b5e436f9b1a45a14d5466ed3",
+      "copied_monotonic": 1011851.641741625,
+      "copy_offset": 19416,
+      "alive_at_copy": true,
+      "display_selected_monotonic": 1011851.70370025,
+      "display_intent": "unscoped content selected before Keeper starts",
+      "keeper_observation_finished_monotonic": 1011893.639371875,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 1011893.6803785,
+      "capture_errors": []
+    }
+  },
+  "keeper": "browser-handoff-proof-75289000",
+  "turn_started_monotonic": 1011853.06538,
+  "operation_id": "kmsg-42fea546ef0da1b60e20cada70c8144a",
+  "operation_state": "Succeeded",
+  "turn_observed_elapsed_seconds": 40.461,
+  "model_tool_calls": [
+    {
+      "id": "exec-956bce92-0ee9-49bf-bb6a-85bb6f1a2cc4",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789268414331-0001",
+      "success": true
+    },
+    {
+      "id": "exec-f3ee6819-aee3-4a5a-b2dc-afde5b9f0b80",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789268414343-0002",
+      "success": true
+    },
+    {
+      "id": "exec-89708055-1d73-4193-b8ad-fa015dca2695",
+      "name": "BrowserRead",
+      "execution_id": "exec-1789268417959-0003",
+      "success": true
+    },
+    {
+      "id": "exec-9f6076c6-0b9c-4af3-b546-b3a272f7b090",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789268422329-0006",
+      "success": true
+    },
+    {
+      "id": "exec-105f8fc7-9733-4f85-98dd-0bb9db4b5632",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789268425911-0009",
+      "success": true
+    },
+    {
+      "id": "exec-a31c1a19-0712-4e3c-a4e9-0ea94613190b",
+      "name": "keeper_compose_browser-live-click-content",
+      "execution_id": "exec-1789268429283-000c",
+      "success": true
+    }
+  ],
+  "composition_invocations": 3,
+  "chat_envelope_tool_calls": [],
+  "model_tool_calls_measurement": "typed turn execution_ids joined to durable tool_call records",
+  "result": "operation_completed_pending_evidence_audit"
+}

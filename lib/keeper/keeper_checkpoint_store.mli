@@ -170,6 +170,11 @@ val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.mess
 
 (** Strictly decode exact canonical bytes and derive their reference without
     re-encoding. *)
+val exact_snapshot_of_value :
+  expected_session_id:Keeper_id.Trace_id.t -> Agent_core.Checkpoint.t ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+(** Capture a producer-returned checkpoint once, using the canonical encoder. *)
+
 val exact_snapshot_of_canonical_bytes :
   expected_session_id:Keeper_id.Trace_id.t ->
   string ->
@@ -295,6 +300,14 @@ val retain_exact_snapshot :
 val load_retained_exact_snapshot :
   session_dir:string -> reference:Keeper_checkpoint_ref.t ->
   (exact_checkpoint_snapshot, checkpoint_cas_error) result
+
+val find_exact_snapshot_for_retention : session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (exact_checkpoint_snapshot, checkpoint_cas_error) result
+(** Find the already identified bytes in retained storage, canonical state, or
+    rolling history under the original session lock. No re-encoding, newest-file
+    selection, or changed-checkpoint substitution is permitted. I/O failure
+    remains an error; the caller must confirm retention before resuming. *)
+
 
 module For_testing : sig
   val with_before_history_link : (unit -> unit) -> (unit -> 'a) -> 'a

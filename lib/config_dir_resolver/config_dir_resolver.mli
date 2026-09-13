@@ -102,7 +102,8 @@ val resolve_for_base_path : base_path:string -> resolution
 (** Resolve the config root for an explicit workspace [base_path]. Explicit
     [MASC_CONFIG_DIR] overrides are still honored, but
     ambient [MASC_BASE_PATH] and process cwd do not replace the caller's
-    workspace. *)
+    workspace. A relative override is anchored to that workspace, matching
+    global resolution when MASC_BASE_PATH is configured. *)
 
 val keepers_dir_for_base_path : base_path:string -> string
 (** [keepers_dir_for_base_path ~base_path] returns the keepers directory for an

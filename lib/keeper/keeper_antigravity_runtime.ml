@@ -5,6 +5,7 @@ module Session_store = Keeper_official_client_session_store
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -376,7 +377,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name
+let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -432,15 +433,22 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        just what the store writes. *)
     let* native_posture =
       Host.resolve_native_posture
+        ~required:required_native_posture
         ~base_path
         ~keeper_name
         ~client_label:"Antigravity"
         ~default:Runtime_native_tools.antigravity_default
-        ~none_supported:false
+        ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~native_posture tools
     in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Antigravity ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -526,6 +534,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let* dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Mcp
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -632,6 +641,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let* dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Mcp
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -804,6 +814,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
             internal_error ("Antigravity host-stop settlement failed: " ^ detail))
         in
         session_state := settled;
+           on_session_settled settled;
         projected
       | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
         Error
@@ -999,7 +1010,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
               ~session_id:turn.conversation_id
               ~turn_id
               ~updated_at:(Time_compat.now ())
-            |> Result.map (fun settled -> session_state := settled)
+            |> Result.map (fun settled -> session_state := settled; on_session_settled settled)
             |> Result.map_error (fun detail ->
               internal_error ("Antigravity session settlement failed: " ^ detail))
           in
@@ -1078,7 +1089,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1088,6 +1099,8 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
+  let settled_session = Atomic.make None in
+  let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
@@ -1096,7 +1109,8 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle
+      run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+        ~required_native_posture
         ~runtime_id
         ~keeper_name
         ~on_model_input_window_observation
@@ -1120,7 +1134,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~observe_effect_attempted
         ~config)
   in
-  { result; effect_disposition = Atomic.get effect_disposition }
+  { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
 ;;
 
 module For_testing = struct

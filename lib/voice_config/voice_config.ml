@@ -706,6 +706,30 @@ let load_from_runtime_toml () =
     | Error msg -> Error msg
     | Ok text -> parse_runtime_toml_text text)
 
+(* The standalone source read the way the loader reads it, so a surface that
+   reports which configuration is active cannot parse the file differently from
+   the speak and transcribe paths. *)
+let load_standalone_file path =
+  match
+    try Ok (Fs_compat.load_file path) with
+    | Sys_error error ->
+      Error (Printf.sprintf "voice config read failed: %s" error)
+    | Eio.Io _ as exn ->
+      Error
+        (Printf.sprintf
+           "voice config Eio read failed: %s"
+           (Printexc.to_string exn))
+  with
+  | Error msg -> Error msg
+  | Ok content -> (
+    (* parse via parse_json_safe (keeps the UTF-8 repair pass) but
+       keep the Error — read_json_eio would swallow a syntax error
+       into a warn-log plus an empty object that then fails schema
+       parsing with a misleading "must be object" message. *)
+    match Safe_ops.parse_json_safe ~context:path content with
+    | Error msg -> Error (Printf.sprintf "invalid voice config json: %s" msg)
+    | Ok json -> parse_json json)
+
 let load_detailed () =
   (* Prefer runtime.toml [voice] section over standalone JSON.
      Only fall back when the file or section is absent — TOML
@@ -718,32 +742,43 @@ let load_detailed () =
     if not (Sys.file_exists path)
     then Error Not_configured
     else
-      match
-        try Ok (Fs_compat.load_file path) with
-        | Sys_error error ->
-          Error (Printf.sprintf "voice config read failed: %s" error)
-        | Eio.Io _ as exn ->
-          Error
-            (Printf.sprintf
-               "voice config Eio read failed: %s"
-               (Printexc.to_string exn))
-      with
-      | Error msg -> Error (Invalid msg)
-      | Ok content -> (
-        (* parse via parse_json_safe (keeps the UTF-8 repair pass) but
-           keep the Error — read_json_eio would swallow a syntax error
-           into a warn-log plus an empty object that then fails schema
-           parsing with a misleading "must be object" message. *)
-        match Safe_ops.parse_json_safe ~context:path content with
-        | Error msg ->
-          Error (Invalid (Printf.sprintf "invalid voice config json: %s" msg))
-        | Ok json -> (
-          match parse_json json with
-          | Ok config -> Ok config
-          | Error msg -> Error (Invalid msg))))
+      match load_standalone_file path with
+      | Ok config -> Ok config
+      | Error msg -> Error (Invalid msg))
 
 let load_error_to_string = function
-  | Not_configured -> Printf.sprintf "voice config missing at %s" (config_path ())
+  (* Names both places a configuration is read from, and where runtime.toml
+     was looked for. Naming only the standalone JSON sent a reader whose voice
+     lives in runtime.toml to a file they never made, when what was missing was
+     the workspace the lookup ran against. *)
+  | Not_configured ->
+    let resolution = Config_dir_resolver.resolve () in
+    let root = resolution.Config_dir_resolver.config_root in
+    let runtime_toml =
+      Filename.concat root.Config_dir_resolver.path Config_dir_resolver.runtime_toml_filename
+    in
+    (* [exists] on the resolved root means "resolved", not "on disk": with no
+       MASC_BASE_PATH or MASC_CONFIG_DIR the resolver does not take the current
+       directory as a workspace, and reports a default path under it as
+       missing even when that directory is there. So the sentence follows the
+       source, not the flag. *)
+    let where =
+      match root.Config_dir_resolver.source with
+      | Config_dir_resolver.Missing ->
+        (match (Host_config.from_env ()).base_path with
+         | None ->
+           "no workspace is resolved (MASC_BASE_PATH and MASC_CONFIG_DIR are unset)"
+         | Some _ ->
+           Printf.sprintf "no masc configuration at %s" root.Config_dir_resolver.path)
+      | Config_dir_resolver.Invalid_env ->
+        Printf.sprintf "MASC_CONFIG_DIR does not point to a directory: %s"
+          root.Config_dir_resolver.path
+      | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+        if Sys.file_exists runtime_toml
+        then Printf.sprintf "no [voice] section in %s" runtime_toml
+        else Printf.sprintf "no %s" runtime_toml
+    in
+    Printf.sprintf "voice config missing: %s, and no %s" where (config_path ())
   | Invalid message -> message
 
 let enabled_endpoints (endpoints : endpoint list) =

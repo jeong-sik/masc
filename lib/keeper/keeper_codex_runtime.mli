@@ -6,6 +6,7 @@ type successful_tool_completion =
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }
@@ -16,6 +17,9 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  accepts_image_input:bool ->
+  ?required_native_posture:Runtime_native_tools.posture ->
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
@@ -50,16 +54,16 @@ val run :
     history this turn carried. Without it the turn record is written with no
     window and no input composition, which is what [/context] reads.
 
-    [on_transmitted_model_input] fires once per attempt, after the capacity
-    window has cut the history and before the turn is validated. Required
+    [on_transmitted_model_input] fires once per attempt, after context injection
+    is acknowledged and the complete turn/start input is written. Required
     rather than optional: a lane that reports nothing is what wrote every
     turn's input attribution on this lane as zero (masc#32995).
 
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     that injects the history into the thread. A [Resume] reports
-    [Held_by_client_session]: the app-server holds the conversation and masc
-    sends only the new turn, so the input the model reads cannot be measured
-    from here. *)
+    [Held_by_client_session]: MASC injects the current Keeper instructions and
+    developer context before the new turn, but the app-server holds the prior
+    conversation, so its full model input cannot be measured here. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit

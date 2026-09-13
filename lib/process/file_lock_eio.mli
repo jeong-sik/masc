@@ -102,6 +102,8 @@ val with_durable_lock :
     completed body result must use the observed surface. *)
 
 module For_testing : sig
+  val holders_and_waiters : lock_path:string -> int
+  (** Read the existing entry reference count without changing lock state. *)
   val with_durable_lock_observed_with_release_failure :
     release_failure:durable_lock_error ->
     lock_path:string ->

@@ -37,6 +37,17 @@ type operation_interrupt_result =
     never signal a newer operation: the expected id is compared by the Owner
     before its exact child cancel capability is invoked. *)
 
+type interrupt_target =
+  | Observed_turn of
+      { current : Keeper_registry_types.turn_switch option Atomic.t
+      ; interrupt_token : string
+      }
+  | Direct_operation of Chat_operation.Operation_id.t
+
+type run_next_result =
+  | Run_next_paused
+  | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
+
 type turn_lane =
   | Autonomous
   | Chat_operation
@@ -75,6 +86,7 @@ val turn_lane_to_string : turn_lane -> string
 
 type autonomous_block =
   | Turn_busy of turn_in_flight option
+  | Admission_paused
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type shutdown_reservation =
@@ -286,6 +298,13 @@ val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
+val pause_and_interrupt : t -> interrupt_target -> (operation_interrupt_result, error) result
+(** Validate the exact current execution, persist the operator pause, then signal.
+    No queued or autonomous successor can start after this command. *)
+val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:interrupt_target option -> (run_next_result, error) result
+(** Prioritize before releasing a chat-interrupt pause. Other pauses remain closed. *)
+
 val interrupt_running_operation
   :  t
   -> Chat_operation.Operation_id.t
@@ -310,6 +329,9 @@ val edit_queued_operation
   -> operation_id:Chat_operation.Operation_id.t
   -> input:Yojson.Safe.t
   -> (Chat_operation.t, error) result
+
+val move_queued_operation_to_front : t -> Chat_operation.Operation_id.t ->
+  (Chat_operation.t, error) result
 
 val move_queued_operation_to_end
   :  t
@@ -365,3 +387,7 @@ val defer_direct_gate_reconciliation : t -> operation_id:Chat_operation.Operatio
 
 val direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.gate_binding option, error) result
+
+val direct_gate_bindings : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_binding) list, error) result
+val reconcile_direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
+  binding:Keeper_semantic_execution.gate_binding -> waiting:Keeper_semantic_execution.gate_wait -> (unit, error) result

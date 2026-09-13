@@ -106,6 +106,46 @@ lands in Recent Events:
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
 
+### When nothing answers
+
+When every read fails because nothing listens on the port, the TUI starts a
+server once per session: `masc start --base-path <base> --host 127.0.0.1
+--port <port>`, with the `masc` beside the TUI binary, or else the one on
+`PATH`. The server keeps running after the TUI closes. While the header says
+`[disconnected]`, `s` on the Keepers list starts one by hand.
+
+The server's stdout and stderr go to `.masc/logs/masc-server-<port>.log` under
+the base path, emptied at each start. When a server refuses to start before its
+own log exists, that file is the only place the reason is written. The TUI
+reads its last line back when the server exits before `/health` answers.
+
+Measured on 2026-09-13 with the base path already held by a server on port
+8976 and the TUI pointed at port 8977. The TUI added these four events, newest
+first:
+
+```
+masc server exited (exit 1) before it was ready
+[FATAL] Base path <base> is locked. The lease records PID 15310; its namespace and current holder are unverified. Lock file: '…'. …
+full output: .masc/logs/masc-server-8977.log
+starting masc server here...
+```
+
+The events pane is half the screen. At 120 columns it cut each event at 57
+cells, timestamp included: the headline lost its last word and the lock line
+was cut inside the base path, so open the file for the whole line. The file held 961 bytes: one `[INFO]` line
+and the `[FATAL]` line. If the server is still not answering after 30 seconds,
+the TUI says `masc server did not answer /health in time` and names the same
+file.
+
+`masc setup` starts its server the same way. When that server exits first,
+setup stops with the exit status, the last line and the absolute path of the
+file.
+
+A server that does start keeps writing its console log into this file until it
+stops. Three runs of 18 to 44 minutes with one keeper booted wrote about 13 KB
+while booting, then 5 to 35 KB an hour. The file is not rotated; the next start
+on that port empties it.
+
 ## Navigation
 
 Every surface draws the Tab ring on its top row with the active surface
@@ -322,7 +362,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P S   LAST LIFECYCLE / RUNTIME             TASK
+    HEALTH       KEEPER             A P S   TURN LIFECYCLE / RUNTIME             TASK
  >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
     ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
    OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
@@ -331,7 +371,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 `A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a
 letter — `D` docker, `M` microvm, `L` local — because a sandbox is a name, not
-an on/off. `LAST` is the time since the keeper's last turn (the lifetime turn
+an on/off. `TURN` is the time since the keeper's last turn (the lifetime turn
 count moved to the detail pane; a keeper that never turned shows a dash). The
 metadata list needs no server, so names, last-turn times, and tasks stay
 readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
@@ -365,6 +405,10 @@ Keeper's own override, whatever this toggle says. It is in memory too: a
 restart puts every Keeper back on `auto`.
 
 ### Lanes
+
+For TOML package installations, open `/addons` from the composer or choose
+`go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
+covers configuration editing, connections, Skills, actions and cross-Lane evidence.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
 Keepers, so this surface no longer repeats a second Keeper table. It hangs
@@ -991,7 +1035,7 @@ completion judge, `Task Review·7` is tasks waiting for an operator.
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
  >   [dropped ] P1  Reduce all exampleorg service backlogs to 0
-     [executi~] P1  Multi-Keeper real-world mission keeper-collab-e0-r7
+     [executi…] P1  Multi-Keeper real-world mission keeper-collab-e0-r7
   j/k:move  Enter:detail  r:refresh  Tab:next  | Port: 8935
 ```
 

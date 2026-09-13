@@ -1419,6 +1419,15 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       ( Keeper_turn_checkpoint_reason.Operation_queued
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
+let format_workspace_memory_observation = function
+  | Workspace_memory_publication.Missing -> None
+  | Workspace_memory_publication.Unavailable _ ->
+    Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
+  | Workspace_memory_publication.Available descriptor ->
+    Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
+      [ "proposal_id", descriptor.proposal_id;
+        "context_sha256", descriptor.context_sha256 ] ^ "\n\n")
+
 let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -1428,6 +1437,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : (goal_summary list, string) result option)
+    ?(workspace_memory = Workspace_memory_publication.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1786,6 +1796,8 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        keeper commits or upstream advances, not per cycle. Projection only —
        it states where each checkout stands so the keeper can choose to
        fetch/rebase; nothing here schedules or forces that work. *)
+    | Keeper_context_layers.Workspace_memory ->
+      format_workspace_memory_observation workspace_memory
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -2018,6 +2030,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       | Keeper_context_layers.Approval_authority
       | Keeper_context_layers.Connected_surfaces
       | Keeper_context_layers.Namespace_state
+      | Keeper_context_layers.Workspace_memory
       | Keeper_context_layers.Repository_freshness
       | Keeper_context_layers.Autonomous_trigger
       | Keeper_context_layers.Scheduled_automation
@@ -2109,6 +2122,7 @@ let build_prompt
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?workspace_memory
       ?repository_freshness
       ?context_budget_bytes
       ~observation
@@ -2124,6 +2138,7 @@ let build_prompt
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?workspace_memory
       ?repository_freshness
       ?context_budget_bytes
       ~observation
@@ -2140,6 +2155,7 @@ let build_prompt_preview
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
+      ?workspace_memory
       ?repository_freshness
       ~observation
       ()
@@ -2152,6 +2168,7 @@ let build_prompt_preview
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
+    ?workspace_memory
     ?repository_freshness
     ~observation
     ()

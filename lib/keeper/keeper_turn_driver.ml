@@ -52,16 +52,19 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
+
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
 type provider_attempt_outcomes =
   { provider_result : provider_run_result
   ; turn_result : provider_run_result
+  ; checkpoint_after : Agent_core.Checkpoint.t option
   }
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
@@ -79,10 +82,11 @@ type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
 
-let selected_runtime_result (runtime : Runtime.t) ~lane_attempt_index result =
+let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~lane_attempt_index result =
   Result.map
     (fun run_result ->
        { run_result
+       ; official_client_settlement
        ; selected_runtime_id = runtime.id
        ; selected_max_context = Runtime.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
@@ -125,6 +129,7 @@ type lane_terminal_error =
   { origin_runtime_id : string
   ; origin_attempt : int
   ; lane_error : Agent_core.Error.t
+  ; checkpoint_after : Agent_core.Checkpoint.t option
   }
 
 (* Quota demotion must never promote a candidate the runtime table cannot
@@ -192,7 +197,7 @@ let canonical_checkpoint_sink ~replay_prefix_projection sink
   | Ok checkpoint -> sink { snapshot with checkpoint }
 ;;
 
-let project_provider_attempt_result ~replay_prefix_projection provider_result =
+let project_provider_attempt_result ?checkpoint_after ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
     | Error _ as error -> error
@@ -215,7 +220,14 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
               (Agent_core.Error.Internal
                  (Keeper_replay_prefix.restore_error_to_string error))))
   in
-  { provider_result; turn_result }
+  let turn_result, checkpoint_after = match checkpoint_after with
+    | None -> turn_result, None
+    | Some checkpoint ->
+      (match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection checkpoint with
+       | Ok checkpoint -> turn_result, Some checkpoint
+       | Error error -> Error (Agent_core.Error.Internal
+           (Keeper_replay_prefix.restore_error_to_string error)), None) in
+  { provider_result; turn_result; checkpoint_after }
 ;;
 
 let runtime_attempt_decision ~idx ~runtime_id =
@@ -413,7 +425,7 @@ let attempt_runtime_candidates
           | Some scope -> Runtime_quota_window.note_succeeded ~scope
           | None -> ());
          Ok value
-       | Error error, _checkpoint_after, effect_disposition, dispatch ->
+       | Error error, checkpoint_after, effect_disposition, dispatch ->
          emit_runtime_manifest
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
@@ -517,6 +529,7 @@ let attempt_runtime_candidates
                  { origin_runtime_id = attempt_runtime_id
                  ; origin_attempt = idx
                  ; lane_error = error
+                 ; checkpoint_after
                  }
              else None
          in
@@ -524,6 +537,7 @@ let attempt_runtime_candidates
            { origin_runtime_id = attempt_runtime_id
            ; origin_attempt = idx
            ; lane_error
+           ; checkpoint_after
            }
          in
          if not effect_retry_admitted
@@ -960,6 +974,7 @@ let run_named
     ?(tools = [])
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
+    ?required_native_posture
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
@@ -991,6 +1006,7 @@ let run_named
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_request_attribution
+    ?official_client_continuation
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -1009,6 +1025,15 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  let tool_requirement = match output_contract with
+    | Tool_verdict -> Keeper_required_tools.Required
+    | Provider_default -> tool_requirement in
+  if output_contract = Tool_verdict
+     && (Option.is_none (Runtime.get_runtime_by_id runtime_id)
+         || Option.is_some deferred_runtime_lane) then
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      { field = "verifier.runtime"; detail = "A verifier slot requires a direct runtime binding without a deferred lane" }))
+  else
   if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
@@ -1088,10 +1113,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
+    match output_contract, deferred_runtime_lane with
+    | Tool_verdict, _ -> Ok (None, [runtime_id])
+    | Provider_default, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | None ->
+    | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->
@@ -1155,7 +1181,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
-    modality_reroute_candidates
+    match output_contract with
+    | Tool_verdict -> []
+    | Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
@@ -1230,11 +1258,18 @@ let run_named
      walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
      signature and its mutable state out of the delegation. *)
   let project_images =
-    Keeper_vision_ingest.fallback_projector
+    let project = Keeper_vision_ingest.fallback_projector
       ~base_path
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
-      ()
+      () in
+    fun ~mode blocks ->
+      (* Exact-lane admission also owns provider selection for image evidence:
+         retain unread artifacts, but never dispatch an out-of-lane vision call. *)
+      let mode = match output_contract with
+        | Provider_default -> mode
+        | Tool_verdict -> Keeper_vision_ingest.Store_only in
+      project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return.
@@ -1303,7 +1338,16 @@ let run_named
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
-      let source_reader_ready = match recovery_view, runtime.Runtime.execution with
+      let source_reader_ready =
+        if required_native_posture = Some Runtime_native_tools.Native_none
+           && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
+          Error (Keeper_required_tools.to_core_error
+            {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
+        else match official_client_continuation with
+        | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
+            || Runtime_execution.checkpoint_owner runtime.Runtime.execution <> Runtime_execution.Official_client ->
+          Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
+        | Some _ | None -> match recovery_view, runtime.Runtime.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
@@ -1313,10 +1357,22 @@ let run_named
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
-      (match Result.bind source_reader_ready (fun () ->
+      let verifier_ready = match output_contract with
+        | Provider_default -> Ok ()
+        | Tool_verdict ->
+          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
+            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+              current_goal_blocks with
+            | Runtime_agent.No_reroute_needed -> Ok ()
+            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
+          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
+      (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
-          |> Result.map_error Keeper_required_tools.to_core_error) with
+          |> Result.map_error Keeper_required_tools.to_core_error)) with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,
@@ -1387,6 +1443,8 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects
@@ -1410,6 +1468,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1440,6 +1499,7 @@ let run_named
                             "provider config transforms cannot target a \
                              codex-app-server runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             ; successful_tool_completion =
@@ -1502,7 +1562,7 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx codex_result
+        ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1515,6 +1575,8 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
+            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             (* Antigravity's CLI assembles the wire, so the shape masc can
@@ -1537,6 +1599,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1569,6 +1632,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target an antigravity-cli runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1608,7 +1672,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx antigravity_result
+        ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1622,6 +1686,8 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects
@@ -1647,6 +1713,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1676,6 +1743,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target a claude-code runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1720,7 +1788,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx claude_result
+        ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1900,12 +1968,10 @@ let run_named
               try_provider_ctx candidate
           in
           let outcomes =
-            project_provider_attempt_result
-              ~replay_prefix_projection
-              provider_result
-          in
+            project_provider_attempt_result ?checkpoint_after
+              ~replay_prefix_projection provider_result in
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
-          , checkpoint_after
+          , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , Keeper_attempt_dispatch.Dispatched ))))
        )))
@@ -1921,6 +1987,7 @@ module For_testing = struct
       ~next_runtime_id ~later_runtime_ids ~failure
   ;;
 
+  let produced_checkpoint (outcomes : provider_attempt_outcomes) = outcomes.checkpoint_after
   let project_provider_attempt_result = project_provider_attempt_result
   let canonical_checkpoint_sink = canonical_checkpoint_sink
   let provider_result outcomes = outcomes.provider_result

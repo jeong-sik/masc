@@ -1,0 +1,37 @@
+{
+  "scope": "Source Reaction Thread in Chromium; synthetic API responses and push invalidations; no installed/runtime acceptance.",
+  "passed": true,
+  "scenarios": [
+    "both sources show loading before an observed response",
+    "Board succeeds independently while Decisions reports an explicit error",
+    "manual retry recovers a populated Decisions card without erasing the failed Board source snapshot",
+    "existing server-push router independently refreshes Board and Decisions"
+  ],
+  "requests": [
+    {
+      "source": "board",
+      "mode": "initial"
+    },
+    {
+      "source": "decisions",
+      "mode": "initial"
+    },
+    {
+      "source": "board",
+      "mode": "error"
+    },
+    {
+      "source": "decisions",
+      "mode": "ready"
+    },
+    {
+      "source": "board",
+      "mode": "updated"
+    },
+    {
+      "source": "decisions",
+      "mode": "ready"
+    }
+  ],
+  "errors": []
+}

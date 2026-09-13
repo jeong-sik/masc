@@ -55,7 +55,8 @@ def summarize(value: object, selected: list[str]) -> dict:
             "machine_id": machine, "machine_incarnation": incarnation,
             "frame": frame, "clock": clock,
             "matches_binding": fields["matches_binding"],
-            "input_cursor": fields["input_cursor"], "evidence": item["evidence"],
+            "input_cursor": fields["input_cursor"], "input_ledger": fields["input_ledger"],
+            "evidence": item["evidence"],
         })
     return {"captures": captures, "coverage": coverage}
 

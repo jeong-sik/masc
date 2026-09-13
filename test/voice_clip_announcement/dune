@@ -1,0 +1,7 @@
+; What a keeper's spoken reply is announced as on the chat line it is written
+; to. The clip is built from a real file on disk, because the container is a
+; property of the bytes and not of the caller's expectation.
+
+(test
+ (name test_voice_clip_announcement)
+ (libraries alcotest unix masc masc.voice_bridge_core))

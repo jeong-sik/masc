@@ -27,12 +27,16 @@ let accept_no_progress_should_try_next error =
    authorities before advancing to the next candidate. A 402 is the same
    kind of fact about the binding's account (RFC-0440 §3): it cannot pay, so
    the walk moves on; [Error_domain.is_retryable] still refuses a retry of the
-   same candidate, and the quota window records the exhaustion. *)
+   same candidate, and the quota window records the exhaustion. Official
+   clients carry the same access facts as [Provider] errors. *)
 let candidate_access_should_try_next = function
   | Agent_core.Error.Api
       ( Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _
       | Agent_core.Retry.PaymentRequired _ )
     -> true
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _) ->
+    true
   | Agent_core.Error.Api
       ( Agent_core.Retry.RateLimited _ | Agent_core.Retry.Overloaded _
       | Agent_core.Retry.ServerError _

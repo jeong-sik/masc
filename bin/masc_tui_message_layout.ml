@@ -543,17 +543,55 @@ let split_at_cells text cells =
     let cut = walk 0 0 (display_pieces text) in
     (String.sub text 0 cut, String.sub text cut (String.length text - cut))
 
+(* What a cut leaves behind in place of the text it dropped.
+
+   One mark for every cut -- the tail, the middle, and the composer's head in
+   this module, and the roster marquee in {!Masc_tui_roster_pane}, which is the
+   fourth and the only one that spends two at once.
+   The middle cut spelled it "…" and the other two "~", and a single frame
+   drew both: a roster name cut to [some…-name] sat beside a notice cut to
+   [http://127.0.0.1:~], so the reader had to learn two spellings of one fact.
+
+   "~" is the worse of the two to keep. It is a legal byte in a path and in a
+   URL, so a cut address reads as an address that ends in a tilde -- and the
+   port it was cut at is the token the operator came for. The glyph is spoken
+   for elsewhere besides: {!Masc_tui_markdown} reserves a single "~" for a home
+   directory, the Changes column wears it for an edited file, and the Acting
+   pane for a record that has not settled. A cut is the one meaning it does
+   not need to carry.
+
+   The cell cost is derived rather than written as 1, so each budget subtracts
+   what the mark actually spends. That is one cell today, the same number the
+   literals said. A wider mark would not be safe by derivation alone: where a
+   column is narrower than the mark, each of the four floors its budget at zero
+   and draws the mark anyway rather than cutting it, so the mark would overrun.
+   The marquee would overrun first, since it spends two. A two-cell mark needs
+   those four sites decided, not just this value changed. *)
+(* A count and the noun it counts, in the number the count asks for. Four
+   modules each wrote this as a local [plural], and thirty-odd rows wrote
+   "%d lines" with no plural at all, so a single draft line read "1 lines". *)
+let count_noun ?plural count singular =
+  let noun =
+    if count = 1 then singular
+    else match plural with Some word -> word | None -> singular ^ "s"
+  in
+  Printf.sprintf "%d %s" count noun
+
+let cut_mark = "…"
+let cut_mark_cells = display_width cut_mark
+
 let fit_width text width =
   if width <= 0 then ""
   else
     let pieces = display_pieces text in
     let cells = pieces_width pieces in
     if cells > width then
+      let room = max 0 (width - cut_mark_cells) in
       let prefix, prefix_cells, saw_ansi =
-        cell_prefix_of_pieces text pieces (width - 1)
+        cell_prefix_of_pieces text pieces room
       in
       let reset = if saw_ansi then "\x1B[0m" else "" in
-      prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
+      prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
     else text ^ String.make (width - cells) ' '
 
 (* Where a bare URL begins and where it stops. Two readers ask -- the one that
@@ -636,7 +674,9 @@ let input_viewport ~max_cells input =
   let pieces = display_pieces input in
   if pieces_width pieces <= max_cells then input
   else if max_cells = 0 then ""
-  else "~" ^ cell_suffix_of_pieces input pieces (max_cells - 1)
+  else
+    cut_mark
+    ^ cell_suffix_of_pieces input pieces (max 0 (max_cells - cut_mark_cells))
 
 (* The chat pane draws the composer's first line with this prefix and wraps
    continuation lines to the same width, so the caret column is measured from
@@ -736,7 +776,7 @@ let chat_role_label_width ~pane_cells =
    identifier needs both. Keeper names share long prefixes and differ in
    their tail, but a name cut to its tail alone no longer says which family
    it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
-   "rw-e0-r9-20260820-revi~" loses exactly the part that distinguishes it,
+   "rw-e0-r9-20260820-revi…" loses exactly the part that distinguishes it,
    and to "…0820-revision-audit" loses exactly the part that groups it.
 
    The tail gets two thirds of the budget because it is the deciding end. As
@@ -751,9 +791,9 @@ let fit_middle column label =
     let pieces = display_pieces label in
     let cells = pieces_width pieces in
     if cells <= column then label ^ String.make (column - cells) ' '
-    else if column = 1 then "…"
+    else if column <= cut_mark_cells then cut_mark
     else
-      let usable = column - 1 in
+      let usable = column - cut_mark_cells in
       let head_cells = usable / 3 in
       let tail_cells = usable - head_cells in
       let head, head_width, saw_ansi =
@@ -762,8 +802,8 @@ let fit_middle column label =
       let tail = cell_suffix_of_pieces label pieces tail_cells in
       let tail_width = pieces_width (display_pieces tail) in
       let reset = if saw_ansi then "\x1B[0m" else "" in
-      let used = head_width + 1 + tail_width in
-      head ^ reset ^ "…" ^ tail ^ String.make (max 0 (column - used)) ' '
+      let used = head_width + cut_mark_cells + tail_width in
+      head ^ reset ^ cut_mark ^ tail ^ String.make (max 0 (column - used)) ' '
 
 (* One glyph per speaker, from the vocabulary the Keepers roster and Acting
    already use. Colour carries this distinction better, and NO_COLOR takes
@@ -1314,8 +1354,8 @@ let origin_gutter ~origin ~previous ~inner_width entry =
         else 0
       in
       (* A partial clock is context, not an identifier. [fit_width] would put
-         its generic "~" over the final clock cell, producing gutters such as
-         [12:~keeper] that look like damaged chat. Keep the cell-safe prefix
+         its generic "…" over the final clock cell, producing gutters such as
+         [12:…keeper] that look like damaged chat. Keep the cell-safe prefix
          and its alignment without inventing a truncation glyph. *)
       let clock = take_cells clock clock_cells in
       let clock =
@@ -1790,8 +1830,15 @@ let last_page_start ~height row_costs =
   end
 
 (* One span, in the largest unit that still carries a remainder. Every reading
-   is at most seven cells wide, so a column sized for the longest span holds
+   is at most six cells wide, so a column sized for the longest span holds
    every shorter one.
+
+   From a hundred days the remainder goes. Days and hours ran to seven cells
+   there ("100d00h"), one past the six-cell columns that hold an age -- Board,
+   the Keeper roster -- and a table cell too narrow keeps a reading's first
+   character and its tail, so the days were what got cut: a Board post with
+   no timestamp, aged from the epoch, drew [2…d10h]. Beside a third digit of
+   days the hours say nothing a reader would act on.
 
    The tiers stopped at minutes here, and the Fusion table drew its ages
    through this: all 28 rows read [12045m~], five figures of minutes cut by
@@ -1810,7 +1857,9 @@ let span_text seconds =
   else if whole < 3600 then Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60)
   else if whole < 86_400 then
     Printf.sprintf "%dh%02dm" (whole / 3600) (whole mod 3600 / 60)
-  else Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+  else if whole < 100 * 86_400 then
+    Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+  else Printf.sprintf "%dd" (whole / 86_400)
 
 let age_text ~now ~since =
   let seconds = now -. since in

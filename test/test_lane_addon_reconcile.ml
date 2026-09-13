@@ -3,7 +3,12 @@
     replaced by observable barriers; no Docker daemon or model is required. *)
 open Alcotest
 open Masc
-module Runtime = Lane_addon_runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
 
@@ -416,7 +421,7 @@ let test_held_observer_does_not_block_other_declarations () =
       "primary action completed" (Eio.Promise.await_exn primary);
     check int "held observer remains unreleased" 0 (List.length (stops state));
     check int "held observation has no fabricated result" 0 (number "observation_seq" (instance config held_id));
-    Runtime.notify_activity ~config;
+    ignore (dispatch config Runtime.Observe ["instance_id", `String ready_id]);
     await clock (fun () -> number "observation_seq" (instance config ready_id) >= 2);
     Sys.remove held_path;
     ignore (reconcile config directory);

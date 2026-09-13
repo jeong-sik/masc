@@ -134,6 +134,12 @@ latest_tag_version="$(package_version_from_tag "$latest_tag")"
 if [[ "$head_major" == "$base_major" ]] \
   && version_gt "$base_package_version" "$head_package_version"
 then
+  # Correct an unpublished version without reusing a published release number.
+  if version_gt "$head_package_version" "$latest_tag_version"; then
+    printf 'Release train guard OK (unreleased correction): base=%s head=%s latest_tag_ref=%s latest_tag_version=%s\n' \
+      "$base_package_version" "$head_package_version" "$latest_tag" "$latest_tag_version"
+    exit 0
+  fi
   fail "head ref $head_ref downgrades package version from base $base_package_version to $head_package_version in major $base_major"
 fi
 

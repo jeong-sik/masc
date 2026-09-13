@@ -1,0 +1,30 @@
+{
+  "observed_at": "2026-09-12T09:11:41.750185+00:00",
+  "sources": 24,
+  "cited_sources": 24,
+  "claims": 10,
+  "conflicts": 2,
+  "completed_snapshot_pass": true,
+  "semantic_verification": "partial manual source audit; not accepted as current verified facts",
+  "findings": [
+    {
+      "claim_index": 8,
+      "finding": "Synthesis changes source s18 three quantitative criteria into three files. Source says file existence, three pages and evidence recording; published Goal actually references fivefiles. Do not promote the inferred filecount."
+    },
+    {
+      "conflict_index": 1,
+      "finding": "Final synthesis preserves admission fee as unresolved, improving on the first group that copied corrupted wording as a claim."
+    },
+    {
+      "finding": "Source revisions11/20 were already12/28 at earlier live read; proposal representscaptured snapshots, not current workspace state."
+    }
+  ],
+  "published": false,
+  "validated_source_example": {
+    "source": "s17",
+    "codepoint": "U+BD05",
+    "syllable": "봅",
+    "word": "바라봅니다",
+    "syllable_in_word": true
+  }
+}

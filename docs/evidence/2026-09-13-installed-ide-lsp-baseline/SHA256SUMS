@@ -1,0 +1,8 @@
+b98da7cf9d688803cdefee09e755ec972e716a0f8809e52fc1f51424dadb481e  docs/evidence/2026-09-13-installed-ide-lsp-baseline/README.md
+1ec4183dc4aaf12c612e940b897e9401509622cc9f2e8f0a113264f02e9f084a  docs/evidence/2026-09-13-installed-ide-lsp-baseline/failed-local-network-receipt.json
+9103bf6a27db7891aed3fad6811fcd7a1b9a8ff2f3684f170536a194d1789f3f  docs/evidence/2026-09-13-installed-ide-lsp-baseline/failed-tree-selection-receipt.json
+3d76159ae9dea11b648209acafdff18624009967cdcd73a4b63abcda00240e2e  docs/evidence/2026-09-13-installed-ide-lsp-baseline/fixture.json
+63b2334ea694fa88fea093c9a038ac383864fa02608f792a8f605d5bef42f20f  docs/evidence/2026-09-13-installed-ide-lsp-baseline/initial-desktop.png
+16fd73f0b2721c2ef9cc0e95e4dd31f075a2a636c7dc2508ab0d7413c45a9041  docs/evidence/2026-09-13-installed-ide-lsp-baseline/page-text.txt
+5a2af3fb0e05258a72e16a797c7bb14b00e08b81163a255a67caecbcc3a06127  docs/evidence/2026-09-13-installed-ide-lsp-baseline/receipt.json
+66ee5141b1f481ba08f5b6e56e212f547de9e50864573424ee8d88d10daa7a23  scripts/verify-installed-ide-lsp.mjs

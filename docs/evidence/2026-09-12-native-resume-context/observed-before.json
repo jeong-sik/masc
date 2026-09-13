@@ -1,0 +1,49 @@
+{
+  "scope": "Observed native persisted history and host composition; no HTTP model-request capture and no claim of model comprehension. Repair tests use fixture processes, not model evaluations.",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "keeper": "exhibit-designer",
+  "native_session_id": "01a09514-d1d5-7803-a94c-f60273149fc0",
+  "observed_through": "2026-09-12T11:35:54.740Z",
+  "raw_trace_sha256": "0fe66adc25f5ab1d5ecacc3e54188da037a412c9db5dd039ad9502386122b9b9",
+  "host_prompt": "지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다.",
+  "host_final_text": "새 상태 변화나 남은 실행 작업이 없습니다. Goal의 인간 확인을 기다리며 산출물과 기록을 그대로 보존합니다.",
+  "composition_log": "[2026-09-12 20:35:43] Codex turn composition: mode=resume prompt_bytes=131 developer_instructions_bytes=20087 history_messages=137 history_bytes=188317 tools=124 tool_surface_bytes=101399",
+  "native_developer_messages": [
+    {
+      "line": 2,
+      "timestamp": "2026-09-12T10:06:09.204Z",
+      "bytes": 47632,
+      "sha256": "896b414dd7432031a48ddca25c7afc8ea7a4ea14a06572ac4ed42ac7822d0435",
+      "contains_task003": false
+    },
+    {
+      "line": 3,
+      "timestamp": "2026-09-12T10:06:09.204Z",
+      "bytes": 2264,
+      "sha256": "af60719c7b64906bd05733aec72a96726712fe25d382a7bc9e05a6733cfd67dc",
+      "contains_task003": false
+    },
+    {
+      "line": 4,
+      "timestamp": "2026-09-12T10:06:09.204Z",
+      "bytes": 271,
+      "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e",
+      "contains_task003": false
+    }
+  ],
+  "native_turn_messages": [
+    {
+      "line": 802,
+      "timestamp": "2026-09-12T11:35:48.423Z",
+      "role": "user",
+      "text": "지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다."
+    },
+    {
+      "line": 807,
+      "timestamp": "2026-09-12T11:35:54.687Z",
+      "role": "assistant",
+      "text": "새 상태 변화나 남은 실행 작업이 없습니다. Goal의 인간 확인을 기다리며 산출물과 기록을 그대로 보존합니다."
+    }
+  ],
+  "protocol_reference": "https://learn.chatgpt.com/docs/app-server#inject-items-into-a-thread"
+}

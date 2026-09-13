@@ -429,6 +429,10 @@ val planning_row :
     one, so six cells of the title were spent on being different. They match
     now. *)
 
+val board_id_width : int
+(** Cells the ID column holds. The reader names a post by the same id and folds
+    it at the same width. *)
+
 type board_row_values = {
   brow_mark : string;
   brow_id : string;
@@ -455,6 +459,10 @@ type board_row_styles = {
 val board_no_styles : board_row_styles
 (** Every reading undressed. A caller drawing the row plain -- a test, or a
     surface that dresses the whole line -- has nothing to spell out. *)
+
+val board_age_text : now:float -> float option -> string
+(** The AGE cell: the span since the post last moved, or ["—"] when the post
+    carried no time. *)
 
 val board_title_width : inner_width:int -> int
 (** What the title has after the named columns, never below a floor. [inner_width]

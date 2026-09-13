@@ -18,6 +18,9 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
+  | Too_many_pages of { pages : int; limit : int }
+  | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
+  | Payload_budget_exceeded of { bytes : int; limit : int }
   | Storage_failed of string
 
 let error_to_string = function
@@ -33,6 +36,17 @@ let error_to_string = function
   | Invalid_output detail -> "pdf_inspection_invalid_output: " ^ detail
   | Image_policy_rejected {page;bytes;limit} ->
     Printf.sprintf "PDF page %d image has %d bytes, exceeding configured image limit %d" page bytes limit
+  | Too_many_pages {pages;limit} ->
+    Printf.sprintf
+      "pdf_page_budget_exceeded: %d pages, over the %d this verifier renders"
+      pages limit
+  | Rendered_bytes_exceeded {pages;bytes;limit} ->
+    Printf.sprintf
+      "pdf_render_budget_exceeded: %d pages rendered to %d bytes, over the %d one \
+       response carries"
+      pages bytes limit
+  | Payload_budget_exceeded { bytes; limit } ->
+    Printf.sprintf "pdf_payload_budget_exceeded: %d bytes exceed %d" bytes limit
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
 
 let ( let* ) = Result.bind
@@ -40,6 +54,14 @@ let ( let* ) = Result.bind
 let read_owned root path =
   match Fs_compat.load_owned_regular_file ~ownership_root:root path with
   | Ok (Some bytes) -> Ok bytes
+  | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
+  | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
+
+let read_bounded_owned root path ~max_bytes =
+  match Fs_compat.load_owned_regular_file_prefix ~ownership_root:root ~max_bytes path with
+  | Ok (Some prefix) when prefix.truncated ->
+    Error (Payload_budget_exceeded { bytes = prefix.file_size; limit = max_bytes })
+  | Ok (Some prefix) -> Ok prefix.content
   | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
   | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
 
@@ -64,7 +86,30 @@ let parsed_pages xml =
       Ok ((width_points,height_points,text) :: pages)) (Ok []) pages
     |> Result.map List.rev
 
-let inspect ~base_path ~max_image_bytes ~bytes =
+(* Submitted evidence is not trusted input. A malformed or deliberately
+   expensive PDF can leave either Poppler command sitting there, and the
+   completion verifier holds its review slot for as long as it waits, so one
+   document would wedge Task and Goal verification. The bound is generous
+   enough for a large scanned document on a loaded machine; a render that
+   needs longer is reported as a failure rather than waited on. *)
+let command_timeout_sec = 120.
+
+(* Every page can sit under [max_image_bytes] and the document still be too
+   large: the render loop holds each PNG and the result base64-encodes all of
+   them into one response. Both the count and the total are capped, because
+   either one alone lets the other run away. *)
+let max_source_bytes = 64 * 1024 * 1024
+let max_extracted_bytes = 2 * 1024 * 1024
+let max_page_pixels = 2048
+let max_pages = 64
+let max_total_image_bytes = 24 * 1024 * 1024
+
+let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+      ?(max_extracted_bytes = max_extracted_bytes)
+      ~base_path ~max_image_bytes ~bytes () =
+  let* () = if String.length bytes > max_source_bytes then
+    Error (Payload_budget_exceeded { bytes = String.length bytes; limit = max_source_bytes })
+    else Ok () in
   let missing = Pdf_runtime_dependencies.missing () in
   if missing <> [] then Error (Dependency_unavailable missing)
   else
@@ -81,6 +126,7 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       let diagnostics = ref [] in
       let run program arguments =
         let status, _stdout, stderr = Process_eio.run_argv_with_status_split
+            ~timeout_sec:command_timeout_sec
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
             ~cwd:root (program :: arguments) in
         let detail = String.trim stderr in
@@ -92,16 +138,21 @@ let inspect ~base_path ~max_image_bytes ~bytes =
           Error (Command_failed {program;status;detail}) in
       let xml_path = Filename.concat root "pages.xhtml" in
       let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
-      let* xml = read_owned root xml_path in
+      let* xml = read_bounded_owned root xml_path ~max_bytes:max_extracted_bytes in
       let* descriptions = parsed_pages xml in
-      let rec render number acc = function
+      let page_count = List.length descriptions in
+      let* () =
+        if page_count > max_pages
+        then Error (Too_many_pages {pages=page_count;limit=max_pages})
+        else Ok () in
+      let rec render number total acc = function
         | [] -> Ok (List.rev acc)
         | (width_points,height_points,text) :: rest ->
           let prefix = Filename.concat root (Printf.sprintf "page-%d" number) in
           (* Explicit single-page output gives the page its declared index,
              avoiding filename/count guesses and preserving all PDF pages. *)
           let* () = run "pdftoppm"
-            ["-png";"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
+            ["-png";"-scale-to";string_of_int max_page_pixels;"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
           let* png = read_owned root (prefix ^ ".png") in
           let size = String.length png in
           let* () = if size > max_image_bytes then
@@ -109,8 +160,14 @@ let inspect ~base_path ~max_image_bytes ~bytes =
             else match Keeper_vision_tool.sniff_image_media_type png with
               | Ok "image/png" -> Ok ()
               | Ok _ | Error _ -> Error (Invalid_output "Poppler page rendering is not a PNG") in
-          render (number + 1) ({number;width_points;height_points;text;png} :: acc) rest in
-      let* pages = render 1 [] descriptions in
+          let total = total + size in
+          let* () =
+            if total > max_total_image_bytes
+            then Error (Rendered_bytes_exceeded
+                          {pages=page_count;bytes=total;limit=max_total_image_bytes})
+            else Ok () in
+          render (number + 1) total ({number;width_points;height_points;text;png} :: acc) rest in
+      let* pages = render 1 0 [] descriptions in
       let* retained = read_owned root source in
       if not (String.equal retained bytes) then Error (Invalid_output "captured PDF changed during inspection")
       else Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);

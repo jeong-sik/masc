@@ -23,7 +23,8 @@ let with_store f =
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;outputs=[];
+  directory=dir;skills_directory=None;action_tool=None;outputs=[];refresh_policy=Types.Every_hint;
+  binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
@@ -160,7 +161,81 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
       (member "output" observed |> member "rows" |> list |> List.length))
     [[];["output_id",`String "all"]])
 
+let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->
+  let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+  let ledger_dir = Filename.concat dir "machine" in
+  ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:None));
+  Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+    let capture () =
+      require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+        ~store ~package:(package dir 16384)
+        ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "native"]]))
+      |> list |> List.hd |> member "observations" |> list |> List.hd in
+    let reference observation = member "input_ledger" observation |> member "evidence" |> own_reference in
+    let empty = capture () in
+    check string "empty native ledger is observed, not missing" ""
+      (require (Store.read_jsonl store (reference empty)));
+    let press who name =
+      let key = Msx_lane.key_of_string name |> require in
+      ignore (msx (Msx_lane.press ~who ~keys:[key] ~hold_frames:1 ~step_frames:2 ~sequence:false)) in
+    press "keeper-A" "space";
+    press "keeper-B" "up";
+    let before = msx (Msx_lane.capture_with_identity ()) in
+    let observed = capture () in
+    let after = msx (Msx_lane.capture_with_identity ()) in
+    check int "source capture does not step" before.frame.number after.frame.number;
+    check string "same captured machine history" before.incarnation (member "incarnation" observed |> text);
+    check string "input cursor includes actual edges" "4" (member "input_cursor" observed |> text);
+    check int "snapshot count matches native cursor" 4
+      (member "entry_count" (member "input_ledger" observed) |> Yojson.Safe.Util.to_int);
+    let expected = List.rev before.input_ledger
+      |> List.map (fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n") |> String.concat "" in
+    let ref = reference observed in
+    check string "native frame/who/key/edge records survive" expected (require (Store.read_jsonl store ref));
+    check string "snapshot equals native ledger file while controller is paused" expected
+      (In_channel.with_open_bin (Filename.concat ledger_dir "ledger.jsonl") In_channel.input_all);
+    check (Alcotest.list string) "actual callers preserved, not capture actor" ["keeper-A";"keeper-A";"keeper-B";"keeper-B"]
+      (List.map (fun (entry : Msx_lane.entry) -> entry.who) (List.rev before.input_ledger));
+    let checkpoint = Filename.concat dir "saved.json" in
+    ignore (msx (Msx_lane.save ~path:checkpoint));
+    press "keeper-C" "return";
+    let future = capture () in
+    check string "future input has a separate cursor" "6" (member "input_cursor" future |> text);
+    check string "later input never rewrites retained evidence" expected (require (Store.read_jsonl store ref));
+    ignore (msx (Msx_lane.restore ~path:checkpoint ~ledger_dir));
+    let restored = capture () in
+    check bool "restore has a new epoch" false (member "incarnation" restored = member "incarnation" observed);
+    check string "restored snapshot includes saved history, not future input" expected
+      (require (Store.read_jsonl store (reference restored)));
+    ignore (msx (Msx_lane.eject ()));
+    check string "machine removal preserves input evidence" expected (require (Store.read_jsonl store ref))))
+
+let test_source_activity_does_not_infer_ownership () =
+  let interest sources = Sources.refresh_interest (binding sources) |> require in
+  let msx = interest [`Assoc ["source_id",`String "screen";"kind",`String "msx_capture"]] in
+  let browser = interest [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
+    "lane",`String "automation";"tab_id",`Int 1;"target_id",`String "project";
+    "environment",`String "preview";"request_id",`String "capture"]] in
+  let dependent = interest [`Assoc ["source_id",`String "metric";"kind",`String "lane_output";
+    "installation_id",`String "producer";"selection",`String "latest_completed"]] in
+  check bool "MSX changes refresh only the declared native MSX source" true
+    (Sources.interested msx Sources.Msx_changed);
+  check bool "browser changes refresh only the declared browser source" true
+    (Sources.interested browser Sources.Browser_changed);
+  List.iter (fun activity ->
+    check bool "producer output dependencies do not subscribe to tool completions" false
+      (Sources.interested dependent activity);
+    check bool "owned environment has no invented external source" false
+      (Sources.interested (interest []) activity))
+    [Sources.Tool_completed;Sources.Msx_changed;Sources.Browser_changed];
+  check bool "unrelated completion does not refresh browser capture" false
+    (Sources.interested browser Sources.Tool_completed);
+  check bool "browser completion does not refresh MSX capture" false
+    (Sources.interested msx Sources.Browser_changed)
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
+  test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
   test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;

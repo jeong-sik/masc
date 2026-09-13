@@ -85,6 +85,8 @@ val mcp_runtime_schemas : Masc_domain.tool_schema list
 (** Canonical schemas projected from {!mcp_runtime_operations}. *)
 
 type misc_operation =
+  | Misc_lane_declaration_read
+  | Misc_lane_declaration_save
   | Misc_lane_attach
   | Misc_lane_inspect
   | Misc_lane_observe

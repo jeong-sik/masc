@@ -104,6 +104,29 @@ let test_malformed_palette_stays_unknown_and_is_not_input () =
     result.replay
 ;;
 
+(* The query asks for the sixteen palette slots as well, and a terminal answers
+   each with [ESC ] 4 ; n ; rgb:...]. The prefix reader held only [10;] and
+   [11;], so a slot answer went on as typed input -- on a terminal that answers
+   all sixteen, startup logged "Manual refresh" ten times with no key pressed --
+   and no slot was ever recorded. *)
+let test_a_palette_slot_answer_is_read_and_not_typed () =
+  let slot = osc_st "4;3;rgb:f7f7/caca/8888" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("before" ^ foreground ^ background ^ slot ^ graphics_ok ^ "after")
+  in
+  check string "a slot answer is not input" "beforeafter" result.replay;
+  (match Masc_tui_terminal_palette.ansi (palette result) 3 with
+   | Some color -> check_rgb "slot 3 is recorded" (0xf7, 0xca, 0x88) color
+   | None -> fail "slot 3 was not recorded");
+  let other = osc_bell "41;not-ours" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (other ^ foreground ^ background ^ graphics_ok)
+  in
+  check string "an OSC that only starts with 4 still replays" other result.replay
+;;
+
 let test_rgba_requires_and_ignores_a_valid_alpha () =
   let foreground = osc_bell "10;rgba:0101/0202/0303/ffff" in
   let result =
@@ -381,6 +404,8 @@ let () =
             test_palette_requires_both_slots
         ; test_case "malformed stays unknown" `Quick
             test_malformed_palette_stays_unknown_and_is_not_input
+        ; test_case "a palette slot answer is read, not typed" `Quick
+            test_a_palette_slot_answer_is_read_and_not_typed
         ; test_case "rgba validates alpha" `Quick
             test_rgba_requires_and_ignores_a_valid_alpha
         ; test_case "process authority preserves None" `Quick

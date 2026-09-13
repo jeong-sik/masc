@@ -170,9 +170,15 @@ let spawn_detached ~argv ~env ~cwd =
              (Printf.sprintf "spawn_detached %s: %s" bin
                 (Printexc.to_string exn)))
 
-let spawn_detached_devnull ~argv ~env ~cwd =
+(* Where a pipe-less child's stdout and stderr go. Its stdin reads
+   /dev/null either way. *)
+type quiet_output =
+  | Discard
+  | Write_to of Unix.file_descr
+
+let spawn_detached_quiet ~label ~argv ~env ~cwd ~output =
   match argv with
-  | [] -> Error "spawn_detached_devnull: empty argv"
+  | [] -> Error (label ^ ": empty argv")
   | bin :: _ ->
       let devnull_ref = ref None in
       let cleanup_setup_fds () =
@@ -187,12 +193,13 @@ let spawn_detached_devnull ~argv ~env ~cwd =
            Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0
          in
          devnull_ref := Some devnull;
+         let out = match output with Discard -> devnull | Write_to fd -> fd in
          let pid = fork_session_ready
            ~child_setup:(fun () ->
              if cwd <> "" then resume_syscall (fun () -> Unix.chdir cwd);
              resume_syscall (fun () -> Unix.dup2 devnull Unix.stdin);
-             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdout);
-             resume_syscall (fun () -> Unix.dup2 devnull Unix.stderr);
+             resume_syscall (fun () -> Unix.dup2 out Unix.stdout);
+             resume_syscall (fun () -> Unix.dup2 out Unix.stderr);
              close_quietly devnull)
            ~child_exec:(fun () -> Unix.execvpe bin (Array.of_list argv) env)
          in
@@ -211,13 +218,21 @@ let spawn_detached_devnull ~argv ~env ~cwd =
        | Unix.Unix_error (err, fn, arg) ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached_devnull %s: %s (%s %s)"
-                bin (Unix.error_message err) fn arg)
+             (Printf.sprintf "%s %s: %s (%s %s)"
+                label bin (Unix.error_message err) fn arg)
        | exn ->
            cleanup_setup_fds ();
            Error
-             (Printf.sprintf "spawn_detached_devnull %s: %s" bin
+             (Printf.sprintf "%s %s: %s" label bin
                 (Printexc.to_string exn)))
+
+let spawn_detached_devnull ~argv ~env ~cwd =
+  spawn_detached_quiet ~label:"spawn_detached_devnull" ~argv ~env ~cwd
+    ~output:Discard
+
+let spawn_detached_writing_to ~argv ~env ~cwd ~output =
+  spawn_detached_quiet ~label:"spawn_detached_writing_to" ~argv ~env ~cwd
+    ~output:(Write_to output)
 
 let is_pgid_alive ~pgid =
   try

@@ -1,0 +1,406 @@
+{
+  "scope": "experimental Python BiDi Browser Lane live bridge; real fd441 MASC/TUI; no extension or Keeper",
+  "result": "passed",
+  "source_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+  "session": {
+    "sessionId": "52a112da-61bb-4361-b07e-808678fb11a7",
+    "capabilities": {
+      "acceptInsecureCerts": false,
+      "browserName": "firefox",
+      "browserVersion": "155.0.1",
+      "platformName": "mac",
+      "setWindowRect": true,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:155.0) Gecko/20100101 Firefox/155.0",
+      "moz:buildID": "20260903215306",
+      "moz:headless": true,
+      "moz:platformVersion": "25.6.0",
+      "moz:processID": 7027,
+      "moz:profile": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/bidi-tui-evidence-1789271335351362000/profile",
+      "moz:shutdownTimeout": 60000
+    }
+  },
+  "initial_tree": {
+    "contexts": [
+      {
+        "children": [],
+        "context": "8ad688bc-c5ac-4316-9910-6072719e0a91",
+        "originalOpener": null,
+        "url": "about:home",
+        "userContext": "default",
+        "clientWindow": "406b63e3-5693-4894-932f-04e887664218",
+        "parent": null
+      },
+      {
+        "children": [],
+        "context": "7d0763f3-18f2-4ac1-80ad-bc5073d6b7af",
+        "originalOpener": null,
+        "url": "http://127.0.0.1:62254/",
+        "userContext": "default",
+        "clientWindow": "406b63e3-5693-4894-932f-04e887664218",
+        "parent": null
+      },
+      {
+        "children": [],
+        "context": "305ed2ac-e7ce-4872-bcc3-1d9de139a20b",
+        "originalOpener": null,
+        "url": "http://127.0.0.1:62254/",
+        "userContext": "default",
+        "clientWindow": "406b63e3-5693-4894-932f-04e887664218",
+        "parent": null
+      }
+    ]
+  },
+  "mapping": {
+    "1": "7d0763f3-18f2-4ac1-80ad-bc5073d6b7af",
+    "2": "305ed2ac-e7ce-4872-bcc3-1d9de139a20b"
+  },
+  "before": {
+    "1": {
+      "url": "http://127.0.0.1:62254/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    },
+    "2": {
+      "url": "http://127.0.0.1:62254/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    }
+  },
+  "health_build": {
+    "release_version": "0.35.15",
+    "binary_version": "0.35.15",
+    "commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "commit_source": "embedded",
+    "binary_commit": "fd441e234f58f34e2889d8fde0fc20d3ea2be4d1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "4d52244143e6ad093938cfdacd817dc303cb141def0b91c48afb6a650b66630d",
+    "binary_commit_unix_ts": 1789266265.0,
+    "binary_commit_age_seconds": 5077,
+    "executable_path": "/private/tmp/browser-navigation-native-fd441/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-navigation-native-fd441/runtime",
+    "runtime_instance_id": "01a098e1-fc68-7000-ac66-cd8f602d632f",
+    "started_at": "2026-09-13T03:49:02Z",
+    "uptime_seconds": 0
+  },
+  "client_id": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+  "gesture": {
+    "scope": "real native TUI keystrokes/mouse reports; unchanged HTTP forwarding; real experimental BiDi live Firefox",
+    "columns": 130,
+    "rows": 35,
+    "inputs": [
+      {
+        "keys_hex": "3a676f2042726f77736572204c616e650d",
+        "monotonic": 1014794.133766
+      },
+      {
+        "keys_hex": "6c",
+        "monotonic": 1014794.150636708
+      },
+      {
+        "keys_hex": "0f",
+        "monotonic": 1014794.192586125
+      },
+      {
+        "keys_hex": "1b5b3c303b32393b31314d1b5b3c303b39323b31316d",
+        "monotonic": 1014794.34504825
+      }
+    ],
+    "images": [
+      {
+        "name": "initial",
+        "png_sha256": "11227457c923a3f5fc49b9fd0c57e5c6d560a83ccbdd523b7000a0b1510b1ee5",
+        "pixel_width": 1366,
+        "pixel_height": 683,
+        "placement_rows": 30,
+        "pty_prefix_bytes": 76100
+      },
+      {
+        "name": "dragged",
+        "png_sha256": "b58474629554287aadfa439a3d38d268b163922a65cc1170ac9ee5064cd8d8e6",
+        "pixel_width": 1366,
+        "pixel_height": 683,
+        "placement_rows": 30,
+        "pty_prefix_bytes": 138552
+      }
+    ],
+    "receipts": [
+      {
+        "path": "/api/v1/dashboard/browser-lane/clients",
+        "method": "GET",
+        "input": null,
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "clients": [
+              {
+                "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+                "browser": "firefox",
+                "version": "155.0.1",
+                "engineVersion": "155.0.1"
+              }
+            ]
+          }
+        },
+        "completed_monotonic": 1014794.136100375
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/clients",
+        "method": "GET",
+        "input": null,
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "clients": [
+              {
+                "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+                "browser": "firefox",
+                "version": "155.0.1",
+                "engineVersion": "155.0.1"
+              }
+            ]
+          }
+        },
+        "completed_monotonic": 1014794.152728
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/read",
+        "method": "POST",
+        "input": {
+          "lane": "live",
+          "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86"
+        },
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "tabs": [
+              {
+                "id": 1,
+                "title": "Gesture Lab",
+                "url": "http://127.0.0.1:62254/",
+                "active": true
+              },
+              {
+                "id": 2,
+                "title": "Gesture Lab",
+                "url": "http://127.0.0.1:62254/",
+                "active": false
+              }
+            ],
+            "page": {
+              "tabId": 1,
+              "url": "http://127.0.0.1:62254/",
+              "title": "Gesture Lab",
+              "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0",
+              "chars": 746,
+              "truncated": false
+            },
+            "source": "live",
+            "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+            "elapsed_ms": 8.240542
+          }
+        },
+        "completed_monotonic": 1014794.160811958
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/read",
+        "method": "POST",
+        "input": {
+          "lane": "live",
+          "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86"
+        },
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "tabs": [
+              {
+                "id": 1,
+                "title": "Gesture Lab",
+                "url": "http://127.0.0.1:62254/",
+                "active": true
+              },
+              {
+                "id": 2,
+                "title": "Gesture Lab",
+                "url": "http://127.0.0.1:62254/",
+                "active": false
+              }
+            ],
+            "page": {
+              "tabId": 1,
+              "url": "http://127.0.0.1:62254/",
+              "title": "Gesture Lab",
+              "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0",
+              "chars": 746,
+              "truncated": false
+            },
+            "source": "live",
+            "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+            "elapsed_ms": 5.033291
+          }
+        },
+        "completed_monotonic": 1014794.173830833
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/screenshot",
+        "method": "POST",
+        "input": {
+          "lane": "live",
+          "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+          "tabId": 1
+        },
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "source": "live",
+            "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+            "tabId": 1,
+            "title": "Gesture Lab",
+            "url": "http://127.0.0.1:62254/",
+            "mimeType": "image/png",
+            "data": {
+              "sha256": "11227457c923a3f5fc49b9fd0c57e5c6d560a83ccbdd523b7000a0b1510b1ee5",
+              "bytes": 44083
+            },
+            "viewport": {
+              "documentId": "175570748b4720b7a3cba60720b24207",
+              "width": 1366.0,
+              "height": 683.0,
+              "scrollX": 0.0,
+              "scrollY": 0.0
+            },
+            "elapsed_ms": 21.256167
+          }
+        },
+        "completed_monotonic": 1014794.217243291
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/interact",
+        "method": "POST",
+        "input": {
+          "lane": "live",
+          "tabId": 1,
+          "action": "drag",
+          "from": {
+            "x": 0.2375,
+            "y": 0.25
+          },
+          "to": {
+            "x": 0.7625,
+            "y": 0.25
+          },
+          "viewport": {
+            "documentId": "175570748b4720b7a3cba60720b24207",
+            "width": 1366.0,
+            "height": 683.0,
+            "scrollX": 0.0,
+            "scrollY": 0.0
+          },
+          "expectedUrl": "http://127.0.0.1:62254/",
+          "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86"
+        },
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "action": "drag",
+            "urlBefore": "http://127.0.0.1:62254/",
+            "url": "http://127.0.0.1:62254/",
+            "title": "Gesture Lab"
+          }
+        },
+        "completed_monotonic": 1014794.5450955
+      },
+      {
+        "path": "/api/v1/dashboard/browser-lane/screenshot",
+        "method": "POST",
+        "input": {
+          "lane": "live",
+          "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+          "tabId": 1
+        },
+        "status": 200,
+        "response": {
+          "ok": true,
+          "data": {
+            "source": "live",
+            "clientId": "c42ff958-4ccf-434f-8ff8-c6fa14fbaa86",
+            "tabId": 1,
+            "title": "Gesture Lab",
+            "url": "http://127.0.0.1:62254/",
+            "mimeType": "image/png",
+            "data": {
+              "sha256": "b58474629554287aadfa439a3d38d268b163922a65cc1170ac9ee5064cd8d8e6",
+              "bytes": 46292
+            },
+            "viewport": {
+              "documentId": "175570748b4720b7a3cba60720b24207",
+              "width": 1366.0,
+              "height": 683.0,
+              "scrollX": 0.0,
+              "scrollY": 0.0
+            },
+            "elapsed_ms": 15.08925
+          }
+        },
+        "completed_monotonic": 1014794.562253416
+      }
+    ],
+    "pid": 7564,
+    "tui_sha256": "4c6d0179a02b767c2ed0b53f9eb29559adef0908b5e436f9b1a45a14d5466ed3",
+    "result": "passed",
+    "tui_exit": 0,
+    "cleanup_errors": []
+  },
+  "after": {
+    "1": {
+      "url": "http://127.0.0.1:62254/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard moved; down trusted=true; up trusted=true\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    },
+    "2": {
+      "url": "http://127.0.0.1:62254/",
+      "title": "Gesture Lab",
+      "text": "Open details\nDrag card\nDrop zone\n\nCard not moved\n\nMessage row 0 \u2014 visible context\n\nMessage row 1 \u2014 visible context\n\nMessage row 2 \u2014 visible context\n\nMessage row 3 \u2014 visible context\n\nMessage row 4 \u2014 visible context\n\nMessage row 5 \u2014 visible context\n\nMessage row 6 \u2014 visible context\n\nMessage row 7 \u2014 visible context\n\nMessage row 8 \u2014 visible context\n\nMessage row 9 \u2014 visible context\n\nMessage row 10 \u2014 visible context\n\nMessage row 11 \u2014 visible context\n\nMessage row 12 \u2014 visible context\n\nMessage row 13 \u2014 visible context\n\nMessage row 14 \u2014 visible context\n\nMessage row 15 \u2014 visible context\n\nMessage row 16 \u2014 visible context\n\nMessage row 17 \u2014 visible context\n\nMessage row 18 \u2014 visible context\n\nMessage row 19 \u2014 visible context\n\nGesture Lab; Pane scroll=0"
+    }
+  },
+  "stale_rejection": "observed_viewport_changed",
+  "stale_input": {
+    "tabId": 1,
+    "action": "drag",
+    "from": {
+      "x": 0.2375,
+      "y": 0.25
+    },
+    "to": {
+      "x": 0.7625,
+      "y": 0.25
+    },
+    "viewport": {
+      "documentId": "deliberately-stale-owned-probe",
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "expectedUrl": "http://127.0.0.1:62254/"
+  },
+  "cleanup": [
+    {
+      "name": "masc",
+      "pid": 7537,
+      "exit": 0
+    },
+    {
+      "name": "firefox",
+      "pid": 7027,
+      "exit": -15
+    }
+  ],
+  "cleanup_errors": []
+}

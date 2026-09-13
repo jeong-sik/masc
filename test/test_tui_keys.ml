@@ -81,13 +81,14 @@ let test_a_key_is_spelled_one_way_across_every_surface () =
         1 (List.length seen))
     spellings
 
-(* The handler pages the Config body in both panes (masc_tui.ml walks
-   [Config when config_pane = Config_prompts] and [= Config_runtime]), and the
-   footer advertised the keys while the table did not -- so the help sheet,
-   which projects from the table, could not answer what PgUp does here. *)
+(* The handler pages the Config body in three panes (masc_tui.ml walks
+   [Config when config_pane = Config_prompts || = Config_presets] and
+   [= Config_runtime]), and the footer advertised the keys while the table did
+   not -- so the help sheet, which projects from the table, could not answer
+   what PgUp does here. *)
 let test_config_declares_the_page_keys_it_handles () =
   (* [for_surface] takes a surface, not a pane, so the sheet cannot narrow this
-     to the two panes the dispatcher pages. The help text is where the sheet
+     to the three panes the dispatcher pages. The help text is where the sheet
      says so -- without it the key reads as working on all seven. *)
   match
     List.find_opt
@@ -108,7 +109,8 @@ let test_config_declares_the_page_keys_it_handles () =
       in
       Alcotest.(check bool) "and says it pages the runtime.toml pane" true
         (names "runtime.toml");
-      Alcotest.(check bool) "and the prompts pane" true (names "prompts")
+      Alcotest.(check bool) "and the prompts pane" true (names "prompts");
+      Alcotest.(check bool) "and the presets pane" true (names "presets")
 
 let test_chat_help_names_memory_cycle () =
   let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in
@@ -122,6 +124,20 @@ let test_chat_help_names_memory_cycle () =
       check (Alcotest.option str) "Memory cycle help"
         (Some "cycle Memory journal summary / full / hidden")
         binding.help
+
+(* The chat pane binds the capture keys (masc_tui.ml, the arms beside
+   [submit_chat_draft]) and is the surface an operator speaks from. The help
+   sheet for it named neither, so the only place they were written down was the
+   composer row on other surfaces. *)
+let test_chat_help_names_the_voice_keys () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface (Keepers Keeper_message))
+  in
+  Alcotest.(check bool) "Ctrl-Y starts a capture" true (List.mem "Ctrl-Y" keys);
+  Alcotest.(check bool) "Ctrl-A turns continuous capture on" true
+    (List.mem "Ctrl-A" keys)
 
 let test_plain_listing_footer_shape () =
   (* Connectors answers the row search, so its footer carries the two Search
@@ -143,9 +159,9 @@ let test_system_logs_footer_names_browser_controls () =
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
-    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
+    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, o, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -317,9 +333,11 @@ let test_repositories_footer_offers_code_and_git_changes () =
 
 let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
-     same movement and no arm answered it. *)
+     same movement and no arm answered it. [/] narrows this table rather than
+     moving a cursor through it, and Esc clears that filter before it leaves,
+     so both are named the way the fact browser names them. *)
   check str "the health table names the way into the facts"
-    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  Esc:clear / back  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
@@ -523,9 +541,12 @@ let test_lanes_run_list_footer_names_the_drill_down () =
    one scroll walks, so the two panes move together and the key's name says
    which of the two it does. *)
 let test_lanes_run_detail_footer_appends_the_scroll_position () =
-  check str "the run detail footer carries its live scroll position"
-    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~scroll:3 ~max_scroll:40)
+  check str "the stacked run detail footer carries the window it drew"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  4-23/60"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:(Some "4-23/60"));
+  check str "the split panes name their own windows, so the footer does not"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:None)
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
@@ -583,7 +604,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -608,12 +629,34 @@ let test_board_and_planning_explain_their_order () =
     (planning_sort_explanation Planning_sort_due)
 ;;
 
+(* Where the strip puts the highlight for a view, read through the index the
+   strip draws with. These tests used to read a second copy of the mapping
+   that nothing on screen called. The Browser Lane arm lived only in the drawn
+   one, so the two could disagree and the tests would not see it. *)
+let ring_stop surface =
+  visible_surface_ring_index
+    (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
+    surface
+
+(* Every view lands on a stop the ring holds. The index cannot say this: a
+   family missing from the ring comes back as 0, Overview's position, and a
+   comparison against Overview would pass. *)
+let test_every_view_has_a_ring_stop () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  List.iter
+    (fun surface ->
+      Alcotest.(check bool) "the view's family is a ring stop" true
+        (List.exists
+           (fun (stop, _) -> stop = surface_ring_family state surface)
+           surface_ring))
+    every_surface
+
 let test_task_review_is_a_planning_child () =
   Alcotest.(check bool) "Task Review is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Verification) surface_ring);
   Alcotest.(check int) "Task Review highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Verification)
+    (ring_stop Planning)
+    (ring_stop Verification)
 
 (* Verdicts is the far half of Task Review -- one lists what is waiting for a
    ruling, the other what was ruled -- and it stood on the top-level ring under
@@ -623,8 +666,8 @@ let test_verdicts_is_a_planning_child () =
   Alcotest.(check bool) "Verdicts is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Harness) surface_ring);
   Alcotest.(check int) "Verdicts highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Harness);
+    (ring_stop Planning)
+    (ring_stop Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
        (fun (label, _) -> String.equal label "Planning / Task Verdicts")
@@ -637,8 +680,8 @@ let test_changes_is_a_keeper_child () =
   Alcotest.(check bool) "Changes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Changes) surface_ring);
   Alcotest.(check int) "Changes highlights Keepers"
-    (surface_ring_index (Keepers Keeper_list))
-    (surface_ring_index Changes)
+    (ring_stop (Keepers Keeper_list))
+    (ring_stop Changes)
 
 let test_keeper_operations_are_not_top_level_tabs () =
   List.iter
@@ -646,8 +689,8 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check bool) (label ^ " is not a top-level ring entry") false
          (List.exists (fun (entry, _) -> entry = surface) surface_ring);
        Alcotest.(check int) (label ^ " highlights Keepers")
-         (surface_ring_index (Keepers Keeper_list))
-         (surface_ring_index surface))
+         (ring_stop (Keepers Keeper_list))
+         (ring_stop surface))
     [ Connectors, "Channels"; Schedules, "Automation" ];
   Alcotest.(check (list string)) "Keeper operation tab labels"
     [ "Channels"; "Automation"; "Runs" ]
@@ -667,8 +710,8 @@ let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
   (* No ring assertion here on purpose. Runtime left the ring when it moved
-     under Config, so [surface_ring_index Runtime] and [surface_ring_index
-     Lanes] are now the same match arm resolving to Config -- comparing them
+     under Config, so [ring_stop Runtime] and [ring_stop Lanes] are now the
+     same match arm resolving to Config -- comparing them
      cannot fail, and would keep passing if Lanes were moved to hang off
      Resources instead. What Lanes highlights is claimed with teeth in
      [test_logs_is_an_activity_child], against Config's own index. The label
@@ -693,8 +736,8 @@ let test_code_is_a_workspace_child () =
   Alcotest.(check bool) "Code is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Code) surface_ring);
   Alcotest.(check int) "Code highlights Workspace"
-    (surface_ring_index Repositories)
-    (surface_ring_index Code);
+    (ring_stop Repositories)
+    (ring_stop Code);
   Alcotest.(check bool) "and the help sheet files it under Workspace" true
     (List.exists
        (fun (label, _) -> String.equal label "Workspace / Code")
@@ -712,8 +755,8 @@ let test_resources_is_a_config_child () =
   Alcotest.(check bool) "Resources is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
   Alcotest.(check int) "Resources highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Resources);
+    (ring_stop Config)
+    (ring_stop Resources);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Resources")
@@ -730,8 +773,8 @@ let test_tools_is_a_config_child () =
   Alcotest.(check bool) "Tools is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
   Alcotest.(check int) "Tools highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Tools);
+    (ring_stop Config)
+    (ring_stop Tools);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Tools")
@@ -746,19 +789,19 @@ let test_tools_is_a_config_child () =
 
 (* Tool calls settling and the server's own log lines are two readings of
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
-   under [l] instead of holding a Tab stop of its own. *)
+   under its [1 / 2] tabs instead of holding a Tab stop of its own. *)
 let test_logs_is_an_activity_child () =
   Alcotest.(check bool) "Runtime is inside Config" false
     (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
-        (surface_ring_index Config) (surface_ring_index surface))
+        (ring_stop Config) (ring_stop surface))
     [Runtime; Lanes; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
-    (surface_ring_index Acting)
-    (surface_ring_index System_logs);
+    (ring_stop Acting)
+    (ring_stop System_logs);
   Alcotest.(check bool) "and the help sheet files it under Activity" true
     (List.exists
        (fun (label, _) -> String.equal label "Activity / Logs")
@@ -773,8 +816,8 @@ let test_logs_is_an_activity_child () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "Activity documents the [l] hop" true
-    (List.mem "l" acting_keys)
+  Alcotest.(check bool) "Activity documents the way to Logs" true
+    (List.mem "1 / 2" acting_keys)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
@@ -782,8 +825,8 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Metrics is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
   Alcotest.(check int) "Metrics highlights Overview"
-    (surface_ring_index Overview)
-    (surface_ring_index Metrics);
+    (ring_stop Overview)
+    (ring_stop Metrics);
   let overview_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -863,6 +906,45 @@ let test_the_sheet_names_every_keeper_mark () =
             (String.length meaning > 0))
         entries
 
+(* The Keepers header words and the Mode S letters used to take two rows above
+   the roster. The sheet holds them now, next to the marks. *)
+let test_the_sheet_explains_the_keeper_columns () =
+  match List.assoc_opt "Keeper columns" (Masc_tui_keys.help_sections ()) with
+  | None -> Alcotest.fail "the sheet has no Keeper columns section"
+  | Some entries ->
+      Alcotest.(check int) "every column entry is on the sheet"
+        (List.length Masc_tui_keeper_mark.column_legend)
+        (List.length entries)
+
+(* The listing tail is Global's to say. Each surface section used to end with
+   r refresh / Tab next / q quit again, under a Global section that already
+   names Tab / Shift-Tab, r and q. *)
+let test_the_sheet_says_the_listing_tail_once () =
+  let sections = Masc_tui_keys.help_sections () in
+  let tail = [ ("r", "refresh"); ("Tab", "next"); ("q", "quit") ] in
+  List.iter
+    (fun (title, rows) ->
+      if not (String.equal title "Global") then
+        List.iter
+          (fun row ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s does not repeat %s" title (fst row))
+              false (List.mem row rows))
+          tail)
+    sections;
+  match List.assoc_opt "Global" sections with
+  | None -> Alcotest.fail "the sheet has no Global section"
+  | Some rows ->
+      List.iter
+        (fun key ->
+          Alcotest.(check bool) ("Global names " ^ key) true
+            (List.exists (fun (k, _) -> String.equal k key) rows))
+        [ "Tab / Shift-Tab"; "r"; "q" ];
+      Alcotest.(check bool) "a surface's own r stays" true
+        (match List.assoc_opt "Config" sections with
+         | None -> false
+         | Some config -> List.mem ("r", "reload") config)
+
 let test_braille_sparkline () =
   Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
     (braille_sparkline []);
@@ -874,14 +956,59 @@ let test_fleet_total_cost () =
   Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
     (fleet_total_cost_usd state)
 
+(* The golden below holds every label, so a deliberate relabelling fails it and
+   asks to be looked at -- which is what it is for. The three hops are asserted
+   on their own underneath, because losing one of those is not a relabelling: it
+   is the only place the Config screen names a surface the ring folds under it,
+   and a reader who cannot see it has no way to the surface but the palette. *)
 let test_config_footer_names_child_hops () =
+  (* The five short labels after f are pane-scoped writes and views that were
+     in no list at all -- which pane each belongs to is in the help the ?
+     overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  PgUp/PgDn:page  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
-    (Masc_tui_keys.footer_hints Config)
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Config);
+  let hints = Masc_tui_keys.footer_hints Config in
+  List.iter
+    (fun hop ->
+      Alcotest.(check bool) ("Config still names " ^ hop) true
+        (List.exists (String.equal hop)
+           (String.split_on_char ' ' hints
+            |> List.filter (fun piece -> not (String.equal piece "")))))
+    [ "9:Runtime"; "s:resources"; "t:tools" ]
+
+(* Runtime's footer comes from the table. The renderer's own line named
+   neither [c], the only key to Clients, nor [Esc], the way back to Config, and
+   it offered [e] as if the key table did not know it. *)
+let test_runtime_footer_is_the_tables () =
+  let lanes = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_lanes in
+  let all = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_all in
+  let has hints piece =
+    let n = String.length piece and m = String.length hints in
+    let rec go i = i + n <= m && (String.sub hints i n = piece || go (i + 1)) in
+    go 0
+  in
+  List.iter
+    (fun piece ->
+      Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
+  Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
+  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
+  (* The sheet reads the same table and names the whole walk once, because it
+     is not drawn from either reading. *)
+  let labels key =
+    Masc_tui_keys.for_surface Runtime
+    |> List.filter (fun (b : Masc_tui_keys.binding) -> String.equal b.Masc_tui_keys.key key)
+    |> List.map (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.label)
+  in
+  Alcotest.(check (list string)) "the sheet names the p walk once"
+    [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
+  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
-  (* g/G/f still belong to Acting. Logs owns the server level floor, direct
-     verbose toggle, and category cycle under l/v/c. *)
+  (* The newest/oldest ends and f still belong to Acting. Logs owns the server
+     level floor, direct verbose toggle, and category cycle under l/v/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -897,8 +1024,122 @@ let test_system_logs_owns_only_its_real_filter_keys () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "g/G stays on Acting" true (List.mem "g / G" acting);
+  Alcotest.(check bool) "the ends stay on Acting" true (List.mem "Home/End" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
+
+let footer_has_key key row =
+  String.split_on_char ' ' row
+  |> List.exists (String.starts_with ~prefix:(key ^ ":"))
+
+let fitted_footer ~cols hints =
+  Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:cols ~port:8935
+    ~hints ()
+  |> String.trim
+
+let test_config_pane_footer_actions () =
+  let panes =
+    [ Config_runtime; Config_models; Config_params; Config_prompts
+    ; Config_presets; Config_themes; Config_voice ]
+  in
+  List.iter (fun pane ->
+    let hints = Masc_tui_keys.footer_hints_config ~pane in
+    let enabled key expected =
+      Alcotest.(check bool) ("pane availability of " ^ key) expected
+        (footer_has_key key hints)
+    in
+    enabled "PgUp/PgDn"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes
+         ; Config_voice ]);
+    enabled "v" (pane = Config_runtime);
+    enabled "E" (pane = Config_params);
+    enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
+    enabled "f" (pane = Config_themes);
+    enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    enabled "e"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
+    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
+    List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
+    panes;
+  (* The prompts pane's read-only assets: the registry's edit keys only answer
+     with a notice there, so the row does not offer them, and [o] goes back. *)
+  let assets = Masc_tui_keys.footer_hints_prompt_assets in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row leaves out " ^ key) false
+        (footer_has_key key assets))
+    [ "a"; "i"; "e"; "x" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row keeps " ^ key) true
+        (footer_has_key key assets))
+    [ "j/k"; "PgUp/PgDn"; "p"; "9"; "Esc"; "q" ];
+  Alcotest.(check bool) "and o names the way back" true
+    (List.exists (String.equal "o:registry") (String.split_on_char ' ' assets));
+  (* A cut row keeps the pane's own keys over the ones every pane shares. *)
+  let at_120 hints = fitted_footer ~cols:120 hints in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
+    [ "n"; "u"; "PgUp/PgDn" ];
+  Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
+    (footer_has_key "o" (at_120 assets));
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
+    [ "Enter"; "E"; "x" ];
+  (* The themes list pages now, and its own keys still fit the row. *)
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("themes keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_themes))))
+    [ "PgUp/PgDn"; "Enter"; "x"; "f" ];
+  List.iter (fun pane ->
+    List.iter (fun cols ->
+      let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
+      Alcotest.(check bool) "fitted Config row stays within terminal" true
+        (Masc_tui_message_layout.display_width row <= cols);
+      List.iter (fun key ->
+        Alcotest.(check bool) ("Config retains " ^ key) true
+          (footer_has_key key row)) [ "Esc"; "q" ];
+      List.iter (fun key ->
+        Alcotest.(check bool) ("inactive action stays absent: " ^ key) false
+          (footer_has_key key row))
+        (match pane with
+         | Config_runtime -> [ "E"; "Enter"; "x"; "f" ]
+         | Config_themes -> [ "v"; "e"; "E" ]
+         | Config_models | Config_params | Config_prompts | Config_presets
+         | Config_voice -> []))
+      [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
+
+let test_activity_footer_keeps_filter_before_evidence () =
+  let hints = Masc_tui_keys.footer_hints Acting in
+  for cols = 80 to 148 do
+    let row = fitted_footer ~cols hints in
+    Alcotest.(check bool) "Activity stays within terminal" true
+      (Masc_tui_message_layout.display_width row <= cols);
+    Alcotest.(check bool) "evidence never outlives its filter prerequisite" true
+      (not (footer_has_key "Enter" row) || footer_has_key "f" row);
+    if cols >= 120 then begin
+      Alcotest.(check bool) "filter remains visible at affected widths" true
+        (footer_has_key "f" row);
+      Alcotest.(check bool) "the key that opens an event is visible" true
+        (footer_has_key "Enter" row)
+    end
+  done;
+  (* One row per action: a second spelling of an action already on the row
+     takes a place the fitter then takes from a key that does something else. *)
+  let labels =
+    List.map (fun (binding : Masc_tui_keys.binding) -> binding.label)
+      (Masc_tui_keys.for_surface Acting)
+  in
+  Alcotest.(check int) "no two Activity rows name the same action"
+    (List.length labels)
+    (List.length (List.sort_uniq String.compare labels))
 
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
@@ -961,13 +1202,14 @@ let test_the_sheet_opens_on_the_current_surface () =
              (String.length title >= String.length expected
               && String.equal (String.sub title 0 (String.length expected))
                    expected);
-           (* The section has to be that surface's, not just titled like it. *)
+           (* The section has to be that surface's, not just titled like it:
+              its own keys, less the tail Global names. *)
            Alcotest.(check (list (pair string string)))
              (name ^ ": and carries its keys")
              (List.map
                 (fun (b : Masc_tui_keys.binding) ->
                    (b.key, Option.value b.help ~default:b.label))
-                (Masc_tui_keys.for_surface surface))
+                (Masc_tui_keys.sheet_bindings surface))
              keys
        | [] -> Alcotest.fail (name ^ ": no sections at all"))
     [ ("Overview", Overview, "Overview")
@@ -1145,7 +1387,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = 0.
+  ; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }
@@ -1334,6 +1576,25 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_runs, []
   ]
 
+(* The table's own key notation, read as single keys. The Keeper detail
+   footer drops a control whose key a tab answers itself, so the Sandbox
+   tab's "d/m/s" has to be read as the [s] it takes from shutdown. *)
+let test_key_atoms_read_the_table_notation () =
+  let atoms = Masc_tui_keys.key_atoms in
+  Alcotest.(check (list string)) "alternatives" [ "d"; "m"; "s" ] (atoms "d/m/s");
+  Alcotest.(check (list string)) "spaced alternatives and a double press"
+    [ "b"; "e"; "u" ] (atoms "b / e / u u");
+  Alcotest.(check (list string)) "a chord" [ "arrows"; "enter" ] (atoms "arrows+enter");
+  Alcotest.(check (list string)) "a single key" [ "L" ] (atoms "L");
+  Alcotest.(check bool) "Sandbox takes s and o" true
+    (List.for_all
+       (fun key -> List.mem key (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_sandbox))
+       [ "s"; "o" ]);
+  Alcotest.(check bool) "Channels takes e" true
+    (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check (list string)) "Info takes nothing" []
+    (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
+
 let test_detail_tab_bindings_cover_the_live_keys () =
   List.iter
     (fun (tab, expected) ->
@@ -1419,6 +1680,136 @@ let surfaces_that_answer_the_row_search =
      that focus drops both keys. *)
   ; "Resources", Resources
   ]
+
+let test_code_search_count_tracks_fetched_source () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  let load path rows =
+    match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+    | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+    | Masc_tui_fetched.Started (next, request) ->
+        state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
+  in
+  let count query = surface_search_count state Code ~query in
+  load "large.ml" (Array.init 20_000 (fun index ->
+    [((if index mod 2 = 0 then "needle" else "other"), "")]));
+  Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
+  let first_reading = !code_search_count_memo in
+  Alcotest.(check (option int)) "repaint keeps the count" (Some 10_000) (count "needle");
+  Alcotest.(check bool) "repaint reuses the settled reading" true
+    (first_reading == !code_search_count_memo);
+  Alcotest.(check (option int)) "query change recounts" (Some 0) (count "absent");
+  load "large.ml" [|[("needle", "")]|];
+  Alcotest.(check (option int)) "same-path replacement recounts" (Some 1) (count "needle");
+  state.code_focus_file <- Left_pane;
+  Alcotest.(check (option int)) "tree does not reuse file matches" (Some 0) (count "needle");
+  state.code_focus_file <- Right_pane;
+  state.repository_changes_open <- true;
+  Alcotest.(check (option int)) "overlay without a source has no count" None (count "needle");
+  state.repository_changes_open <- false;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  Alcotest.(check (option int)) "closed file has no source" None (count "needle");
+  load "empty.ml" [||];
+  Alcotest.(check (option int)) "loaded empty file has zero matches" (Some 0) (count "needle")
+
+let test_detail_search_counts_follow_the_active_pane () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.search_last <- "needle";
+  state.harness <- Some
+    { Tui_decode.hs_verdicts =
+        [{ Tui_decode.hv_at = 1.; hv_task_id = "task-1";
+           hv_task_title = "needle"; hv_agent = "agent"; hv_gate = "gate";
+           hv_verdict = "approve"; hv_evaluator = "evaluator";
+           hv_fallback_reason = None; hv_notes_hash = "hash" }];
+      hs_calibration = None; hs_overview = None };
+  state.system_logs <- Some
+    { Tui_decode.sys_entries =
+        [{ Tui_decode.sl_seq = 1; sl_ts = "2026-09-13T00:00:00Z";
+           sl_level = Tui_decode.System_info;
+           sl_source = Tui_decode.System_structured;
+           sl_module = "test"; sl_keeper = None; sl_turn = None;
+           sl_message = "needle"; sl_details = `Null; sl_category = None }];
+      sys_total = 1; sys_latest_seq = 1 };
+  let check_pane label surface set_detail =
+    state.view <- surface;
+    let count () = surface_search_count state surface ~query:state.search_last in
+    Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " list has a cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail true;
+    Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
+    Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
+      None (surface_row_texts state surface);
+    Alcotest.(check bool) (label ^ " detail has no cursor") false
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail false;
+    Alcotest.(check (option int)) (label ^ " return restores count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " return restores cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    Alcotest.(check string) (label ^ " keeps settled query") "needle" state.search_last
+  in
+  check_pane "Harness" Harness
+    (fun detail -> state.harness_detail <- if detail then Some ("task-1", 1.) else None);
+  check_pane "System logs" System_logs
+    (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
+
+let test_changes_diff_uses_visible_search_rows () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let payload = Yojson.Safe.from_string {|{
+    "keeper":"alpha", "window_hours":24, "calls_in_window":1,
+    "over_budget":0, "malformed":0,
+    "changes":[{"at":1, "keeper":"alpha", "turn":1, "task_id":"task-1",
+      "execution_id":"exec-change", "line_evidence":null,
+      "location":{"kind":"repo","repo_id":"masc","path":"needle.ml"},
+      "change":{"kind":"write","content":"let value = 1"}, "succeeded":true}]
+  }|} in
+  state.changes <- Some (match Tui_decode.decode_file_change_snapshot payload with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  state.view <- Changes;
+  state.search_last <- "needle";
+  let check_list label =
+    Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
+      (surface_search_count state Changes ~query:state.search_last);
+    Alcotest.(check bool) (label ^ " cursor available") true
+      (Option.is_some (scrolled_surface_rows state Changes)) in
+  check_list "list";
+  state.changes_diff_row <- Some 0;
+  Alcotest.(check (option (list string))) "diff has no hidden search rows" None
+    (surface_row_texts state Changes);
+  Alcotest.(check (option int)) "diff has no hidden list count" None
+    (surface_search_count state Changes ~query:state.search_last);
+  Alcotest.(check bool) "diff cannot move a hidden list cursor" false
+    (Option.is_some (scrolled_surface_rows state Changes));
+  state.changes_diff_row <- None;
+  check_list "return";
+  state.changes_diff_row <- Some 1;
+  Alcotest.(check bool) "stale index does not open a diff" false
+    (Option.is_some (opened_file_change state));
+  check_list "refresh removed open row";
+  Alcotest.(check string) "settled query survives" "needle" state.search_last
+
+let test_workspace_activity_offers_no_row_search () =
+  (* [h] on a repository row replaces the list with that repository's own
+     activity rows and its own cursor, and the handler there takes every key
+     the surface has, "/" and n and N among them. What sits behind it is the
+     repository list, so a settled query counted rows that no key on this
+     screen could reach and the footer reported the number. *)
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let repository : Tui_decode.repository =
+    { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
+    ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
+    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_auto_sync = false }
+  in
+  state.view <- Repositories;
+  state.repositories <-
+    Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
+  Alcotest.(check (option int)) "the repository list answers the search"
+    (Some 1) (surface_search_count state Repositories ~query:"masc");
+  state.workspace_activity_repo <- Some "masc";
+  Alcotest.(check (option int)) "Workspace Activity answers no search"
+    None (surface_search_count state Repositories ~query:"masc")
 
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
@@ -1581,6 +1972,8 @@ let () =
     [ ( "table"
       , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
             test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "key atoms read the table notation" `Quick
+            test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
             test_detail_tab_hint_projects_the_table
         ; Alcotest.test_case "detail tab keys reach the help sheet" `Quick
@@ -1597,6 +1990,8 @@ let () =
             test_config_declares_the_page_keys_it_handles
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case "chat help names the voice keys" `Quick
+            test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
             test_a_searchable_surface_does_not_also_bind_n
         ; Alcotest.test_case "Code separates blame from the definition walk"
@@ -1607,6 +2002,14 @@ let () =
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
+        ; Alcotest.test_case "Code search counts follow immutable fetched rows"
+            `Quick test_code_search_count_tracks_fetched_source
+        ; Alcotest.test_case "Changes diff uses visible search rows" `Quick
+            test_changes_diff_uses_visible_search_rows
+        ; Alcotest.test_case "detail search counts follow the active pane"
+            `Quick test_detail_search_counts_follow_the_active_pane
+        ; Alcotest.test_case "Workspace Activity offers no row search"
+            `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
         ] )
@@ -1675,6 +2078,8 @@ let () =
             `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
+        ; Alcotest.test_case "every view has a ring stop" `Quick
+            test_every_view_has_a_ring_stop
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
         ; Alcotest.test_case "Verdicts is a Planning child" `Quick
@@ -1693,8 +2098,18 @@ let () =
             test_tools_is_a_config_child
         ; Alcotest.test_case "the sheet names every keeper mark" `Quick
             test_the_sheet_names_every_keeper_mark
+        ; Alcotest.test_case "the sheet explains the keeper columns" `Quick
+            test_the_sheet_explains_the_keeper_columns
+        ; Alcotest.test_case "the sheet says the listing tail once" `Quick
+            test_the_sheet_says_the_listing_tail_once
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
+        ; Alcotest.test_case "Runtime footer is the table's" `Quick
+            test_runtime_footer_is_the_tables
+        ; Alcotest.test_case "Config footer follows active pane and width" `Quick
+            test_config_pane_footer_actions
+        ; Alcotest.test_case "Activity filter survives evidence hint" `Quick
+            test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick

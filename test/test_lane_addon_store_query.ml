@@ -225,7 +225,120 @@ let corrupted_source_is_not_delivered () = with_store (fun root store ->
   write (Filename.concat root ("evidence/" ^ hash ^ ".json")) "changed bytes";
   check bool "corrupt raw source prevents publication" true
     (Result.is_error (Store.publish_for_keeper ~base_path:root store frozen)))
+let retained_sequences_grow_only_with_new_records () = with_store (fun root store ->
+  let encoded = ref 0 and entries = ref [] and snapshots = ref [] in
+  let encode entry = incr encoded;
+    Yojson.Safe.to_string (`Assoc ["value", `String (Printf.sprintf "%04d" entry ^ String.make 256 'x')]) ^ "\n" in
+  for count = 1 to 128 do
+    entries := count :: !entries;
+    let snapshot = unwrap (Store.retain_jsonl store ~history:"machine-A" ~entry_count:count
+      ~newest_first:!entries ~encode) in
+    snapshots := snapshot :: !snapshots;
+    check int "only the newly appended record was encoded" count !encoded;
+    let unchanged = unwrap (Store.retain_jsonl store ~history:"machine-A" ~entry_count:count
+      ~newest_first:!entries ~encode:(fun _ -> fail "unchanged cursor encoded history")) in
+    check bool "unchanged capture reuses its root" true (snapshot = unchanged)
+  done;
+  let newest = List.hd !snapshots and oldest = List.hd (List.rev !snapshots) in
+  let node_size snapshot = String.length (unwrap (Store.read_blob store snapshot.Store.reference)) in
+  check int "node growth is only the count's decimal width" 2 (node_size newest - node_size oldest);
+  check int "one immutable node per input plus the empty root" 129
+    (Array.length (Sys.readdir (Filename.concat root "sequences")));
+  let late = unwrap (Store.retain_jsonl store ~history:"machine-A" ~entry_count:1
+    ~newest_first:[1] ~encode:(fun _ -> fail "late capture encoded history")) in
+  check bool "out-of-order capture gets its original prefix" true (late = oldest);
+  let restored = unwrap (Store.retain_jsonl store ~history:"machine-B" ~entry_count:128
+    ~newest_first:!entries ~encode) in
+  check bool "restored saved inputs share content, not machine incarnation" true (restored = newest);
+  check int "restore does not duplicate already retained nodes" 129
+    (Array.length (Sys.readdir (Filename.concat root "sequences")));
+  let cold = Store.create ~root in
+  let expected = List.rev !entries |> List.map encode |> String.concat "" in
+  check string "all records survive a cold reader" expected (unwrap (Store.read_jsonl cold newest.reference)))
+
+let sequence_graph_is_published_and_rejects_nonlocal_or_broken_links () = with_store (fun root store ->
+  let snapshot = unwrap (Store.retain_jsonl store ~history:"captured" ~entry_count:2
+    ~newest_first:["second\n"; "first\n"] ~encode:Fun.id) in
+  unwrap (Store.append_observation store ~instance_id ~seq:1
+    ~sources:(`List [`Assoc ["evidence", `List [retained_json snapshot.reference]]])
+    {rows=[row 1 "ledger"];coverage=[]});
+  let frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+    ~row_ids:[(row 1 "").id]) in
+  let delivered = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
+  let manifest = read_as_keeper ~base_path:root
+      (artifact_of_json (Yojson.Safe.Util.member "keeper_artifact" delivered))
+      |> Yojson.Safe.from_string in
+  let artifacts = match Tool_output.artifact_manifest_of_json manifest with
+    | Tool_output.Decoded_artifact_manifest {structured_content; _} ->
+        structured_content |> Yojson.Safe.Util.member "artifacts" |> Yojson.Safe.Util.to_list
+    | _ -> fail "invalid published artifact manifest" in
+  let rec read count reference acc =
+    let artifact = List.find (fun value ->
+      Yojson.Safe.Util.member "lane_uri" value = `String reference.Types.uri) artifacts
+      |> Yojson.Safe.Util.member "artifact" |> artifact_of_json in
+    let node = read_as_keeper ~base_path:root artifact |> Yojson.Safe.from_string in
+    check int "published predecessor count" count
+      (Yojson.Safe.Util.member "entry_count" node |> Yojson.Safe.Util.to_int);
+    if count = 0 then String.concat "" acc
+    else let previous = unwrap (Types.evidence_of_json (Yojson.Safe.Util.member "previous" node)) in
+      read (count - 1) previous
+        ((Yojson.Safe.Util.member "record" node |> Yojson.Safe.Util.to_string) :: acc) in
+  check string "Keeper artifact reads recover the complete history" "first\nsecond\n"
+    (read 2 snapshot.reference []);
+  let opaque = unwrap (Store.write_blob store
+      {|{"schema":"masc.lane-jsonl-sequence.v1","entry_count":1,"previous":{"uri":"file:///must-not-read","sha256":null},"record":"untrusted"}|}) in
+  check bool "ordinary source JSON never becomes a host-owned sequence" true
+    (Result.is_error (Store.read_jsonl store opaque));
+  let forge fields =
+    let bytes = Yojson.Safe.to_string (`Assoc fields) in
+    let hash = Store.digest bytes in
+    write (Filename.concat root ("sequences/" ^ hash ^ ".json")) bytes;
+    {Types.uri="lane-sequence:" ^ hash; sha256=Some hash} in
+  let fields count previous = ["schema", `String "masc.lane-jsonl-sequence.v1";
+    "entry_count", `Int count; "previous", previous; "record", `String "forged\n"] in
+  let nonlocal = forge (fields 1 (`Assoc ["uri", `String "file:///must-not-read"; "sha256", `Null])) in
+  check bool "host sequence rejects nonlocal predecessor" true
+    (Result.is_error (Store.read_jsonl store nonlocal));
+  let increasing = forge (fields 1 (retained_json snapshot.reference)) in
+  check bool "count must strictly decrease, including cyclic graph attempts" true
+    (Result.is_error (Store.read_jsonl store increasing));
+  let unknown = forge (("schema", `String "unknown") :: List.remove_assoc "schema"
+    (fields 3 (retained_json snapshot.reference))) in
+  check bool "unknown sequence schema is rejected" true
+    (Result.is_error (Store.read_jsonl store unknown));
+  let corrupt = forge (fields 3 (retained_json snapshot.reference)) in
+  write (Filename.concat root ("sequences/" ^ Option.get corrupt.sha256 ^ ".json")) "changed";
+  check bool "corrupt sequence bytes are rejected" true
+    (Result.is_error (Store.read_jsonl store corrupt));
+  unwrap (Store.append_observation store ~instance_id ~seq:2
+    ~sources:(`Assoc ["arbitrary_plugin_field", retained_json corrupt])
+    {rows=[row 2 "untrusted field"];coverage=[]});
+  let opaque_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+    ~row_ids:[(row 2 "").id]) in
+  ignore (unwrap (Store.publish_for_keeper ~base_path:root store opaque_frozen));
+  unwrap (Store.append_observation store ~instance_id ~seq:3
+    ~sources:(`Assoc ["evidence", `List [retained_json corrupt]])
+    {rows=[row 3 "unrelated corrupt sequence"];coverage=[]});
+  let healthy_frozen = unwrap (Store.freeze store ~instance_id ~binding:(binding 4096)
+    ~row_ids:[(row 1 "").id]) in
+  ignore (unwrap (Store.publish_for_keeper ~base_path:root store healthy_frozen));
+  check bool "selecting the corrupt sequence still refuses complete evidence" true
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096)
+      ~row_ids:[(row 3 "").id]));
+  let head = unwrap (Store.read_blob store snapshot.reference) |> Yojson.Safe.from_string in
+  let previous = unwrap (Types.evidence_of_json (Yojson.Safe.Util.member "previous" head)) in
+  Sys.remove (Filename.concat root ("sequences/" ^ Option.get previous.sha256 ^ ".json"));
+  check bool "missing ancestor refuses complete history" true
+    (Result.is_error (Store.read_jsonl store snapshot.reference));
+  check bool "missing ancestor refuses publication of a frozen root" true
+    (Result.is_error (Store.publish_for_keeper ~base_path:root store frozen));
+  check bool "missing ancestor refuses a new freeze" true
+    (Result.is_error (Store.freeze store ~instance_id ~binding:(binding 4096) ~row_ids:[(row 1 "").id])))
+
 let () = run "bounded Lane history" ["queries", [
+  test_case "captured histories retain only new records" `Quick retained_sequences_grow_only_with_new_records;
+  test_case "typed sequence graph crosses Keeper evidence boundary intact" `Quick
+    sequence_graph_is_published_and_rejects_nonlocal_or_broken_links;
   test_case "history growth and explicit window" `Quick bounded_history;
   test_case "recent window crosses a long covered history" `Quick (covered_history ~count:40 ~detail:None);
   test_case "selected coverage precedes deferred coverage within one reply" `Quick

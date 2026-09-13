@@ -493,6 +493,22 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 
+let test_native_continuation_rows_keep_the_original_operation () =
+  let key = `Assoc [ "kind", `String "operation_native";
+    "operation_id", `String "original-operation";
+    "continuation_id", `String "native-attempt" ] in
+  let decoded = decode (`List [
+    row ~role:"tool" ~delivery_key:key
+      ~transcript_slot:(tool_transcript_slot "native-execution" 0)
+      ~tool_call_name:"Read" "{}" ]) in
+  check (list (option string)) "journal lookup uses the original operation"
+    [Some "original-operation"]
+    (List.map (fun row -> row.History.operation_id) decoded.History.rows);
+  check (list (option string)) "continuation tools remain in the original turn"
+    [Some "original-operation"]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
 let test_consecutive_tools_from_different_turns_do_not_merge () =
   let tool turn execution =
     row ~role:"tool" ~delivery_key:(operation_key turn)
@@ -1856,6 +1872,8 @@ let () =
             test_unrelated_failure_is_not_marked_recovered
         ; test_case "rows carry the operation id only for direct turns" `Quick
             test_rows_carry_the_operation_id_only_for_direct_turns
+        ; test_case "native continuation keeps original operation" `Quick
+            test_native_continuation_rows_keep_the_original_operation
         ; test_case "rows retain the exact turn identity" `Quick
             test_rows_retain_the_exact_turn_identity
         ; test_case "different turns do not merge their tool blocks" `Quick

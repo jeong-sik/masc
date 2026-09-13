@@ -26,3 +26,8 @@ val action :
 (** [now_ns] and the state's [signalled_at_ns] are monotonic nanoseconds
     from [Mtime_clock.elapsed_ns] — never wall-clock values, so a backward
     clock step cannot re-arm the guard. *)
+
+val observed_action : now_ns:int64 -> current_token:string option ->
+  previous:(string * int64 * bool) option -> action option
+(** Previous token, request time, and whether it failed. Recent duplicate
+    input is swallowed even after token disappearance or successor publication. *)

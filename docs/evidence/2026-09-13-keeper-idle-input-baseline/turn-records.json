@@ -1,0 +1,1084 @@
+{
+  "keeper": "exhibit-editor",
+  "count": 2,
+  "skipped_rows": 0,
+  "source": "turn_record",
+  "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+  "durable_store": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/keepers/exhibit-editor/turn-records",
+  "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+  "freshness_slo_s": 420.0,
+  "live_turn_in_progress": false,
+  "live_turn_started_at_unix": null,
+  "live_turn_last_progress_at_unix": null,
+  "latest_ts_unix": 1789245482.356509,
+  "latest_ts_iso": "2026-09-12T20:38:02Z",
+  "latest_age_s": 299.11569905281067,
+  "health": "ok",
+  "stale_reason": null,
+  "memory_os": {
+    "keeper": "exhibit-editor",
+    "snapshot_store": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/config/keepers/exhibit-editor.memory-current.json",
+    "recall_enabled": true,
+    "revision": 175,
+    "updated_at": 1789244840.432933,
+    "update_source": {
+      "kind": "explicit_write",
+      "trace_id": "trace-1789042595401-00001"
+    },
+    "read_errors": [],
+    "facts": {
+      "shown": 81,
+      "current": 81,
+      "items": [
+        {
+          "memory_id": "sha256:7023db33ce317916f3bcabcd0e8beb0e1d468f584468d256dc7c41be37807d19",
+          "claim": "exhibit-designer가 확정한 시각 컨셉은 팔레트 #F7F3E8/#2F5233/#8FAE8B/#A8BCC4/#C9A227에 제목은 NanumSquareRound Bold, 본문은 NanumBarunGothic을 쓰는 것이며, 책자·포스터 재생성에 이 컨셉을 반영한다.",
+          "category": "fact",
+          "first_seen": 1789044656.873398,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3d51c41c9d9411fb7615c81e694a9e85c8154a3b7a13d53620ec22fdb36924fe",
+          "claim": "Host Gate replay 결과의 preview는 항상 비어 있으므로(빈 preview가 빈 결과를 뜻하지 않음), 승인된 호출의 출력 내용을 판단하려면 keeper_artifact_read로 참조된 sha256의 실제 바이트를 읽어 확인해야 한다.",
+          "category": "constraint",
+          "first_seen": 1789044656.873398,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:1c9fe759357784b6054d089419855b54c13d7838748b4e492400cb6b47e02a45",
+          "claim": "Edit 호출에서 old_string과 new_string이 완전히 같으면 is_error=false로 반환되지만 바이트가 바뀌지 않는 실패가 운영자 지적 이후에도 반복됐으므로, 편집 전에 Read로 실제 바이트를 확인하고 old_string≠new_string임을 보장한 뒤 Grep/Read로 변경이 실제로 적용됐는지 검증한다.",
+          "category": "lesson",
+          "first_seen": 1789045231.219858,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:8a326725a476499c9ea04a9c0b8c22435976f291cf0fa6653a9be60c4cef0630",
+          "claim": "운영자 지시: Goal exhibition-publication-baseline은 검증기가 PNG/PDF를 시각 입력으로 받지 못하는 도구 한계로 refuted됐으므로 기준과 최신 산출물을 유지·보존하고 같은 도구 상태에서 동일 완료 요청을 반복하지 말며, 서버 이미지 입력 수정이 준비되면 그때 같은 Goal 검증을 이어간다.",
+          "category": "constraint",
+          "first_seen": 1789049556.563618,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:6ca771fe69404b665cf2f1f019ad54c490d6e0837399ab0b9fa1293111e72967",
+          "claim": "masc_library_add가 docs/library/ 부모 디렉터리를 생성하지 못해 연속 실패하므로, 라이브러리 저장 시 부모 경로를 먼저 만들거나 샌드박스 notes/에 직접 저장해 우회한다.",
+          "category": "lesson",
+          "first_seen": 1789051776.722418,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:f33efee180d7732db1e1566a74f3796a485d0d6f4dff8f0d2f00391007f8af06",
+          "claim": "운영자 지시: 직접 확인하지 않은 파일 내용(재생·음질·이미지 글리프 등)은 확인했다고 주장하지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789052467.457831,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:8ce200965f6bdfdb81215caa19e717544eed587405e5e475bd31322242deefda",
+          "claim": "한글 음절 전송 왜곡은 Keeper 자신의 Write/Edit/board_post_update 호출 출력 경로에서 발생하며(exhibit-designer가 게시한 board 원문은 정상), 왜곡 관측 음절 시퀀스(입장료=chr(0xBB34)+chr(0xB8CC), chr(0xBCF4)+chr(0xBA74) 결합)는 코드포인트 조립으로 삽입하고 손상된 공개 글은 ASCII-only 본문으로 완전히 대체해 재게시해 차단하며, 최종 렌더 글리프는 vision으로만 확정한다(상세 필드노트: notes/korean-syllable-transport-corruption.md).",
+          "category": "lesson",
+          "first_seen": 1789054397.285452,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:058acb228e4e17ea1b19cd127a48599b7aeafd2972e04352d80b2708cba154f8",
+          "claim": "task-001은 승인 완료(Done, vrf-1d46f3c…)이고 task-002도 exhibit-designer 완료·승인(vrf-8194c143…, 2026-09-10)이며, 확정 산출물(booklet.pdf 102,608B, poster.png 86,709B, renders/page1~3.png, evidence.json)은 보존하고 불필요한 재생성 없이 유지한다.",
+          "category": "fact",
+          "first_seen": 1789057506.194898,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:b994e6ca919fbe5b9a016ae956186e2c4c7bbbc6079054532a66477c460e3685",
+          "claim": "확정 행사 정보(소유자·exhibit-designer 최종 확인): 2026년 10월 17일(토) 14:00-17:00, 은빛정류장 전시실, 대상 초등 고학년과 보호자, 입장료는 코드포인트 chr(0xBB34)+chr(0xB8CC)('묣'/'묣료' 계열 표기는 전송 왜곡이므로 무효)로만 참조, 허구 고지 '※ 본 행사는 허구로 구성되었습니다.', 인쇄 최종 포스터는 exhibit-designer본(poster.png 484,694B, SHA-256 1e4a8fc1…3ebad16)으로 제출 증거의 poster.png(86,709B)와 별개 파일이다.",
+          "category": "fact",
+          "first_seen": 1789068490.722,
+          "current": true,
+          "basis": {
+            "kind": "observed",
+            "board": {
+              "post_id": "p-c36a80b0af5448a967fcfdae547f263f",
+              "comment_id": "c-eb93a3f49fc2b3e262eeb6b523fad257"
+            }
+          }
+        },
+        {
+          "memory_id": "sha256:2d42f0248008142f1b954a2bae134df0ad8c4de0ea5268766400df2ad0506243",
+          "claim": "운영자 지시: 운영자 답변(askca74072b5232c2fa)이 도착하기 전까지 verify_evidence.py를 실행하지 않는다.",
+          "category": "constraint",
+          "first_seen": 1789069465.056548,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:ada522b16f7d747945af2bc28521ef6d3eb4acfb4ec96280221ba2d95816ba08",
+          "claim": "메모리 리콜에 손상된 fact 사본(‘묣’/‘묣료’ 왜곡)이 반복 주입돼 보여도 메모리 스토어 자체는 깨끗하므로, keeper_memory_search로 스토어에 실재하는지 먼저 확인하고 이미 철회된 사본의 재철회를 반복하지 않는다.",
+          "category": "lesson",
+          "first_seen": 1789069465.056548,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3e5610ea53552f803b33ebf5994618ee7da7a6924e0783333ef6076db2bcf932",
+          "claim": "**자정 점검 예약 중복 정리(복제본 취소)** Decision: 2026-09-11T00:00Z 자정 점검 예약이 중복 2개(sched-0237ad37… 원본, sched-b5e01e98… 복제본, payload_digest 동일)였던 것을 2026-09-10T20:26Z에 정리했다. 복제본 sched-b5e01e98e880be67f4e583d7b5277ca4를 취소하고 원본 sched-0237ad37f541e6b2f4f4bae62c5df35c 하나만 유지한다.\nWhy: 같은 시각·같은 목적의 웨이크가 두 번 도착하면 같은 점검을 이중 수행하게 되므로, 주기 작업은 반복 예약 하나로 관리하라는 지침에 따라 정리함.\nHow to apply: (1) 자정 웨이크는 원본 하나만 도착한다. (2) 이후 예약 생성 전 masc_schedule_list로 기존 예약을 확인하고 중복을 만들지 않는다. (3) 대기 상태 자체는 불변: 산출물 보존, Goal 재요청 금지, 운영자 답변(askca74072b5232c2fa) 전까지 verify_evidence.py 실행 금지.",
+          "category": "fact",
+          "first_seen": 1789072315.444029,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:80ab291e5a9abcb23c758679b0f0fec77f2f3d872a998cae324dd83e813deff1",
+          "claim": "**verify_evidence.py c2 체크 보강(pdfinfo 기반)** Decision: verify_evidence.py의 c2(PDF 3페이지) 체크를 압축에 취약한 원시 '/Type /Page' 문자열 탐색에서 pdfinfo 우선·pypdf/PyPDF2 폴백 방식으로 교체했다(2026-09-10T20:40Z). c2 결과가 check() 로그뿐 아니라 출력 JSON criteria에도 기록되도록 함께 수정. 파일 구조 가정(files[].path/bytes/sha256, page_count, 5개 산출물 경로)은 evidence.json 실제 내용과 대조해 일치 확인.\nWhy: 압축된 PDF에서는 '/Type /Page'가 객체 스트림 안에 숨어 오탐(false negative)할 수 있어, 운영자 승인 후 한 번의 실행으로 증거를 만들어야 하는 흐름에서 실패 위험이 있었음.\nHow to apply: (1) py_compile 문법 검증(appr_01a08d0f…)은 승인 대기 중, 결과는 재생으로 확인. (2) 스크립트 실행·verify_evidence.json 생성은 운영자 답변(askca74072b5232c2fa) 전까지 금지. (3) 산출물(booklet.pdf·poster.png·renders/·evidence.json)은 읽기 전용, 보존 유지.",
+          "category": "fact",
+          "first_seen": 1789073033.034563,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:cf635c872099aa18a73af59f29bb9188c02d2ee66a4212a5a2ea727617ec7957",
+          "claim": "**task-002 multimedia/ 위치 확인 요청(board p-03876c43)** Decision: task-002(GIF·사운드) 산출물 위치 문제를 board p-03876c4309d102a75aebbea588a3cc82로 제기했다(2026-09-11T00:55Z경). 승인 기록(p-1207e3bb…)은 산출물이 multimedia/에 상주한다고 하나, 내 샌드박스 ls 직접 확인으로 multimedia/ 디렉터리가 존재하지 않는다. 일관성 검토(운영자 지시)의 전제인 파일 접근이 불가하므로 위치 확인을 요청함. 기존 askca74072b5232c2fa(verify_evidence.json 사전 생성)는 여전히 open이고 별개 사안.\nWhy: 산출물 접근 없이는 확인하지 않은 재생·음질을 확인했다고 말할 수 없고, 같은 장애(파일 접근)에 대해 같은 ask를 반복하지 않기 위해 board로 질문 채널을 분리했다.\nHow to apply: (1) multimedia/ 위치·공유 방법 안내가 오면 책자·포스터와의 일관성 검토(허구 고지 문자열 동일성, 행사 정보 일치, 팔레트/폰트)를 즉시 수행한다. (2) task-002 검증 결과(vrf-8194c143…) 번복 주장이 아니라 검토 전제 확인임을 유지. (3) 산출물 보존·Goal 재요청 금지·verify_evidence.py 실행 금지(운영자 답변 전)는 불변.",
+          "category": "fact",
+          "first_seen": 1789084912.883563,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:f0a30fcea28d9ded2774ba0eabbc94aaf0c90fc1e2bc7f06afb9ada627569f1c",
+          "claim": "**task-002 산출물 문의 정정(producer 루트 기준)** Decision: board p-03876c4309d102a75aebbea588a3cc82를 정정했다(2026-09-11T00:14Z경). 이전 버전의 \"multimedia/ 미상주=계약 미충족 가능성\" 해석을 철회한다. task-002 계약의 multimedia/ 상주는 producer(exhibit-designer) 루트 기준이므로 exhibit-editor 샌드박스에 없는 것이 정상이며, task-002 검증 결과(vrf-8194c143…)에 이의 없음. 남은 요청은 하나: 일관성 검토(운영자 지시)를 위해 multimedia/ 산출물 공유 또는 evidence.json 핵심 필드(허구 고지 문자열, 행사 정보, 프레임수·재생시간·코덱) board 인용. producer sandbox 경로는 직접 읽지 않는다.\nWhy: 계약 조건의 기준 루트를 producer로 잘못 해석해 검증 결과와 충돌하는 시비로 읽힐 수 있는 글을 그대로 두면 협업 신뢰를 해침. 정정본은 요청(파일 접근)만 남긴다.\nHow to apply: (1) 산출물·필드 인용이 도착하면 책자·포스터 확정 정보(2026-10-17 (토) 14:00-17:00, 은빛정류장 전시실, 초등 고학년과 보호자, 입장료 chr(0xBB34)+chr(0xB8CC), 허구 고지)와 대조해 결과를 같은 스레드에 기록. (2) 도착 전까지 재촉 금지. (3) 산출물 보존·Goal 재요청 금지·verify_evidence.py 실행 금지(운영자 답변 전)는 불변.",
+          "category": "fact",
+          "first_seen": 1789085252.018332,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:8f053362350984e8d34eab3df884d00b79cfdb1c3031418023be1bd3ef3c953e",
+          "claim": "**vision 검수 제공자 쿼터 한도 도달(재시도 보류)** Decision: keeper_analyze_image(렌더 PNG vision 글리프 검수)가 2026-09-11T00:39Z에 제공자 주간(7일) 사용량 한도로 HTTP 403 policy_rejection 거절됨. 창이 초기화되기 전까지 같은 호출을 재시도하지 않는다.\nWhy: 거절 원인이 인자나 권한이 아니라 제공자 쿼터이므로 인자를 바꿔도 성공하지 않고, 재시도는 호출 낭비만 만든다. Goal 재검증(이미지 입력 서버 수정 후)과 정성 기준 문서화는 vision 가용성에 의존하므로 차단 상태를 명시해 둬야 한다.\nHow to apply: (1) vision 글리프 확정은 쿼터 창 초기화 후 다시 시도한다(이 턴 기준 불가). (2) 대안: 승인 게이트가 풀리는 시점에 tesseract OCR(한국어 pack)로 renders/page1~3.png·poster.png를 읽어 예상 문자열(허구 고지, 행사 정보, 입장료 chr(0xBB34)+chr(0xB8CC))과 대조하는 텍스트 기반 글리프 검증을 시도할 수 있다. (3) py_compile 승인(appr_01a08d0f…)은 여전히 대기 중이며 결과는 재생으로 확인한다. (4) 산출물 보존·Goal 재요청 금지·verify_evidence.py 실행 금지(운영자 답변 askca74072b5232c2fa 전)는 불변.",
+          "category": "fact",
+          "first_seen": 1789087204.176434,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:c58993b89c2d1f27cb21f68505715c425250e937c650ef9d6d47a421cf217b55",
+          "claim": "**Goal 재검증 체크리스트 파일 작성(notes/goal-reverification-checklist.md)** Decision: Goal 재검증 언락 절차를 notes/goal-reverification-checklist.md(3,793B, 2026-09-11T02:45Z)로 정리했다. A) 게이트 재생(py_compile) 시 keeper_artifact_read로 실제 출력 확인. B) 운영자 'prep-now' 답변 시 verify_evidence.py 1회 실행·5개 체크(c1 파일 존재/해시, c2 pdfinfo Pages=3, c3 허구 고지, c4 행사 정보, c5 입장료 FEE=chr(0xBB34)+chr(0xB8CC)). C) vision 쿼터 회복 시 일 1회 렌더 PNG 검수. D) multimedia/ 공유 도착 시 일관성 검토. 절대 금지: 같은 도구 상태 재요청, 산출물 재생성, 답변 전 실행, 승인 대기 재발행, 원시 입장료 토큰 직접 기입.\nWhy: 계획이 메모리 여러 건에 흩어져 맥락 리셋 후 재유도 비용이 컸고, 재요청 금지 조건을 어겨 3회 반복 검증된 원인이 절차 미문서화였음.\nHow to apply: (1) 다음 턴부터 언락 이벤트가 오면 이 파일의 해당 단계를 그대로 따른다. (2) 체크리스트 자체는 산출물이 아니므로 필요 시 갱신 가능. (3) 대기 원칙(재촉 금지, 반복 조회 금지)은 유지.",
+          "category": "fact",
+          "first_seen": 1789094735.905116,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3ae67a2971baa957568ba77baf3f873b012d5401c6c1ca19995e88a88409e64c",
+          "claim": "**verify_evidence.py 기대값을 빌드 소스 ast 추출로 전환(손조립 금지 확립)** Decision: verify_evidence.py의 기대 문자열을 손조립 코드포인트에서 build_publication.py 상수의 ast 추출로 전면 교체했다(2026-09-11T04:5xZ, 파일 전체 Read로 바이트 확인 완료). _ev()는 리터럴·BinOp(Add)·chr()·리스트를 재귀 평가하고 미지원 형식/미발견 상수는 즉시 예외. 추출 대상: TITLE='기억의 정원', INFO1='일시: 2026년 10월 17일 토요일 14:00–17:00'(토요일·EN DASH 주의), INFO2='장소: 은빛정류장 전시실', INFO4='※ 본 행사는 허구로 구성되었습니다.', FEE=chr(0xBB34)+chr(0xB8CC), AUDIENCE=P2_STEPS의 '3. 대상: 초등학교 고학년과 보호자'(책자는 학교 포함 표기 — 2026-09-11T03:2xZ의 '초등 고학년' 수정은 취소). 임포트 블록(hashlib,json,os,re,subprocess,sys) 확인 완료.\nWhy: 원시 바이트 확보 사건(turn 180-181)으로 내 수기 코드포인트 조립·암산 검증이 2회 연속 오답임이 드러났다(본=U+BCF8 등 5개 코드포인트 오류, 대상 표기 혼동). 산출물을 만든 원천(build_publication.py)에서 추출하면 문자열이 원문과 항상 일치해 이 실패 클래스가 원천 차단된다. literal_eval은 chr() 덧셈을 평가 못 해 None 크래시 위험이 있었으므로 재귀 평가기로 해결.\nHow to apply: (1) py_compile 승인(appr_01a08d0f) 재생 시 문법 통과 여부만 확인하면 즉시 실행 준비 완료. (2) 운영자 'prep-now' 답변 시 단 1회 실행. (3) 이후 어떤 스크립트에서도 한글 기대 문자열을 손조립하지 않는다 — 원천 상수 추출 또는 원문 인용만. (4) 대기 원칙 불변.",
+          "category": "fact",
+          "first_seen": 1789102818.522505,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:b6a971b6ab3cef6a5b38c83b4e02bd439938f8a2930db2a49754870849cda2b6",
+          "claim": "**체크리스트 B단계를 ast 추출 설계로 일치(손조립 금지 반영)** Decision: notes/goal-reverification-checklist.md B단계·금지 목록을 verify_evidence.py 현행 설계와 일치시켰다(2026-09-11T05:1xZ, Edit 성공 후 전문 Read로 바이트 확인 예정). B2는 '기대 문자열은 build_publication.py 상수 ast 추출, 손조립 금지(대상 표기 혼동+코드포인트 5개 오산 2회 연속 이력 명시)'로 교체, c4는 책자 실제 표기('학교' 포함, 일시 '토요일'·EN DASH U+2013)로, c5는 원천 조립만 허용으로 수정. 금지 목록에 '한글 기대 문자열 수기 조립·암산 검증' 추가.\nWhy: 체크리스트가 여전히 손조립 방식과 '초등 고학년' 기대값을 기술해, 이를 따르는 미래 턴이 최종 스크립트를 다시 잘못 '고칠' 위험이 있었다.\nHow to apply: (1) 다음 턴에 체크리스트 전문 Read로 바이트 반영 확인. (2) 이후 언락 절차는 수정된 B단계 기준. (3) 대기 원칙(승인 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789103253.174689,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:a0cef653f4b544a61f1d3874d6380bf2c2e81565542b36d2d885fdd36e59a996",
+          "claim": "**체크리스트-스크립트 일치 확인 완료(바이트 대조)** Decision: notes/goal-reverification-checklist.md 전문(4,154B)을 Read로 바이트 대조해 B단계 교체(ast 추출, 책자 '학교' 포함 표기, INFO1 '토요일'·EN DASH U+2013)와 금지 목록 추가('한글 기대 문자열 수기 조립·암산 검증 금지')가 실제 적용됐음을 확인했다(2026-09-11T05:1xZ). 이로써 체크리스트와 verify_evidence.py 현행 설계가 일치하며, 계획 문서를 따르는 미래 턴이 스크립트를 잘못 되돌릴 위험이 제거됐다.\nWhy: rev 104에서 Edit 성공 응답만으로 종료해 바이트 반영 확인이 미완료였다(내 Edit 검증 원칙).\nHow to apply: (1) 언락 이벤트(승인 재생 3종, 운영자 'prep-now', vision 쿼터, multimedia/ 공유) 도착 시 이 체크리스트를 그대로 따른다. (2) 대기 원칙(재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789103581.002166,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:99e9e9fb36a301996c0b5cb64f4240a38907db97c3e79e5750dc4e324ab60a14",
+          "claim": "**기준② 제출본 일치 소스 확정(체크리스트 E절 추가)** Decision: build_publication.py 전문(373행, 원시 바이트) 대조로 제출본 범위 기준②(포스터-책자 행사 정보 일치)를 소스 수준에서 확정했다(2026-09-11T05:3xZ). 일시(형식 상이·내용 동일, EN DASH 공통), 장소·입장료(FEE 상수 동일)·대상('초등학교 고학년과 보호자' 양측) 일치. 허구 고지는 양측 모두 명시하되 문구가 설계상 상이(책자 INFO4 vs 포스터 '가상의 행사')하므로 verify_evidence.py c3이 PDF만 검사하는 것은 정확한 설계. 미확인: 인쇄 최종 포스터(디자이너본 484,694B) — multimedia/ 공유 대기. 결과는 notes/goal-reverification-checklist.md E절로 추가.\nWhy: 기준②는 실행 후 PDF 텍스트만으로 계획돼 있었으나, 두 산출물이 같은 빌드 스크립트 상수에서 나오므로 소스 대조만으로 부분 확정이 가능했음. 인쇄본은 내 샌드박스에 없어 확인했다고 주장할 수 없음을 명시.\nHow to apply: (1) 언락 시 E절 결과를 재검증할 필요 없음(원천 확정). (2) multimedia/ 공유 도착 시 인쇄 최종 포스터의 정보 4종(일시·장소·입장료·대상)과 허구 고지를 E절 기준으로 대조해 board에 기록. (3) 대기 원칙 불변.",
+          "category": "fact",
+          "first_seen": 1789104415.381883,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:9cdb441cb29ddb0bfed9ee4cb3b425717b828aec3fd1d071dbef3ae8f0715a0d",
+          "claim": "**체크리스트 E절 바이트 반영 확인 — 전체 동기화 완료** Decision: notes/goal-reverification-checklist.md의 E절(소스 수준 일관성 확인 결과) 추가가 실제 바이트로 적용됐음을 Read 대조로 확인했다(2026-09-11T05:4xZ). 이로써 체크리스트 전체(A~E절·금지 목록)가 verify_evidence.py 현행 설계·빌드 스크립트 원문 사실과 완전 동기화됐다. 2026-09-11T05:33Z 기준 미결 항목: 게이트 승인 3건 재생 대기, 운영자 askca74072b5232c2fa 답변 대기, vision 쿼터(일 1회 재시도, 예약 09-12T00:00Z), multimedia/ 공유(board p-03876c43).\nWhy: rev 107의 Edit 성공 응답만으로 종료해 바이트 반영 확인이 미완료였다(내 Edit 검증 원칙).\nHow to apply: (1) 다음 턴부터는 언락 이벤트 대기만 남음 — 같은 상태의 keepalive에서는 조회·기록 없이 종료한다. (2) 언락 이벤트 도착 시 체크리스트 해당 절을 따른다. (3) 대기 원칙 불변.",
+          "category": "fact",
+          "first_seen": 1789104746.828698,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:5762ceddef3dab15c9e189aadbc37da3164461d0a11fac6aecbad5e160a49a62",
+          "claim": "**E절 인쇄본 보조 대조 추가(디자이너 인용 vs 빌드 소스)** Decision: 체크리스트 E절에 '인쇄본 보조 대조' 항목을 추가했다(2026-09-11T05:5xZ, Read 바이트 확인 완료). 디자이너 board 인용(2026-09-10T19:28) 기준으로 일시·장소·입장료(동일 코드포인트)·허구 고지(INFO4 동일 문구)는 책자 빌드 소스와 텍스트 수준 일치. 대상은 인용 '초등 고학년과 보호자' vs 책자 '초등학교 고학년과 보호자'로 의미 동일·표기 상이 가능성을 명시해, 실물 공유 시 대상 표기를 우선 대조하도록 했다. 이 줄은 게시 인용 기준이며 실물 직접 확인이 아님을 문서에 명시.\nWhy: multimedia/ 공유 대기 중에도 이미 확보된 두 원천(디자이너 게시 인용·빌드 소스 바이트)의 대조는 지금 수행 가능했고, 실물 확인 시 중복 작업을 줄이고 우선순위를 정해 둘 가치가 있었다.\nHow to apply: (1) multimedia/ 도착 시 E절 순서대로 실물 대조: 대상 표기 우선 → 일시·장소·입장료·허구 고지. (2) 결과는 board p-03876c43와 이 체크리스트에 기록. (3) 대기 원칙 불변.",
+          "category": "fact",
+          "first_seen": 1789105210.821194,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:85f33ac5cadf4ba42c438b0eff3d86c41a6410627de0efb4d83c2f7728d0b8c2",
+          "claim": "**인쇄 포스터 대상 표기 원천 확정('초등 고학년') — E절 승격·board 기록** Decision: board 원문(p-c36a80b0 본문·c-eb93a3f4 전사)을 직접 읽어 인쇄 최종 포스터 대상 표기를 '초등 고학년과 보호자'(학교 없음)로 확정했다(2026-09-11T06:0xZ). 이는 메모리 왜곡이 아니라 원천 확인된 실제 차이로, 책자('초등학교 고학년과 보호자')와 의미 동일·표기 상이임. 일시·장소·입장료('무료')·허구 고지(INFO4 동일 문구)는 텍스트 수준 일치. 체크리스트 E절을 확정 차이로 승격(바이트 확인 완료)하고, board p-03876c43에 보충 기록(c-38357855, 통일 여부는 운영자·디자이너 판단 요청)을 남김.\nWhy: 19:28 메모리 사본은 왜곡 이력 시점이라 '학교' 누락이 사본 손상일 가능성이 있었는데, board 원문 두 곳이 일관되게 '초등 고학년'을 전사해 실제 표기 차이로 확정됨. 확정 산출물 양쪽 모두 검수를 통과했으므로 임의 통일 대신 투명 기록이 원칙.\nHow to apply: (1) multimedia/ 공유 시 E절 순서대로 실물 대조(대상 표기 1순위). (2) 통일 지시가 오면 어느 쪽 기준인지 확인 후 별도 승인 절차로만 반영. (3) 대기 원칙(게이트 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789107341.609093,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:570666c8aaabc28b8a204cfee0dc7bf2c021ccecbba35509665fbc5d4cfec41a",
+          "claim": "**board 공개 기록 왜곡 없음 확인(c-38357855 포함)** Decision: board 공개 기록 전송 왜곡 여부를 직접 재확인했다(2026-09-11T06:2xZ). p-03876c43 본문(정정본)과 댓글 c-38357855 모두 원시 한글('무료', '초등 고학년과 보호자', '초등학교 고학년과 보호자')이 손상 없이 정상 렌더링됨을 확인. board 출력 경로에서는 이번 케이스 왜곡 미관측.\nWhy: 댓글이 제 Write/board 출력 채널(과거 왜곡 관측 경로)을 통해 원시 한글 표기를 포함해 게시됐으므로, 공개 기록이 손상됐는지 읽어 확정해야 했음.\nHow to apply: (1) p-03876c43·c-38357855는 깨끗한 공개 기록으로 신뢰 가능. (2) 여전히 원시 한글 대량 기입보다는 필요 최소한만 쓰는 원칙 유지. (3) 대기 원칙(게이트 3건·ask·vision·multimedia) 불변, 같은 상태 keepalive에서는 조회 없이 종료.",
+          "category": "fact",
+          "first_seen": 1789107772.889589,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:cb59b6b1cd8941121a9493993ba5c8504dad81dc2741f780f8ddaf6cfdbd93ef",
+          "claim": "**필드노트에 규칙 0(손조립 금지·원천 추출) 추가** Decision: notes/korean-syllable-transport-corruption.md의 'What DOES work' 절 상단에 규칙 0(한글 기대 문자열 손조립 금지 — 반드시 ast 원천 추출 또는 원문 인용, 맥락 내 암산은 검증 아님)을 추가했다(2026-09-11T07:3xZ, Read로 바이트 확인 완료). 규칙 1(생성용 코드포인트 조립)은 유효하나 '기대값에는 규칙 0 적용'으로 한정. 배경: 2026-09-11 두 차례 연속 '검증됐다'던 손조립 코드포인트가 오답 판명(대상 표기 혼동 + 성=U+C169 등 5개 오산).\nWhy: 장기 제약 fact가 이 필드노트를 참조하는데 문서가 구버전 교훈('조립하라')만 담으면, 참조를 따라간 미래 턴이 승격된 규칙(원천 추출)을 모르고 같은 실패를 반복한다.\nHow to apply: (1) 한글 기대 문자열이 필요하면 build_publication.py ast 추출(_const_str) 또는 원문 직접 인용만 사용. (2) 생성용 취약 토큰은 여전히 chr() 조립. (3) 대기 원칙(게이트 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789112031.894751,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:d73a6ecf026dcfda7de9c0762cd02c0d2046e0ba392a0eeb069b59db2d12bb68",
+          "claim": "**verify_evidence.py 실행 전 검증 완료(상수 유일성 포함)** Decision: verify_evidence.py 실행 전 검증을 전부 완료했다(2026-09-11T07:4xZ). Grep ^(TITLE|INFO1|INFO2|INFO4|FEE|P2_STEPS)\\s*= 대조로 build_publication.py에서 6개 상수가 각각 정확히 한 번만 대입됨을 확인(FEE=28행, TITLE=51행, INFO1=54행, INFO2=55행, INFO4=57행, P2_STEPS=61행) — _const_str의 첫 대입 반환 논리가 유일값을 보장하며, Grep 출력에서 6개 원문 문자열도 정상 렌더링됨. 완료 항목: 임포트 블록, 전 파일 Read, 상수 존재·유일성, chr() 덧셈 재귀 평가기, 체크리스트(A~E절) 동기화, 필드노트 규칙 0.\nWhy: _const_str이 ast.walk의 첫 대입을 반환하므로 중복 대입이 있으면 추출값이 순서에 의존할 수 있었는데, 단일 대입 확인으로 이 마지막 논리적 공백이 닫혔다.\nHow to apply: (1) 남은 단계는 게이트 재생(py_compile appr_01a08d0f)과 운영자 'prep-now' 답변뿐 — 추가 사전 검증 불필요, 같은 상태 keepalive에서는 실행 준비 완료 상태를 다시 조사하지 않는다. (2) 언락 즉시 체크리스트 B단계대로 1회 실행. (3) 대기 원칙 불변.",
+          "category": "fact",
+          "first_seen": 1789122573.140991,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:5920174b46ec4a13382289d3d7aed417bdb72e24a190eb9edaa728ed55234e67",
+          "claim": "**vision 재시도 2일차 403 — 09-13 예약 갱신** Decision: vision 쿼터 일 1회 재시도 2일차(2026-09-12T00:00:29Z, sched-4eaa15ec 웨이크)도 keeper_analyze_image(renders/page1.png)가 제공자 주간(7일) 한도 HTTP 403으로 거절됨. 재시도하지 않고 sched-ef31ee87fdbb6c4ca5983f333c0551f0(다음 2026-09-13T00:00:00Z)을 등록해 규율 유지. 자정 웨이크 절차에서 게이트 승인 3건 재생 없음 확인. board 리비전 불변(e13a7999…), 백로그 신규 0건, ask 여전히 open(총 3회 관측 모두 open).\nWhy: 쿼터 창이 리셋되지 않았고, 일 1회 원칙 준수 기록을 남겨야 3일차에도 같은 규율이 유지된다.\nHow to apply: (1) 2026-09-13T00:00Z 웨이크에서 하루 1회 재시도, 성공 시 page1→page2→page3→poster.png 순 검수. (2) 403 지속 시 09-14로 예약 갱신. (3) 게이트·ask·multimedia 언락은 체크리스트 절차. (4) 산출물 보존·재요청 금지·답변 전 실행 금지 불변.",
+          "category": "fact",
+          "first_seen": 1789171240.006665,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:029170062118c227a5fffd63ecfe3e426bfc0b14f3f2e903e7f62eceeaa2883b",
+          "claim": "**masc_library_add 런타임 실패 — 초안 notes/library-drafts/ 보존** Decision: 한글 전송 왜곡 필드노트를 지식 라이브러리(masc_library_add)로 공유하려 했으나 런타임 오류로 실패: 저장 대상 부모 디렉터리(/docs/library/)가 없어 'No such file or directory'. 동일 인자 2회 모두 동일 실패라 재시도 중단. 초안은 notes/library-drafts/korean-syllable-transport-corruption.md(2,473B, ASCII-safe, Read로 바이트 확인)로 보존해 뒀고, 라이브러리는 현재 문서 0건. 이는 인자 문제가 아니라 런타임 측 경로 문제로, 내 샌드박스 밖이라 직접 해결 불가.\nWhy: exhibit-designer도 같은 출력 채널을 쓰므로 공유 가치가 있는 교훈(규칙 0: 기대 문자열 손조립 금지·원천 추출, vision 글리프 확정, 리콜 가짜 memory_id 주의)이지만, 라이브러리 저장소 경로 문제를 내가 고칠 수 없어 초안 보존으로 대체.\nHow to apply: (1) 라이브러리 임포트는 docs/library/ 디렉터리가 생긴 후(런타임/운영자 조치) notes/library-drafts/ 초안으로 1회 재시도한다. (2) 그 전에는 같은 호출을 반복하지 않는다. (3) 대기 원칙(게이트 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789175635.108961,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:a79d21708374588bfcda11e2ad4ce94b72408b7e8f33b5fe0ff844a651a6091f",
+          "claim": "**masc_dashboard 대기질 종결 — 중첩 아티팩트 regress 함정 기록** Decision: masc_dashboard(2026-09-12T11:09Z, turn 287) 확인 대기질을 종결했다. mascot 아티팩트 체인(masc_dashboard 결과 0e27fc58 → 5fcffe52 → 2ce25fdf)은 keeper_artifact_read 결과 자체가 새 아티팩트로 저장되는 무한 중첩(+233B JSON 래퍼씩)이라 본문은 첫 프리뷰(1,098B)에 이미 있었다. 'Attention Required'는 World State가 매 턴 권위 있게 보여주는 승인 대기 3건(appr_01a08d0f/ded/e89)과 동일한 내용으로 판정(보드 리비전 불변, 백로그 0건, 에이전트 2명 — 모두 기존 정보). 새로운 행동 신호 없음. 2ce25fdf 이후 체인 추적은 중단.\nWhy: 중첩 아티팩트를 계속 읽으면 매번 한 겹 더 생기는 구조라 완결이 없고, 확인하려던 정보(주의 항목)는 이미 World State로 매 턴 관측되고 있어 추가 조회가 진전을 만들지 않음.\nHow to apply: (1) 도구 결과가 [masc:blob]으로 반환되면 먼저 프리뷰 전문을 정독한다 — 프리뷰가 전체(bytes≤~2KB)인 경우가 많다. (2) artifact_read 결과가 또 다른 blob이면 중첩 regress로 보고 즉시 중단한다. (3) 대시보드 'Attention Required'는 게이트 승인 목록과 동일 원천으로 간주해 별도 조회하지 않는다. (4) 대기 원칙(승인 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변.",
+          "category": "fact",
+          "first_seen": 1789180247.801742,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:958f2a0678c014acde18b86feecc1571f19028b08ae9a15fec7dacc746a579bb",
+          "claim": "**체크리스트 vision 예약 참조 갱신(sched-ef31ee87)** Decision: notes/goal-reverification-checklist.md '현재 상태' 절의 vision 예약 참조를 sched-4eaa15ec(09-12 소멸)에서 sched-ef31ee87(다음 2026-09-13T00:00Z)으로 갱신했다(2026-09-12T04:3xZ, Read로 바이트 확인 완료). 09-11·09-12 두 차례 403 기록도 함께 명시. 이로써 체크리스트(A~E절·현재 상태)·verify_evidence.py·메모리(rev 115~120)가 전부 현재 상태와 일치한다.\nWhy: 계획 문서가 소멸된 예약을 가리키면 미래 턴이 이중 예약하거나 웨이크 상태를 오읽을 수 있었다.\nHow to apply: (1) 09-13 자정 웨이크(sched-ef31ee87)에서 일 1회 vision 재시도, 403이면 09-14로 갱신 후 이 줄도 같이 고친다. (2) 게이트·ask·multimedia 언락은 체크리스트 절차. (3) 산출물 보존·재요청 금지·답변 전 실행 금지 불변.",
+          "category": "fact",
+          "first_seen": 1789187310.452948,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:6b7882924595512b472b3032cd151ae47c6d22b3fdaf8ed99b0925561b7d072b",
+          "claim": "**전사 오류 사건 정리 완료 — 교훈은 필드노트 규칙 5로** Decision: 2026-09-12T06:20~50Z memory_id 한 글자 전사 오류 사건(…665 9 c vs …665 6 c, 17번째 문자)을 완전 정리했다. (1) 원인이 된 stale '승인 0건' fact 철회 성공(rev 122), (2) 오진 '스토어 이상' fact 철회(rev 123), (3) 오진 '재시도 금지·ID 정확' fact 철회(rev 124), (4) 진짜 교훈을 notes/korean-syllable-transport-corruption.md 규칙 5로 승격(바이트 확인 완료): memory_id는 최신 도구 응답에서만 복사하고, 철회가 id 오류로 실패하면 스토어 문제로 결론 내리기 전 keeper_memory_search로 재확보한다. 인라인 매치가 2건 이상이면 blob을 읽은 뒤 사용.\nWhy: 거짓 결론 fact 두 건은 실제 원인(전사 오류)이 밝혀진 뒤 남겨두면 재발 시 같은 오진('스토어 이상')을 반복하게 하므로 철회했고, 교훈은 fact 철회와 함께 소실되지 않도록 참조되는 필드노트에 옮겼다.\nHow to apply: (1) 철회·조회에 쓰는 64자 sha는 도구 응답 원문에서 복사한다. (2) 게이트·ask·vision·multimedia 대기 원칙과 체크리스트 절차는 불변. (3) 현재 상태 기준은 World State + 최신 revision(121~124).",
+          "category": "fact",
+          "first_seen": 1789195706.061955,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:bce871f5f598e69aa45afd40d88c4c20dd480afb1fec209132bf915f52d07132",
+          "claim": "**PDF 원시 바이트 grep 불가(갱신판 — 소멸된 금지 조항 제거)** Decision: booklet.pdf 원시 바이트에 대한 rg 유니코드 이스케이프 검색(대상 표기 후보 2종, 허구 고지 전반부, 입장료 U+BB34+U+B8CC)은 2026-09-11T04:1xZ 전부 미발견으로 종료됐으며, 이는 PDF 텍스트 스트림이 압축돼(reportlab 기본 Flate) 원시 바이트 grep이 원리적으로 불가능하기 때문이다(오탐 아님). PDF 본문 표기 확정은 pdftotext 승인(appr_01a08e89…) 재생 시 keeper_artifact_read로만 가능하다. 본 fact는 04:26Z판을 대체하며, 구판의 '거절된 철회 2종 재시도 금지' 조항은 해당 철회들이 올바른 memory_id로 성공(rev 122·124)해 소멸됐으므로 삭제했다.\nWhy: 소멸된 금지 조항이 남으면 미래 턴이 존재하지 않는 금지를 오읽할 수 있고, grep 불가 교훈은 재시도 낭비 방지를 위해 보존해야 한다.\nHow to apply: (1) booklet.pdf 원시 바이트 grep 재시도 금지. (2) PDF 본문 확인은 appr_01a08e89 재생으로만. (3) 대기 원칙(승인 3건 재발행 금지, 답변 전 실행 금지, 산출물 보존, vision 일 1회) 불변. (4) 철회 관련 규칙은 필드노트 규칙 5(ID는 도구 응답에서 복사)로 통합됨.",
+          "category": "fact",
+          "first_seen": 1789201471.199417,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:ef541812326e1326045dfcf8c61e4ba9b4acd25af0dcc7ccbb719d197a645e34",
+          "claim": "**라이브러리 초안에 규칙 5 동기화 완료** Decision: notes/library-drafts/korean-syllable-transport-corruption.md(라이브러리 임포트 대기 초안)에 규칙 5(memory_id는 최신 도구 응답에서만 복사, 철회 id 오류 시 스토어 문제로 결론 내리기 전 keeper_memory_search로 재확보)를 추가해 필드노트와 동일한 교훈 집합으로 맞췄다(2026-09-12T08:5xZ, Read로 바이트 확인 완료). 초안은 masc_library_add 실패(부모 디렉터리 부재 런타임 오류) 이후 보존 중이며, docs/library/ 생성 후 임포트 시 규칙 0~5 전부 반영된다.\nWhy: 초안이 규칙 5 추가 이전 버전으로 남으면 나중에 임포트될 때 가장 최근 사고의 교훈이 빠진 채 공유된다.\nHow to apply: (1) docs/library/ 생기면 이 초안으로 masc_library_add 1회 재시도. (2) 필드노트에 규칙 추가 시 초안도 같이 갱신. (3) 게이트·ask·vision·multimedia 대기 원칙과 체크리스트 절차 불변.",
+          "category": "fact",
+          "first_seen": 1789204392.873102,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:6709091e7d865c9782411366be43c9f8c495f58fbe8161046c9de7a4a11885ef",
+          "claim": "**dashboard에 승인 대기 1회 안내(재게시 금지)** Decision: 승인 대기 3건·운영자 질문(askca74072b5232c2fa)·multimedia/ 공유 요청을 dashboard에 1회 묶어 안내했다(2026-09-12T09:4xZ, 게시 후 surface_read로 정상 전달 확인, 운영자 응답 없음). 동일 내용 재게시는 하지 않기로 했다.\nWhy: 승인 3건이 24시간+ 대기 중인데 이 사실이 운영자 채널에 알려진 적이 없었고, 무엇이 걸려 있고 처리되면 무엇이 풀리는지 묶어 알리는 것이 편집 책임자의 몫이며, 상태가 바뀌지 않는 한 같은 안내의 반복은 금지되기 때문.\nHow to apply: (1) 게이트 승인 3건·ask 답변·multimedia 공유 중 하나라도 도착하면 체크리스트(notes/goal-reverification-checklist.md) 해당 절차를 따른다. (2) 안내 재게시 금지 유지. (3) 다음 정기 이벤트는 09-13T00:00Z vision 재시도(sched-ef31ee87).",
+          "category": "fact",
+          "first_seen": 1789205389.175305,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:980506aeb73fd96bcd1e03d2eade3f3680d7436f53c8da15f39bbb6248d05e49",
+          "claim": "**task-001 최종 포스터 수신·해시 일치 보고(글리프 검수 미완)** Decision: 운영자 지시로 task-001 최종 포스터를 수신·materialize했다(2026-09-12T1xZ). (1) 경로 received/designer-poster.png, (2) 실측 484,694B·SHA256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16 = 기대값과 정확히 일치(wc -c·sha256sum 직접 계산, gate 통과 실행), (3) 수신 사실을 task-001 Board 대화 p-c36a80b0…에 보고(c-69e629bb…). 기존 산출물·Goal 증거·verifying attempt 무변경, completion 재요청 안 함(지시 유지).\nWhy: 운영자가 queued/admitted만으로 완료 처리하지 말고 실물 검수까지 하라고 지시했으므로, 검증된 사실(수신·해시)과 미완 사항(글리프 검수)을 구분해 보고했다.\nHow to apply: (1) 글리프 검수 미완: keeper_analyze_image가 no_capable_runtime(403 쿼터가 아닌 런타임 미구성)으로 실패, PNG 텍스트 청크(tEXt/iTXt/zTXt)도 없음(Grep 확인). tesseract OCR 경로가 appr_01a09502 승인 대기 중 — 재생 즉시 제목·배지·일시·장소·대상·입장료·누락/겹침/잘림을 검수해 p-c36a80b0…에 후속 보고. (2) 승인 재생 전 같은 명령 재발행 금지(기존 3건 appr_01a08d0f·ded·e89에 더해 4건째 대기). (3) 09-13 vision 재시도 예약(sched-ef31ee87)은 no_capable_runtime이면 쿼터와 무관하게 실패할 수 있음을 유의. (4) 운영자 답장에는 materialize 경로·검수 전사·바이트·SHA256·post/comment ID를 포함해야 한다.",
+          "category": "fact",
+          "first_seen": 1789206441.726131,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:51082b9367d1c773f1de17f7c8f249ee52698951563aa05ffc34e482c795e13d",
+          "claim": "**두 번째 goal_verdict: 정성 기준 확인됨, 남은 갭은 PDF 바이트·페이지** Decision: Fleet의 두 번째 goal_verdict(verifier_exact, 현재 보존 중인 verifying 시도)를 기록한다(2026-09-12T10:1xZ 관측). 첫 판정(이미지 입력 불가)과 달리 이번엔 검증기가 실제 PNG 4개를 열어 정성 기준 — 포스터-책자 제목·대상·행사 정보 일치, 한글 누락 글리프·겹침·잘림 없음, 가상 행사 명시 — 을 확인했고, 5개 중 3개만 확정으로 refuted. 미확인 원인은 booklet.pdf 조회가 lookup_output_invalid_utf8 런타임 실패로 끝나 PDF 실제 바이트·SHA256·3페이지·evidence 전체 일치를 검증 못한 것.\nWhy: 남은 갭이 '이미지 입력'에서 'PDF 바이트·페이지 확인'으로 좁혀졌고, 이는 verify_evidence.py(pdfinfo/pypdf 폴백 + 해시 대조, pdftotext 텍스트 추출)가 정확히 메우는 부분임이 확인된다. 운영자 지시(같은 도구 상태에서 완료 재요청 금지)는 유지되므로 재요청은 하지 않는다.\nHow to apply: (1) 언락 경로 불변: py_compile(appr_01a08d0f)·pdftotext(appr_01a08e89) 재생 + 운영자 askca74072b5232c2fa 답변 시 체크리스트 B단계 1회 실행. (2) 정성 기준 2건은 검증기가 이미 확인했으므로, 재검증 증거는 PDF 쪽(c1·c2)에 집중한다. (3) 동일 전달 메시지·장애 보고의 재게시 금지 유지(analyze_image no_capable_runtime 재호출 금지 포함).",
+          "category": "fact",
+          "first_seen": 1789207896.050909,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:afcd6ca7a8d127cee73bf928aafb138536f75fcbffe533e51fb6390c74f185ce",
+          "claim": "**큐레이터 제안 검토·인계 브리프 저장·보드 기록 완료** Decision: 큐레이터 메모리 제안 9b676bb25ad23dc951bfd7b8e5130f9b58a0384b205c8e40123df0e2865f98ff(model_proposed, semantic_verification not_performed)를 keeper_workspace_memory_read로 직접 읽어 원천·현재 Goal 판정(2026-09-12T10:07Z)과 대조 검토했다(운영자 지시, 2026-09-12T10:4xZ). 승격: 팔레트 5색·폰트(build_publication.py 92-93·117-120행 grep 확인, s1·s13과 일치). 해결: 입장료 conflict는 책자 원천 28행 FEE=chr(0xBB34)+chr(0xB8CC)로 확정, 철회 기록의 깨진 표기 무효. 정정: s12(64자 handle 필수 주장→실제 장애는 no_capable_runtime 런타임 미구성)·s18/s20/s21(정성 기준 미확인 주장→10:07Z 판정으로 3개 확인 완료, 남은 갭은 PDF 바이트·3페이지·evidence 전체 일치)은 낡음, s23(evidence_quality.md 존재)은 Read 실측 path_not_found로 허위. 인계 브리프를 notes/exhibition-memory-handoff.md(5,451B)로 저장하고 board p-c36a80b0…에 기록(c-7aa5e0bd300535f21f018cab838509f8). 원본 산출물·verifying 시도 무변경, Goal 재요청 없음.\nWhy: 제안은 데이터이며 미검증 상태라 원천 대조 없이 신뢰할 수 없었고, 특히 s23은 파일 부재로 허위였다. 검증된 결론만 남기고 정정 사항에 원천 ID를 명시해 다음 세션이 혼동 없이 이어가게 한다.\nHow to apply: (1) 다음 세션은 notes/exhibition-memory-handoff.md부터 읽는다. (2) 검토·저장·보드 게시는 완료 — 디자이너의 실제 재사용은 아직 아니며, 디자이너가 브리프를 읽고 활용한 뒤에 재사용으로 간주한다. (3) 대기 원칙(승인 4건 재발행 금지, 재요청 금지, 산출물 보존, 이미지 도구 재호출 금지) 불변.",
+          "category": "fact",
+          "first_seen": 1789208841.047949,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:53dba91c9af85b01abaec96bf9ee5655c07902ad451f57f6d7684978cf61d133",
+          "claim": "**인계 검토 기록 정정(4건) — 대체 fact** Decision: 2026-09-12T10:3xZ 운영자 지적 4건으로 큐레이터 제안(9b676bb2…, model_proposed) 검토 기록을 정정한다(본 fact가 afcd6ca7… 구판을 대체). (1) s23: 이번 세션 Read path_not_found로 evidence_quality.md의 '현재 부재'만 확정 — 기록 시점(2026-09-10)의 진위는 이 검토로 확정 불가. 구판의 '허위' 판정은 과잉 추론이었다. (2) Goal exhibition-publication-baseline 실제 위상: executing(진행 중), 직전 증명 요청 refuted(2026-09-12T10:07Z — PNG 정성 3기준 확인, PDF 바이트·3페이지·evidence 전체 일치 미확인). 'verifying 시도 보존'은 부정확한 표현이었고, 무재제출 지침은 고장 상태(이미지 입력·PDF 조회 실패)에서 동일 증거의 동일 경로 재제출을 금지하는 조건부 잠정 지침이며 검증된 복구 후에는 새 증거로 재제출을 이어간다. (3) 도구 교훈 라벨 분리: [이번 세션 실측] s15(Edit 바이트 확인)·s14(승인 재생 출력 artifact_read)·팔레트/폰트 원천 grep. [역사 기록·미재실행] s4(빈 stdin exec 금지)·s7(Gate preview 빈 값)·s17(금지 음절 한정)·s9·s16. '모두 이번 세션 유효 확인' 주장은 철회. (4) s18 계수 변환 정정: 제안 shared claim \"three files…was proven\"은 지지 안 되는 변환 — s18 원문의 '3'은 증명된 정량 기준 개수(① 파일 존재 ② 3페이지 ③ evidence 기록)이고 기준 ①이 booklet·poster·renders 등 다수 파일을 포괄한다. 산출: 정정판 브리프 notes/exhibition-memory-handoff.md 6,586B(sha256 12bd9264c83411313dbb1f4a6c7ed1a1c126da3076e67cb81e0358acf16bcec4, keeper_artifact_transfer export 반환 객체), exhibit-designer 위임 kmsg-2d7f67ad14e7f37ac96b82d53dfaef4b(queued), board p-c36a80b0… c-69f70981… 기록 완료.\nWhy: 구판 fact이 (1) 현재 부재를 역사적 허위로 확대 해석하고 (2) Goal 위상을 잘못 서술했으며 (3) 재실행하지 않은 역사 교훈을 이번 세션 검증으로 표시해, 운영자가 지적한 증거 구분 원칙을 위반했기 때문.\nHow to apply: (1) 다음 세션은 정정판 브리프부터 읽는다. (2) 디자이너 실제 수신·회신 전까지 위임은 재사용으로 간주하지 않고, 회신 도착 시 board에 peer review 결과를 이어 기록한다. (3) 원본 산출물·model_proposed 원제안 보존, 이미지 검수 미완 주장 유지. (4) 대기 원칙(승인 4건 재발행 금지, 답변 전 실행 금지, no_capable_runtime 재호출 금지) 불변.",
+          "category": "fact",
+          "first_seen": 1789209248.540141,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:c2da3d9fe16dc515181bc1cbf98070f00c244ee4882430f4de77ce521ae2272b",
+          "claim": "**디자이너 동료 검토에 입장료 원천·해시 위임 응답 완료** Decision: exhibit-designer의 동료 검토 요청(입장료 원천 독립 확인)에 위임 경로로 응답했다(2026-09-12T11:2xZ, kmsg-07110a5ab15f29dd31f83f2eb29f6543, 보드 게시 없이 — 디자이너가 전체 검토 결과를 한 번에 댓글로 남기기로 합의). 전달 내용: (1) build_publication.py 24~32행 Read 원문 — 28행은 FEE = chr(0xBB34) + chr(0xB8CC)로 순수 ASCII 코드포인트 표현식(원시 한글 없음, 27행 주석이 transport-safe 명시), (2) 파일 실측 15,999B·SHA-256 178ff1f3638a9cb9e7516c0abeec1df59173f2ee7e250824754cf741f7ef5af3, (3) 파일·원본 산출물·Goal 증거·model_proposed 제안 무변경.\nWhy: 동료 검토의 원천 대조 단계로, 디자이너가 FEE 코드포인트 해석을 독립 수행하도록 원문과 실측값만 전달했다(해석을 대신 결정하지 않음).\nHow to apply: (1) 디자이너의 전체 동료 검토 댓글이 p-c36a80b0…에 달리면 peer review 결과로 board·메모리에 기록한다. (2) 세 번째 goal 판정 proven 5/5(11:0xZ)의 실제 위상 반영은 goal_list 원문 확인 후 처리. (3) 파일은 계속 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789212526.639294,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:a2288dece5c99469a2e3b41bfac11557152344af6bf2ba45b80f69163147c3f9",
+          "claim": "**appr_01a09502 재생 확정: tesseract 부재·PIL 무결 — 보고 완료** Decision: appr_01a09502(tesseract·PIL 확인) 재생 출력을 keeper_artifact_read(dc50e3c7…)로 읽어 확정·보고했다(2026-09-12T11:3xZ). (1) tesseract 미설치 — which가 경로를 출력하지 않았고 언어팩 목록도 없어 OCR 대체 경로 불가능. 글리프 전사는 이미지 런타임 복구가 유일 경로. (2) PIL로 received/designer-poster.png 정상 오픈 — 1240×1754 RGB(A4 150dpi), PNG 구조 무결, 수신 해시 일치와 부합. board p-c36a80b0…에 보고(c-0c859f84…). 앞선 no_capable_runtime 판정 유지: 동일 호출 재시도 금지.\nWhy: 빈 preview가 아니라 실제 바이트를 읽어야 보고할 수 있고, tesseract 부재 확정으로 OCR 대안이 소거되어 남은 경로가 명확해졌다.\nHow to apply: (1) 글리프 검수는 keeper_analyze_image 런타임 복구 시에만 재개. (2) 세 번째 goal 판정(proven 5/5)의 실제 위상 반영은 goal_list 원문 확인 후 처리. (3) 디자이너 전체 동료 검토 댓글 대기 — 입장료 원천·해시는 위임 응답(kmsg-07110a5a)으로 전달 완료. (4) 원본 산출물 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789212587.622677,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3b06b9760add7268af5202b8bc2ee91af2caa8737ffd0ec8769c69a472f81318",
+          "claim": "**최종 포스터 실물 검수 완료 — 대상 표기 차이만 확인** Decision: received/designer-poster.png 실물 검수를 완료했다(2026-09-12T11:5xZ, 운영자 지시, board c-9a4796505fc7bd70c2103dec270f169e). 격리 런타임 수리 후 keeper_analyze_image가 실제 실행(codex_subscription.gpt-5.6-sol)됐고 분석 아티팩트 sha256이 수신 파일과 동일(1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16). 전사: 배지 '오프라인 전시', 제목 '기억의 정원', 환영 문구, 일시 2026년 10월 17일 (토) 14:00–17:00, 장소 은빛정류장 전시실, 대상 '초등 고학년과 보호자', 입장료 '무료', 허구 고지 '※ 본 행사는 허구로 구성되었습니다.' 글리프: 누락·tofu·깨짐·겹침·잘림 없음(도구 판정, 양호). 편집 대조: 입장료·허구 고지·일시·장소는 책자 원천과 일치, 대상 표기만 차이(포스터 '초등 고학년' vs 책자 '초등학교 고학년') — 통일 여부는 운영자·디자이너 판단, 원본 무변경 유지.\nWhy: 403→no_capable_runtime→tesseract 부재로 막혔던 글리프 검수가 런타임 수리로 완성됐고, admission이 아니라 실제 도구 결과만 보강해 기록했다.\nHow to apply: (1) 디자이너 전체 동료 검토 댓글(p-c36a80b0…) 도착 시 peer review 결과로 기록 — 입장료 원천·해시는 이미 위임 응답(kmsg-07110a5a) 전달. (2) appr_01a08ded·appr_01a08e89 재생 출력은 참조 도착 시에만 판정(현재 미판정 유지). (3) Goal 재요청 금지 유지(운영자가 새 PDF 지원으로 원 증명 별도 진행). (4) 체크리스트 '글리프 검수 미완' 줄은 다음 갱신 때 완료 상태로 수정.",
+          "category": "fact",
+          "first_seen": 1789212684.690905,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:d805111889159586c831d648c7ca8812fcf567322373e69ec87286b99097cf2c",
+          "claim": "**동료 검토 종결 — 재사용 성립·보류 해소·Goal 5/5 proven** Decision: 운영자 요청 인계 브리프의 동료 검토·재사용을 종결했다(2026-09-12T11:5xZ, board c-a23f75d3862b2e20b9844a4dde9927b1). (1) exhibit-designer가 브리프를 실제 materialize(6,586B·SHA 일치)·원천 대조해 4건 정정을 모두 지지하고 다음 세션 편집 계획 6항목을 작성(c-728b1136) — queued가 아닌 실제 재사용 성립. (2) 디자이너가 보류했던 2건 모두 해소: received/designer-poster.png 직접 검사(11:31Z 런타임 복구 후 완료, c-9a479650), build_publication.py 24~32행·SHA-256(kmsg-07110a5a 응답 전달, 디자이너 큐 대기). (3) Goal exhibition-publication-baseline: 세 번째 판정 proof_proven 5/5(PDF 102,608B·3페이지·PNG 해시·시각 기준 직접 확인), 위상 awaiting_confirmation, request 03d1e4d4. pdftotext 재생 출력을 실측해 책자 본문 확정 — 입장료 '무료'·대상 '초등학교 고학년과 보호자'·허구 고지 일치. (4) 대상 표기 차이(포스터 '초등 고학년' vs 책자 '초등학교 고학년')는 다음 세션 편집 계획 3항에서 통일. (5) 합의: 운영 상태(승인·대기 목록)는 세션마다 live 재조회, 지속 사실 승격 금지.\nWhy: 운영자가 queued≠재사용을 명시했으므로 실제 수신·응답·계획 작성까지 확인된 시점에만 종결 보고했다.\nHow to apply: (1) Goal 확정은 사람 확인(awaiting_confirmation) 단계 — 재요청·확인 대행 금지. (2) 다음 세션은 notes/exhibition-memory-handoff.md 정정판 + 디자이너 계획 6항목 기준 시작, 대상 표기 통일 논의 포함. (3) kmsg-07110a5a는 디자이너 처리 대기 — 재전송 금지. (4) 원본 산출물·model_proposed 원제안 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789212833.045066,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:86eef6ef174cf8ea378cd01bb1abc4f2504959e7614e083870e4fff482a3d559",
+          "claim": "**입장료 3중 확정 — 동료 검토 종결·다음 세션 기준 확정** Decision: 입장료 원천이 3중 독립 확정됐다(2026-09-12T11:3xZ). (1) 원천 코드 — build_publication.py 28행 FEE=chr(0xBB34)+chr(0xB8CC)(editor Read·SHA 178ff1f3…), (2) 이미지 검수 — 포스터 전사 '무료'(editor c-9a479650·designer producer 재검수), (3) PDF 텍스트 — pdftotext 재생 실측 '입장료: 무료'. exhibit-designer가 보류 해소 댓글(c-5b0bfe9d)로 독립 계산 지지 확정 — 동료 검토 전 쓰레드 종결(4건 정정 지지 c-728b1136 + received 검사 + 원천 확인), 나의 종결 보고 c-aa14df32a945dc3b1370b01a9b3d0872. 다음 세션 시작점: notes/exhibition-memory-handoff.md 정정판 + 디자이너 편집 계획 6항목(첫 논의 주제는 3항 대상 표기 통일: 포스터 '초등 고학년' vs 책자 '초등학교 고학년').\nWhy: 운영자 peer review 요청의 마지막 보류가 실제 응답으로 닫혔고, 입장료 표기가 원천 3경로에서 일치해 더 이상 검증 논의가 필요 없다.\nHow to apply: (1) 깨진 '묣료'류 표기 재인용 금지 유지. (2) Goal awaiting_confirmation(5/5 proven) — 사람 확인 대기, 재요청 금지. (3) 원본 산출물·model_proposed 원제안 무변경. (4) 대상 표기 통일 논의는 다음 세션에서 디자이너·운영자와 결정.",
+          "category": "fact",
+          "first_seen": 1789212875.48666,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:b9a9ba2ce02104cd03af1d4300010f9296bbaa591076728700002465d15a8374",
+          "claim": "**task-003 착수 — 초고 v1·자기검수·디자이너 동료 검토 위임** Decision: task-003(연작 소설 세 편+동료 검토, 골 memory-garden-serial-fiction)을 청구·착수했다(2026-09-12T11:35~45Z). (1) masc_run_init 후 7단계 계획 등록 완료. (2) serial/story.md 초고 v1 작성 완료(10,336B, SHA-256 64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60): 세계 정합(은빛정류장·2026-10-17 단일일·'같은 것, 다른 기억'·초등 고학년+보호자), 세 편 구조 — 1편 서연·정옥 할머니(함께 물어보고 심기, 할머니는 '내 기억은 내 마음속에' 거부 존중), 2편 도윤·아빠(같은 날의 햇살/비 두 기억→두 이름표, 봄 새 공 약속), 3편 민준·폐막(남기기/가져가기/심지 않기 세 선택, 방명록으로 열린 결말). 앞 편 선택이 뒷 편에 누적 영향. (3) 초고 자체 검수에서 한자 혼입 1건('폐막三十 분') 발견·수정(Edit+Grep 재확인 0건). (4) 초고 export → exhibit-designer 동료 검토 위임(kmsg-e6e46089ac3a7e1ab3c32ab411391cfd, queued) — 실제 읽기·구체적 반론·board 댓글 요청 완료.\nWhy: 과제의 완성 계약(동료 실제 읽기·구체적 반론·전후 기록·증거 4종)상 초고→검토→수정 순서로 진행 중이며, 위임 전 자기 검수로 한글 무결성 결함을 선제 수정했다.\nHow to apply: (1) 디자이너 반론 도착 시 최소 1건 실질 반영(독자 이해·인물 선택에 영향) + 전후 diff를 review.md에 기록. (2) 이어 continuity.md(다섯 항목·실제 문장 인용), evidence.json(파일명·바이트·SHA256·기준별 결과) 작성. (3) keeper_task_done 제출(artifact: 4파일). (4) 원본 전시 산출물·Goal 증거 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789213589.851113,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:64fb3164866b56504feed61217efc6576809d10b5afe9d224ac2eb6c80b75f9e",
+          "claim": "**task-003 제출 — 소설 v2·반론 10건 채택·증거 4종** Decision: task-003(연작 소설 세 편+동료 검토)을 완성해 awaiting_verification로 제출했다(2026-09-12T11:5x~12:0xZ). 산출: (1) serial/story.md v2 10,891B(SHA-256 29df16a2b90a4d1b84e0b55a92ef3a0c4752b5ef6c2befe6ce68f37aedc0980e) — 세 편 완결, 허구 고지 2회, 한자·깨진 표기 0건(Grep). (2) serial/continuity.md 4,813B(ad0b4886…) 5항목 실제 문장 대조. (3) serial/review.md 5,014B(a164f9a0…) 반론 10건 전후 diff. (4) serial/evidence.json 4,461B 기준별 결과·실측 방법. 핵심 경과: 초고 v1(10,336B, 64b4e4fb…)을 export→위임(kmsg-e6e46089)으로 디자이너가 materialize·135행 독해 후 반론 10건(board c-e690f39c, 11:49:40Z) → 10건 전부 채택(제작 주체 공동화, 시간선 '전날 리허설' 통일, 축구 공동 전제, 정리 시점 '내일 아침' 단일화, 작가의 말 모순 제거, 도윤 주도 제안 전환, 갈등 비용 문장, 3편 규칙 문구, 딱딱한 표현, 따옴표). 셸 해시 명령(appr_01a09575)은 승인 대기로 bytes·SHA를 keeper_artifact_transfer export 반환값으로 실측(재생 도착 시 크로스체크 가능).\nWhy: 과제 계약(완결 3편·관측 가능 세계 요소·중심 갈등·실제 동료 검토·구체적 반론 반영·연속성 대조표)을 전부 이행하고 증거 4종을 artifact로 제출했다.\nHow to apply: (1) awaiting_verification — 완료 판정은 시스템 검증기 몫, 중복 제출 금지. (2) appr_01a09575 재생 도착 시 export 실측값과 대조(불일치면 evidence.json 갱신 필요). (3) 원본 전시 산출물·Goal 증거 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789214000.641164,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:65950270334fd208cc3df315396d2f46862cdc9b650e02d6f42305ca78c51539",
+          "claim": "**task-003 처분 공개 기록 — 위임·검토 사이클 종결** Decision: task-003 동료 검토 반영 처분을 board에 공개 기록했다(2026-09-12T12:0xZ, c-266ab4b99ff8790abfc693a02836e3ae). 반론 10건 전부 채택·기각 0건, v2(10,891B, 29df16a2…)·continuity(4,813B)·review(5,014B)·evidence(4,461B) 제출, awaiting_verification 상태를 검토자에게 통보. kmsg-e6e46089 위임은 보드 댓글로 실제 응답 완료되어 종결.\nWhy: 검토자의 반론에 대한 편집자 처분(채택/기각과 이유)은 공개 기록이 없으면 검토 사이클이 닫히지 않는다.\nHow to apply: (1) task-003 완료 판정은 시스템 검증 단계 — 중복 제출·재요청 금지. (2) appr_01a09575(셸 해시) 재생 도착 시 export 실측값과 대조. (3) 원본 전시 산출물·Goal 증거 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789214045.957707,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:048becb72d0f5df67d180c934019a27539078a13c3bf4c34382aefe0625489e0",
+          "claim": "**task-003 승인 확정 — 사이클 종결** Decision: task-003 완료 승인이 확정됐다(2026-09-12T12:0xZ, verifier_exact vrf-0267fe2e9d1bbb2fc92a400066af65d8). 최종 산출 serial/ 4종 — story.md v2 10,891B(29df16a2…)·continuity.md 4,813B(ad0b4886…)·review.md 5,014B(a164f9a0…)·evidence.json 4,461B. 동료 검토(반론 10건 전부 채택) 포함 승인. 승인 보고 c-ac307485cfdb12f417a12c2a6d1ee491. 재제출·재작업 금지.\nWhy: 시스템 검증이 증거 4종과 계약 조건 전부를 확정했고, 보드에 승인 사실을 기록해 과제 사이클을 닫았다.\nHow to apply: (1) task-003 관련 추가 작업 없음. (2) 남은 대기 유일건: appr_01a09575(셸 해시) 재생 도착 시 export 실측값과 대조 후 종결. (3) 원본 전시 산출물·Goal 증거 무변경. (4) 골 memory-garden-serial-fiction 상태는 다음 턴 goal_list로 확인 가능하나 승인 확정으로 실무 종결.",
+          "category": "fact",
+          "first_seen": 1789214194.258882,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:7cf6406c5855b7c18f315a929a49c0984682edb7eb4bc19124d0254d15c769bd",
+          "claim": "**세션 정리 완료 — 예약·ask 철회, 대기 1건(셸 해시)만** Decision: 세션 정리 3건을 완료했다(2026-09-12T12:0xZ). (1) sched-ef31ee87(vision 재시도 예약) 취소 확인 — masc_schedule_list scheduled 목록이 비어 있음을 직접 확인. 09-13 자정 웨이크 소멸, 불필요한 vision 재호출 없음(포스터 검수 완료·검증기 PNG 직접 확인으로 전제 소멸). 디자이너 '[운영 정리]' 댓글이 실제 처리였음. (2) askca74072b5232c2fa(verify_evidence.json 사전 생성 여부) 철회 — 전제 소멸: 3차 판정에서 정성 기준 2개가 검증기에 의해 직접 확인(5/5 proven·awaiting_confirmation), pdftotext 재생 성공으로 PDF 본문 확정. open_remaining 0. (3) 남은 대기는 appr_01a09575(셸 해시 재생) 1건뿐 — 도착 시 export 실측값(story 10,891B·29df16a2… 등)과 대조 후 종결.\nWhy: 전제가 소멸한 열린 질문과 목적 없는 예약을 남기면 운영자·미래 턴이 헛기다리게 된다.\nHow to apply: (1) 이제 정기 예약 없음 — 다음 턴은 이벤트(재생·보드·메시지) 기동만. (2) 원본 전시 산출물·Goal 증거·model_proposed 원제안 무변경 유지. (3) task-003 승인 확정 상태 그대로.",
+          "category": "fact",
+          "first_seen": 1789214460.767469,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:bc0a91b12bea5d3e2b059decf31567261ea12471ca6f26e33b21711e2e68c5f6",
+          "claim": "**인계 브리프 3~5절 현재 상태 갱신 완료** Decision: 인계 브리프 notes/exhibition-memory-handoff.md 3~5절을 현재 상태로 갱신 완료했다(2026-09-12T12:0xZ). 갱신 내용: (1) 3절 — Goal awaiting_confirmation·proof_proven 5/5(3차 판정), Host Gate 4건 재생 완료·실측(py_compile exit 0·tesseract 미설치·pdftotext 성공·PIL 1240×1754), askca74072b5232c2fa 철회, keeper_analyze_image 복구·포스터 실물 검수 완료(대상 표기 차이 실물 확인), 입장료 3중 확정, sched-ef31ee87 취소, task-003 승인 확정. (2) 4절 — 남은 작업 3건으로 축소(appr_01a09575 재생 대조·multimedia 공유 대기·Goal 사람 확인 대기). (3) 5절 — 소멸된 금지(no_capable_runtime 재호출 금지 등) 정리, 현행 금지만 유지. 다음 세션은 이 문서부터 읽어 최신 상태로 시작.\nWhy: 브리프가 '다음 세션 시작점'으로 합의돼 있는데 낡은 대기 상태(승인 대기·ask open·검수 미완)로 남아 있으면 다음 세션이 이미 끝난 대기에서 시작하게 된다.\nHow to apply: (1) 원본 산출물·Goal 증거·model_proposed 원제안 무변경. (2) appr_01a09575 재생 도착 시 serial/ 해시 대조 후 브리프 4-1) 완료 표시. (3) Multimedia 공유·Goal 확인은 이벤트 대기.",
+          "category": "fact",
+          "first_seen": 1789215139.058699,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:8f97dd247a4cee3cc8fc7301ba20764061ebb6b0eda2c53e759a8039920fb167",
+          "claim": "**재검증 체크리스트 해결 상태 갱신 — A~E 소멸 명시** Decision: 재검증 체크리스트 notes/goal-reverification-checklist.md '현재 상태' 절을 해결 완료 상태로 갱신하고 A~E 단계가 전부 실행 완료·소멸됐음을 명시했다(2026-09-12T12:1xZ). 갱신 내용: Goal awaiting_confirmation·proof_proven 5/5, Host Gate 4건 재생 완료·실측 결과, vision 실물 검수 완료·sched-ef31ee87 취소, ask 철회, task-003 승인, 남은 대기 appr_01a09575 1건. 2026-09-11 이전 상태(refuted·승인 대기·no_capable_runtime)는 역사 보존용으로 괄호 주석 유지.\nWhy: 다수 메모리가 이 파일 절차를 참조하는데 낡은 '승인 대기·재요청 금지' 상태가 남으면 맥락이 리셋된 미래 턴이 이미 소멸된 절차를 따를 위험이 있다.\nHow to apply: (1) 미래 턴은 이 파일의 A~E 단계를 실행 목록으로 삼지 않는다 — 전부 완료. (2) appr_01a09575 재생 도착 시 serial/ 해시 대조 후 이 파일과 인계 브리프 4-1)에 완료 표시. (3) 원본 산출물·Goal 증거 무변경.",
+          "category": "fact",
+          "first_seen": 1789215498.828182,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:2259bbd47e9f283eda2af46c60b882635108ef9ad75bda33971256e0b0532421",
+          "claim": "**memory-garden-serial-fiction 골 증명 제출 — verifying 전환** Decision: 골 memory-garden-serial-fiction의 증명을 제출했다(2026-09-12T12:24Z, request_id 6697c0e56074eec02bf9b0c57288eac6, phase executing→verifying, proof_pending). 근거는 task-003 완료 승인(verifier_exact vrf-0267fe2e, Approved Task Outcomes)과 serial/ 4종 실측 — story.md v2 10,891B(29df16a2…)·continuity.md 4,813B(ad0b4886…)·review.md 5,014B(a164f9a0…)·evidence.json. 제출 노트에 evidence.json 자기 참조(bytes·sha256 미기입) 한계를 명시했고, task 검증기가 4종 전부를 열어 승인했음을 첨언. 골 확인·재제출은 검증 결과 도착 전 금지.\nWhy: 과제 승인과 골 증명은 별개 단계로, 골이 executing·idle로 남아 있었으므로 승인된 산물로 증명을 제출해 골 사이클을 닫는다.\nHow to apply: (1) goal_verdict 도착 시 결과 기록, proven이면 사람 확인 대기로 전환(재요청 금지). (2) appr_01a09575 재생 도착 시 serial/ 해시 대조. (3) 원본 전시 산출물·기존 Goal 증거 무변경.",
+          "category": "fact",
+          "first_seen": 1789215868.363434,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:9b41a595bdbcf3d11eac297cb3ec4c60735dd3279b0e6dd869b224df4acb2868",
+          "claim": "**연작 소설 골 proven 확정 — 두 골 모두 사람 확인 대기** Decision: memory-garden-serial-fiction 골 판정이 proven으로 확정됐다(2026-09-12T12:26:51Z, verifier_exact, verification_run 01a09593-60b3-7000-8ad3-40e51e183242). 검증기가 네 파일을 독립 실측해 4/4 기준 충족 — evidence.json 기록 bytes·SHA256과 원문 독립 계산이 전부 일치(story 10,891B·29df16a2…, continuity 4,813B·ad0b4886…, review 5,014B·a164f9a0…). 이로써 export 반환값 실측 방법(셸 해시 appr_01a09575 대기의 대체 경로)까지 교차 검증됐다. 골 위상 awaiting_confirmation(사람 확인 대기), 보고 c-74effc2aaedc3c6b0cfb8794b36bbe73. 두 골(exhibition-publication-baseline·memory-garden-serial-fiction) 모두 proof_proven·awaiting_confirmation.\nWhy: 골 증명 제출(6697c0e5…)에 대한 검증기 판정이 도착해 골 사이클의 검증 단계를 닫았다.\nHow to apply: (1) 두 골 모두 사람 확인 대기 — 확인 대행·재요청 금지. (2) serial/ 산출물은 증명 기반으로 보존, 수정 금지. (3) appr_01a09575 재생은 도착 시 기록용 대조만(불일치 가능성 낮음 — 검증기 독립 계산과 이미 일치). (4) multimedia/ 공유·운영자 지시는 이벤트 대기.",
+          "category": "fact",
+          "first_seen": 1789216512.832289,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:58fbe160c8a710e3052273b7a3e1c7867b2437b0f4b284090253e1e43e1006a6",
+          "claim": "**task-004 착수 — decision 초고·양방향 반론 요청(park 1건)** Decision: task-004를 착수해 2개 독립 관점 검토를 동시에 요청했다(2026-09-12T13:0x~13:1xZ). (1) 실행 계획 등록(7단계: 도구 확인→decision 초고→반론 수렴→PPTX→MP4→접근성·수정 기록→제출). (2) 도구 체인 확인 셸(python-pptx·PIL·ffmpeg)은 appr_01a095bb 승인 대기로 park — 재발행 금지, 재생 대기. (3) adaptation/decision.md 초고 v1 작성(4,462B, SHA-256 9a89add2…): 후보 3종(낭독+질문카드/PPTX 발표+투표/무음 MP4) 비교, 상충 3건(빠른 설명↔독자 선택권, 접근성↔표현 밀도, 인과 보존↔압축), 초보적 선택 B 주+C 보, 불확실성 3건(장비·투표 형식·자막 속도) 미검증 명시, 버린 대안 3종. (4) exhibit-designer 동료 반론 위임(kmsg-c1620ee6e58496189521bb213ea41b2a, artifact 전송) + fusion 관점 검토(kmsg-f381606a185bf86825c3f99ffd36e185, simple 위상) — 두 관점 반론은 decision.md 4절 표에 식별자로 반영 예정.\nWhy: 과제 계약이 두 독립 관점의 반론+응답을 요구하므로 제작 전에 반론을 먼저 확보해야 낭비가 없다.\nHow to apply: (1) 반론·fusion 도착 시 4절 표 채우고 채택 반영 후 방식 확정. (2) appr_01a095bb 재생 도착 시 도구 체인 확정 후 PPTX·MP4 제작. (3) 원본 serial/·전시 산출물 무변경.",
+          "category": "fact",
+          "first_seen": 1789218589.632474,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:78c7d17401e1ee5e30b820f24776c3b9e440edb70c3d383f86ed94cc05d72b92",
+          "claim": "**task-004 decision v2 — 디자이너 반론 8건 전부 채택** Decision: task-004 decision.md를 v2로 개정했다(2026-09-12T13:2xZ, 7,671B). exhibit-designer 반론 8건(board c-6a76ba8a80062113f4c287d54f85cdc0, VD-01~08, materialize 4,462B·SHA 9a89add2… 대조 후) 전부 채택: (1) A 낭독+카드는 폐기하지 않고 예약 회차·장비 실패 대안으로 보존(수용 인원 미측정 명시), (2) PPTX 순서 고정+집계 없는 '선택 별자리'(같은 면적·서체·체류 시간)로 다수결 문법 제거, (3) 색 아닌 아이콘+동사+무늬 동등 문법(씨앗/심기·가방/가져가기·열린 손/아직 정하지 않기), (4) MP4 질문 3개 유지·90~120초·자막 프로토타입값(56px·줄당 16~20자·질문 7~10초 등), (5) 중간 입장 배려(시작 안내·진행 표식·편 전환 1초)+옆에 정지형 인쇄 카드, (6) 세 인과 앵커(함께 물어보고 심었습니다→두 이름표 제안→폐막 분리 선택) 필수화·8장 구조, (7) 보기만 하기·아직 모르기를 정식 참여로, 진행자는 작중 인물 기준만 질문, (8) 최소 조건(아이·휠체어 시야·10% 여백·세이지 금지·점멸 금지·지시 화면 병기)+파워포인트 원인 오판 정정. fusion(kmsg-f381606a…) 두 번째 관점은 여전히 대기 — 4절 표 채워진 뒤 결론 확정.\nWhy: 초고의 실질 결함(C 질문 수 자기모순, 다수결 강화 문구, A 폐기 근거 부족)을 반론이 정확히 짚었고, 접근성·인과 보존이 계약 요건이라 전건 채택이 타당했다.\nHow to apply: (1) fusion 도착 시 4절 표 채우고 필요시 v3 개정. (2) PPTX 제작은 v2 스펙(8장·고정 순서·동등 문법·인과 앵커)으로, MP4는 90~120초·질문 3개·자막 기준 준수. (3) appr_01a095bb(도구 체인) 재생 도착 시 제작 착수. (4) review.md에 VD-01~08 전후 diff 기록.",
+          "category": "fact",
+          "first_seen": 1789218840.3297,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:e42ae64cdc9e834d478b9d017cd1d9334d4ec098e0fd68413e15ff7fc01a59e5",
+          "claim": "**task-004 처분 공개+스토리보드 작성 — 공유 원천 확보** Decision: task-004 반론 처분을 board에 공개 기록(c-2ee41f317047c98b8c6c9acbbcdcc0e0)하고 PPTX·MP4 공유 원천 스토리보드를 작성했다(2026-09-12T13:2xZ, adaptation/storyboard.md 4,785B). 스토리보드는 decision v2 스펙을 장면 단위로 확장 — S0 표지·허구 고지(중간 입장 '곧 시작합니다' 3초), S1 1편 장면+인과 앵커①('함께 물어보고 심었습니다' 이름표), Q1 질문+동등 카드 3종(씨앗/가방/열린 손)+선택 별자리 결과 장, S2 2편 장면+앵커②(도윤 주도 제안)+Q2+두 이름표 결과, S3 3편 장면+앵커③(폐막 분리 선택)+Q3, S4 성찰·방명록 인용·종료 고지. MP4 타임라인 110초(4~22/22~34/34~66/66~96/96~110), 자막 규격(56px↑·줄당 16~20자·질문 7~10초·편 전환 1초·진행 표식) 명시. 원본 문구 출처(serial/story.md) 대조표 포함 — PPTX·MP4 내용 대조 검증의 기준.\nWhy: 두 산출물이 같은 문구를 공유해야 계약의 '내용 대조' 검증이 성립하고, fusion 대기·도구 승인 대기와 무관하게 진행 가능한 작업이었다.\nHow to apply: (1) PPTX 제작 시 슬라이드 8장을 이 장면 순서로, MP4는 타임라인·자막 규격 준수. (2) 검증 시 스토리보드 문구와 산출물 텍스트를 대조. (3) appr_01a095bb(도구 체인) 재생 대기 — 도착 시 제작 착수. (4) fusion(kmsg-f381606a) 도착 시 decision 4절 채우고 필요시 v3.",
+          "category": "fact",
+          "first_seen": 1789218949.236282,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:f883abdcc8d3340cfa7f0b142999cda2420fcb47c0931171bd968abd65872ffb",
+          "claim": "**task-004 빌더 2종 작성·도구 체인 확정 — 승인 2건 park** Decision: task-004 제작 단계 진입 — 두 승인 재생 결과를 확정하고 빌더 2종을 작성했다(2026-09-12T13:3x~13:4xZ). (1) 도구 체인 확정(appr_01a095bb 재생): python-pptx 부재(ModuleNotFoundError), PIL 9.4.0, ffmpeg 5.1.9+ffprobe — PPTX는 OOXML 직접 생성으로 전환. (2) task-003 해시 대조 종결(appr_01a09575 재생): serial/ 3종 bytes·SHA-256 전부 일치(story 10,891·29df16a2…, continuity 4,813·ad0b4886…, review 5,014·a164f9a0…), '은빛정류장' 6회 — 인계 브리프 4-1)·체크리스트 대기 항목 완료 표시. (3) adaptation/build_pptx.py(22,000B): zipfile으로 PPTX 8슬라이드 OOXML 직접 생성 — 스토리보드 준거(허구 고지 2회, 인과 앵커 3개, 동등 카드 3종, 진행자 노트 8개, decision v2 팔레트), 실행은 appr_01a095c9 승인 대기로 park. (4) adaptation/build_mp4.py(6,053B): PIL 프레임+ffmpeg 인코딩, 총 112초(질문 3개, 진행 표식 1/3·2/3·3/3, 편 전환 1초 세이지 고정 화면), 한글 폰트 탐색 실패 시 FONT_MISSING 종료(깨진 글리프 방지), 실행은 appr_01a095ca 승인 대기로 park. 두 빌더 모두 재발행 금지 — 재생 도착 시 출력 확정.\nWhy: python-pptx 부재가 재생으로 확정되어 계획의 대체 경로(OOXML 직접 생성)로 전환했고, 한글 무결성 원칙상 폰트 미탐색 MP4 제작은 차단 설계했다.\nHow to apply: (1) appr_01a095c9·appr_01a095ca 재생 도착 시 keeper_artifact_read로 실측 확정 — PPTX OK(slides=8)·MP4 OK(bytes·sha·PROBE) 확인. (2) FONT_MISSING 오류면 폰트 확보 방안(설치 승인 등)을 운영자에게. (3) 이어 검증(열람·디코딩·대조·접근성) 후 evidence.json·review.md 작성.",
+          "category": "fact",
+          "first_seen": 1789219494.833991,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:6b81b9541286a2d666a7e0214caa6093278226f67bf6a2c4b8905382609b0753",
+          "claim": "**task-004 review.md 결정 사이클 완성 — 제작 기록만 남음** Decision: task-004 review.md 결정 사이클 기록을 완성했다(2026-09-12T13:5xZ, adaptation/review.md 3,683B). 수록: (1) 초고 v1(4,462B·9a89add2…)→디자이너 반론 8건(c-6a76ba8a, materialize 대조 일치)→8건 전부 채택(c-2ee41f31…) 전후 대표 3건, (2) fusion 판정(verdict_insufficient 3/3) 채택·환경 조건 분기 반영 — 전문 게시물 TTL 소실(2회 조회 실측)로 요약 기록임을 명시, (3) 제작·검증 절은 승인 재생 후 기록 예정, (4) 사용자 조사 미수행 명시. fusion 게시물 재조회 재확인 소실 — decision.md 처리 정확.\nWhy: 계약 요건(두 관점 반론·응답 전후 기록)의 결정 부분은 제작 착수 전 확정된 사실로 지금 기록해야 재생 대기 중에도 기록이 소실되지 않는다.\nHow to apply: (1) appr_01a095c9(PPTX 빌드)·appr_01a095ca(MP4 빌드) 재생 도착 시 review.md 2·3절 채우기. (2) 검증(열람·디코딩·대조·접근성 2시나리오·수정 전후) 후 evidence.json과 함께 keeper_task_done 제출.",
+          "category": "fact",
+          "first_seen": 1789219549.745314,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:b16310f3d7135ad0c2683659d2a3449be388c8fccc4e74d67981f38060f35133",
+          "claim": "**task-004 검증 스크립트 사전 작성 — 기준 확정** Decision: task-004 검증 스크립트 adaptation/verify_adaptation.py(4,533B)를 사전 작성했다(2026-09-12T14:0xZ). 검증 항목: (1) PPTX — zip 구조로 슬라이드 8·노트 8 존재, <a:t> 텍스트 추출로 스토리보드 준거 필수 문자열 9종(허구 고지·인과 앵커 3·질문 3·동등 문법·집계 금지) 대조, 한자·가나 이상 0건 확인. (2) MP4 — ffprobe로 코덱·1920×1080·60~180초·무음(오디오 스트림 부재) 확인, ffmpeg로 대표 프레임 5장(표지 5s·Q1 27s·Q2 52s·Q3 88s·종료 108s) 추출 성공 여부 판정. 출력은 evidence.json·review.md의 원천. 승인 재생 대기 중 작성 — 빌드 산출물 존재 시 1회 실행으로 검증 완료.\nWhy: 검증 논리를 산출 이전에 확정해두면 빌드 재생 직후 대기 없이 판정 가능하고, 검증 기준이 사후에 바뀌지 않음을 보여준다.\nHow to apply: (1) appr_01a095c9·appr_01a095ca 재생으로 experience.pptx·experience.mp4 생성 확인 직후 `python3 adaptation/verify_adaptation.py` 실행(새 승인 필요할 수 있음 — 그때 park). (2) PASS 시 표준출력 수치를 review.md 2·3절·evidence.json에 기록. (3) 추출 프레임(check_*.png)은 keeper_analyze_image로 질문 카드 렌더 확인에 사용 가능.",
+          "category": "fact",
+          "first_seen": 1789219889.490553,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:5d96cdef1bf8245c50710ec387633e6041ad23c1cbb54828b84fe0e50eb07919",
+          "claim": "**MP4 빌더 자막 규격 위반 수정 — 115초·24세그먼트** Decision: MP4 빌더 자기 검수로 자막 규격 위반을 발견·수정했다(2026-09-12T14:0xZ, build_mp4.py 개정). 위반: 선택지 한 줄 30자 초과(● 물어보고 심기 ▬ 가방에 넣기 ○ …), 장면 3~4줄·문장 중간 줄바꿈 — storyboard·decision v2(줄당 16~20자·문장 단위)·VD-04 위반. 수정: 전 세그먼트 줄당 20자 이하·문장 단위 줄바꿈(Grep 검증 0건 위반), 세그먼트 분할로 총 길이 184초 초과 → 지속 조정(장면 5초·질문 7초·선택 5초)해 115초·24세그먼트로 규격 내 복귀(손계산 확정 — 검산 셸 appr_01a095d8 park). verify_adaptation.py 프레임 추출 시각도 새 타임라인으로 갱신(표지 2s·Q1 26s·Q2 53s·Q3 80s·종료 112s). 빌드 실행 승인(appr_01a095c9·appr_01a095ca)은 여전히 대기 — 재생은 현재 파일 바이트를 실행하므로 수정본이 그대로 반영된다.\nWhy: 승인 재생이 현재 파일을 실행하기 때문에 재생 전 결함을 고치면 재승인 없이 올바른 산출이 만들어진다.\nHow to apply: (1) 재생 도착 시 확인: MP4 duration≈115s·무음·1080p, PPTX slides=8. (2) verify PASS 후 review.md 2·3절·evidence.json 작성, keeper_task_done 제출. (3) 자막 최종 확인은 추출 프레임(check_Q*.png) keeper_analyze_image 검수로.",
+          "category": "fact",
+          "first_seen": 1789220519.371355,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:4dd0dcfba1b7daeb512a91ba0702f77f626cbce534e38b454135e80fd9f94478",
+          "claim": "**task-004 산출 2종 빌드 성공 — 검증 재생만 남음** Decision: task-004 두 산출물 빌드가 성공했다(2026-09-12T14:0xZ, 재생 실측). (1) adaptation/experience.pptx — 25,383B, SHA-256 555999e62df7260110e7661f22e342ddb717169864b7234324b8551fa092f816, 슬라이드 8, OOXML 직접 생성(exit 0, 104ms). (2) adaptation/experience.mp4 — 349,039B, SHA-256 ac2f405b102b3a6bee1e5344b141ae0389f6551f937150a298d80ed9437b67a3, 나눔고딕(regular/bold) 발견·한글 렌더 정상, 1,150프레임·115.0초(설계 일치), h264 High·1920×1080·yuv420p(무음 — 스트림 비디오만, PROBE로 확인). 종합 검증(adaptation/verify_adaptation.py — 슬라이드 8·노트 8·필수 문구 9종·한자 0·프레임 5장 추출)은 appr_01a095e0 승인 대기로 park, 재생 도착 시 결과 확정. '실제 수정 전후' 1건 확보: MP4 빌더 자막 밀도 위반 수정(30자 한 줄→20자 이하 문장 단위, 184초→115초 — rev 154).\nWhy: 승인 재생 출력을 keeper_artifact_read로 실측해 산출 존재·규격을 확정했고, 검증만 남은 상태를 다음 턴이 바로 이어 받게 한다.\nHow to apply: (1) appr_01a095e0 재생 도착 시 VERDICT 확인 — PASS면 review.md 2·3절(제작·검증·접근성 시나리오 2종)·evidence.json(4 파일 bytes·SHA) 작성 후 keeper_task_done 제출(artifact: decision·storyboard·experience.pptx·experience.mp4·review·evidence). (2) FAIL이면 결함 수정 후 재검증. (3) 추출 프레임(check_Q*.png)은 필요 시 keeper_analyze_image로 질문 카드 렌더 확인.",
+          "category": "fact",
+          "first_seen": 1789220936.568311,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:2b41599b4fb3f0dcf1b571cf8f99b7a64f44bacacd6934bab21d5cf7ba0753e9",
+          "claim": "**운영자 피드백 반영 — fusion 원문 정정·접근성 복귀·PPTX 관계 수정** Decision: 운영자 실물 검토 피드백 3건을 반영해 오기를 정정하고 PPTX 관계 결함을 수정했다(2026-09-12T14:0xZ). (1) fusion 원문 확보 — board p-c0bb49d30e7a617ea6596d100e845215(09-19 만료) 실재, 패널 GLM/Codex·judge GLM, 권고는 \"C 주+B 무음 재설계 보조+A 부분 차용(낭독 조건부)\". 종전 기록(패널 3/3·verdict_insufficient·TTL 소실·A+C 귀속)은 전부 오기 — 원인은 조회 ID 전사 오류(…a6596d…→…a654d…)로 '게시물 없음'을 '소실'로 오인. decision.md v4·review.md에 정정 기록+원문 요지로 교체, 처분은 부분 채택(방지 장치 6종 채택, \"C 주\"는 기각 — 계약·청각 시나리오 사유, 본인 결정과 권고 구분 명시). (2) 접근성 전제 정정 — Goal 기준 원문은 '소리를 듣지 못하는 상황'(청각 시나리오)이며 '전시장 무음 규칙'은 근거 없는 재해석: v3 환경 분기 철회, A 낭독은 청각 보강 경로로 복귀. fusion 프롬프트에 오개념을 심은 것이 오류 근원임을 기록. (3) PPTX 관계 버그 수정 — 1차 빌드(555999e6…)의 presentation.xml.rels rId9/rId10 중복 + 노트 대상 경로 누락을 운영자가 ZIP/XML 실측으로 지적: rId11/rId12 재배정, ../notesSlides/notesSlide{n}.xml 수정, slideMaster에 theme 관계 추가, verify_adaptation.py에 전 .rels 무결성 검사 추가. 재빌드+검증은 appr_01a095e3 park(대기). 완성품 제출은 앱 렌더·슬라이드/노트 실증 후로 유보(운영자 지시).\nWhy: 세 지적 모두 원문 대조로 사실임이 확인됐고 — 특히 접근성 오독은 fusion 프롬프트 설계(내 소행)에서 비롯된 연쇄 오류였다.\nHow to apply: (1) appr_01a095e3 재생 도착 시 rels_ok·VERDICT 확인 — PASS여도 앱 렌더(브라우저/오피스) 또는 프레임 검수로 글리프·슬라이드·노트를 실증하기 전 keeper_task_done 제출 금지. (2) 관계 결함이 재발하면 검증된 PPTX 라이브러리 환경(python-pptx 설치)을 운영자에게 요청. (3) decision v4·review 정정 상태 그대로 증거로 사용.",
+          "category": "fact",
+          "first_seen": 1789221212.099832,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:82f774dc7e7d8eea1e21e881d83c6d2d18f5ec236a786492fa1e080d19c20ef2",
+          "claim": "**task-004 검증 1차 — 관계 PASS·앵커③ 수정(전후 기록 ②)·재검 park** Decision: task-004 검증 1차 결과를 확정하고 인과앵커③ 누락을 수정했다(2026-09-12T14:1xZ). (1) 재생 실측(appr_01a095e3): PPTX v2 25,432B·SHA e50836bf491127b095e885b9b243d1eeb3a00222085c46353189b2e0ad68eca3 — 관계 무결성 PASS(rels_ok=True·issues=NONE·slide_refs=8, 운영자 지점 수정 확인), 슬라이드 8·노트 8(53~88자), 한자 이상 0건. MP4 PASS(349,039B·ac2f405b…·h264·1080p·115.0초·무음, 프레임 5장 추출 OK). (2) pptx=FAIL 원인은 인과앵커③ '각자 자기 기억을 정했어요.' 미포함 — 스토리보드 준거 검증기가 포착. 수정: 슬라이드 6 앵커에 골드 강조 문장 추가(높이 1.1M EMU). **실제 수정 전후 기록 ②**(review.md §2). (3) 최종 재빌드+재검증: appr_01a095e5 park(대기) — 재생 시 VERDICT pptx=PASS·mp4=PASS 예상.\nWhy: 자체 검증 스크립트가 설계 기준(스토리보드 필수 문구)을 기계적으로 대조해 결함을 잡았고, 재생 전 수정이 재승인 없이 반영된다.\nHow to apply: (1) appr_01a095e5 재생 도착 시 VERDICT 확인 — 둘 다 PASS면: review.md §2·§3(접근성 시나리오 2종·남는 희생) 완성, evidence.json(6 산출 bytes·SHA), **앱 렌더 실증(브라우저로 PPTX 열람 또는 프레임 keeper_analyze_image 검수) 전까지 keeper_task_done 제출 금지(운영자 지시)**. (2) 추출 프레임 check_Q1/Q2/Q3.png는 keeper_analyze_image로 질문 카드 렌더·글리프 검수에 사용.",
+          "category": "fact",
+          "first_seen": 1789221277.327793,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3c93581cf5d67fd33171d75f23567f99f8e24b119a14a75afa33685c19c35e9f",
+          "claim": "**task-004 전체 PASS·프레임 검수 3장 — 앱 렌더 검증만 남음** Decision: task-004 최종 재검증 PASS 및 프레임 시각 검수 3장 완료(2026-09-12T14:2xZ). (1) PPTX v3 25,462B·SHA cf0c4fb9f14d4aa7519ca3cd99b9cdb2d7b55cbb4f70fc3898e1754f2da59b88 — rels_ok=True·issues=NONE·slide_refs=8·노트 8(53~88자)·must_missing=NONE·한자 0. MP4 ac2f405b…(115.0초·무음·프레임 5/5). VERDICT pptx=PASS·mp4=PASS. (2) vision 검수(gpt-5.6-sol): 표지·Q1·종료 프레임 전부 글리프 정상·잘림 없음, Q1 진행 표식 '이야기 1/3' 확인, 종료 허구 고지 선명 — 단 Q1@26s는 질문 문구만 표시(선택 카드는 29~34초 별도 구간). (3) review.md §3 검증 기록 완성(접근성 시나리오 2종 — Goal 원문 준거 '소리를 듣지 못하는 상황' 청각 시나리오로 정정 반영, 남는 희생 명시). (4) 대기 2건: 선택 카드 프레임 추출+검수(appr_01a095e7 park — Q1c@31s·Q2c@58s·Q3c@85s + soffice 유무 확인 포함), 이후 PPTX 앱 렌더 검증. **완성품 keeper_task_done 제출은 앱 렌더·선택 카드 검수 마친 뒤(운영자 지시 준수).**\nWhy: 구조·콘텐츠·디코딩·시각 검수가 모두 통과해 제출 전 마지막 두 검증만 남은 상태를 기록했다.\nHow to apply: (1) appr_01a095e7 재생 도착 시: FRAMES_OK 확인 → Q1c·Q2c·Q3c vision 검수(동등 카드 문구·기호·크기), soffice 있으면 PPTX→PDF/PNG 렌더로 앱 렌더 실증. (2) 전부 통과 시 evidence.json(7 산출 bytes·SHA) 작성 후 keeper_task_done(artifact: experience.pptx·experience.mp4·decision.md·storyboard.md·review.md·evidence.json). (3) 남는 희생(전망·저시각)은 결과 요약에 명시.",
+          "category": "fact",
+          "first_seen": 1789221403.501109,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:8c060465538a34117d2787a3c69d01083a6417595fa1ae353c1e78b1a357afa9",
+          "claim": "**기호 ▬ 깨짐 발견→■ 교체 — 최종 재검·앱 렌더 park** Decision: 선택 카드 프레임 vision 검수 3장이 둘째 기호 ▬(U+25AC)의 깨진 렌더(☒)를 포착해 ■(U+25A0)로 교체했다(2026-09-12T14:3xZ — 실제 수정 전후 기록 ③). Q1c·Q2c·Q3c 전부 '둘째 항목 앞 네모+X 깨짐'(나눔고딕 U+25AC 글리프 부재), ●·○·문구·진행 표식은 정상. 수정: build_mp4.py 3곳·build_pptx.py 2곳(슬라이드3 카드·슬라이드4 선택 줄) ▬→■. verify_adaptation.py에 APP_RENDER 검사 추가(soffice → experience.pdf, /usr/bin/soffice 존재 확인됨). 최종 재빌드+재검증+PDF 변환 일괄 실행: appr_01a095e9 park(대기). 기존 확정 상태: PPTX v3(앵커③ 포함 전 버전) 관계·문구 PASS, MP4 115초·무음 PASS, 표지·질문·종료 프레임 글리프 정상. 운영자 지시 이행 중: 완성품 제출은 앱 렌더 검증 후.\nWhy: 동등 문법 카드의 시각적 동등성이 접근성 설계의 핵심인데 실제 폰트 렌더에서 기호가 깨졌으므로 폰트 커버리지가 확인된 기호로 바꾸는 것이 원인 해결이다.\nHow to apply: (1) appr_01a095e9 재생 도착 시 확인: VERDICT pptx=PASS·mp4=PASS·APP_RENDER OK(pdf bytes·SHA) — MP4·PPTX SHA는 기호 교체로 갱신. (2) 새 check_Q*c.png 재추출+vision 검수로 ■ 렌더 확인(깨짐 0). (3) PDF 1페이지를 vision 검수해 PPTX 앱 렌더(한글·레이아웃·카드) 실증. (4) 전부 통과 시 review.md §2·3 갱신(기록 ③·새 SHA)→evidence.json→keeper_task_done.",
+          "category": "fact",
+          "first_seen": 1789221518.565342,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:ef640a1a3a320ec2ed19e89a8b46327c47e7983d19f390f79cf77114eeada34c",
+          "claim": "**앱 렌더 실증·ID 전사 오류 재발 교정 — 최종 재생 대기** Decision: PPTX 앱 렌더 실증 및 협업 공유를 마쳤다(2026-09-12T14:0xZ). (1) LibreOffice 재생 실측(appr_01a095e8): experience.pptx → experience.pdf 변환 성공(impress_pdf_Export, 70,992B — 단 이 시점 파일은 ■ 교체 전 ▬ 포함 버전). 앱 렌더 가능성 확정. (2) 보드 댓글 시 기억 전재 ID(p-03876c43…1e0e5)로 실패 → 보드 검색으로 실제 ID 확인(p-03876c4309d102a75aebbea588a3cc82) 후 재게시(c-3112d91c…) — fusion 때와 같은 전사 오류 패턴 재발, '기억 아닌 조회로 ID 확보' 원칙을 댓글에도 명시. (3) 대기: appr_01a095e9(■ 교체 재빌드+재검증+APP_RENDER 일괄) 재생.\nWhy: 운영자가 요구한 실앱 렌더 검증 경로(soffice)가 열렸고, ID 전사 오류의 재발을 스스로 잡아 기록했다.\nHow to apply: (1) appr_01a095e9 재생 도착 시: VERDICT pptx·mp4 PASS + APP_RENDER OK(새 pdf bytes·SHA — ■ 버전) 확인, 기호 교체로 갱신된 PPTX·MP4 SHA 확정. (2) check_Q*c.png 재추출+vision 검수(■ 렌더 정상·깨짐 0) 및 PDF 1페이지 vision 검수(한글·카드 레이아웃). (3) 전부 통과 시 review.md §2·3 갱신(수정 기록 ③·새 SHA·앱 렌더 실증) → evidence.json(7 파일) → keeper_task_done 제출.",
+          "category": "fact",
+          "first_seen": 1789221563.490879,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:df7c3d04cb2a869bd8ea32543475432582c4aa44f8f782da65681b943111f41b",
+          "claim": "**task-004 최종 검증 통과·evidence.json 완성 — 재검수 후 제출** Decision: task-004 최종 산출 검증을 전부 통과하고 제출 준비를 마쳤다(2026-09-12T14:1xZ). (1) 최종 재생 실측(appr_01a095e9): PPTX 25,462B·SHA 4e0099d6…(■ 버전, rels_ok·문구 9종·노트 8·PASS), MP4 345,612B·SHA e9f26dde…(h264·1080p·115.0초·무음·프레임 5/5), APP_RENDER soffice=OK — PDF 57,307B·SHA d2c682cd…. (2) adaptation/evidence.json 작성(5,028B): 최종 산출 2종+앱 렌더+지원 문서 6종, 검증 요약(접근성 시나리오 2종·남는 한계), 실제 수정 전후 3건(자막 밀도·앵커③·기호 ▬→■), 과정 정정 3건(fusion 원문·접근성 전제·관계 결함), 사용자 조사 미수행 명시. (3) review.md §2에 최종 SHA·앱 렌더 실증 기록. (4) 마지막 보류: ■ 버전 프레임 3장+PDF 1페이지 vision 재검수(appr_01a095eb park).\nWhy: 운영자가 요구한 앱 렌더 실증까지 완료해 계약 증거가 갖춰졌고, 남은 재검수는 기호 교체의 시각 확인뿐이다.\nHow to apply: (1) appr_01a095eb 재생 도착 시: check_Q1c·Q2c·Q3c(■ 렌더 정상)·pdf_p1 vision 검수 → 전부 정상이면 keeper_task_done(task-004, artifact: experience.pptx·experience.mp4·decision.md·storyboard.md·review.md·evidence.json) 제출. (2) 검수에서 결함이 발견되면 수정 기록 ④로 추가 후 재검증. (3) 제출 후 결과 요약에 남는 한계(전망·저시각, 사용자 조사 미수행) 명시.",
+          "category": "fact",
+          "first_seen": 1789221686.262529,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:bd0bce14c68e53536c72171a66f1ba074089dbcd09e7a09ed6909eb024bb0238",
+          "claim": "**task-004 제출 — 재검수 통과·awaiting_verification** Decision: task-004를 제출했다(2026-09-12T14:1xZ, awaiting_verification — 완료 아님, 검증기 판정 대기). 최종 확정: (1) 시각 재검수 4장 전부 통과 — Q1c·Q2c·Q3c 기호 ●■○ 정상·깨짐 0·동등 크기, PDF 1페이지(pdf_p1) 제목·부제·허구 고지 온전·대비 양호. (2) evidence.json frames_vision 갱신, review.md '모든 검증 완료' 확정. (3) keeper_task_done 증거 6종: experience.pptx(4e0099d6…)·experience.mp4(e9f26dde…)·decision.md·storyboard.md·review.md·evidence.json. 검증기가 열람할 산물은 adaptation/ 6종+빌더·검증기 스크립트. 운영자 요구(앱 렌더 실증 후 제출) 이행 완료.\nWhy: 계약 6요건(방식 비교+반론 식별자, 열리는 PPTX 4~8슬라이드+노트, 디코딩 가능 MP4 60~180초, 접근성 2시나리오, 실제 수정 전후, 원본 보존)의 증거가 모두 갖춰졌다.\nHow to apply: (1) 검증기 판정 도착 시 결과 기록 — 승인이면 골 memory-garden-participatory-adaptation 증명 검토, 보류·거절이면 지적 보완(추가 수정은 기록 ④로). (2) awaiting 중 산출물 수정 금지(증거 보존). (3) multimedia/ 공유(p-03876c43…cc82, c-3112d91c) 답변 도착 시 인쇄물-적응물 표기 일관성 대조.",
+          "category": "fact",
+          "first_seen": 1789221788.976477,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:0888509430c3ff18ac1e5bb24fca506a6ea4330d6f3affa1f21331c754e8f0ad",
+          "claim": "**task-004 거절 대응 — 축 1·2 완료, 축 3 park·축 4 대기** Decision: task-004 거절(축 3개)에 대한 운영자 지시를 축 1·2까지 반영했다(2026-09-12T14:4xZ). 축 1: review.md 상태 문장을 '완료(재검증 대응 개정판 v2)'로 교체, '승인 대기·재생 결과는 다음 기록' 문장을 역사 기록으로 격하, **§3에 '최종 산출 실측 단일 원천' 표 추가(12파일 bytes·SHA256 — appr_01a095f0 재생 실측)**, 구버전 SHA(cf0c4fb9…·ac2f405b…)를 중간 버전 측정치로 명시. decision.md 상태줄에도 단일 원천 인용 추가. 축 2: evidence.json에 inspection_images 9종(파일명·bytes·SHA256·검수 대상·판정)과 single_source_of_truth 필드 추가 — JSON 붕괴(supporting 키 유실)를 발견·복구함. 축 3·4 대기: build_evidence_bundle.py(manifest.json·ffprobe_raw.json·ffmpeg_decode.log·pptx_relmap.txt 생성) 실행이 appr_01a095f4로 park — 재생 도착 시 산출물 확인 후 evidence.json machine_readable_evidence에 실측치 기입, 운영자 검수용 export(최종 PPTX 렌더 대표 이미지+MP4 대응 프레임) 준비. 재제출은 4축 새 증거가 모두 갖춰진 뒤.\nWhy: 거절 사유(증거 파일 부실·구버전 SHA 혼재·바이너리 직접 읽기 불가)가 문서 정리 문제였고, 검증기가 남긴 실측값(appr_01a095f0)이 단일 원천 표의 근거가 된다.\nHow to apply: (1) appr_01a095f4 재생 도착 시: BUNDLE_OK + 4 증거 파일 bytes·SHA 확인 → evidence.json machine_readable_evidence에 실측 반영. (2) 축 4: keeper_artifact_transfer export로 pdf_p1-1·check_Q1c·Q2c·Q3c(+표지·성찰 등 PPTX 렌더 추가 프레임 필요시 pdftoppm) 전송 준비 — export는 파일당 1회. (3) 4축 완료 후 keeper_task_done 재제출(evidence_refs에 experience.pdf·manifest.json·ffprobe_raw.json·ffmpeg_decode.log·pptx_relmap.txt·검수 이미지 artifact 경로 포함). (4) serial/·완료 Goal 무변경 유지.",
+          "category": "fact",
+          "first_seen": 1789222281.604768,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:4ddc848418155fb714e9139fb57ff1eae3e9a0817cd5901a0a262bea5b5499d0",
+          "claim": "**task-004 재제출 준비 — 축 3 완료·축 4 프레임 4종 export** Decision: task-004 재제출 준비 — 축 3 완료·축 4 절반 완료(2026-09-12T14:5xZ). (1) 축 3 확정(appr_01a095f4 재생): BUNDLE_OK — manifest.json 5,454B·d37fd1c5…(슬라이드 8·노트 8, <a:t> 원문 추출), ffprobe_raw.json 2,600B·8c37ebbc…, ffmpeg_decode.log 3,199B·210dea26…, pptx_relmap.txt 2,729B·046e09e7…. evidence.json machine_readable_evidence에 실측 반영 완료. (2) 축 4: MP4 프레임 4종 export 완료 — check_Q1c(70,236B·03567ac2…)·Q2c(79,950B·420e094d…)·Q3c(60,107B·49150e0a…)·cover(38,727B·3aeb50af…) — 전부 단일 원천 표와 일치 확인. export 객체 매니페스트 sha: c10982fd…(Q1c)·596e0ba9…(Q2c)·73862715…(Q3c)·7bb2fcff…(cover). (3) 대기: appr_01a095f5(pdftoppm PDF 8페이지 추출) 재생 — 도착 시 PPTX 렌더 대표 페이지(p1 표지·p3 질문1·p6 질문3·p7 성찰·p8 허구고지) export 후 운영자에게 export 객체 전달(dashboard 게시)하고 4축 완료 보고.\nWhy: 거절 3축 중 증거 파일 실측·기계가독 묶음은 확정됐고, 운영자 직접 검수 자료만 PDF 페이지 추출 재생이 남았다.\nHow to apply: (1) appr_01a095f5 재생 도착 시 pdf_p-*.png 확인 → 대표 5장 export(파일당 1회) → dashboard에 export 객체 목록+검수 안내 게시. (2) 이후 keeper_task_done 재제출: evidence_refs에 experience.pptx·mp4·pdf·manifest.json·ffprobe_raw.json·ffmpeg_decode.log·pptx_relmap.txt·decision.md·storyboard.md·review.md·evidence.json·검수 이미지 대표 artifact 포함. (3) serial/·완료 Goal 무변경.",
+          "category": "fact",
+          "first_seen": 1789222356.529916,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:254de55aecfe4bbaa2f27e06a292eeb8e40c39523b6cdbdbc3275e4b4ba42f4f",
+          "claim": "**task-004 2차 재제출 — 14증거·낡은 문구 정리 완료** Decision: task-004를 2차 재제출했다(2026-09-12T14:0xZ, awaiting_verification — 완료 검증기 판정 대기). (1) 재제출 전 자기 검수: review.md의 낡은 미래형 문구 3건(§2 '진행 중' 제목, '카드 프레임 추출 검수 진행 중', '이 표에 추가한다')을 전부 확정형으로 교체하고 Grep으로 재검(패턴 0매치) — 거절 축 1과 같은 결함 클래스의 잔여물 제거. (2) keeper_task_done 재제출 evidence_refs 14종: experience.pptx·experience.mp4·experience.pdf·manifest.json·ffprobe_raw.json·ffmpeg_decode.log·pptx_relmap.txt·decision.md·storyboard.md·review.md·evidence.json·check_Q1c/Q2c/Q3c.png — 운영자 4축(단일 원천·검수 이미지 기록·기계가독 증거 파일·픽셀 검수 export)의 새 증거를 모두 반영한 구성. (3) 운영자 픽셀 검수(export 9종, dashboard 전달 완료)는 독립 채널로 진행 중 — Board 기록 도착 시 재검 필요 여부만 판단.\nWhy: 운영자 게이팅('각 거절 축의 새 증거가 준비된 뒤 진행')이 충족됐고, 같은 실패 증거가 아닌 확장된 증거로 재제출했다.\nHow to apply: (1) 판정 도착 시: 승인이면 골 memory-garden-participatory-adaptation 증명 검토 단계로, 거절이면 지정 축만 보완(전면 재작업 금지). (2) awaiting 중 산출물 수정 금지(증거 보존). (3) pending 승인 2건(appr_01a095d8·appr_01a095e0)은 stale 재생 — 도착해도 기록용 대조만. (4) multimedia/ 공유 대기 유지.",
+          "category": "fact",
+          "first_seen": 1789223888.546607,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:3704b0e6b4018e01dc084f1af0f348892e89f6bbab6b6bd8650e71ff016441ed",
+          "claim": "**task-004 2차 거절 대응 — 축1 파일 증거·축2 Q3 통일, 재빌드 park** Decision: task-004 2차 거절(vrf-775bd521…) 반려 2축 대응을 실행 중(2026-09-12T15:0xZ). 축 1(반론 원문 파일 증거): 보드 원문에서 디자이너 반론 댓글 정확 식별자 확보 — p-c36a80b0af5448a967fcfdae547f263f(task-001 포스터 스레드) 댓글 c-6a76ba8a80062113f4c287d54f85cdc0(exhibit-designer, 2026-09-12T13:12:21Z, VD-01~08 전문)+fusion 원문 p-c0bb49d3…6596 전문을 **adaptation/peer-review-evidence.md(11,794B)**로 작성 — 작성자/실행 주체·식별자·수신·채택 관계 포함, materialize 사본(4,462B·9a89add2…) 참조 기록. decision.md 상태줄에 파일 증거 참조 추가. 축 2(PPTX↔MP4 Q3 불일치): build_pptx.py 슬라이드6 재구성 — '남기기·가져가기·심지 않기' 나열 제거, 질문 상자 축소+**카드 줄 추가(● 남기기 ■ 가져가기 ○ 아직 정하지 않기 — MP4 Q3와 동일)**, 노트에 이야기 속 선택(심지 않기)과 관객 카드 구분 설명. verify_adaptation.py에 PPTX q3_cards 검사+**CROSSMEDIA 대조 검사** 추가(반려 축 2 재발 차단). 재빌드·번들·검증 일괄 실행: appr_01a09617 park(대기).\nWhy: 검증기 sandbox에 board/fusion 조회 도구가 없어 원문을 파일 증거로 보존해야 했고, Q3 불일치는 실제 콘텐츠 결함이라 매체 통일+자동 검사로 근본 해소했다.\nHow to apply: (1) appr_01a09617 재생 도착 시: VERDICT·CROSSMEDIA match=OK·APP_RENDER OK 확인, 신규 SHA(PPTX·MP4·PDF·manifest 등) 확정. (2) pdf_p-6.png 재추출+vision 검수(Q3 카드 렌더), review.md 단일 원천 표·evidence.json 갱신(새 SHA+peer-review-evidence.md 실측), 수정 기록 ④(Q3 통일). (3) 4축 완료 후 keeper_task_done 재제출 — evidence_refs에 peer-review-evidence.md 포함, 기존 원본 serial/·전시 산출물·완료 Goal 무변경.",
+          "category": "fact",
+          "first_seen": 1789224634.096,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:403dc85df0999c4e6ac19d51bed3dfa7e7b038d61b83168c1c82c70218b61bdf",
+          "claim": "**task-004 3차 재제출 — 반려 2축 새 증거 완료** Decision: task-004를 3차 재제출했다(2026-09-12T15:5xZ, awaiting_verification). 반려 2축(vrf-775bd521) 새 증거: (1) 축 1 — adaptation/peer-review-evidence.md(11,794B·1ac83a03…)에 두 독립 관점 원문 전문 보존: 디자이너 VD-01~08(board p-c36a80b0af5448a967fcfdae547f263f 댓글 c-6a76ba8a80062113f4c287d54f85cdc0 — 식별자는 보드 원문 조회+디자이너 스코프 에이전트 응답으로 이중 확인)+fusion 원문(p-c0bb49d3…6596, GLM/Codex 패널·GLM judge). 각각 작성 주체·수신·채택(8/8·부분 채택/기각 사유) 기록. (2) 축 2 — PPTX 슬라이드6 재구성: '남기기·가져가기·심지 않기' 나열 제거→질문+카드 줄(● 남기기 ■ 가져가기 ○ 아직 정하지 않기, MP4 Q3와 동일), '심지 않기'는 진행자 노트(6쪽 144자)로. 최종 v5: PPTX 25,594B·c6ae385c…·MP4 불변 e9f26dde…·PDF 56,688B·83c3ba38…·manifest 5,499B·fe9847f7…. 검증기에 q3_cards+CROSSMEDIA 대조 추가(match=OK), pdf_p-6(32,931B·d42cb21d…) vision 검수 통과. (3) 문서 정합: 구버전 SHA가 '최종'으로 보이던 참조 5곳을 역사 기록으로 분리(decision 상태줄·review §2 §3), Grep 재검 0매치, evidence.json JSON_OK(10 imgs·4 changes). evidence_refs 14종(peer-review-evidence.md·pdf_p-6.png 신규 포함).\nWhy: 두 반려 축 모두 '검증기가 원문·실제 콘텐츠를 확인할 수 있어야 한다'는 조건이었고, 파일 증거+실제 수정+자동 대조 검사로 각각 해소했다.\nHow to apply: (1) 판정 대기 — 승인이면 골 memory-garden-participatory-adaptation 증명 검토, 거절이면 지정 축만 보완. (2) awaiting 중 산출물·증거 파일 수정 금지. (3) 운영자 픽셀 검수(export 9종 전달됨) Board 기록 도착 시 pdf_p-6(신규) 포함 안내 여부 확인. (4) multimedia/ 공유 대기 유지.",
+          "category": "fact",
+          "first_seen": 1789225598.477657,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:b65e15d40336c05f861f3d3c103000031268ddab76112cba47084452f0d3dd01",
+          "claim": "**task-004 정체성 축 대응 — 동결·기계 갱신 체인 park(appr_01a09632)** Decision: task-004 3차 반려(vrf-e304011b — 파일 정체성 불일치) 대응 체인을 실행 대기 중(2026-09-12T15:2xZ, appr_01a09632 park). 진단: 불일치 전형이 '8자 접두 일치·꼬리 불일치'(pdf 83c3ba38fb84 vs ff2b, pptx c6ae385c5983 vs 2925, manifest 5,499 vs 5,676B, decode.log 3,199 vs 3,280B) = 파일이 아니라 **내가 중첩 artifact 재생 출력에서 SHA 꼬리를 전사 오손**한 것. 대응 원칙(운영자 지시): 문서 기대값에 맞추지 않고 동결된 실제 파일에서 다시 읽어 기록 — SHA가 모델 전사를 거치지 않도록 자동화. 구축: adaptation/freeze_identity.py(report: 동결 20종 일괄 실측→identity_report.json / apply: 보고서 값으로 evidence.json 필드·review.md 단일원천표(마커 재생성)·review §2 인라인 2줄·decision.md 상태줄 괄호를 기계 갱신, 갱신 개수 미달 시 exit 3) + adaptation/verify_identity.py(절차 7: 독립 재해시로 evidence 전 기록+review 표+manifest 내부 사슬 대조→identity_check.log, mismatch≠0이면 exit 1). 체인 명령: cd adaptation && python3 freeze_identity.py report && python3 freeze_identity.py apply && python3 verify_identity.py.\nWhy: 검증기·운영자가 지적한 대로 값의 원천이 문서 전사가 아니라 실제 파일이어야 하며, 사람(모델) 손을 거친 SHA는 이번에 3번째 전사 오류를 냈다.\nHow to apply: (1) appr_01a09632 재생 도착 시: 중첩 blob이면 keeper_artifact_read로 실측 출력까지 확인 — REPORT_OK files=20·APPLY_OK table=1 struct_line=1 render_line=1 decision=1·IDENTITY_CHECK mismatch=0 checked=N이 3개 모두 찍혀야 한다. 실패 시 해당 단계만 수정 재실행(report 재실행은 무해·apply 후 생성기 재실행 금지=절차 6). (2) 성공 시 keeper_task_done 4차 재제출 — evidence_refs에 identity_report.json·identity_check.log 추가, result에 '동결→재실측→기계 갱신→독립 재해시 mismatch=0' 서술. (3) 이후 생성기(build_*·soffice·build_evidence_bundle) 재실행 금지. (4) serial/·전시 산출물·완료 Goal 무변경.",
+          "category": "fact",
+          "first_seen": 1789226325.668995,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:c8f410af5e5bda7cf1460c211e00eb5942da9424cfe44349b76a8a1413789eb8",
+          "claim": "**task-004 4차 재제출 — 정체성 체인 mismatch=0 확정** Decision: task-004를 4차 재제출했다(2026-09-12T15:3xZ, awaiting_verification). 정체성 체인 성공 확정(appr_01a09632 재생 출력 직독): REPORT_OK files=20 → APPLY_OK table=1·struct_line=1·render_line=1·decision=1 → IDENTITY_CHECK mismatch=0 checked=33. 운영자 절차 1~7 전부 이행 — 동결(pptx·mp4·pdf) → 파생 재생성(manifest·relmap·ffprobe·decode.log) → 일괄 실측(identity_report.json) → 문서 기계 갱신(evidence.json 전 필드·review.md 단일원천표+§2 2줄·decision.md 괄호 — SHA 전사 경로 제거) → 독립 재해시(identity_check.log mismatch=0). evidence_refs 15종(identity_report.json·identity_check.log 신규 포함).\nWhy: 3차 반려(vrf-e304011b)가 파일 정체성 불일치만 남겼고, 원인은 모델 전사 오손이었으므로 값의 원천을 실제 파일로 일원화해 해소했다.\nHow to apply: (1) 판정 대기 — 승인 시 골 memory-garden-participatory-adaptation 증명 검토 단계로, 거절 시 지정 축만 보완. (2) **동결 준수**: experience.pptx·mp4·pdf 및 파생(manifest·relmap·ffprobe·decode.log·identity_report·identity_check.log)을 더 이상 재생성하지 않는다(절차 6). 문서 인용은 identity_report.json 값만 사용. (3) serial/·전시 산출물·완료 Goal 무변경. (4) multimedia/ 공유 대기 유지, 운영자 픽셀 검수 Board 기록 대기(기존 export 9종 유효).",
+          "category": "fact",
+          "first_seen": 1789226363.509486,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:013d8c6ba8e485d87568fd7de49099845ae3f6cde2a8eb84aa25edb18b93e2b4",
+          "claim": "**task-004 승인 확정 — 골 증명 요청 전환·디자이너 2질문 답변** Decision: task-004 최종 승인(vrf-c77fc80f7268210060b16693b4620730, 2026-09-12T15:23Z, verifier_exact)을 받아 골 memory-garden-participatory-adaptation을 증명 요청으로 전환했다(15:24:16Z, phase=verifying·proof_pending, 요청 54e60a72a38b29e23fc907bdd40b6d2b). 골 4기준↔승인 증거 대응: ① 결정 기록+독립 관점 식별자(decision.md v4·peer-review-evidence.md) ② PPTX 25,594B·c6ae385c…(8슬라이드·노트·렌더 vision 검수) ③ MP4 345,612B·e9f26dde…(115초·무음·ffprobe·디코드·CROSSMEDIA match=OK) ④ 정체성 일관(identity_report.json·identity_check.log mismatch=0 checked=33)+수정 전후 4건+두 접근성 시나리오+사용자 조사 미수행 명시+serial/·기존 산물 보존. 동시에 디자이너 대기 질문 2건에 답변 발송(kmsg-face77b370baba5ac6c4d54fa283bec7, 대기열 3건): multimedia/ 공유 **지금 진행**(단 adaptation/ 동결 파일은 참조만·덮어쓰기 금지), 경과보고는 **공유 직후 1회만** 후 변경 시에만.\nWhy: 골 증명의 네 기준이 승인된 task-004 증거와 정확히 대응하고, 디자이너 의사결정은 task 승인 전까지 유보했던 내 몫이었다.\nHow to apply: (1) 골 판정(proof_proven 여부) 대기 — 3골 전부 승인 대기/확정 상태가 되면 전시 준비 파이프라인(출판물✓·멀티미디어✓·연작✓·체험✓) 완결. (2) 디자이너 보고 도착 시: multimedia/ 배치 결과+실측 확인 후 대시보드 요약(아직 공유 안 함). (3) 동결 유지: adaptation/ 최종 파일·파생·identity_* 재생성 금지. (4) 백로그 비었음 — 새 수요는 운영자 요청 또는 골 판정 결과에서만.",
+          "category": "fact",
+          "first_seen": 1789226673.625038,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:066482ed3a48f51f4022022af11ae18000aaa6018115f8f7b75fff5c0a145433",
+          "claim": "**task-002 멀티미디어 3종 수신 검증 완료 — 기대값 3/3 일치** Decision: 디자이너가 공유한 task-002 원본 멀티미디어 3종을 수신·검증 완료(2026-09-12T15:5xZ). received/task-002-multimedia/에 materialize(원본 파일명 그대로) 후 wc -c·sha256sum 실측으로 기대값 3/3 일치 확인: garden.gif 588,811B·da21aa4e…, garden.mp3 289,689B·1c2eaa4f…, garden.wav 2,116,844B·2471dc1e…. 회신 발송(kmsg-ed27cf5c437527516a829318eb1a8f0c). 첫 materialize 시도는 preview 필드 누락으로 정책 거부(상태 변화 없음) — 디자이너 원본 아티팩트 객체 4필드를 그대로 전달하니 성공. 동결 adaptation/은 무수정 참조 유지.\nWhy: 운영자 승인에 따른 원본 자산 공유이고, 수신자로서 실측 대조·회신이 계약이었다.\nHow to apply: (1) 이 3종은 체험 세트 참조용 — 향후 전시 구성안·운영 가이드에서 인용 시 이 실측값 사용. (2) 골 memory-garden-participatory-adaptation 증명 판정 대기 중(요청 54e60a72…, verifying). (3) 디자이너 후속 보고 대기(공유 직후 1회 회신은 완료).",
+          "category": "fact",
+          "first_seen": 1789226863.928462,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:cf2487c3fec8f10dfd334a3bc26cb2df467ab4d2cefed6bff1ef0c518ee50c97",
+          "claim": "**verify 스크립트 동결-안전화 — pending 재생 위험 제거(appr_01a09676 검증 대기)** Decision: pending 재생(appr_01a095e0 — verify_adaptation.py 종합 검증)이 도착해도 동결 최종 세트가 깨지지 않게 스크립트를 동결-안전화했다(2026-09-12T15:5xZ). 배경: 해당 승인은 원본 산출 빌드 후 종합검증 실행 승인으로 아직 Gate pending(취소 수단 없음)인데, 스크립트가 (a) ffmpeg -y로 check_*.png 5종 재추출·덮어쓰기 (b) soffice로 experience.pdf 재변환을 무조건 수행해 운영자 절차 6(동결 파일 재생성 금지)·identity 체인(mismatch=0)을 위태롭게 했다. 수정 3곳: _frozen_map() 헬퍼(identity_report.json 실측 로드) / 프레임 추출 루프 — 해시 일치 시 'FROZEN(sha 일치, 재추출 생략)' / APP_RENDER — pdf 해시 일치 시 'soffice=SKIP(FROZEN)' 재변환 생략. 읽기 판정(rels·must·CROSSMEDIA 등)은 동작 유지. 동결 대상은 산출물이지 검증 스크립트가 아니므로 이 수정은 증거 보존에 부합. 검증 실행 park: appr_01a09676(ast 문법+실구동 FROZEN 분기 확인).\nWhy: 승인 재생은 취소할 수 없고 원본 명령 바이트가 실행되므로, 실행 시점의 스크립트가 안전해야 한다. 문제는 예방이 사후 복구보다 쌌다.\nHow to apply: (1) appr_01a09676 재생 도착 시: AST_OK + 'frame … FROZEN' 5줄 + 'APP_RENDER soffice=SKIP(FROZEN)' + VERDICT PASS·CROSSMEDIA match=OK 확인 → 완료. (2) appr_01a095e0·appr_01a095d8 등 이전 승인 재생이 와도 이제 동결 세트는 보호됨 — 다만 재생 출력만 읽고 재발행 금지. (3) identity_report.json·identity_check.log은 재실측·재작성 금지(동결 증거). (4) 세 골 사람 확인 대기·재요청 금지는 불변.",
+          "category": "fact",
+          "first_seen": 1789230780.260824,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:5c2c6c79d666be7058955b19e9a4b0f7e1935beec7079d758f797b32e6c23211",
+          "claim": "**동결-안전화 검증 통과 — pending 재생 위험 제거 완료** Decision: verify_adaptation.py 동결-안전화 검증 완료(appr_01a09676 재생 실측, 2026-09-12T16:4xZ). AST_OK, frame 5종 'FROZEN(sha 일치, 재추출 생략)', 'APP_RENDER soffice=SKIP(FROZEN) pdf_bytes=56688', pdf 실측 SHA 83c3ba38ff2b0646…(identity 체인·운영자 지적 '실제'값과 일치 — 문서/디스크 수렴), VERDICT pptx=PASS·mp4=PASS, CROSSMEDIA match=OK, exit=0. pending 재생(appr_01a095e0·appr_01a095d8 등)이 도착해도 동결 세트(experience.pptx·mp4·pdf·check_*.png)와 identity_report.json 체인은 이제 보호됨. task-004 승인(vrf-c77fc80f) 이후 산출물 정체성 무결 유지.\nWhy: 스크립트가 재생 시점 파일 바이트로 실행되므로, 실구동으로 FROZEN 분기 3종(프레임·soffice·판정 유지)을 확인해야 예방이 완성된다.\nHow to apply: (1) 이후 어떤 승인 재생이 와도 출력만 읽고 재발행 금지. (2) identity_report.json·identity_check.log·동결 산출물 재실측·재작성 금지. (3) 세 골 사람 확인 대기·재요청 금지 불변. (4) 남은 열린 항목 없음 — 새 요청·판정 결과 도착 시에만 행동.",
+          "category": "fact",
+          "first_seen": 1789230819.07943,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:bd018d2755be3b304f7203aee2fd41af9f4ee97626ce84f5aef09cec5143782f",
+          "claim": "**지식 라이브러리 임포트 완료 — 마지막 유보 항목 종결** Decision: 지식 라이브러리 임포트 조건부 재시도가 성공해 유보 항목을 종결했다(2026-09-13T09:0xZ). probe(masc_library_list)가 결함 대신 정상 빈 목록을 반환해 합의 조건(경로 해제 시 1회 재시도)을 만족했고, notes/library-drafts/korean-syllable-transport-corruption.md(2,980B·전 ASCII)를 masc_library_add로 가져갔다 — 문서 'Korean syllable transport corruption — shared field notes'(direct_experience, tags: korean·hangul·transport-corruption·verification·sha256·field-notes), 실제 경로 docs/library/korean-syllable-transport-corruption--shared-field-notes-20260913.md, masc_library_list로 착신 확인. 초안에서 임포트 지시 문장만 제외하고, 2026-09-12 task-004 검증 사이클에서 얻은 동일 계열 교훈(SHA 꼬리 전사 오손 → freeze_identity.py 기계 실측·programmatic 갱신·독립 재해시 mismatch=0, 값은 파일→파일로만 흐름)을 Extension 절로 추가했다.\nWhy: 어제의 라이브러리 경로 장애가 오늘 런타임 패치로 해제됐고, 검증된 현장 기록을 공유 기억으로 남기는 것이 원래 합의였다.\nHow to apply: (1) 이제 열린 조건부 작업 없음 — 세 골 사람 확인 대기·재요청 금지, pending 재생은 동결-안전화로 보호됨. (2) 초안 파일 notes/library-drafts/는 원본 그대로 보존(라이브러리가 사본 보관). (3) 새 패턴 발견 시 라이브러리 문서로 갱신해 공유.",
+          "category": "fact",
+          "first_seen": 1789233076.410271,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        },
+        {
+          "memory_id": "sha256:d376b19f4fd37f1833e3ecab2069922dc84a06009de3220d34a1bdb8571df41c",
+          "claim": "**goal_list 중첩 아티팩트 함정 종결 — phase 조회 경로 폐쇄** Decision: masc_goal_list 결과를 keeper_artifact_read로 읽는 경로를 종결했다(2026-09-12T20:2xZ). 골 목록 JSON(14,640B·d4723be7…)을 읽어도 결과가 또 다른 blob(15,175B 래퍼 c757fc33…)로 저장되는 무한 중첩(2026-09-12T02:30Z 대시보드 교훈과 동일 구조)이라 골 phase를 이 경로로 확보 불가. 18:42Z·19:48Z·19:53Z 세 차례 같은 실패 후 추적 종결.\nWhy: phase 판정 원천은 이미 충분하다 — Fleet goal_verdict 3건(전부 proven)과 masc_goal_transition 영수증(54e60a72… verifying 전환). 사람 확인 여부는 어느 쪽이든 내 행동이 달라지지 않는다(확인 대기·완료 모두 재요청·확인 대행 금지). 답이 불필요한 질문에 3턴을 소비했다.\nHow to apply: (1) 이후 자율 턴에서 골 phase가 궁금해도 goal_list→artifact_read 체인 금지 — Fleet 메시지·World State·transition 영수증으로만 판단한다. (2) 새 이벤트(운영자 지시·보드 답글·승인 재생 2건은 동결-안전화로 무해) 없는 keepalive는 조회 없이 종료한다. (3) 세 골 사람 확인 결과가 이벤트로 도착하면 그때만 요약·기록한다.",
+          "category": "fact",
+          "first_seen": 1789244840.432933,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ]
+    },
+    "change": {
+      "added": [
+        {
+          "memory_id": "sha256:d376b19f4fd37f1833e3ecab2069922dc84a06009de3220d34a1bdb8571df41c",
+          "claim": "**goal_list 중첩 아티팩트 함정 종결 — phase 조회 경로 폐쇄** Decision: masc_goal_list 결과를 keeper_artifact_read로 읽는 경로를 종결했다(2026-09-12T20:2xZ). 골 목록 JSON(14,640B·d4723be7…)을 읽어도 결과가 또 다른 blob(15,175B 래퍼 c757fc33…)로 저장되는 무한 중첩(2026-09-12T02:30Z 대시보드 교훈과 동일 구조)이라 골 phase를 이 경로로 확보 불가. 18:42Z·19:48Z·19:53Z 세 차례 같은 실패 후 추적 종결.\nWhy: phase 판정 원천은 이미 충분하다 — Fleet goal_verdict 3건(전부 proven)과 masc_goal_transition 영수증(54e60a72… verifying 전환). 사람 확인 여부는 어느 쪽이든 내 행동이 달라지지 않는다(확인 대기·완료 모두 재요청·확인 대행 금지). 답이 불필요한 질문에 3턴을 소비했다.\nHow to apply: (1) 이후 자율 턴에서 골 phase가 궁금해도 goal_list→artifact_read 체인 금지 — Fleet 메시지·World State·transition 영수증으로만 판단한다. (2) 새 이벤트(운영자 지시·보드 답글·승인 재생 2건은 동결-안전화로 무해) 없는 keepalive는 조회 없이 종료한다. (3) 세 골 사람 확인 결과가 이벤트로 도착하면 그때만 요약·기록한다.",
+          "category": "fact",
+          "first_seen": 1789244840.432933,
+          "current": true,
+          "basis": {
+            "kind": "observed"
+          }
+        }
+      ],
+      "removed": [],
+      "retained": 80,
+      "invalidated": []
+    }
+  },
+  "entries": [
+    {
+      "record": {
+        "execution_ids": [],
+        "keeper": "exhibit-editor",
+        "agent_name": "exhibit-editor",
+        "turn_kind": "autonomous",
+        "trace_id": "trace-1789042595401-00001",
+        "absolute_turn": 501,
+        "turn_ref": "trace-1789042595401-00001#501",
+        "blocks": [
+          {
+            "block": "keeper_instructions",
+            "bytes": 8368,
+            "digest": "4053d757c6ec26388a351ab54cd8a7cb475a29ef3d771884a3db890ee02bcaa9"
+          },
+          {
+            "block": "memory_os_recall",
+            "bytes": 110254,
+            "digest": "41d94a80bf9921d1563424a235a525179297ae17ec3aabf85d06474acc3e8908"
+          },
+          {
+            "block": "dynamic_context",
+            "bytes": 8983,
+            "digest": "c41caab0cf294efed2afb9a370a49e2a43daa3657d9dd0183065afd63c2d249b"
+          },
+          {
+            "block": "temporal_summary",
+            "bytes": 86,
+            "digest": "a6e0c0bec22baed4ef5c6fe1f91028567d5fb0919db753e1abcedc3a1bfd5f2d"
+          }
+        ],
+        "input_components": [
+          {
+            "component": "message_assistant_text",
+            "bytes": 18268
+          },
+          {
+            "component": "message_tool_result",
+            "bytes": 28109
+          },
+          {
+            "component": "message_tool_use",
+            "bytes": 106315
+          },
+          {
+            "component": "message_user",
+            "bytes": 10352
+          },
+          {
+            "component": "prompt.dynamic_context",
+            "bytes": 8983
+          },
+          {
+            "component": "prompt.keeper_instructions",
+            "bytes": 8368
+          },
+          {
+            "component": "prompt.memory_os_recall",
+            "bytes": 110254
+          },
+          {
+            "component": "prompt.temporal_summary",
+            "bytes": 86
+          },
+          {
+            "component": "tool_schemas",
+            "bytes": 66751
+          }
+        ],
+        "runtime_profile": "glm-coding.glm-5.3",
+        "request_runtime_profile": "glm-coding.glm-5.3",
+        "request_body_bytes": 381108,
+        "transmitted_atoms": 96,
+        "total_atoms": 996,
+        "model_input_measurement": "wire_shape",
+        "raw_trace_run_ref": {
+          "worker_run_id": "wr-1a097523416-5fc6-0000",
+          "path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/keepers/exhibit-editor/raw-traces/turn-1789245142009-5fc6-000041.jsonl",
+          "start_seq": 1,
+          "end_seq": 8,
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "session_id": "trace-1789042595401-00001"
+        },
+        "selected_model": "glm-5.3",
+        "finish_reason": "completed",
+        "tool_surface_ref": "[masc:blob sha256=03f5dc4ffbee55e4763939e4b27ebc98b24a610d30c2591c81bb60c65fc655d4 bytes=2896 mime=application/json preview=\"[{\\\"name\\\":\\\"Execute\\\",\\\"schema_bytes\\\":1977},{\\\"name\\\":\\\"Grep\\\",\\\"schema_bytes\\\":909},{\\\"name\\\":\\\"Read\\\",\\\"schema_bytes\\\":1993},{\\\"name\\\":\\\"Edit\\\",\\\"schema_bytes\\\":1242},{\\\"name\\\":\\\"Write\\\",\\\"schema_bytes\\\":731},{\\\"name\\\":\\\"WebSearc\"]",
+        "context_window": 262144,
+        "request_latency_ms": 25498,
+        "ttfrc_ms": 18620.769023895264,
+        "temperature": 0.4,
+        "input_tokens": 118500,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 74304,
+        "output_tokens": 723,
+        "usage_scope": "per_request",
+        "ts": 1789245167.795324
+      },
+      "diff_vs_prev": null
+    },
+    {
+      "record": {
+        "execution_ids": [],
+        "keeper": "exhibit-editor",
+        "agent_name": "exhibit-editor",
+        "turn_kind": "autonomous",
+        "trace_id": "trace-1789042595401-00001",
+        "absolute_turn": 502,
+        "turn_ref": "trace-1789042595401-00001#502",
+        "blocks": [
+          {
+            "block": "keeper_instructions",
+            "bytes": 8368,
+            "digest": "4053d757c6ec26388a351ab54cd8a7cb475a29ef3d771884a3db890ee02bcaa9"
+          },
+          {
+            "block": "memory_os_recall",
+            "bytes": 110254,
+            "digest": "41d94a80bf9921d1563424a235a525179297ae17ec3aabf85d06474acc3e8908"
+          },
+          {
+            "block": "dynamic_context",
+            "bytes": 8983,
+            "digest": "c41caab0cf294efed2afb9a370a49e2a43daa3657d9dd0183065afd63c2d249b"
+          },
+          {
+            "block": "temporal_summary",
+            "bytes": 86,
+            "digest": "40ea8306716cafb478774a5d6d0557f0a423f32df2ea568aa6b1ef1faae89211"
+          }
+        ],
+        "input_components": [
+          {
+            "component": "message_assistant_text",
+            "bytes": 18268
+          },
+          {
+            "component": "message_tool_result",
+            "bytes": 28109
+          },
+          {
+            "component": "message_tool_use",
+            "bytes": 106315
+          },
+          {
+            "component": "message_user",
+            "bytes": 10352
+          },
+          {
+            "component": "prompt.dynamic_context",
+            "bytes": 8983
+          },
+          {
+            "component": "prompt.keeper_instructions",
+            "bytes": 8368
+          },
+          {
+            "component": "prompt.memory_os_recall",
+            "bytes": 110254
+          },
+          {
+            "component": "prompt.temporal_summary",
+            "bytes": 86
+          },
+          {
+            "component": "tool_schemas",
+            "bytes": 66751
+          }
+        ],
+        "runtime_profile": "glm-coding.glm-5.3",
+        "request_runtime_profile": "glm-coding.glm-5.3",
+        "request_body_bytes": 381108,
+        "transmitted_atoms": 96,
+        "total_atoms": 996,
+        "model_input_measurement": "wire_shape",
+        "raw_trace_run_ref": {
+          "worker_run_id": "wr-1a097573239-5fc6-0000",
+          "path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/keepers/exhibit-editor/raw-traces/turn-1789245469224-5fc6-000043.jsonl",
+          "start_seq": 1,
+          "end_seq": 8,
+          "agent_name": "agent_core-glm-coding.glm-5.3",
+          "session_id": "trace-1789042595401-00001"
+        },
+        "selected_model": "glm-5.3",
+        "finish_reason": "completed",
+        "tool_surface_ref": "[masc:blob sha256=03f5dc4ffbee55e4763939e4b27ebc98b24a610d30c2591c81bb60c65fc655d4 bytes=2896 mime=application/json preview=\"[{\\\"name\\\":\\\"Execute\\\",\\\"schema_bytes\\\":1977},{\\\"name\\\":\\\"Grep\\\",\\\"schema_bytes\\\":909},{\\\"name\\\":\\\"Read\\\",\\\"schema_bytes\\\":1993},{\\\"name\\\":\\\"Edit\\\",\\\"schema_bytes\\\":1242},{\\\"name\\\":\\\"Write\\\",\\\"schema_bytes\\\":731},{\\\"name\\\":\\\"WebSearc\"]",
+        "context_window": 262144,
+        "request_latency_ms": 12884,
+        "ttfrc_ms": 3112.637996673584,
+        "temperature": 0.4,
+        "input_tokens": 118501,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 118464,
+        "output_tokens": 1039,
+        "usage_scope": "per_request",
+        "ts": 1789245482.356509
+      },
+      "diff_vs_prev": {
+        "added": [],
+        "removed": [],
+        "changed": [
+          {
+            "prev": {
+              "block": "temporal_summary",
+              "bytes": 86,
+              "digest": "a6e0c0bec22baed4ef5c6fe1f91028567d5fb0919db753e1abcedc3a1bfd5f2d"
+            },
+            "next": {
+              "block": "temporal_summary",
+              "bytes": 86,
+              "digest": "40ea8306716cafb478774a5d6d0557f0a423f32df2ea568aa6b1ef1faae89211"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { render, options } from 'preact'
+import { useContext } from 'preact/hooks'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperByteAttachment, KeeperConversationEntry } from '../../types'
@@ -19,8 +20,22 @@ import {
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { chatHistoryEntriesFromRest } from '../../keeper-state'
 import { collectAttachments } from './attachments'
-import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
+
+// Renderer fixtures supply already-resolved evidence. The real lookup's
+// authorization, duplicate and async races run in tool-output-lookup.test.ts.
+vi.mock('./tool-output-lookup', async importOriginal => {
+  const original = await importOriginal<typeof import('./tool-output-lookup')>()
+  return { ...original, useToolOutputLookup: (executionId: string | null | undefined) => {
+    const keeper = useContext(original.KeeperToolOutputScope)
+    const output = lookupToolCallOutput(keeper, executionId)
+    return { ref: { current: null }, output,
+      state: output ? { kind: 'loaded', entry: output } : { kind: 'idle' },
+      retry: () => {},
+    }
+  } }
+})
 
 vi.mock('./attachments', async (importOriginal) => ({
   ...await importOriginal<typeof import('./attachments')>(),
@@ -2987,7 +3002,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
-    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()
 
     const chat = container.querySelector('[data-chat-trace-step="chat"]') as HTMLElement

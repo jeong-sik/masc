@@ -146,6 +146,7 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Runtime_config_read_failed of string
+  | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error

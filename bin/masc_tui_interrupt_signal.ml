@@ -5,7 +5,7 @@ type interrupt_signal =
       ; detail : string option
       }
 
-let decode_interrupt_signal ~expected_request_id json =
+let decode_signal ~identity_field ~expected_identity json =
   let field name =
     match json with
     | `Assoc fields -> List.assoc_opt name fields
@@ -21,13 +21,13 @@ let decode_interrupt_signal ~expected_request_id json =
     | Some (`Int value) -> Some value
     | Some _ | None -> None
   in
-  let echoed_request_id = string_of "request_id" in
-  if echoed_request_id <> Some expected_request_id
+  let echoed_request_id = string_of identity_field in
+  if echoed_request_id <> Some expected_identity
   then
     Error
       (Printf.sprintf
-         "interrupt response request_id mismatch: expected %s, received %s"
-         expected_request_id
+         "interrupt response %s mismatch: expected %s, received %s"
+         identity_field expected_identity
          (Option.value ~default:"<missing>" echoed_request_id))
   else
   match field "signalled" with
@@ -39,3 +39,9 @@ let decode_interrupt_signal ~expected_request_id json =
            ; detail = string_of "detail"
            })
   | Some _ | None -> Error "interrupt response has no signalled flag"
+
+let decode_interrupt_signal ~expected_request_id json =
+  decode_signal ~identity_field:"request_id" ~expected_identity:expected_request_id json
+
+let decode_observed_interrupt_signal ~expected_token json =
+  decode_signal ~identity_field:"interrupt_token" ~expected_identity:expected_token json

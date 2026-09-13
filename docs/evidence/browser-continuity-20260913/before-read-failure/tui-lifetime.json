@@ -1,0 +1,38 @@
+{
+  "columns": 130,
+  "rows": 35,
+  "input_events": [
+    {
+      "monotonic": 987953.828725833,
+      "keys_hex": "3a676f2042726f77736572204c616e650d"
+    },
+    {
+      "monotonic": 987953.873495208,
+      "keys_hex": "76"
+    },
+    {
+      "monotonic": 987953.996874333,
+      "keys_hex": "79"
+    },
+    {
+      "monotonic": 987953.998061291,
+      "keys_hex": "73"
+    },
+    {
+      "monotonic": 987954.123344833,
+      "keys_hex": "73"
+    }
+  ],
+  "refresh_interval": "unmodified product default",
+  "pid": 23960,
+  "started_monotonic": 987952.280730583,
+  "binary_sha256": "55dbd26ba13bd874a851d8ce26aaa402b204fbb8bb79eec752e8a1d1cebb6e9c",
+  "copied_monotonic": 987953.998037375,
+  "copy_offset": 18902,
+  "alive_at_copy": true,
+  "display_selected_monotonic": 987954.257475583,
+  "display_intent": "unscoped content selected before Keeper starts",
+  "exit": 0,
+  "stopped_monotonic": 987981.234329166,
+  "capture_errors": []
+}

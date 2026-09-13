@@ -1,16 +1,16 @@
-(* Live preview of the turn a keeper is running: the tail of its latest
-   agent-core response and the tool it is calling right now.
+(** Ephemeral activity for the running Keeper turn. Reset at turn entry;
+    the turns route also rejects observations older than its running turn.
+    Provider attempts, stream events, and tool hooks write this projection. *)
 
-   Process memory on purpose, like the other telemetry planes: this is a
-   glance ("what is it doing?"), not durable truth — a keeper turn's real
-   record is its transcript. Entries are never cleared on turn end; the
-   consumer (the turns projection) only reads a preview while the Owner says
-   a turn is running, so a stale entry is unreachable rather than managed. *)
+type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
 type t =
   { text_tail : string
-  ; current_tool : string option
+  ; last_tool : string option
   ; updated_at : float
+  ; runtime_id : string option
+  ; activity : activity
+  ; last_failure : string option
   }
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
@@ -36,26 +36,75 @@ let utf8_tail ~max_bytes s =
   end
 ;;
 
-let current ~keeper_name = Hashtbl.find_opt table keeper_name
+let mutex = Mutex.create ()
+
+let with_lock f =
+  Mutex.lock mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
+let empty now =
+  { text_tail = ""; last_tool = None; updated_at = now
+  ; runtime_id = None; activity = Preparing; last_failure = None }
+
+let current ~keeper_name =
+  with_lock (fun () -> Hashtbl.find_opt table keeper_name)
+
+let update ~keeper_name ~now f =
+  with_lock (fun () ->
+    (* DET-OK: absent in-memory telemetry starts empty; this is initialization,
+       not a fallback for unknown external input. *)
+    let old = Option.value ~default:(empty now) (Hashtbl.find_opt table keeper_name) in
+    Hashtbl.replace table keeper_name { (f old) with updated_at = now })
+
+let reset ~keeper_name ~now = update ~keeper_name ~now (fun _ -> empty now)
+
+let note_attempt ~keeper_name ~now ~runtime_id =
+  update ~keeper_name ~now (fun old ->
+    { old with runtime_id = Some runtime_id; activity = Awaiting_response
+    ; last_tool = None; text_tail = "" })
+
+let note_failure ~keeper_name ~now ~runtime_id detail =
+  let detail = Observability_redact.redact_preview ~max_len:tail_bytes detail in
+  update ~keeper_name ~now (fun old ->
+    { old with runtime_id = Some runtime_id; activity = Failed
+    ; last_tool = None; last_failure = Some detail })
 
 let note_text ~keeper_name ~now text =
   let text = String.trim text in
-  if not (String.equal text "") then begin
-    let text_tail = utf8_tail ~max_bytes:tail_bytes text in
-    let current_tool =
-      match Hashtbl.find_opt table keeper_name with
-      | Some existing -> existing.current_tool
-      | None -> None
-    in
-    Hashtbl.replace table keeper_name { text_tail; current_tool; updated_at = now }
-  end
-;;
+  if not (String.equal text "") then
+    update ~keeper_name ~now (fun old ->
+      { old with text_tail = utf8_tail ~max_bytes:tail_bytes text
+      ; activity = Receiving_response })
 
-let note_tool ~keeper_name ~now current_tool =
-  let text_tail =
-    match Hashtbl.find_opt table keeper_name with
-    | Some existing -> existing.text_tail
-    | None -> ""
+let note_tool ~keeper_name ~now tool_name =
+  update ~keeper_name ~now (fun old ->
+    { old with last_tool = Some tool_name; activity = Tool_observed })
+
+let note_stream ~keeper_name ~now event =
+  match event with
+  | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
+    update ~keeper_name ~now (fun old ->
+      { old with text_tail = utf8_tail ~max_bytes:tail_bytes (old.text_tail ^ text)
+      ; activity = Receiving_response })
+  | ContentBlockStart { tool_name = Some tool_name; _ } ->
+    note_tool ~keeper_name ~now tool_name
+  | ContentBlockDelta { delta = TextSnapshot text; _ } ->
+    note_text ~keeper_name ~now text
+  | MessageStart _ | ContentBlockDelta { delta = ThinkingDelta _ | ReasoningDetailsDelta _; _ } ->
+    update ~keeper_name ~now (fun old -> { old with activity = Receiving_response })
+  | _ -> ()
+
+let status_text preview =
+  let activity =
+    match preview.activity with
+    | Preparing -> "preparing turn"
+    | Awaiting_response -> "waiting for provider response"
+    | Receiving_response -> "receiving response"
+    | Tool_observed -> "tool activity observed"
+    | Failed -> "provider attempt failed"
   in
-  Hashtbl.replace table keeper_name { text_tail; current_tool; updated_at = now }
-;;
+  String.concat " · "
+    (List.filter_map Fun.id
+       [ preview.runtime_id; Some activity
+       ; Option.map (fun name -> "last observed tool: " ^ name) preview.last_tool
+       ; Option.map (fun detail -> "last failure: " ^ detail) preview.last_failure ])

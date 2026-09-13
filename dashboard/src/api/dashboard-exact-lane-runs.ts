@@ -3,6 +3,7 @@ import { get, type AbortableRequestOptions } from './core'
 
 export type ExactLane =
   | 'librarian_exact'
+  | 'workspace_curator_exact'
   | 'hitl_auto_judge'
   | 'board_attention_exact'
 
@@ -71,6 +72,7 @@ export interface DashboardExactLaneRunsResponse {
 
 const LANES: readonly string[] = [
   'librarian_exact',
+  'workspace_curator_exact',
   'hitl_auto_judge',
   'board_attention_exact',
 ]

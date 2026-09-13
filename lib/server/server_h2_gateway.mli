@@ -16,6 +16,9 @@ val make_request_handler :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   server_start_time:float ->
-  'a ->
+  Eio.Net.Sockaddr.stream ->
   H2.Reqd.t ->
   unit
+(** The client address was ['a] while this handler discarded it, which is also
+    how the per-client-IP limit the H1 ingress applies went missing on this
+    transport. It is named now because the handler charges that bucket. *)

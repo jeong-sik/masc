@@ -30,7 +30,7 @@ let name_window ~selected ~frame ~width name =
   if (not selected) || cells <= width || width < 3 then
     (* A row the cursor is not on still has to be identifiable. [fit_width]
        kept the head and dropped the tail, so every keeper sharing a prefix
-       read the same -- "rw-e0-r9-20260820-revi~" says nothing the next one
+       read the same -- "rw-e0-r9-20260820-revi…" says nothing the next one
        does not. Dropping the middle keeps both the family and the deciding
        end. The cursor row still scrolls the whole name below. *)
     Masc_tui_message_layout.fit_middle width name
@@ -38,7 +38,11 @@ let name_window ~selected ~frame ~width name =
     (* Edge ellipses remain fixed while the name moves behind them. They say
        which side still contains text without turning the identity itself into
        a guessed abbreviation. *)
-    let window = width - 2 in
+    (* Two marks, one per end, so the window is the column less both. Derived
+       rather than written as 2, and the blank that stands in for an unmarked
+       end is as wide as the mark it replaces -- otherwise the name slides by a
+       cell the moment one end stops being marked. *)
+    let window = width - (2 * Masc_tui_message_layout.cut_mark_cells) in
     let overflow = max 0 (cells - window) in
     let offset = marquee_offset ~frame ~overflow in
     let remaining = Masc_tui_message_layout.drop_cells name offset in
@@ -47,8 +51,14 @@ let name_window ~selected ~frame ~width name =
       | first :: _ -> first
       | [] -> ""
     in
-    let left = if offset > 0 then "\xe2\x80\xa6" else " " in
-    let right = if offset + window < cells then "\xe2\x80\xa6" else " " in
+    let blank = String.make Masc_tui_message_layout.cut_mark_cells ' ' in
+    let left =
+      if offset > 0 then Masc_tui_message_layout.cut_mark else blank
+    in
+    let right =
+      if offset + window < cells then Masc_tui_message_layout.cut_mark
+      else blank
+    in
     left ^ Masc_tui_message_layout.fit_width chunk window ^ right
 
 let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols

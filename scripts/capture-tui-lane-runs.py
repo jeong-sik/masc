@@ -133,7 +133,7 @@ def redaction_pairs(names: list[str]) -> list[list[str]]:
 
     Besides each full name, every displayable prefix is covered: a table column
     truncates a long name to fit (the actor column swaps the last cell for
-    "~"), and a truncated name no longer matches the full-name rule.
+    "…"), and a truncated name no longer matches the full-name rule.
     """
     pairs: list[list[str]] = []
     for index, name in enumerate(names):
@@ -410,7 +410,7 @@ def first_terminal_verifier_row(text: str) -> tuple[int, str]:
                 displayed = (
                     status
                     if len(status) <= RUN_STATUS_COLUMN_CELLS
-                    else status[: RUN_STATUS_COLUMN_CELLS - 1] + "~"
+                    else status[: RUN_STATUS_COLUMN_CELLS - 1] + "…"
                 )
                 if displayed in line:
                     return index, status

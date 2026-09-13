@@ -1,0 +1,79 @@
+{
+  "source_commit": "ee73f5fd4b6d042500b0d8e9ff807d4900848448",
+  "server_sha256": "0abb05edf81ac291695a8a06c32bb47eba8e2802c155a0977cfb9de78a3801e8",
+  "binaries": {
+    "masc-macos-arm64": "0abb05edf81ac291695a8a06c32bb47eba8e2802c155a0977cfb9de78a3801e8",
+    "masc-tui-macos-arm64": "007d6f617c4550768ebbecf5dc87c25044e07e32c09a5edddf76d50a0bfcd997",
+    "masc-browser-host-macos-arm64": "89c07942aeae2298cf30432a41644e193cbc1eb90a688f3fc5297d2e17291814"
+  },
+  "binary_source_proof": {
+    "source_commit": "ee73f5fd4b6d042500b0d8e9ff807d4900848448",
+    "runtime": "/tmp/browser-context-native-ee73/runtime",
+    "sha256": {
+      "masc-macos-arm64": "0abb05edf81ac291695a8a06c32bb47eba8e2802c155a0977cfb9de78a3801e8",
+      "masc-tui-macos-arm64": "007d6f617c4550768ebbecf5dc87c25044e07e32c09a5edddf76d50a0bfcd997",
+      "masc-browser-host-macos-arm64": "89c07942aeae2298cf30432a41644e193cbc1eb90a688f3fc5297d2e17291814"
+    }
+  },
+  "runtime_provenance": {
+    "libraries": [
+      {
+        "name": "libcrypto.3.dylib",
+        "upstream_sha256": "c853c9fefb6d391ab52d8db288b21c106db98e22efd148f2812cb7c27531cd41"
+      },
+      {
+        "name": "libgmp.10.dylib",
+        "upstream_sha256": "03091509d91b059bb22432c77b5aabecf918d32eb3b66b90b0c0c78f74c177b9"
+      },
+      {
+        "name": "libssl.3.dylib",
+        "upstream_sha256": "4a466b82b563ce7bcf90062811ca36c8d57ce5f7fca22333dd68b2f7f41ee7ba"
+      },
+      {
+        "name": "libzstd.1.5.7.dylib",
+        "upstream_sha256": "34c960d7a0c76409111fa77423cf61b6177da9b30901b4d588b190cb351fd1e8"
+      }
+    ],
+    "minimum_macos": "14.0",
+    "platform": "macos-arm64",
+    "python": {
+      "browser_download_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "digest": "sha256:d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+      "name": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "release": "20260901",
+      "size": 25147663,
+      "upstream": "astral-sh/python-build-standalone"
+    },
+    "schema": "masc.macos-runtime.v1",
+    "source_commit": "ee73f5fd4b6d042500b0d8e9ff807d4900848448"
+  },
+  "packages": {
+    "browser-lanes": {
+      "SKILL.md": "6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df",
+      "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+      "references/composition.md": "661203a7464152b506f7f62e480e3f9d903f4e428ba94918e291d06132b2e37a",
+      "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+      "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+      "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+    },
+    "browser-live-click-content": {
+      "SKILL.md": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107"
+    }
+  },
+  "exports": [
+    {
+      "package": "browser-lanes",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-context-native-ee73/bundle/browser-lanes\nbundled revision: 7b1f895a8660ef5d0e3c187befbd0dea837575c3f73ac8d680644b563102fe7c\n",
+      "stderr": "[2026-09-13 04:44:08] [INFO] [MCP] Tag registry initialized: 172 tools registered\n"
+    },
+    {
+      "package": "browser-live-click-content",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-context-native-ee73/bundle/browser-live-click-content\nbundled revision: a5387473ce40a24f0d69767a27e7b9226aadf2755ac7effdd84759caabd16b43\n",
+      "stderr": "[2026-09-13 04:44:08] [INFO] [MCP] Tag registry initialized: 172 tools registered\n"
+    }
+  ],
+  "origin": "candidate binary skills-refresh --export-to",
+  "result": "exported"
+}

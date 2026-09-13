@@ -5,6 +5,7 @@ export type StandaloneLaneId =
   | 'board_attention_exact'
   | 'hitl_auto_judge'
   | 'librarian_exact'
+  | 'workspace_curator_exact'
   | 'verifier_exact'
 
 export type StandaloneLaneStatus =
@@ -68,6 +69,7 @@ export const LANE_IDS = [
   'board_attention_exact',
   'hitl_auto_judge',
   'librarian_exact',
+  'workspace_curator_exact',
   'verifier_exact',
 ] as const satisfies readonly StandaloneLaneId[]
 const STATUSES: readonly string[] = ['running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']

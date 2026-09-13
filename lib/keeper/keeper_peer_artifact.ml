@@ -39,9 +39,23 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
   match decode args with
   | Error detail -> fail Tool_result.Policy_rejection detail
   | Ok (Export {path; purpose}) ->
-    (match Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes ?turn_sandbox_factory
-        ~config ~meta ~path () with
+    (* The Keeper names the path, so the size is the Keeper's choice, and the
+       bytes end up durable in the blob store. Read one past the ceiling: at
+       exactly the ceiling a file that fits and a file that was cut look the
+       same, and a cut export would still satisfy the size check its own
+       reference records -- [fetch] compares against [reference.bytes], which
+       was written from the cut length. So an oversize file is refused, never
+       shortened. *)
+    let ceiling = Env_config_keeper.KeeperPeerArtifact.max_bytes () in
+    (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?turn_sandbox_factory
+        ~config ~meta ~path ~max_bytes:(ceiling + 1) () with
      | Error detail -> fail Tool_result.Runtime_failure detail
+     | Ok bytes when String.length bytes > ceiling ->
+       fail Tool_result.Policy_rejection
+         (Printf.sprintf
+            "Exported artifact is larger than %d bytes; export a smaller file \
+             or raise MASC_KEEPER_PEER_ARTIFACT_MAX_BYTES"
+            ceiling)
      | Ok bytes ->
        (try
           let blob = Tool_blob_store.put_durable

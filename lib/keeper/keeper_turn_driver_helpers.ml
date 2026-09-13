@@ -14,8 +14,9 @@
 (* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
    tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 
-let checkpoint_after_attempt ?agent_ref = function
+let checkpoint_after_attempt ?agent_before_attempt ?session_id ?working_context ?agent_ref = function
+  | Some agent when Option.fold ~none:false ~some:(fun prior -> prior == agent) agent_before_attempt -> None
   | Some agent ->
       (match agent_ref with Some r -> r := Some agent | None -> ());
-      Some (Agent_core.Agent.checkpoint agent)
+      Some (Agent_core.Agent.checkpoint ?session_id ?working_context agent)
   | None -> None

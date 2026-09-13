@@ -1,0 +1,19 @@
+{
+  "stage_prefix": "/tmp/masc-a7855af-installed-candidate-20260913",
+  "source_commit": "a7855af2f7640edffd2c23ae752b6f1e37e610d2",
+  "binary_sha256": "93fbec0f483c6763238ee06c4cbb3f32c34070da5d69ea9341ddf31defae10bc",
+  "release_manifest_sha256": "f126995a24b54ef2f7c41f4eea4e833a8899691d71704efbb6b00b9a26f4dec5",
+  "receipt_keys": [
+    "binary_asset",
+    "binary_sha256",
+    "companions",
+    "files",
+    "runtime",
+    "schema",
+    "source_commit"
+  ],
+  "verified_tree_files": 5433,
+  "server_activated": false,
+  "runtime_config_mutated": false,
+  "scope": "paired artifact extraction and byte verification only"
+}

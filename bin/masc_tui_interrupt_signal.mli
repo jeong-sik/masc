@@ -21,3 +21,6 @@ val decode_interrupt_signal
   -> (interrupt_signal, string) result
 (** Rejects a response whose echoed [request_id] is not the one asked about, so
     a late answer to an earlier interrupt is never read as this one's outcome. *)
+
+val decode_observed_interrupt_signal : expected_token:string -> Yojson.Safe.t ->
+  (interrupt_signal, string) result

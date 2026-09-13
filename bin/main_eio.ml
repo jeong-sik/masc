@@ -118,8 +118,30 @@ let safe_reqd_respond reqd response body =
 
     Enforces two complementary rate limits:
     1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
-    2. Per-agent bearer token (via Authorization header) — enforces per-agent
-       quotas regardless of source IP, complementing the IP-level check. *)
+    2. MCP transport requests consume the per-agent operation bucket here.
+       Authenticated API operation wrappers own that charge for their routes;
+       charging them here too would double-debit one request. Dashboard assets
+       and read observations remain under the same per-IP resource boundary. *)
+(* Which requests this ingress charges to the per-agent bucket. The exemption
+   this lane introduces is for observation reads, and "not MCP transport" was a
+   wider net than that:
+
+   - A WebSocket upgrade is a GET, but it opens a persistent session rather than
+     answering a read, and no route wrapper charges it. Left exempt, one token
+     could hold open as many sessions as it liked while the per-IP bucket
+     refilled -- the session count is what is unbounded, not the message rate.
+   - Any other method is not a read. [with_public_read] reaches
+     [with_read_auth] only under MASC_HTTP_AUTH_STRICT, so outside strict mode a
+     bearer-authenticated POST through that wrapper -- nav-event is one -- had no
+     charge here and none there either.
+
+   GET and HEAD on everything else stay exempt, which is the read boundary this
+   lane set out to draw. *)
+let charges_agent_bucket (request : Httpun.Request.t) =
+  is_mcp_transport_request request
+  || String.equal (Http.Request.path request) "/ws"
+  || match request.Httpun.Request.meth with `GET | `HEAD -> false | _ -> true
+
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
@@ -141,7 +163,8 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ~protocol:Transport_metrics.H1
         ~scope:Transport_metrics.Client_ip;
       true
-    end else
+    end else if not (charges_agent_bucket request) then false
+    else
       match auth_token_from_request request with
       | None -> false
       | Some token ->
@@ -541,12 +564,13 @@ let acquire_pid_lock port =
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
-  | Server_startup_takeover.Base_path_already_owned { pid } ->
-      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
+  | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
+      let detail =
+        Server_startup_takeover.base_path_contention_message
+          ~base_path ~lock_path owner
+      in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
-           owner base_path);
+        ("[FATAL] " ^ detail);
       exit 1
   | Server_startup_takeover.Base_path_rejected rejection ->
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
@@ -1689,6 +1713,7 @@ let verify_runtime_execution runtime timeout_s =
     Eio_context.set_env env;
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
+      ~secure_random:(Eio.Stdenv.secure_random env)
       ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
@@ -1764,10 +1789,51 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio as_json =
-  let tts = Masc.Voice_bridge.probe_tts ~message () in
-  let stt =
-    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+let voice_verify_cmd_exit requested_base_path message audio agent as_json =
+  (* The workspace whose configuration is probed, when one is named. The voice
+     loader finds runtime.toml through the environment, so a workspace set up
+     with `voice-local-setup --base-path` and never recorded as the default had
+     no way to be checked from this command: measured 2026-09-13 with only
+     HOME and PATH set, run inside that workspace, it answered "voice config
+     missing" while the section was there. Exported the way the server boot
+     exports it, and the resolver's cache is cleared because the tool registry
+     has already resolved once by the time a subcommand runs. *)
+  Option.iter
+    (fun raw ->
+      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
+      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Config_dir_resolver.reset ())
+    requested_base_path;
+  (* The keeper whose voice is being checked, when one is named. A voice is
+     resolved per keeper and per endpoint, so "does this configuration work"
+     and "does this keeper have the voice I gave it" are different questions
+     -- and for say only the second one can catch a wrong name, because say
+     speaks in another voice rather than failing on one it does not have. The
+     probe looks the name up in say's own list and refuses one that is not
+     there. *)
+  (* Under an event loop, because a voice_mcp endpoint is asked over the same
+     MCP HTTP client a turn uses, and that client needs a switch, a clock and
+     a connection pool. The HTTP and command kinds run a process and do not
+     depend on it. *)
+  let tts, stt =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.set_switch sw;
+        Eio_context.set_net (Eio.Stdenv.net env);
+        Eio_context.set_clock (Eio.Stdenv.clock env);
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+          let tts =
+            match agent with
+            | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+            | None -> Masc.Voice_bridge.probe_tts ~message ()
+          in
+          let stt =
+            Option.map
+              (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ())
+              audio
+          in
+          tts, stt)))
   in
   let section name = function
     | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)
@@ -1828,6 +1894,18 @@ let voice_verify_cmd =
             "Audio file each STT endpoint is asked to transcribe. Without it, only TTS \
              is probed.")
   in
+  let agent =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "agent" ]
+          ~docv:"KEEPER"
+          ~doc:
+            "Probe with the voice this keeper is mapped to, rather than the section \
+             default. A voice is resolved per keeper and per endpoint, so a mapping \
+             that names a voice an endpoint does not have is only visible this way.")
+  in
   let as_json =
     Arg.(
       value
@@ -1849,7 +1927,207 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ as_json)
+    Term.(const voice_verify_cmd_exit $ run_base_path $ message $ audio $ agent $ as_json)
+(* Turning voice on without a server running.
+
+   The setup journey runs before there is anything to talk to over HTTP, and
+   the two command kinds need no server of their own, so this writes the
+   section through the same writer the route uses -- same revision guard, same
+   refusal to publish a section the loader would reject.
+
+   It writes only what it was asked for: listing is a separate mode because the
+   journey has to show the voices before it can ask which one. *)
+let voice_local_endpoint ~id ~kind =
+  { Voice_config.id
+  ; kind
+  ; base_url = None
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = None
+  ; enabled = true
+  ; timeout_seconds = None
+  ; default_voice = None
+  ; command = None
+  }
+
+let voice_local_voices_exit () =
+  match
+    Masc.Voice_bridge.list_voices
+      (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+  with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok voices ->
+    print_endline
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "voices", `List (List.map Masc.Voice_bridge.catalogue_voice_json voices) ]));
+    0
+
+let voice_local_setup_exit base_path speak_voice hear_model =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  let refuse message = prerr_endline message; 1 in
+  (* Voice is a section of the configuration [masc init] writes, so a directory
+     that was never initialized has nowhere to put one. Checked here, by the
+     file's existence, rather than read out of the writer's error: that error
+     carries the exception as text, and telling "absent" from "unreadable" in it
+     would mean matching a string. A file that exists and cannot be read still
+     falls through to the writer's own sentence.
+
+     Measured 2026-09-13 on an empty directory before this: exit 1 and
+     [Sys_error("<path>: No such file or directory")], with nothing created. *)
+  if not (Sys.file_exists runtime_config_path) then
+    refuse
+      (Printf.sprintf
+         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
+          first, then this again."
+         base_path runtime_config_path (Filename.quote base_path))
+  else
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
+  | Error error -> refuse (Voice_setup.error_message error)
+  (* The writer refuses this too, under its lock; said here first so nothing
+     below is decided against a configuration this command cannot write. *)
+  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
+    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
+  | Ok (revision, active) ->
+    let existing = Option.map snd active in
+    let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
+    let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
+    if Option.is_some hear_model
+      && Option.exists
+           (fun (config : Voice_config.stt_config) -> List.exists
+             (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
+             config.Voice_config.endpoints)
+           stt then
+      refuse
+        "Existing STT endpoints share a provider model. Adding a local model file \
+         would change their model, so nothing was written. Configure the STT section explicitly."
+    else if Option.is_some speak_voice
+      && Option.exists
+           (fun (config : Voice_config.tts_config) -> List.exists
+             (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
+               && endpoint.Voice_config.kind <> Voice_config.Macos_say)
+             config.Voice_config.endpoints)
+           tts then
+      refuse "The endpoint macos-say already names another provider; nothing was written."
+    else
+      (* The name is typed here, and say does not fail on one it does not
+         have: it speaks in another voice and exits 0. Measured 2026-09-13,
+         -v NoSuchVoice wrote the same bytes as -v Yuna. Written unchecked, the
+         mistake surfaced only as a keeper with the wrong voice. The endpoint
+         this writes runs plain say, so that is the catalogue asked. *)
+      match
+        match speak_voice with
+        | None -> Ok ()
+        | Some voice ->
+          Masc.Voice_bridge.check_say_voice
+            (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+            ~voice
+      with
+      | Error reason -> refuse (reason ^ ". Nothing was written.")
+      | Ok () ->
+      let speaking =
+        match speak_voice with
+        | None -> []
+        | Some voice ->
+          (* Where the choice is written decides whether per-keeper voices
+             still reach this endpoint. {!Voice_setup.voice_placement} carries
+             the reason and the measurement. *)
+          let endpoint_voice, section =
+            match Voice_setup.voice_placement tts with
+            | Voice_setup.On_the_endpoint -> Some voice, []
+            | Voice_setup.On_the_section ->
+              None, [ Voice_setup.Set_tts_default_voice voice ]
+          in
+          let endpoint =
+            { (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+              with default_voice = endpoint_voice }
+          in
+          (Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) :: section)
+      in
+      let hearing =
+        match hear_model with
+        | None -> []
+        | Some model ->
+          [ Voice_setup.Put_endpoint
+              ( Voice_setup.Stt
+              , voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli )
+          ; Voice_setup.Set_default_model (Voice_setup.Stt, model)
+          ]
+      in
+      match speaking @ hearing with
+      | [] ->
+          prerr_endline
+            "Nothing to set up: pass --voice to speak, --model to listen, or both.";
+          2
+      | changes ->
+          match
+            Voice_setup.apply ~runtime_config_path ~standalone_path
+              ~expected_revision:revision changes
+          with
+          | Error error -> refuse (Voice_setup.error_message error)
+          | Ok _revision ->
+              print_endline "voice is configured";
+              0
+
+let voice_local_setup_cmd =
+  let voice =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "voice" ]
+          ~docv:"NAME"
+          ~doc:
+            "Speak with this system voice. The name is the whole label say prints, \
+             parentheses included, compared without regard to case. A name say does not \
+             list is refused and nothing is written: say itself would speak it in another \
+             voice without failing, and a bare name that exists in several languages \
+             selects one of them silently.")
+  in
+  let model =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "model" ]
+          ~docv:"FILE"
+          ~doc:"Listen with whisper-cli, loading this ggml model file.")
+  in
+  let list_voices =
+    Arg.(
+      value
+      & flag
+      & info
+          [ "list-voices" ]
+          ~doc:"Print the voices this machine has as JSON, and change nothing.")
+  in
+  Cmd.v
+    (Cmd.info
+       "voice-local-setup"
+       ~doc:"Turn on voice that needs no server, without one running."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "say is in the base system of every mac and whisper-cli comes from one brew \
+              formula. Both run once and exit, so neither needs a server -- which is why \
+              this can run during setup, before there is anything to talk to over HTTP."
+         ; `P
+             "Writes through the same writer the HTTP route uses: the same revision \
+              guard, and the same refusal to publish a section the loader would reject."
+         ])
+    Term.(
+      const (fun base_path voice model list_voices ->
+        if list_voices then voice_local_voices_exit ()
+        else voice_local_setup_exit base_path voice model)
+      $ base_path
+      $ voice
+      $ model
+      $ list_voices)
+
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -3192,8 +3470,23 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, or pdf-tools.")
-    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, or presentation-tools.")
+    (* Resolved on demand: only presentation-tools is scoped to a workspace, and
+       an operator installing Codex or Docker has not made one yet. Taking the
+       resolving [base_path] term here refused every dependency with "MASC_BASE_PATH
+       is not set" -- advice that does not install anything. *)
+    Term.(const (fun base_path dependency action ->
+      Masc_cli_prerequisites.run
+        ~base_path:(fun () -> match base_path with Some raw -> raw | None -> default_base_path ())
+        ~dependency ~action)
+      $ run_base_path $ dependency $ action)
+
+let inspect_file_cmd =
+  let path = Arg.(required & pos 0 (some string) None & info [] ~docv:"FILE"
+    ~doc:"Original PDF, PPTX or MP4 to inspect completely without modifying the file.") in
+  Cmd.v (Cmd.info "inspect-file"
+    ~doc:"Inspect original media as JSON with rendered content. No LLM verdict or Task/Goal transition.")
+    Term.(const (fun base_path path -> Masc_cli_inspect_file.run ~base_path ~path) $ base_path $ path)
 
 let cmd =
   let doc =
@@ -3205,6 +3498,7 @@ let cmd =
       Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
+    ; inspect_file_cmd
     ; skills_refresh_cmd
     ; start_cmd
     ; login_cmd
@@ -3215,6 +3509,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; voice_verify_cmd
+    ; voice_local_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_setup_render_cmd

@@ -455,8 +455,26 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
     let read () =
+      (* [max_bytes] used to be spent on [cat]'s finished output: the child
+         wrote the whole file and the drainer read every byte to EOF, and only
+         then was the first [max_bytes] kept. Reads ask for 16 KiB
+         ([Common.max_tool_result_wire_bytes]), so a Read of a large file paid
+         a whole read and a whole pipe transfer to answer with a few pages.
+         Retention was already capped -- Process_eio keeps head 8 MiB plus
+         tail 256 KiB -- so what moves here is the production and the
+         transfer, not the heap.
+
+         [head -c] puts the limit on the producer. It also closes a trap that
+         no caller has reached yet: asked for more than that head cap, the old
+         path returned head, then "(truncated N bytes)", then tail, cut to
+         [max_bytes] -- which is not a prefix of anything.
+
+         Same shape, and same reason, as the bounded [od -N] chunk read in
+         Keeper_browser_upload. *)
       run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:[ "cat"; backend_path ] ~max_bytes ~timeout_sec ()
+        ~command_argv:
+          [ "head"; "-c"; string_of_int (max 0 max_bytes); backend_path ]
+        ~max_bytes ~timeout_sec ()
       |> Result.map_error (fun detail -> Read_failed detail)
     in
     if
@@ -496,4 +514,17 @@ let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host
   let* path = container_path_of_host ~config ~meta ~host_path in
   let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
       ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
+  Ok bytes
+
+let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
+    ~host_path ~max_bytes ~timeout_sec () =
+  let ( let* ) = Result.bind in
+  if max_bytes <= 0 then Error "Raw prefix byte limit must be positive" else
+  let* path = container_path_of_host ~config ~meta ~host_path in
+  (* Binary capture must retain exact bytes; limiting its text projection would
+     corrupt media. Bound the producing command instead, including endpoint
+     reads where the host cannot stat the source. *)
+  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
+      ~command_argv:["head"; "-c"; string_of_int max_bytes; path]
+      ~max_bytes:None ~timeout_sec () in
   Ok bytes

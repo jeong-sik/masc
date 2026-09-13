@@ -96,6 +96,7 @@ type run_result =
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; checkpoint : Agent_core.Checkpoint.t option
   ; cooperative_boundary : Agent_core.Agent.Advanced.tool_boundary option
   ; trace_ref : Agent_core.Raw_trace.run_ref option

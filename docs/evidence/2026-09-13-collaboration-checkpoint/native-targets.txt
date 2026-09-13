@@ -1,0 +1,15 @@
+2026-09-12T18:22:35.8197624Z [targeted] test_operator_media_inspection: OK in 7s
+2026-09-12T18:22:48.8102871Z [targeted] test_install_runtime_setup: OK in 13s
+2026-09-12T18:22:51.6888611Z [targeted] test_presentation_fixture_contract: OK in 3s
+2026-09-12T18:23:08.8398964Z [targeted] test/test_verification_presentation: OK in 2s
+2026-09-12T18:23:10.7130861Z [targeted] test/test_verification_authority_tools: OK in 2s
+2026-09-12T18:23:10.8790171Z [targeted] test/test_verification_collaboration_evidence: OK in 0s
+2026-09-12T18:23:10.9394830Z [targeted] test/test_board_persistence_load_contract: OK in 0s
+2026-09-12T18:23:11.0109487Z [targeted] test/test_board_persistence_schema: OK in 1s
+2026-09-12T18:23:11.1458543Z [targeted] test/test_keeper_tool_plan: OK in 0s
+2026-09-12T18:23:11.1990203Z [targeted] test/test_sandbox_prerequisites: OK in 0s
+2026-09-12T18:23:11.3828766Z [targeted] test/test_fusion_decision: OK in 0s
+2026-09-12T18:23:11.5284582Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: OK in 0s
+2026-09-12T18:23:11.6509054Z [targeted] test/test_server_ide_lsp_proxy: OK in 0s
+2026-09-12T18:23:11.7380403Z [targeted] test/test_lsp_process_manager: OK in 0s
+2026-09-12T18:23:11.8094480Z [targeted] test/test_lsp_message_router: OK in 0s

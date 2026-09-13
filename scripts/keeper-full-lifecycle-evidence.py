@@ -268,9 +268,9 @@ def print_failure_summary(output_dir: pathlib.Path, results: list[dict]) -> None
             print(line, file=sys.stderr)
 
 
-def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path) -> int:
+def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path, build_source_sha: str | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
-    sha = source_sha(repo)
+    sha = build_source_sha if build_source_sha is not None else source_sha(repo)
     results = []
     for scenario in SCENARIOS:
         log_path = output_dir / f"{scenario['id'].lower()}-{scenario['name']}.log"
@@ -367,11 +367,15 @@ def main() -> int:
         "--output-dir", default=".release-evidence/keeper-full-lifecycle"
     )
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--build-source-sha", help="Source commit supplied by the container build driver (generation only)")
     args = parser.parse_args()
+    if args.build_source_sha is not None:
+        if args.verify or len(args.build_source_sha) != 40 or any(c not in "0123456789abcdef" for c in args.build_source_sha):
+            parser.error("--build-source-sha requires a full lowercase commit SHA and cannot be used with --verify")
     repo = pathlib.Path(__file__).resolve().parent.parent
     output_dir = (repo / args.output_dir).resolve()
     return (
-        verify_bundle(repo, output_dir) if args.verify else run_bundle(repo, output_dir)
+        verify_bundle(repo, output_dir) if args.verify else run_bundle(repo, output_dir, args.build_source_sha)
     )
 
 

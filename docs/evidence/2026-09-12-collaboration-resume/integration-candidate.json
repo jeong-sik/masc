@@ -1,0 +1,51 @@
+{
+  "head": "2855bbad1d0775f8f5ee4abfa75331852662b47b",
+  "pr": 35462,
+  "base": "test/collaboration-native-ui-20260912",
+  "test_run": 34696913204,
+  "release_run": 34696914912,
+  "test_dispatch_superseded": {
+    "run": 34694052046,
+    "reason": "Two nested OCaml suites needed keeper_chat_operations path; cancellation requested before execution and corrected dispatch submitted."
+  },
+  "local_validation": {
+    "ocaml_parse_only_files": 30,
+    "changed_python_syntax": "passed",
+    "diff_check": "passed",
+    "build_run": false
+  },
+  "independent_review": "native scope write/read finding fixed; no further P1/P2 on exact source/CAS and current-context ordering",
+  "installed": false,
+  "acceptance": "pending",
+  "previous_candidate": {
+    "head": "8fd8d20b3cf5a9f27c8c67024dd41b121277cd1e",
+    "test_run": 34695701869,
+    "release_run": 34695703145,
+    "test_conclusion": "failure",
+    "first_failure": "test_keeper_direct_gate_wait.ml:169: Unbound module Keeper_repetition_snapshot",
+    "suite_execution": "quota passed; 13 OCaml suites not run because grouped build failed",
+    "macos_arm64_artifact_downloaded": true,
+    "installed": false
+  },
+  "followup_commits": [
+    "d2dbe6d297",
+    "da66b0a64d",
+    "23512bb8d8",
+    "03caf06582",
+    "d4a874a663",
+    "0269010b89"
+  ],
+  "component_quota_proof": "https://github.com/jeong-sik/masc/blob/03caf0658203e62b848b9c97747dfe0e6efbf377/docs/evidence/2026-09-12-dashboard-observation-quota/native-artifact-proof.json",
+  "native_input_observation_scope": "Prepared arguments plus adapter post-write signal and later same-session settlement; not generic independent serialized-wire proof.",
+  "test_status": "completed",
+  "release_status": "in_progress",
+  "ci_status_scope": "Status at initial exact-head dispatch verification; not a terminal verdict.",
+  "test_conclusion": "failure",
+  "passed_suites": 13,
+  "failed_suites": 1,
+  "failed_suite_cases": {
+    "passed": 7,
+    "failed": 1
+  },
+  "next_candidate": "fusion-feedback-candidate.json"
+}

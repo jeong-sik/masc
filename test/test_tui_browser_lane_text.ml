@@ -78,6 +78,41 @@ let () =
     width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false;view=Content;scope=None } in
   let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
   let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
+  let copied_target source client_id selected =
+    let scene = {scene with source;client_id;content={content with nodes=[selected]}} in
+    match Lane.scene_context {view with scene=Some scene} with
+    | None -> failwith "selected target context missing"
+    | Some text -> Yojson.Safe.from_string text in
+  let client = "10000000-0000-4000-8000-000000000001" in
+  let region = {node with node_id="channels";kind=Region "navigation";tag="nav";text="Channels"} in
+  let open Yojson.Safe.Util in
+  let region_context = copied_target Live (Some client) region in
+  let region_action = region_context |> member "defaultAction" in
+  let region_input = region_action |> member "input" in
+  assert (region_context |> member "targetKind" = `String "region");
+  assert (Lane.scene_target_action region = Some Read_region);
+  assert (region_action |> member "kind" = `String "read_region");
+  assert (region_action |> member "tool" = `String "BrowserRead");
+  assert (region_input |> member "mode" = `String "scene");
+  assert (region_input |> member "clientId" = `String client);
+  assert (region_input |> member "expectedUrl" = `String content.url);
+  assert (Masc.Browser_scene.scope_of_json (region_input |> member "scope") =
+    Ok {Browser_lane.document_id=content.document_id;node_id=region.node_id});
+  let control = {node with kind=Control {clickable=true;editable=false;disabled=false};tag="button"} in
+  let control_context = copied_target Automation None control in
+  let control_action = control_context |> member "defaultAction" in
+  assert (Lane.scene_target_action control = Some Click_control);
+  assert (control_action |> member "tool" = `String "BrowserInteract");
+  (match Masc.Browser_interaction.parse (control_action |> member "input") with
+   | Ok {action=Browser_lane.Click_node target;expected_url=Some url;client_id=None;_} ->
+       assert (target.document_id=content.document_id && target.node_id=control.node_id && url=content.url)
+   | _ -> failwith "copied control action does not satisfy the actual interaction contract");
+  List.iter (fun kind ->
+    let selected={node with kind} in
+    assert (Lane.scene_target_action selected=None);
+    assert (copied_target Automation None selected |> member "defaultAction" = `Null))
+    [Text;Raster;Control {clickable=true;editable=false;disabled=true};
+     Control {clickable=false;editable=true;disabled=false}];
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then

@@ -1,0 +1,13 @@
+{
+  "source_commit": "d4414681eb1335de48ccde6f20abb5e74d2e300d",
+  "native_ci_run": 34711268006,
+  "test_ci_run": 34711266435,
+  "scope": "Separate downloaded macOS binary key-isolation fixture; not the natural live Keeper candidate.",
+  "files": {
+    "fixture.py": "fe65f848ebb63ea496cebf668b9ec31e64ade2eb7272fbd1a2f2ca427c46d53a",
+    "harness.py": "3090ecdb5ae622c078d6c614075dd0fca6bc1ad426a6977d6c2552acb7a722e7",
+    "result.txt": "21deadec6971db9606380392dbd3d84ca605db08d8e604ac867894a72497e7ca",
+    "verified-binaries.json": "fb6fd2e4ca8d06fbacb6ba0f8b4722d67d4bf7f309598471d69426aeb9769265",
+    "ci-suites.txt": "b94c26092b8c24e2751fda5d401558cee3c70ac276c479f296e26836499d938f"
+  }
+}

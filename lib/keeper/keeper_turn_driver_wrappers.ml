@@ -26,6 +26,10 @@ let run_named_with_masc_tools
     ~base_path
     ~system_prompt
     ?(native_tools = [])
+    ?tool_requirement
+    ?required_native_posture
+    ?tool_result_projection
+    ?on_selected_runtime
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
@@ -49,6 +53,7 @@ let run_named_with_masc_tools
   let bridged_tools = List.map (fun (td : Masc_domain.tool_schema) ->
     Tool_bridge.agent_core_tool_of_masc
       ~base_path
+      ?model_projection:tool_result_projection
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
@@ -57,13 +62,15 @@ let run_named_with_masc_tools
   let+ selected =
     Keeper_turn_driver.run_named
       ~runtime_id
-      ~keeper_name
+        ~keeper_name
       ~goal
       ?goal_blocks
       ~base_path
       ~system_prompt
       ~tools:bridged_tools
       ~agent_core_tools:bridged_tools
+      ?tool_requirement
+      ?required_native_posture
       ?temperature
       ?stream_idle_timeout_s
       ?hooks
@@ -82,4 +89,5 @@ let run_named_with_masc_tools
       ?net
       ()
   in
+  Option.iter (fun observe -> observe selected.selected_runtime_id) on_selected_runtime;
   selected.run_result

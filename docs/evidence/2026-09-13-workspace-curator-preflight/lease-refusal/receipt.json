@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "bash",
+    "/tmp/masc-a7855af-installed-candidate-20260913/masc-check-runtime-deployment-preflight",
+    "--base-path",
+    "/Users/dancer/.masc-integration/collaboration-baseline-68c7668"
+  ],
+  "exit_code": 124,
+  "helper_path": "/private/tmp/masc-a7855af-installed-candidate-20260913/.masc-releases/f126995a24b54ef2f7c41f4eea4e833a8899691d71704efbb6b00b9a26f4dec5/masc-deployment-preflight-helper",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "6a88a86a8f94f8d519a4ca5e19e4a5f7f267f09e556251b752603c88fc203452",
+  "scope": "candidate native deployment preflight only; no server activation requested"
+}

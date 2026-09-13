@@ -1,7 +1,9 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
-type t = { root : string }
-let create ~root = { root }
+type jsonl_snapshot = { entry_count : int; reference : evidence }
+type t = { root : string; sequence_mutex : Mutex.t;
+           sequences : (string, jsonl_snapshot) Hashtbl.t }
+let create ~root = { root; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let digest bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 let protect f =
@@ -19,14 +21,116 @@ let write_blob t bytes =
   let hash = digest bytes in
   let* () = write t (blob_path hash) bytes in
   Ok { uri = "lane-evidence:" ^ hash; sha256 = Some hash }
-let read_blob t (reference : evidence) = protect (fun () ->
+type retained_kind = Blob | Sequence
+let retained_address (reference : evidence) =
   match reference.sha256 with
   | Some hash when String.length hash = 64
-      && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) hash
-      && reference.uri = "lane-evidence:" ^ hash ->
-      let bytes = Fs_compat.load_file (Filename.concat t.root (blob_path hash)) in
-      if digest bytes = hash then Ok bytes else Error "evidence digest mismatch"
-  | _ -> Error "evidence is not retained in this Lane store")
+      && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) hash ->
+      if reference.uri = "lane-evidence:" ^ hash then Ok (Blob, hash)
+      else if reference.uri = "lane-sequence:" ^ hash then Ok (Sequence, hash)
+      else Error "evidence is not retained in this Lane store"
+  | _ -> Error "evidence is not retained in this Lane store"
+let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
+let read_blob t reference = protect (fun () ->
+  let* kind, hash = retained_address reference in
+  let relative = match kind with Blob -> blob_path hash | Sequence -> sequence_path hash in
+  let bytes = Fs_compat.load_file (Filename.concat t.root relative) in
+  if digest bytes = hash then Ok bytes else Error "evidence digest mismatch")
+
+type sequence_node = Empty | Record of { count : int; previous : evidence; bytes : string }
+let sequence_schema = "masc.lane-jsonl-sequence.v1"
+let read_sequence_node t reference =
+  let* kind, _ = retained_address reference in
+  if kind <> Sequence then Error "sequence requires a host-owned lane-sequence reference"
+  else
+    let* bytes = read_blob t reference in
+    protect (fun () ->
+      match Yojson.Safe.from_string bytes with
+      | `Assoc fields when List.sort String.compare (List.map fst fields)
+          = ["entry_count"; "previous"; "record"; "schema"]
+          && List.assoc "schema" fields = `String sequence_schema ->
+          (match List.assoc "entry_count" fields, List.assoc "previous" fields,
+                 List.assoc "record" fields with
+           | `Int 0, `Null, `Null -> Ok Empty
+           | `Int count, previous, `String bytes when count > 0 ->
+               let* previous = evidence_of_json previous in
+               let* kind, _ = retained_address previous in
+               if kind <> Sequence then Error "sequence predecessor is not host-owned"
+               else Ok (Record { count; previous; bytes })
+           | _ -> Error "invalid sequence record")
+      | _ -> Error "invalid sequence schema")
+let node_count = function Empty -> 0 | Record node -> node.count
+let write_sequence_node t node =
+  let count, previous, record = match node with
+    | Empty -> 0, `Null, `Null
+    | Record node -> node.count, evidence_to_json node.previous, `String node.bytes in
+  let bytes = Yojson.Safe.to_string (`Assoc ["schema", `String sequence_schema;
+    "entry_count", `Int count; "previous", previous; "record", record]) in
+  let hash = digest bytes in
+  let reference = { uri = "lane-sequence:" ^ hash; sha256 = Some hash } in
+  if Sys.file_exists (Filename.concat t.root (sequence_path hash)) then
+    let* _ = read_blob t reference in Ok reference
+  else let* () = write t (sequence_path hash) bytes in Ok reference
+let sequence_prefix t snapshot count =
+  let rec walk expected reference =
+    let* node = read_sequence_node t reference in
+    if node_count node <> expected then Error "sequence predecessor count mismatch"
+    else if expected = count then Ok {entry_count = count; reference}
+    else match node with
+      | Empty -> Error "sequence cursor is outside retained history"
+      | Record node -> walk (expected - 1) node.previous in
+  walk snapshot.entry_count snapshot.reference
+let retain_jsonl t ~history ~entry_count ~newest_first ~encode =
+  (* This API is used by offloaded source acquisition, never a running fiber. *)
+  Mutex.lock t.sequence_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock t.sequence_mutex) (fun () ->
+    if entry_count < 0 then Error "negative sequence cursor"
+    else
+      let* previous = match Hashtbl.find_opt t.sequences history with
+        | Some snapshot -> Ok snapshot
+        | None -> let* reference = write_sequence_node t Empty in
+            let snapshot = {entry_count = 0; reference} in
+            Hashtbl.add t.sequences history snapshot;
+            Ok snapshot in
+      if entry_count <= previous.entry_count then sequence_prefix t previous entry_count
+      else
+        let rec new_records remaining acc = function
+          | _ when remaining = 0 -> Ok acc
+          | [] -> Error "input history is shorter than its captured cursor"
+          | entry :: rest -> new_records (remaining - 1) (entry :: acc) rest in
+        let* entries = new_records (entry_count - previous.entry_count) [] newest_first in
+        let rec append snapshot = function
+          | [] -> Hashtbl.replace t.sequences history snapshot; Ok snapshot
+          | entry :: rest ->
+              let count = snapshot.entry_count + 1 in
+              let* reference = write_sequence_node t
+                (Record {count; previous = snapshot.reference; bytes = encode entry}) in
+              append {entry_count = count; reference} rest in
+        append previous entries)
+let fold_sequence ?seen t reference ~init ~f =
+  let rec walk expected acc reference =
+    let* kind, _ = retained_address reference in
+    if kind <> Sequence then Error "sequence requires a host-owned lane-sequence reference"
+    else
+    let count_matches count = Option.fold ~none:true ~some:((=) count) expected in
+    match Option.bind seen (fun table -> Hashtbl.find_opt table reference.uri) with
+    | Some count ->
+        if count_matches count then Ok acc else Error "sequence predecessor count mismatch"
+    | None ->
+        let* node = read_sequence_node t reference in
+        let count = node_count node in
+        if not (count_matches count) then Error "sequence predecessor count mismatch"
+        else
+          let* acc = f acc reference node in
+          Option.iter (fun table -> Hashtbl.add table reference.uri count) seen;
+          match node with Empty -> Ok acc
+          | Record node -> walk (Some (node.count - 1)) acc node.previous in
+  walk None init reference
+let read_jsonl t reference =
+  let* records = fold_sequence t reference ~init:[]
+    ~f:(fun records _ -> function Empty -> Ok records
+      | Record node -> Ok (node.bytes :: records)) in
+  Ok (String.concat "" records)
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
 let action_path ~instance_id ~request_id =
@@ -209,6 +313,35 @@ let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~la
     Ok { rows = List.rev rows; coverage = List.rev coverage @
       [query_coverage ~last ~rows_complete ~coverage_complete ~readable] }
 module Row_ids = Set.Make (String)
+let retained_reference = function
+  | `Assoc fields ->
+      (match List.assoc_opt "uri" fields, List.assoc_opt "sha256" fields with
+       | Some (`String uri), Some (`String hash) -> Ok { uri; sha256 = Some hash }
+       | _ -> Error "retained evidence requires its URI and SHA-256")
+  | _ -> Error "retained evidence requires an object"
+
+(* Traverse only the selected record's structured references, never the bodies
+   of referenced source files. File/HTTP URIs and plugin paths are data. *)
+let rec source_references ?(declared_evidence=false) json =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "uri" fields with
+       | Some (`String uri) when String.starts_with ~prefix:"lane-evidence:" uri
+           || (declared_evidence && String.starts_with ~prefix:"lane-sequence:" uri) ->
+           let* reference = retained_reference json in Ok [reference]
+       | _ -> List.fold_left (fun acc (key, value) ->
+           let* acc = acc in
+           let* references = match key, value with
+             | "evidence", `List values -> references_in_values ~declared_evidence:true values
+             | _ -> source_references value in
+           Ok (List.rev_append references acc)) (Ok []) fields)
+  | `List values -> references_in_values values
+  | _ -> Ok []
+and references_in_values ?(declared_evidence=false) values =
+  List.fold_left (fun acc value ->
+    let* acc = acc in let* references = source_references ~declared_evidence value in
+    Ok (List.rev_append references acc)) (Ok []) values
+
 let freeze t ~instance_id ~binding ~row_ids =
   let requested = Row_ids.of_list row_ids in
   let* max_bytes =
@@ -236,11 +369,19 @@ let freeze t ~instance_id ~binding ~row_ids =
   else if List.length row_ids <> Row_ids.cardinal requested then Error "duplicate selected row identity"
   else if base_size > max_bytes then Error "selected evidence metadata exceeds package byte envelope"
   else
+    let validated_sequences = Hashtbl.create 16 in
     let rec selected_records acc found remaining = function
       | [] -> Ok (List.rev acc, found)
       | seq :: rest ->
           let* bytes = bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq) in
           let* _, output = decode_record bytes in
+          let* references = source_references (Yojson.Safe.from_string bytes) in
+          let* () = List.fold_left (fun result reference ->
+            let* () = result in
+            let* kind, _ = retained_address reference in
+            match kind with Blob -> Ok ()
+            | Sequence -> fold_sequence ~seen:validated_sequences t reference ~init:()
+                ~f:(fun () _ _ -> Ok ())) (Ok ()) references in
           let matching = List.filter (fun (row : row) -> Row_ids.mem row.id requested) output.rows in
           let found = List.fold_left (fun ids (row : row) -> Row_ids.add row.id ids) found matching in
           let hash = digest bytes in
@@ -270,29 +411,6 @@ let freeze t ~instance_id ~binding ~row_ids =
           ^ "\nThe observations list names retained record paths and SHA-256 digests. Read those records for original sources and output."
           ^ "\nUse, defer, or independently check this evidence as appropriate. Your current task continues.")])
 
-let retained_reference = function
-  | `Assoc fields ->
-      (match List.assoc_opt "uri" fields, List.assoc_opt "sha256" fields with
-       | Some (`String uri), Some (`String hash) -> Ok { uri; sha256 = Some hash }
-       | _ -> Error "retained evidence requires its URI and SHA-256")
-  | _ -> Error "retained evidence requires an object"
-
-(* Traverse only the selected record's structured references, never the bodies
-   of referenced source files. File/HTTP URIs and plugin paths are data. *)
-let rec source_references json =
-  match json with
-  | `Assoc fields ->
-      (match List.assoc_opt "uri" fields with
-       | Some (`String uri) when String.starts_with ~prefix:"lane-evidence:" uri ->
-           let* reference = retained_reference json in Ok [reference]
-       | _ -> references_in_values (List.map snd fields))
-  | `List values -> references_in_values values
-  | _ -> Ok []
-and references_in_values values =
-  List.fold_left (fun acc value ->
-    let* acc = acc in let* references = source_references value in
-    Ok (List.rev_append references acc)) (Ok []) values
-
 module Published = Map.Make (String)
 let publish_for_keeper ~base_path t frozen = protect (fun () ->
   let* fields, bundle_reference = match frozen with
@@ -302,7 +420,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
          | None -> Error "frozen evidence bundle is missing")
     | _ -> Error "invalid frozen evidence" in
   let blobs = Tool_blob_store.create ~base_path in
-  let publish ~mime published reference =
+  let publish_one ~mime published reference =
     match Published.find_opt reference.uri published with
     | Some artifact when reference.sha256 = Some artifact.Tool_output.sha256 -> Ok (published, artifact)
     | Some _ -> Error "retained evidence digest disagrees with its URI"
@@ -310,6 +428,19 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
         let* bytes = read_blob t reference in
         let artifact = Tool_blob_store.put_durable blobs ~bytes ~mime in
         Ok (Published.add reference.uri artifact published, artifact) in
+  let published_sequences = Hashtbl.create 16 in
+  let publish ~mime published reference =
+    let* kind, _ = retained_address reference in
+    match kind with
+    | Blob -> publish_one ~mime published reference
+    | Sequence ->
+        let* published = fold_sequence ~seen:published_sequences t reference ~init:published
+          ~f:(fun published reference _ ->
+            let* published, _ = publish_one ~mime:"application/json" published reference in
+            Ok published) in
+        (match Published.find_opt reference.uri published with
+         | Some artifact -> Ok (published, artifact)
+         | None -> Error "sequence publication produced no root") in
   let* bundle_bytes = read_blob t bundle_reference in
   let* records = match Yojson.Safe.from_string bundle_bytes with
     | `Assoc bundle ->

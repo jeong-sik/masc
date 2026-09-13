@@ -8,6 +8,11 @@
     refused, validated redirects, bounded extraction — live in the tool. Descriptor registry drift and unreadable
     producer state reject surface construction. Every dispatched call is
     validated and translated by the same descriptor that was advertised.
+    Exact Board/Fusion source reads are also available. Task authority uses
+    the actual producer identity; Goal authority permits shared workspace
+    records. Direct posts are readable only by their author via Task review,
+    because immutable target readership is not available at this boundary.
+    Neither surface grants general access to the MASC storage directory.
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)
 
@@ -15,9 +20,11 @@
 type t
 
 val create :
-  config:Workspace.config -> producer:string -> (t, string) result
+  config:Workspace.config -> producer:string ->
+  submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result
 
-val create_goal_proof : config:Workspace.config -> (t, string) result
+val create_goal_proof : config:Workspace.config ->
+  submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result
 (** The Goal proof surface: read and web-fetch rooted at the shared playground
     prefix. A Goal names no producer, so there is no owned tree to bind to and
     no producer set to derive; this root is the same fixed workspace location
@@ -45,7 +52,7 @@ val schemas : t -> Types_core.tool_schema list
 
 val image_delivery_note : string
 (** The sentence [schemas] appends to the read_file descriptor: this surface
-    reads images and inspected PDF pages as visual input. Exposed so the schema-parity test asserts
+    reads images and inspected PDF/PPTX pages as visual input. Exposed so the schema-parity test asserts
     against the same spelling the surface publishes. *)
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
@@ -53,4 +60,7 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
     model content, with path, media type, size and SHA-256 in the text receipt.
     PDFs are inspected from complete captured source bytes using Poppler: source
     identity, parsed page metadata/text and all rendered PNG pages are returned.
+    PPTX files additionally expose ordered source slide text and speaker notes,
+    with every slide rendered from the captured presentation. Animations and
+    embedded audio/video playback remain explicitly uninspected.
     Other binary output is a stated lookup failure, never text or visual proof. *)

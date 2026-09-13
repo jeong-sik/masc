@@ -164,6 +164,7 @@ end
 
 module For_testing : sig
   val observe_node_result :
+    ?on_receipt_committed:(Ids.Execution_id.t -> unit) ->
     composition_tool:string ->
     composition_execution:Keeper_tool_composition_catalog.execution_mode ->
     composition_tool_kind:Keeper_tool_descriptor.tool_kind ->

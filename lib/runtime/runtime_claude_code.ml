@@ -222,7 +222,10 @@ type error =
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_admitted : bool
+      }
   | Timeout of float
 
 exception Runtime_error of error
@@ -276,8 +279,9 @@ let error_to_string = function
       api_status
       tool_effect_attempted
       response_emitted
-  | Process_exited detail ->
-    "Claude Code exited before terminal result: " ^ detail
+  | Process_exited { detail; turn_admitted } ->
+    Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
+      turn_admitted detail
   | Timeout seconds ->
     Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
@@ -1533,7 +1537,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
-        Error (Process_exited (if detail = "" then "stdout closed" else detail))
+        (* A client that dies before the turn is admitted submitted nothing,
+           so another candidate may still be tried. [turn_admitted] is the
+           same fact the control responses above already read. *)
+        Error
+          (Process_exited
+             { detail = (if detail = "" then "stdout closed" else detail)
+             ; turn_admitted = !turn_admitted
+             })
       | Idle_timeout seconds -> Error (Timeout seconds)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
@@ -1599,7 +1610,7 @@ let validate_config config ~session_mode ~prompt =
    analyze_image tool schema and the dashboard composer, so a file the operator
    can attach is a file this transport can carry. *)
 let supported_image_media_types =
-  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+  Runtime_official_client_tool.official_client_image_media_types
 ;;
 
 (* Fail closed before spawning the CLI. A malformed image reaches the provider
@@ -1619,14 +1630,9 @@ let validate_images images =
                 where
                 image.media_type
                 (String.concat ", " supported_image_media_types)))
-      else if String.trim image.base64_data = ""
-      then Error (Invalid_config (where ^ ".base64_data must not be empty"))
-      else if String.exists (fun c -> c = '\n' || c = '\r') image.base64_data
-      then
-        Error
-          (Invalid_config
-             (where ^ ".base64_data must not contain newlines"))
-      else loop (index + 1) rest
+      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
+        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
+        | Ok () -> loop (index + 1) rest
   in
   loop 0 images
 ;;

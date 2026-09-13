@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/tmp/masc-a7855af-installed-candidate-20260913/masc",
+    "runtime-wizard-catalog",
+    "--base-path",
+    "/tmp/masc-curator-native-config-preflight-20260913/workspace",
+    "--json"
+  ],
+  "exit_code": 0,
+  "runtime_input_sha256": "1aeb658bc5d410b9e946bcbe986745e6596a821f777b25439f2cd5b702bbdec0",
+  "live_runtime_unchanged": true,
+  "scope": "candidate native TOML/wizard inventory parsing only; no model admission or dispatch"
+}

@@ -22,6 +22,12 @@ val backfill_startup_required_from_embedded : config_root:string -> int
 
 val bootstrap_base_path_config_root : base_path:string -> unit
 
+val bootstrap_initial_config_root : base_path:string -> created:bool -> unit
+(** Called under the runtime configuration lock after atomic directory creation.
+    Preserve full fresh-root seeding only when this caller created the directory
+    and no configuration entries have appeared since. Existing roots retain
+    their normal backfill-only behavior. *)
+
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
 val seed_missing_builtin_skills : base_path:string -> int

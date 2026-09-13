@@ -91,7 +91,8 @@ val publish
     immutable AGENT_CORE admitted-target handle before publication. Credential
     presence is deliberately excluded from publication admission. Unknown
     catalog targets are retained as typed [rejected_slot] observations and do
-    not suppress admitted siblings. Blank or duplicate ids and malformed target
+    not suppress admitted siblings. Blank or duplicate ids (including across
+    [slots] and [cli_slots]) and malformed target
     refs remain fatal. A required lane must retain at least one admitted slot.
     Returns [Publication_busy] while a replacement reservation is active. *)
 
@@ -155,6 +156,10 @@ val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error)
     by the supplied registry. This does not resolve credentials or
     select provider targets; AGENT_CORE owns those operations while executing the
     exact flow. Slot declaration order is preserved. *)
+
+val catalog_generation_fingerprint : t -> string
+(** Opaque identity of the frozen catalog generation. This exposes neither
+    credentials nor serialized provider configuration. *)
 
 val publication_error_to_string : publication_error -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string

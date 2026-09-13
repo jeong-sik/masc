@@ -1,0 +1,40 @@
+{
+  "runtime_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "scope": "allowlisted browser network observation during Keeper workspace hydration; request credentials omitted",
+  "completed_status_counts": {
+    "200": 77,
+    "429": 5
+  },
+  "rate_limited_requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/providers",
+      "query": "",
+      "status": 429
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/config",
+      "query": "",
+      "status": 429
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/transitions",
+      "query": "?limit=1",
+      "status": 429
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/exhibit-editor/waiting-inventory",
+      "query": "",
+      "status": 429
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-D1UutkaU.js",
+      "query": "",
+      "status": 429
+    }
+  ]
+}

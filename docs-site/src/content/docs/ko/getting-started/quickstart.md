@@ -4,12 +4,12 @@ description: 보유 런타임을 연결하고 기본 샌드박스의 imp와 대�
 ---
 
 macOS·Linux용 바이너리를 설치합니다. OCaml·Node.js 빌드 도구는 필요 없습니다.
-이 안내는 **0.35.12** 기준입니다. 게시 여부는
+이 안내는 **0.35.14** 기준입니다. 게시 여부는
 [Releases](https://github.com/jeong-sik/masc/releases)에서 확인하고 바이너리와
 같은 태그에 첨부된 설치기를 사용하세요.
 
 ```bash
-TAG=v0.35.12
+TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -25,9 +25,9 @@ export PATH="$HOME/.local/bin:$PATH"
 
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
 
-## `imp`와 첫 대화 (0.35.12)
+## `imp`와 첫 대화 (0.35.14)
 
-이 경로는 `masc setup`이 포함된 **0.35.12 설치 계약**입니다. 다운로드 전에
+이 경로는 `masc setup`이 포함된 **0.35.14 설치 계약**입니다. 다운로드 전에
 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
 
 1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델

@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "status": {
+    "kind": "exit",
+    "code": 0
+  },
+  "shim_execution_evidence": {
+    "status": "not_observed",
+    "receipts": []
+  },
+  "output_completeness": "complete",
+  "output": "OK adaptation/experience.pptx bytes=25462 sha256=cf0c4fb9f14d4aa7519ca3cd99b9cdb2d7b55cbb4f70fc3898e1754f2da59b88 slides=8\nPPTX rels_ok=True slide_refs=8 issues=NONE\nPPTX bytes=25462 sha256=cf0c4fb9f14d4aa7519ca3cd99b9cdb2d7b55cbb4f70fc3898e1754f2da59b88\nPPTX slides=8 notes=8 struct_ok=True notes_chars=[85, 68, 88, 86, 58, 57, 70, 53]\nPPTX must_missing=NONE\nPPTX cjk_anomaly=NONE\n  slide1: 기억의 정원 이야기 시간같은 것, 다른 기억 — 은빛정류장 전시실 (2026년 10월 17일)※ 본 프로그램\n  slide2: 서연이는 종이바람개비를 내밀며 물었어요.“할머니, 이거 심어도 돼?”이름표: “할머니와 접은 종이바람 — 함\n  slide3: 서연이라면 어떻게 할까요?(정답은 없습니다)●물어보고 심기▬가방에 넣기○아직 정하지 않기보기만 하기도 참여입\n  slide4: 도윤이는 햇살을, 아빠는 비 뒤 잔디 냄새를 기억했어요.같은 날인데도요.서연이의 이름표를 본 도윤이: “우리\n  slide5: “그날의 햇살”도윤이의 이름표“비 뒤의 잔디 냄새”아빠의 이름표같은 날이 두 개의 기억으로 살아 있어요.수를\n  slide6: 폐막 삼십 분 전, 정원에는 세 가지 선택이 있었어요.남기기  ·  가져가기  ·  심지 않기두 이름표 덕분\n  slide7: 기억을 지키는 방법은 하나가 아녜요.다른 사람의 선택도 함께 있어요.“할머니와 봄에 다시 오기로 했습니다.”\n  slide8: 같은 것, 다른 기억※ 본 프로그램은 허구로 구성된 전시 세계의 이야기입니다. (실제 인물·단체와 무관)\nMP4 bytes=349039 sha256=ac2f405b102b3a6bee1e5344b141ae0389f6551f937150a298d80ed9437b67a3\nMP4 codec=h264 1920x1080 duration=115.0s audio=False dim_ok=True\n  frame cover@2s -> OK /home/keeper/playground/exhibit-editor/adaptation/check_cover.png\n  frame Q1@26s -> OK /home/keeper/playground/exhibit-editor/adaptation/check_Q1.png\n  frame Q2@53s -> OK /home/keeper/playground/exhibit-editor/adaptation/check_Q2.png\n  frame Q3@80s -> OK /home/keeper/playground/exhibit-editor/adaptation/check_Q3.png\n  frame end@112s -> OK /home/keeper/playground/exhibit-editor/adaptation/check_end.png\nVERDICT pptx=PASS mp4=PASS\n",
+  "typed": true,
+  "execution_time_ms": 3465,
+  "requested_sandbox": "docker",
+  "via": "docker",
+  "sandbox_profile": "docker"
+}

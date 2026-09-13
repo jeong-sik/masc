@@ -1,6 +1,6 @@
 ---
 name: msx-observe
-description: Read selected MSX observation rows with their frame clock, machine history, source coverage, and original evidence.
+description: Read selected MSX frames and input history with their machine incarnation, source coverage, and original evidence.
 ---
 
 Use this skill when a task needs an explanation of existing MSX observations.
@@ -24,6 +24,12 @@ whether that evidence is useful to the current task.
    evidence references in the resulting explanation. Distinguish a missing or
    delayed observation from a stopped game. Use the existing game controller only
    when the underlying task calls for a game action.
+
+When input history matters, use the selected row's `input_ledger` evidence
+reference and the sequence-reading steps in `references/observations.md`. Its
+immutable chain records frame, input owner, key and down/up edge through
+that capture's input cursor. Null means unobserved history; a restored machine
+can contain saved earlier inputs, which are not new actions in its new epoch.
 
 Reading this skill or its resources does not load a machine, advance a frame,
 send an input, change a Keeper's tools, or establish that an agent played a game.

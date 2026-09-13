@@ -1,0 +1,47 @@
+{
+  "status": "passed",
+  "claims": [
+    "0_to_1_original_endpoint_change",
+    "derived_detach_preserves_DOS_progress_and_honest_missing_input",
+    "frozen_metric_survives_final_detach"
+  ],
+  "original_endpoint_values": [
+    0,
+    1
+  ],
+  "metric": {
+    "value": 1,
+    "direction": "up"
+  },
+  "guest_captures": [
+    {
+      "counter": 0,
+      "state_sha256": "bc6d428e8ea201e4b2b5bd175eab497350285d329a738b42268867ea1c219df4",
+      "png_sha256": "f75e936539dcc851b651aed66e604026fe1d487a96fd65960b33c5bf83b4b05b",
+      "pixels": 64000
+    },
+    {
+      "counter": 1,
+      "state_sha256": "845f47796080c36f53c186bf194c86d4bddb80891144165c7408e9dee174b296",
+      "png_sha256": "401069424d672befce251d72b2e0aa316ab30b6ecb7f4d05e6a7f17f06f71aff",
+      "pixels": 64000
+    },
+    {
+      "counter": 2,
+      "state_sha256": "af333b673c4793b16b2084c60b254c7b0b3758da8ff02f1995e03604e2855df0",
+      "png_sha256": "7f3f06962adc825ee210c6de4a38891767f87ac32b8c5885b3ff1e408cb16e28",
+      "pixels": 64000
+    },
+    {
+      "counter": 3,
+      "state_sha256": "5c712e113c3744d2562e1e3733304060729e4ca46f4323d3c69f0322c7c53e21",
+      "png_sha256": "64bd0df55a1dbeeb3085453e3bad748bbb2a43e19f7bbe96d019f969fee00e86",
+      "pixels": 64000
+    }
+  ],
+  "same_DOS_instance": "01a0972a-631e-7000-91a5-82bce5d4ba21",
+  "actual_action_executor": "9aefdf6c4d0e28a31b71e1c413f30ecfb67fd8788be27c459afccc6a9fd5cbda",
+  "frozen_metric_row": "01a0972a-62f9-7000-863a-ee4c9d373b0f/3/a47e85b253f2264d09230f9a1f4bdd926a8b59f04d925ff6cb78427f53dfc64b",
+  "normal_cleanup_instances_recorded": 5,
+  "scope": "Selected historical bytes only; no live rerun, CI authenticity, current deployment, gameplay, interval coverage or causal claim."
+}

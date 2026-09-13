@@ -1,0 +1,555 @@
+{
+  "scope": "Existing CI-built macOS arm64 executable; isolated full H1 burst fixture; no local build or installed runtime mutation",
+  "artifact_run": 34692595258,
+  "artifact_name": "runtime-probe-macos-arm64-94276567e4c2b9d5229fcdfb782f834c29202a7e-attempt-1",
+  "binary_source_commit": "94276567e4c2b9d5229fcdfb782f834c29202a7e",
+  "binary_sha256": "023e6068f5463838828ebf9e9915c06b7d84b1990814cd74e98522d39a2f258a",
+  "fixture_sha256": "a5a938a463a5694d2d2c67210886a272766234d4a9e1463f57d31c5e95060093",
+  "exit_code": 0,
+  "result": {
+    "protocol": "h1",
+    "asset_reads_before_operations": 60,
+    "authorized_reads_before_operations": 4,
+    "MCP_operations_accepted": 4,
+    "operation_quota_exhaustion_enforced": true,
+    "auth_still_required": true,
+    "IP_quota_exhaustion_enforced": true,
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 503
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/mcp",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/mcp",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/mcp",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/mcp",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/mcp",
+        "status": 429
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/dashboard/browser-lane/goto",
+        "status": 429
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/providers",
+        "status": 401
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/dashboard/assets/fixture.js",
+        "status": 429
+      }
+    ]
+  }
+}

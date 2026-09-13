@@ -1,0 +1,16 @@
+{
+  "source_head": "2855bbad1d0775f8f5ee4abfa75331852662b47b",
+  "run": 34696913204,
+  "job": 103561852545,
+  "passed_suites": 13,
+  "failed_suites": 1,
+  "failed_suite_cases": {
+    "passed": 7,
+    "failed": 1
+  },
+  "first_failure": "wrong scope poisoned store: Keeper chat operation store integrity error: invalid semantic execution transition: action is not admitted in running",
+  "classification": "Caller-invalid proposed Gate binding wrongly maps Invalid_transition to Integrity_error; owner latches Store_unavailable. Semantic rejected before persistence, so this log does not prove DB corruption.",
+  "fix": "Only proposed Suspend_gate_reconciliation Invalid_transition becomes Invalid_input; Invalid_record and Revision_exhausted preserve Integrity_error. No assertion weakening.",
+  "local_build": false,
+  "runtime_mutation": false
+}

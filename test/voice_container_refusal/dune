@@ -1,0 +1,8 @@
+; Audio whisper-cli does not read, refused before whisper-cli runs. The
+; containers are recognised from the first bytes of real files; the command is
+; a script that leaves a mark when it is run.
+
+(test
+ (name test_voice_container_refusal)
+ (libraries alcotest eio eio_main unix masc.masc_process masc.voice_config
+  masc.voice_runtime_overlay masc.voice_bridge_core))

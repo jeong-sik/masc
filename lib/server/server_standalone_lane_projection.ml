@@ -59,6 +59,11 @@ let lane_specs =
     ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
     ; required = false
     }
+  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Workspace_curator
+    ; label = "Workspace Curator"
+    ; purpose = "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed."
+    ; required = false
+    }
   ; { lane_id = Runtime.verifier_exact_lane_id
     ; label = "Verifier"
     ; purpose = "Reviews Task completion and Goal proof evidence."
@@ -67,7 +72,7 @@ let lane_specs =
   ]
 ;;
 
-(* The overview above joins three durable registries into four lanes. The run
+(* The overview above joins three durable registries into five lanes. The run
    drill-down must read the same set: serving only [Exact_lane_run_registry]
    made the Verifier row open an empty list even while its task and Goal
    registries held reviews, tool observations, and verdicts. Keep the source
@@ -193,7 +198,8 @@ let retained_run_skill_evidence_json = function
     (match run.Exact_lane_run_registry.lane with
      | Exact_lane_run_registry.Librarian
      | Exact_lane_run_registry.Hitl_auto_judge
-     | Exact_lane_run_registry.Board_attention ->
+     | Exact_lane_run_registry.Board_attention
+     | Exact_lane_run_registry.Workspace_curator ->
        `Assoc [ "state", `String "no_keeper_skills" ])
   | Task_verification_run _ | Goal_verification_run _ ->
     `Assoc [ "state", `String "no_keeper_skills" ]
@@ -708,7 +714,10 @@ let live_lane_configuration registry lane_id =
             selected_slots
       ; cli_slots
       ; dropped_slots
-      ; admission_error = None
+      ; admission_error =
+          if String.equal lane_id Server_workspace_memory_curator.lane_id && cli_slots <> []
+          then Some "Workspace curator requires admitted exact-output slots; CLI tails are not supported"
+          else None
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

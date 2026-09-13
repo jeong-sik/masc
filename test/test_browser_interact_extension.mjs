@@ -33,11 +33,12 @@ const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Tex
     assert.equal(options.behavior, 'instant'); this.scrollX += options.left; this.scrollY += options.top;
   }},
 });
-const browser = {runtime: {connectNative: () => ({onMessage: {addListener() {}}, onDisconnect: {addListener() {}}, postMessage: value => replies.push(value)})},
-  tabs: {get:async id=>{assert.equal(id,7);if(closed)throw new Error('tab_closed');return {id,url:page.location.href};},executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
-const context = vm.createContext({browser, TextEncoder, setTimeout, clearTimeout});
+const event = () => ({addListener() {}, removeListener() {}});
+const browser = {webNavigation:{getFrame:async () => ({documentId:'native-source',url:page.location.href}),onCommitted:event(),onReferenceFragmentUpdated:event()},runtime: {connectNative: () => ({onMessage: {addListener() {}}, onDisconnect: {addListener() {}}, postMessage: value => replies.push(value)})},
+  tabs: {onRemoved:event(),get:async id=>{assert.equal(id,7);if(closed)throw new Error('tab_closed');return {id,url:page.location.href};},executeScript: async (id, {code}) => {executions++; assert.equal(id, 7); if (closed) throw new Error('tab_closed'); return [vm.runInContext(code, page)];}}};
+const context = vm.createContext({browser, TextEncoder, AbortController, setTimeout, clearTimeout});
 vm.runInContext(background, context);
-async function command(args) { context.command = {id: 'interaction-fixture', verb: 'page.interact', args}; await vm.runInContext('onHostMessage(command)', context); return replies.at(-1); }
+async function command(args) { context.command = {id: 'interaction-fixture', verb: 'page.interact', deadlineMs:Date.now()+20000, args}; await vm.runInContext('onHostMessage(command)', context); return replies.at(-1); }
 assert.equal((await command({action: 'click', selector: '#button'})).error, 'tab_id_required');
 assert.equal(executions, 0);
 assert.equal((await command({tabId: 7, action: 'click', selector: '.ambiguous'})).error, 'selector_is_ambiguous');

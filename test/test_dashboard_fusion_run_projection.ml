@@ -177,6 +177,7 @@ let test_detail_uses_exact_typed_board_origin () =
     { turn_ref = None
     ; source = Some "not-fusion"
     ; fusion_run_id = Some pending_run_id
+    ; fusion_producer = Some "fusion-detail-test"
     }
   in
   (match
@@ -235,6 +236,7 @@ let test_detail_uses_exact_typed_board_origin () =
     { turn_ref = None
     ; source = Some "fusion"
     ; fusion_run_id = Some recorded_run_id
+    ; fusion_producer = Some "fusion-detail-keeper"
     }
   in
   let panel_meta =
@@ -319,7 +321,7 @@ let test_replay_failure_keeps_historical_evidence_readable () =
   let before = Fs_compat.load_file replay_path in
   let registry = Fusion_run_registry.replay replay_path in
   let origin : Board.post_origin =
-    { turn_ref = None; source = Some "fusion"; fusion_run_id = Some lost_id } in
+    { turn_ref = None; source = Some "fusion"; fusion_run_id = Some lost_id; fusion_producer = Some "caller" } in
   let post = match Board_dispatch.create_post ~author:"caller"
       ~content:"The original measured conclusion remains readable."
       ~post_kind:Board.System_post ~origin () with

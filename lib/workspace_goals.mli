@@ -76,7 +76,7 @@ val reconcile_committed_proof :
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
 
-val request_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
+val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
   (Goal_store.goal * Goal_verification.record, string) result
 (** Bind a proof request and Verifying phase to the same current criterion. *)
 

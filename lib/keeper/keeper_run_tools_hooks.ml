@@ -36,7 +36,7 @@ type agent_setup =
             fills the one they read rather than a second one of its own. *)
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
-  ; user_message : string
+  ; model_message : Keeper_gate_replay.model_message
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
@@ -53,7 +53,6 @@ type agent_setup =
   ; observe_official_client_native_action :
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
-  ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
@@ -359,7 +358,7 @@ let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
       ~(turn_system_prompt : string)
-      ~(user_message : string)
+      ~(model_message : Keeper_gate_replay.model_message)
       ~(dynamic_context : string)
       ~(history_messages : Agent_core.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
@@ -372,12 +371,13 @@ let assemble_hooks
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list)
       ?repetition_execution
-      ?gate_replay_evidence
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
   : (agent_setup, Agent_core.Error.t) result
   =
+  let user_message = model_message.text in
+  let gate_replay_evidence = model_message.replay_evidence in
   let acc = ctx.acc in
   let compute_tool_surface = ctx.compute_tool_surface in
   let record_tool_assignment = ctx.record_tool_assignment in
@@ -677,12 +677,14 @@ let assemble_hooks
           Some
             (fun event ->
               match event with
-              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ }
-                when not
-                       (String.equal
-                          tool_name
-                          Keeper_tool_composition_catalog.skill_tool_name) ->
-                if Skill_delivery_state.active skill_delivery_state <> []
+              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                (* A pre-hook observes a request, before validation/approval.
+                   Include Skill without claiming the handler has started. *)
+                Keeper_turn_preview.note_tool ~keeper_name:meta.name
+                  ~now:(Time_compat.now ()) tool_name;
+                if not (String.equal tool_name
+                          Keeper_tool_composition_catalog.skill_tool_name)
+                   && Skill_delivery_state.active skill_delivery_state <> []
                 then
                   (match
                      Keeper_skill_activation_recorder.observe_action
@@ -701,7 +703,6 @@ let assemble_hooks
                        tool_name
                        (Keeper_skill_activation_recorder.error_to_string error));
                 Agent_core.Hooks.Continue
-              | Agent_core.Hooks.PreToolUse _
               | BeforeTurn _
               | BeforeTurnParams _
               | AfterTurn _
@@ -1123,14 +1124,13 @@ let assemble_hooks
       ; agent_cell = ctx.agent_cell
       ; cleanup = keeper_tools_cleanup
       ; terminal_effect_state
-      ; user_message
+      ; model_message
       ; hooks
       ; on_runtime_attempt
       ; model_input_projection
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff
       ; observe_official_client_native_action
-      ; gate_replay_evidence
       ; acc
       ; all_tool_names
       ; skill_projection_diagnostics

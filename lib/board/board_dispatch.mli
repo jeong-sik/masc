@@ -276,6 +276,10 @@ val get_comments :
   post_id:string ->
   (Board.comment list, Board.board_error) Result.t
 
+val require_persisted_sources_readable : unit -> (unit, Board.board_error) result
+(** Evidence requires complete post/comment source loads. Ordinary Board reads
+    remain best effort; a recorded failure clears only on a successful reload. *)
+
 val get_post_and_comments :
   post_id:string ->
   ?comment_offset:int ->

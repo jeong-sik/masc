@@ -44,18 +44,10 @@ let goal_fsm_next_actions ~goal_phase =
     Goal_phase.Record_proof_proven;
     Goal_phase.Record_proof_refuted;
   ]
-  |> List.filter (fun action ->
-         match
-           Goal_phase.decide_transition ~phase:goal_phase ~action
-         with
-         (* Next actions are the ones that move the goal. [Already] is accepted
-            by the tool but changes nothing, and listing "pause" under a paused
-            goal reads as a step that is still to come. Written as an explicit
-            arm because [Ok _] would have absorbed the new outcome and widened
-            this list without a compiler error. *)
-         | Ok (Goal_phase.Move_to _) -> true
-         | Ok (Goal_phase.Already _) -> false
-         | Error _ -> false)
+  (* Next actions are the ones that move the goal. [Already] is accepted by
+     the tool but changes nothing, and listing "pause" under a paused goal
+     reads as a step that is still to come. *)
+  |> List.filter (fun action -> Goal_phase.moves_goal ~phase:goal_phase ~action)
   |> List.map Goal_phase.action_to_string
 
 let goal_fsm_to_json (goal : Goal_store.goal) (node : tree_node) =

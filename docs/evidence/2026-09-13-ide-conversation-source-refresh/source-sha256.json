@@ -1,0 +1,8 @@
+{
+  "dashboard/src/components/ide/ide-conversation-rail.ts": "332c6fdc666fcc513807daec24e62b3b51005127e03f65231d64944bbdbf5d8b",
+  "dashboard/src/api/board.ts": "5290b7f3e45e4dc544b19fefe5daaf3467d3c89328b932121bdf7bbf5f19c203",
+  "dashboard/src/api/dashboard-keeper-cost.ts": "7c7e6c9e9d26af53be9dc48853ffe09abe5d00986715897b792b6e27c93eb264",
+  "dashboard/src/sse-store.ts": "69513ea76b89d591c4ec423f88d2af1a9109e6162720a97e2bae7d99e3a26764",
+  "dashboard/scripts/ide-conversation-browser-fixture.ts": "24200348d91aff485ab085de58e5f6fcfa0b0598d7275a6d8cbcdedbe3fe7832",
+  "scripts/ide-conversation-browser-probe.mjs": "14aeb7ab55c655194624d30083b4d4d67049e2590a9a0cb980a8ecedb244a122"
+}

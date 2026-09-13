@@ -324,7 +324,7 @@ let refresh_builtin_skills ~base_path =
   install_builtin_skills ~base_path ~request:Builtin_skill_package.Automatic
 ;;
 
-let bootstrap_base_path_config_root ~base_path =
+let bootstrap_initial_config_root ~base_path ~created =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ())
   then ()
@@ -336,6 +336,10 @@ let bootstrap_base_path_config_root ~base_path =
     if mode = `Skip
     then Log.Server.info "config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip"
     else if Sys.file_exists config_root
+      && not (created && Sys.is_directory config_root
+        && Array.for_all
+          (String.equal (Config_dir_resolver.runtime_toml_filename ^ ".lock"))
+          (Sys.readdir config_root))
     then
       if Sys.is_directory config_root
       then (
@@ -417,12 +421,10 @@ let bootstrap_base_path_config_root ~base_path =
     Config_dir_resolver.reset ())
 ;;
 
+let bootstrap_base_path_config_root ~base_path =
+  bootstrap_initial_config_root ~base_path ~created:false
+;;
+
 let startup_config_resolution ~base_path =
-  Config_dir_resolver.resolve_with
-    Config_dir_resolver.
-      { cwd = Config_dir_resolver.current_working_dir ()
-      ; executable_name = Sys.executable_name
-      ; env_base_path = Some base_path
-      ; env_config_dir = Config_dir_resolver.current_env_config_dir_opt ()
-      }
+  Config_dir_resolver.resolve_for_base_path ~base_path
 ;;

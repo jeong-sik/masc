@@ -289,6 +289,28 @@ let test_a_line_naming_no_voice_is_dropped () =
   Alcotest.(check int) "nothing to choose, nothing offered" 0
     (List.length (Bridge.say_catalogue_of_output "# just a comment\n\n"))
 
+(* say does not refuse a name it does not have, so the catalogue is where a
+   mapping is checked. Measured 2026-09-13: say took yuna and YUNA as Yuna, and
+   read a Korean sentence in an English voice for the bare name Eddy. *)
+let test_a_say_voice_is_looked_up_as_say_reads_names () =
+  let lookup voice = Bridge.say_voice_in_catalogue (voices ()) ~voice in
+  let has = Alcotest.testable
+      (fun ppf -> function
+         | Bridge.Say_has_it -> Format.pp_print_string ppf "Say_has_it"
+         | Bridge.Say_lacks_it { installed } ->
+           Format.fprintf ppf "Say_lacks_it %d" installed)
+      ( = )
+  in
+  Alcotest.check has "a printed label" Bridge.Say_has_it (lookup "Yuna");
+  Alcotest.check has "in another ASCII case" Bridge.Say_has_it (lookup "yuna");
+  Alcotest.check has "with space around it" Bridge.Say_has_it (lookup " Yuna ");
+  Alcotest.check has "a whole parenthesised label" Bridge.Say_has_it
+    (lookup "Eddy (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))");
+  Alcotest.check has "a bare name say prints only with a language"
+    (Bridge.Say_lacks_it { installed = 5 }) (lookup "Eddy");
+  Alcotest.check has "a name nothing prints"
+    (Bridge.Say_lacks_it { installed = 5 }) (lookup "NoSuchVoice")
+
 (* Where a clip is stored, and how a reader finds it again. The token in the
    URL says nothing about the container -- the endpoint that spoke decided
    that -- so a reader looks for each one. *)
@@ -328,13 +350,26 @@ let test_each_container_is_served_as_itself () =
   Alcotest.(check string) "MP3" "audio/mpeg"
     (Voice_bridge_core.clip_content_type Voice_bridge_core.Mp3)
 
-let test_a_clip_path_gives_its_token_back () =
-  Alcotest.(check (option string)) "a say clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.wav");
-  Alcotest.(check (option string)) "an HTTP clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.mp3");
-  Alcotest.(check (option string)) "and something that is not a clip" None
-    (Voice_bridge_core.clip_token_of_path "/x/audio/notes.txt")
+(* A clip path answers with both halves at once. The caller that announces a
+   spoken reply needs the token to build its URL and the type to say what the
+   bytes are, and getting only the first is what let it announce MP3 for every
+   clip -- including the WAVE one a fresh mac writes. *)
+let test_a_clip_path_gives_back_its_token_and_its_type () =
+  let announced path =
+    Option.map
+      (fun (token, format) -> token, Voice_bridge_core.clip_content_type format)
+      (Voice_bridge_core.clip_of_path path)
+  in
+  let clip = Alcotest.(option (pair string string)) in
+  Alcotest.check clip "a say clip is WAVE" (Some ("9f3c", "audio/wav"))
+    (announced "/x/audio/9f3c.wav");
+  Alcotest.check clip "an HTTP clip is MP3" (Some ("9f3c", "audio/mpeg"))
+    (announced "/x/audio/9f3c.mp3");
+  Alcotest.check clip "and something that is not a clip has neither" None
+    (announced "/x/audio/notes.txt");
+  (* A path with no extension at all used to raise here rather than answer. *)
+  Alcotest.check clip "nor does a name with no extension" None
+    (announced "/x/audio/9f3c")
 
 (* The end of a failed command's output, because that is where the reason is.
    Measured on this machine: whisper-cli says which Metal library it loaded
@@ -429,8 +464,8 @@ let () =
             test_a_token_is_found_in_whichever_container_holds_it
         ; Alcotest.test_case "each container is served as itself" `Quick
             test_each_container_is_served_as_itself
-        ; Alcotest.test_case "a clip path gives its token back" `Quick
-            test_a_clip_path_gives_its_token_back
+        ; Alcotest.test_case "a clip path gives back its token and its type" `Quick
+            test_a_clip_path_gives_back_its_token_and_its_type
         ; Alcotest.test_case "a failure reports its last line not its first" `Quick
             test_a_failure_reports_its_last_line_not_its_first
         ] )
@@ -451,6 +486,8 @@ let () =
             test_a_parenthesised_name_keeps_its_parenthesis
         ; Alcotest.test_case "a line naming no voice is dropped" `Quick
             test_a_line_naming_no_voice_is_dropped
+        ; Alcotest.test_case "a say voice is looked up as say reads names" `Quick
+            test_a_say_voice_is_looked_up_as_say_reads_names
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

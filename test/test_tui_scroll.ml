@@ -165,6 +165,22 @@ let test_a_conditional_overflow_row_is_part_of_the_bound () =
     (Masc_tui_scroll.content_height ~rows:30 ~chrome:9 ~count:24
        ~preview_keep:None ~overflow_takes_row:true)
 
+(* One spelling for where a window stands. The Keeper detail pane drew its
+   scroll offset over the offsets it could take, "[1/5]" over thirty rows, and
+   Board and the call list said "rows X-Y of Z" beside panes that said
+   "X-Y/Z". *)
+let test_a_window_names_its_first_and_last_rows () =
+  let text = Masc_tui_scroll.window_text in
+  check Alcotest.string "the top of thirty rows, twenty-six at a time" "1-26/30"
+    (text ~scroll:0 ~height:26 30);
+  check Alcotest.string "the bottom" "5-30/30" (text ~scroll:4 ~height:26 30);
+  check Alcotest.string "a window taller than the list" "1-3/3"
+    (text ~scroll:0 ~height:26 3);
+  check Alcotest.string "a stale scroll past the end names the last row" "3-3/3"
+    (text ~scroll:9 ~height:26 3);
+  check Alcotest.string "no rows to show them in" "0/30" (text ~scroll:0 ~height:0 30);
+  check Alcotest.string "an empty list" "0/0" (text ~scroll:0 ~height:26 0)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -200,5 +216,9 @@ let () =
     ; ( "layout"
       , [ Alcotest.test_case "conditional overflow row" `Quick
             test_a_conditional_overflow_row_is_part_of_the_bound
+        ] )
+    ; ( "position"
+      , [ Alcotest.test_case "a window names its first and last rows" `Quick
+            test_a_window_names_its_first_and_last_rows
         ] )
     ]

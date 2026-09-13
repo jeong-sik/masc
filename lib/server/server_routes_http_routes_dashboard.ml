@@ -3277,6 +3277,11 @@ let add_routes ~sw ~clock router =
              Keeper_api.handle_keeper_get_subroutes state req request reqd
            ) request reqd))
 
+  |> Http.Router.post "/api/v1/keepers/turn/run-next" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd -> handle_keeper_run_next state ~actor req reqd)
+         request reqd)
+
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_turn_interrupt state request reqd) request reqd)

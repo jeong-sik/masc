@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-09-12T11:42:43.144788+00:00",
+  "task_id": "task-003",
+  "task_created_at": "2026-09-12T11:35:42Z",
+  "goal_id": "memory-garden-serial-fiction",
+  "turn_kind": "autonomous",
+  "absolute_turn": 39,
+  "runtime": "codex_subscription.gpt-5.6-sol",
+  "constructed_context_blocks": [
+    {
+      "block": "keeper_instructions",
+      "bytes": 8613,
+      "digest": "d1f403e294c5dff91c0adf8969d7ea42951355168922acf2e1492071dd4061b6"
+    },
+    {
+      "block": "memory_os_recall",
+      "bytes": 3861,
+      "digest": "386e29ada6d7531fff5cc62d5615e06d604764b2fc77f3654bddc5de6e2329d7"
+    },
+    {
+      "block": "dynamic_context",
+      "bytes": 6938,
+      "digest": "b9019c7a07afd7bf8c7cd94887669104e37b3a8c0a306c5de816b8c1556c359c"
+    },
+    {
+      "block": "temporal_summary",
+      "bytes": 36,
+      "digest": "a446a627b2a2add30f18995da4f35a3d2e8985fb9f5386c7b63e09c77f92a47b"
+    }
+  ],
+  "recorded_run_prompt": "지금은 자율 턴입니다. 위 World State 와 직전 턴들이 남긴 것을 먼저 읽고, 이어서 할 일을 고릅니다.",
+  "final_text": "새 상태 변화나 남은 실행 작업이 없습니다. Goal의 인간 확인을 기다리며 산출물과 기록을 그대로 보존합니다.",
+  "raw_trace_sha256": "0fe66adc25f5ab1d5ecacc3e54188da037a412c9db5dd039ad9502386122b9b9",
+  "scope": "Recorded native autonomous turn says no new work after task003 was created. Whether constructed current World State reached the resumed native session is under source/request investigation; raw user prompt alone does not prove omission."
+}

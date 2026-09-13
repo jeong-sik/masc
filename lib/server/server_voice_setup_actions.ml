@@ -41,9 +41,15 @@ let fields = function
               (String.concat ", " (List.map (fun key -> Printf.sprintf "%S" key) duplicates))))
   | _ -> Error (Invalid_request "expected a JSON object")
 
+(* Trimmed, because every reader of these values compares them trimmed and
+   none of them is free text: ids, section names, model and voice names, a
+   revision. Returning the raw string made padding a per-caller problem, and
+   one caller forgot -- [remove_endpoint] handed the padded id to the
+   exact-match TOML editor, which matched nothing while the response said
+   applied. *)
 let string_field ~what fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
   | Some _ | None ->
     Error (Invalid_request (Printf.sprintf "%s needs a non-empty %S" what key))
 
@@ -155,33 +161,15 @@ let endpoint_allowed_fields =
   [ "id"; "kind"; "enabled"; "timeout_seconds"; "base_url"; "mcp_url"; "health_url";
     "api_key_env"; "default_voice" ]
 
-(* [Voice_runtime_overlay.adapter_for_endpoint] resolves the id before it
-   consults the kind, so an id that is an alias for another adapter wins over
-   what the request declared: id = "elevenlabs" with kind = "openai_compat"
-   reaches ElevenLabs with its authentication shape while this API reports an
-   OpenAI-compatible endpoint. Refused here rather than written, because a
-   config whose declared kind is not the transport the runtime uses is one no
-   reader of it can trust. Making the kind authoritative in that resolver is the
-   other way round and changes how files already written resolve. *)
-let id_agrees_with_kind ~id ~kind =
-  match Voice_runtime_overlay.resolve_adapter id with
-  | None -> true
-  | Some resolved ->
-    String.equal
-      resolved.Voice_runtime_overlay.canonical_name
-      (Voice_runtime_overlay.adapter_for_endpoint_kind kind)
-        .Voice_runtime_overlay.canonical_name
-
 let endpoint_of_json json =
   let what = "an endpoint" in
   let* fields = fields json in
   let* () = no_unknown_fields ~what ~allowed:endpoint_allowed_fields fields in
-  let* raw_id = string_field ~what fields "id" in
   (* [Voice_config.select_endpoint] trims a requested id before comparing, so an
      id stored with padding could never be selected again -- not even with the id
-     the observation handed back. Stored trimmed, which is the form every reader
-     compares. *)
-  let id = String.trim raw_id in
+     the observation handed back. [string_field] trims, which is the form every
+     reader compares. *)
+  let* id = string_field ~what fields "id" in
   let* kind_text = string_field ~what fields "kind" in
   let* kind = kind_of_string kind_text in
   let* enabled = optional_bool ~what fields "enabled" in
@@ -191,21 +179,6 @@ let endpoint_of_json json =
   let* health_url = optional_string ~what fields "health_url" in
   let* api_key_env = optional_string ~what fields "api_key_env" in
   let* default_voice = optional_string ~what fields "default_voice" in
-  let* () =
-    if id_agrees_with_kind ~id ~kind
-    then Ok ()
-    else
-      Error
-        (Invalid_request
-           (Printf.sprintf
-              "endpoint id %S already names the %S transport, which is not the declared \
-               kind %S; the runtime would resolve the id and reach the other one"
-              id
-              (match Voice_runtime_overlay.resolve_adapter id with
-               | Some resolved -> resolved.Voice_runtime_overlay.canonical_name
-               | None -> "")
-              (Voice_config.string_of_endpoint_kind kind)))
-  in
   Ok
     { Voice_config.id
     ; kind
@@ -237,6 +210,10 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      ]
      @ text "base_url" endpoint.Voice_config.base_url
      @ text "mcp_url" endpoint.Voice_config.mcp_url
+     (* The address the transport actually contacts. A client choosing between
+        the two fields above has to know the transport's precedence, and one
+        that guessed showed an address the endpoint is never called at. *)
+     @ text "address" (Voice_runtime_overlay.endpoint_address endpoint)
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
@@ -298,6 +275,14 @@ let change_of_json json =
     let* () = only ~what [ "voice" ] in
     let* voice = string_field ~what fields "voice" in
     Ok (Voice_setup.Set_tts_default_voice voice)
+  | "set_send_on_stop" ->
+    let what = "set_send_on_stop" in
+    let* () = only ~what [ "send" ] in
+    (match List.assoc_opt "send" fields with
+     | Some (`Bool send) -> Ok (Voice_setup.Set_send_on_stop send)
+     | Some _ | None ->
+       Error
+         (Invalid_request "set_send_on_stop needs \"send\" to be true or false"))
   | "set_agent_voice" ->
     let what = "set_agent_voice" in
     let* () = only ~what [ "agent"; "voice" ] in
@@ -355,10 +340,27 @@ let tuning_json (tuning : Voice_config.voice_tuning) =
     ; "style", `Float tuning.Voice_config.style
     ]
 
+(* The JSON the loader falls back to for this workspace. The setup routes pass it
+   to every observation and write so they describe, and refuse to shadow, the
+   configuration the speak and transcribe paths actually load. *)
+let standalone_path ~base_path = Voice_config.voice_config_file_in base_path
+
 let observe ~base_path =
-  match Voice_setup.observe ~runtime_config_path:(runtime_config_path ~base_path) with
+  match
+    Voice_setup.observe
+      ~runtime_config_path:(runtime_config_path ~base_path)
+      ~standalone_path:(standalone_path ~base_path)
+  with
   | Error error -> Error (Setup_failed error)
-  | Ok (revision, config) ->
+  | Ok (revision, active) ->
+    let source =
+      match active with
+      | None -> `Null
+      | Some (Voice_setup.Runtime_toml, _) -> `Assoc [ "kind", `String "runtime_toml" ]
+      | Some (Voice_setup.Standalone_json path, _) ->
+        `Assoc [ "kind", `String "standalone_json"; "path", `String path ]
+    in
+    let config = Option.map snd active in
     let tts =
       match config with
       | None -> `Null
@@ -463,6 +465,7 @@ let observe ~base_path =
     Ok
       (`Assoc
          [ "revision", `String revision
+         ; "source", source
          ; "tts", tts
          ; "stt", stt
          ; "session", session
@@ -476,6 +479,7 @@ let preview ~base_path json =
   match
     Voice_setup.preview
       ~runtime_config_path:(runtime_config_path ~base_path)
+      ~standalone_path:(standalone_path ~base_path)
       ~expected_revision:revision
       changes
   with
@@ -485,33 +489,35 @@ let preview ~base_path json =
 let apply ~base_path json =
   let* revision, changes = request_of_json json in
   let path = runtime_config_path ~base_path in
-  match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
+  match
+    Voice_setup.apply
+      ~runtime_config_path:path
+      ~standalone_path:(standalone_path ~base_path)
+      ~expected_revision:revision
+      changes
+  with
   | Error error -> Error (Setup_failed error)
-  | Ok () ->
-    (* The revision after the write, so a caller can keep editing without
-       reading again. *)
-    (match Voice_setup.observe ~runtime_config_path:path with
-     | Error error -> Error (Setup_failed error)
-     | Ok (revision, _) ->
-       Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ]))
+  (* The revision comes out of the write itself, not from reading the file
+     again afterwards: a second read can see someone else's commit and hand
+     the caller a revision its own change is not in. *)
+  | Ok revision -> Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ])
 
 (* The endpoint a catalogue read is taken against. It is not an endpoint anyone
    configured: it is built for one request and thrown away, so it carries only
    what asking needs -- the kind, and the name of the variable holding that
    provider's key.
 
-   The request chooses neither an address nor a command path. A catalogue read
-   uses the kind's own default destination, because a path this route cannot
-   check is not one to take from a caller. *)
+   The request chooses neither an address nor a command path. Catalogue reads
+   use the endpoint kind's default transport destination. *)
 let catalogue_endpoint_of_json json =
   let* fields = fields json in
+  let* () =
+    no_unknown_fields ~what:"a listing" ~allowed:[ "kind"; "api_key_env" ] fields
+  in
   let* kind_text = string_field ~what:"a listing" fields "kind" in
   let* kind = kind_of_string kind_text in
-  let api_key_env =
-    match List.assoc_opt "api_key_env" fields with
-    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-    | Some _ | None -> None
-  in
+  let* api_key_env = optional_string ~what:"a listing" fields "api_key_env" in
+  let api_key_env = Option.map String.trim api_key_env in
   Ok
     { Voice_config.id = "voice-catalogue-read"
     ; kind

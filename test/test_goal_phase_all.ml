@@ -177,6 +177,24 @@ let test_agrees_with_task_fsm_on_restating_a_terminal_state () =
     (outcome_label
        (GP.decide_transition ~phase:GP.Dropped ~action:GP.Request_complete))
 
+(* What [moves_goal] lights, per phase, over the operator's three keys. Stated
+   as literals rather than recomputed from the matrix: the TUI goal detail lit
+   every key on every phase, and a verifying goal -- which only the verifier
+   moves -- offered drop and reopen that the server refuses. *)
+let test_moves_goal_per_phase () =
+  let module PA = GP.Public_action in
+  let lit phase =
+    PA.all
+    |> List.filter (fun action -> GP.moves_goal ~phase ~action:(PA.to_action action))
+    |> List.map PA.to_string
+  in
+  check (list string) "executing" [ "request_complete"; "drop" ] (lit GP.Executing);
+  check (list string) "verifying" [] (lit GP.Verifying);
+  check (list string) "awaiting_confirmation" [ "drop"; "reopen" ]
+    (lit GP.Awaiting_confirmation);
+  check (list string) "completed" [ "drop"; "reopen" ] (lit GP.Completed);
+  check (list string) "dropped" [ "reopen" ] (lit GP.Dropped)
+
 let () =
   run "goal_phase_all"
     [
@@ -200,5 +218,7 @@ let () =
             test_already_is_the_current_phase;
           test_case "agrees with the Task FSM on restating a terminal state"
             `Quick test_agrees_with_task_fsm_on_restating_a_terminal_state;
+          test_case "moves_goal lights only the keys that move" `Quick
+            test_moves_goal_per_phase;
         ] );
     ]

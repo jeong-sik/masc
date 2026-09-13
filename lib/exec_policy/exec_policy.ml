@@ -264,31 +264,44 @@ let existing_sibling_dirs_hint ?workdir path =
              Some (String.concat ", " shown ^ suffix))))
 ;;
 
+(* Every destination this exec lane can name — a stage's own cwd, a
+   redirect target, or (task-634 / #26289, operator: amend_closed_keys +
+   cd_promote) a closed-table argv operand or a re-opened [sh -c]
+   script's own cd/operand targets — answers to this one function.  The
+   argv-operand pass runs even when [workdir] is [None]: plain argv
+   children carry no cwd field of their own, so before this pass their
+   destinations were never judged at all (the gap task-634 reports). *)
 let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
+  let validate_path_value ~requires_existing_dir value =
+    if String.equal value "/dev/null"
+    then Ok ()
+    else if not (validate_path ?workdir value)
+    then
+      Error
+        (Keeper_path_check_error.(
+           to_message
+             (Path_outside_whitelist
+                { path = value; for_keeper_command = true })))
+    else if requires_existing_dir && not (path_is_existing_dir ?workdir value)
+    then
+      Error
+        (Keeper_path_check_error.(
+           to_message
+             (Cwd_not_directory
+                { path = value
+                ; hint = existing_sibling_dirs_hint ?workdir value
+                })))
+    else Ok ()
+  in
+  let judge_operands () =
+    Execute_script_paths.judge_operands
+      ~judge:validate_path_value
+      ~limit:16
+      shell_ir
+  in
   match workdir with
-  | None -> Ok ()
+  | None -> judge_operands ()
   | Some _ ->
-      let validate_path_value ~requires_existing_dir value =
-        if String.equal value "/dev/null"
-        then Ok ()
-        else if not (validate_path ?workdir value)
-        then
-          Error
-            (Keeper_path_check_error.(
-               to_message
-                 (Path_outside_whitelist
-                    { path = value; for_keeper_command = true })))
-        else if requires_existing_dir && not (path_is_existing_dir ?workdir value)
-        then
-          Error
-            (Keeper_path_check_error.(
-               to_message
-                 (Cwd_not_directory
-                    { path = value
-                    ; hint = existing_sibling_dirs_hint ?workdir value
-                    })))
-        else Ok ()
-      in
       let rec validate_redirects = function
         | [] -> Ok ()
         | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
@@ -337,7 +350,9 @@ let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
            | Ok () -> validate_each rest
            | Error _ as err -> err)
       in
-      validate_parsed_shell_ir shell_ir
+      (match validate_parsed_shell_ir shell_ir with
+       | Error _ as err -> err
+       | Ok () -> judge_operands ())
 ;;
 
 

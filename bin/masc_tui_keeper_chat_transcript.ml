@@ -116,7 +116,7 @@ type awaiting_approval =
   ; tool_name : string
   ; question : string
   ; (* Why the call was held. attached under the question so the reader who
-       answers [y]/[n] from this pane sees the reason the approval list
+       answers /approve or /deny from this pane sees the reason the approval list
        screen shows. *)
     because : string
   }
@@ -1288,7 +1288,7 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "[y] allow  [n] deny · approval for %s: %s"
+      let base = Printf.sprintf "/approve · /deny · approval for %s: %s"
         awaiting.tool_name awaiting.question in
       match awaiting.because with
       | "" -> base

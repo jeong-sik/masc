@@ -714,9 +714,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
+  let header = Printf.sprintf "%s  %s%s%s  %s  %s"
     (screen_title " MASC Task")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (fit_width task.id 20) Ansi.reset timestamp
+    (Masc_tui_theme.tone Masc_tui_theme.Accent)
+    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset timestamp
     (connection_badge state) in
 
   box_top buf cols;
@@ -2092,35 +2093,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         list_post
   in
 
-  let hearth_tag =
-    match Terminal_text.optional_single_line post.bp_hearth with
-    | Some h when not (String.equal h "") ->
-        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
-    | _ -> ""
-  in
-  let score_chip =
-    if post.bp_votes > 0 then
-      Printf.sprintf "%s▲%+d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
-    else if post.bp_votes < 0 then
-      Printf.sprintf "%s▼%d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
-    else
-      Printf.sprintf "%s 0%s" (board_score_style post.bp_votes) Ansi.reset
-  in
-  let replies_chip =
-    if post.bp_comment_count > 0 then
-      Printf.sprintf "%s💬%d%s" (Theme.ok ()) post.bp_comment_count Ansi.reset
-    else
-      Printf.sprintf "%sc0%s" Ansi.dim Ansi.reset
-  in
   let header =
-    Printf.sprintf "%s  %s[%s]%s%s  %s  %s"
-      (screen_title " MASC Board")
-      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-      (fit_width (Terminal_text.single_line post.bp_id) 12)
-      Ansi.reset
-      hearth_tag
-      score_chip
-      replies_chip
+    board_read_title ~screen:(screen_title " MASC Board")
+      ~id:(Terminal_text.single_line post.bp_id)
+      ~hearth:(Terminal_text.optional_single_line post.bp_hearth)
+      ~votes:post.bp_votes ~replies:post.bp_comment_count
   in
 
   box_top buf cols;
@@ -2866,9 +2843,9 @@ let planning_detail_pane (state : state)
 
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s"
+  let header = Printf.sprintf "%s  %s%s%s  %s"
     (planning_workspace_title state ~tab:Planning_goals ~window:"")
-    status_color (fit_width status_label planning_phase_column) Ansi.reset
+    status_color (bracketed ~max_cells:planning_phase_column status_label) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 
@@ -2913,11 +2890,30 @@ let planning_detail_pane (state : state)
   box_line buf cols
     (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
        metric_text due_text prio_color goal.pg_priority Ansi.reset);
+  (* Lit only where the key moves the goal. All three were drawn in colour on
+     every phase, so a verifying goal offered [x] and [o] that the server
+     refuses. A dim key is still pressable: [Already] is accepted -- [c] on a
+     verifying goal re-arms the judge, as its Next line says -- it just does
+     not change the stage. *)
+  let action_item action =
+    let key = planning_action_key action
+    and label = planning_action_label action in
+    if Goal_phase.moves_goal ~phase:goal.pg_phase
+         ~action:(Goal_phase.Public_action.to_action action)
+    then
+      let tone =
+        match action with
+        | Goal_phase.Public_action.Request_complete -> Theme.ok ()
+        | Goal_phase.Public_action.Drop -> Theme.bad ()
+        | Goal_phase.Public_action.Reopen -> Theme.info ()
+      in
+      Printf.sprintf "%s[%s]%s %s" tone key Ansi.reset label
+    else Printf.sprintf "%s[%s] %s%s" Ansi.dim key label Ansi.reset
+  in
   box_line buf cols
-    (Printf.sprintf "  Actions:  %s[c]%s Complete   %s[x]%s Drop   %s[o]%s Reopen"
-       (Theme.ok ()) Ansi.reset
-       (Theme.bad ()) Ansi.reset
-       (Theme.info ()) Ansi.reset);
+    ("  Actions:  "
+     ^ String.concat "   "
+         (List.map action_item Goal_phase.Public_action.all));
   (* The goal's own timeline, dim like the Board read pane's timestamps:
      when it was opened, when it last moved, when it was last reviewed. *)
   let timestamp_lines =
@@ -2947,11 +2943,9 @@ let planning_detail_pane (state : state)
    | Some armed_action ->
        box_line buf cols
          ((Theme.warn ()) ^ Ansi.bold
-          ^ Printf.sprintf "  ARMED: %s -- press same key again to submit, any other key to cancel"
-             (match armed_action with
-              | Goal_phase.Public_action.Request_complete -> "Request Completion [c]"
-              | Goal_phase.Public_action.Drop -> "Drop Goal [x]"
-              | Goal_phase.Public_action.Reopen -> "Reopen Goal [o]")
+          ^ (let key = planning_action_key armed_action in
+             Printf.sprintf "  ARMED: %s [%s] -- [%s] again submits, any other key cancels"
+               (planning_action_label armed_action) key key)
           ^ Ansi.reset)
    | None -> ());
   (match state.goal_action_error with
@@ -2977,6 +2971,10 @@ let planning_detail_pane (state : state)
      resolved it onto each task -- so this reads them back the other way.
      Linear over the open tasks, which is a short list and costs nothing
      against keeping a second copy of the same links in the state.
+
+     Open tasks only: the loader drops the finished ones, which RELATED
+     ACTIVITY below still lists. The row said "(none linked)" over a goal
+     whose every task was done, and over a backlog that had not been read.
 
      Capped: a goal with thirty tasks would take the whole frame and the
      proof underneath would never be seen. What is left out is said, because
@@ -3004,9 +3002,15 @@ let planning_detail_pane (state : state)
      the terminal and the presenter drops whatever fell off. *)
   (match linked_tasks with
    | [] ->
-     box_line buf cols (Ansi.dim ^ "  Tasks       (none linked)" ^ Ansi.reset)
+     let note =
+       match local_rows_page state ~error:state.tasks_error with
+       | Page_empty -> "  (none)"
+       | Page_unread -> page_unread_note
+       | Page_failed -> page_failed_note
+     in
+     box_line buf cols (Ansi.dim ^ "  Open tasks" ^ note ^ Ansi.reset)
    | _ ->
-     box_line buf cols (Ansi.bold ^ "  TASKS" ^ Ansi.reset);
+     box_line buf cols (Ansi.bold ^ "  OPEN TASKS" ^ Ansi.reset);
      List.iter
        (fun (row : Tui_decode.task) ->
          box_line buf cols
@@ -3318,9 +3322,11 @@ let render_schedule_list (state : state) =
                  Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
+                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
                    status_color
-                   (fit_width row.sch_status 10)
+                   (* The column still lines up: the padding goes after the
+                      bracket, not inside it. *)
+                   (fit_width (bracketed ~max_cells:10 row.sch_status) 12)
                    Ansi.reset
                    due
                    (* Measured from the rows rather than given the rest of the
@@ -9852,10 +9858,7 @@ let render_runtime (state : state) =
     else ""
   in
   let hints =
-    Printf.sprintf "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
-      scroll_hint
-      (match state.runtime_mode with Runtime_lanes -> "all runtimes" | Runtime_all -> "service lanes")
-    ^ (match state.runtime_mode with Runtime_lanes -> "  e:add failover" | Runtime_all -> "")
+    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
@@ -13777,7 +13780,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:"n:new TOML  E:edit TOML  s:save  Tab:focus  j/k:select  J/K:scroll  e:evidence  o:observe  d:detach  r:inspect  Esc:back"
+    ~hints:(if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
+      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)

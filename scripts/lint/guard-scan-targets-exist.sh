@@ -69,8 +69,8 @@ scan_entries() {
   rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
-    '(^|[[:space:]])"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
-    -r '$2' \
+    '^[[:space:]]*"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
+    -r '$1' \
     "$tree/scripts" 2>/dev/null || true
   rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
@@ -92,9 +92,8 @@ report() {
     [ -n "$row" ] || continue
     file="${row%%:*}"
     # Each arm prints only the path it captured. Without --only-matching, rg -r
-    # replaces the match and prints the rest of the line too, so an argument
-    # sitting before a quoted entry -- check "test/x.py" "bin/y.mli" -- was
-    # glued onto the path and reported as a file that does not exist.
+    # replaces the match and prints the rest of the line too, and whatever sat
+    # before the entry was glued onto the path.
     path="${row##*:}"
     # bin/*.exe is what dune produces, not a file a scanner reads: it is absent
     # from every clean checkout, so its absence says nothing about scope.
@@ -115,13 +114,18 @@ case "$MODE" in
     # Both spellings, so neither arm can be dropped without this failing.
     printf 'SCAN_FILES=(\n  "lib/present.ml"\n  "lib/absent.ml"\n)\nBARE=(\n  lib/bare_present.ml\n  lib/bare_absent.ml\n)\nrg -n \\\n  -g '"'"'!lib/glob_present.ml'"'"' \\\n  -g '"'"'!lib/glob_absent.ml'"'"' \\\n  pat lib\n' \
       >"$scratch/scripts/probe.sh"
-    # A quoted entry with another argument before it on the same line.
-    printf 'check "test/t.py" "lib/after_argument_absent.ml"\n' >>"$scratch/scripts/probe.sh"
+    # A call whose last argument names a source file is not a scope entry, so
+    # an absent file there is not reported. The quoted arm used to accept it
+    # after any space, and check "test/x.py" "bin/y.mli" in run-edited-tests.sh
+    # came out as the path "test/x.py"bin/y.mli (#35911, #35916).
+    printf 'check "test/t.py" "lib/argument_absent.ml"\n' >>"$scratch/scripts/probe.sh"
     : >"$scratch/lib/present.ml"
     : >"$scratch/lib/bare_present.ml"
     : >"$scratch/lib/glob_present.ml"
+    # A preceding argument must not become part of the captured path.
+    printf 'check "test/scenario.py" "lib/present.ml"\n' \
+      >>"$scratch/scripts/probe.sh"
     want="scripts/probe.sh|lib/absent.ml
-scripts/probe.sh|lib/after_argument_absent.ml
 scripts/probe.sh|lib/bare_absent.ml
 scripts/probe.sh|lib/glob_absent.ml"
     got="$(report "$scratch" | sort)"
@@ -130,7 +134,6 @@ scripts/probe.sh|lib/glob_absent.ml"
       exit 1
     fi
     : >"$scratch/lib/absent.ml"
-    : >"$scratch/lib/after_argument_absent.ml"
     : >"$scratch/lib/bare_absent.ml"
     : >"$scratch/lib/glob_absent.ml"
     if [ -n "$(report "$scratch")" ]; then

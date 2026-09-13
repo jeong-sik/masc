@@ -3486,9 +3486,28 @@ let access_error_from_http code =
        { code; body = "candidate access denied"; retry_after_header = None })
 ;;
 
+(* Exercise the lane with both API and official-client error carriage. Codex
+   uses its real boundary projection so a configuration-error regression cannot
+   be hidden by constructing the expected core error in the fixture. *)
+let candidate_access_errors =
+  [ "HTTP 401", access_error_from_http 401
+  ; "HTTP 403", access_error_from_http 403
+  ; "Claude authentication",
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError
+         { provider = "claude_code"; detail = "login required" })
+  ; "Claude authorization",
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError
+         { provider = "claude_code"; detail = "access denied" })
+  ; "Codex subscription",
+    Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
+      (Runtime_codex_app_server.Subscription_required "login required")
+  ]
+;;
+
 let test_candidate_access_denial_reaches_the_next_declared_runtime () =
-  List.iter (fun code ->
-    let denied = access_error_from_http code in
+  List.iter (fun (label, denied) ->
     let attempts = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
@@ -3500,13 +3519,13 @@ let test_candidate_access_denial_reaches_the_next_declared_runtime () =
       ["denied"; "available"] in
     (match result with
      | Ok selected -> Alcotest.(check string) "available candidate finishes" "available" selected
-     | Error error -> Alcotest.failf "HTTP%d stopped the lane: %s" code (Agent_core.Error.to_string error));
+     | Error error -> Alcotest.failf "%s stopped the lane: %s" label (Agent_core.Error.to_string error));
     Alcotest.(check (list string)) "walk stays inside declared candidates"
-      ["denied"; "available"] (List.rev !attempts)) [401;403]
+      ["denied"; "available"] (List.rev !attempts)) candidate_access_errors
 ;;
 
 let test_access_failover_preserves_effect_and_caller_authority () =
-  List.iter (fun code ->
+  List.iter (fun (_label, denied) ->
     List.iter (fun disposition ->
       let attempts = ref 0 in
       let result = Driver.For_testing.attempt_runtime_candidates
@@ -3515,7 +3534,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
           incr attempts;
           if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
-          ( Error (access_error_from_http code)
+          ( Error denied
           , None
           , disposition
           , Masc.Keeper_attempt_dispatch.Dispatched ))
@@ -3539,17 +3558,23 @@ let test_access_failover_preserves_effect_and_caller_authority () =
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->
-        incr attempts; attempt_without_effect (Error (access_error_from_http code)) None)
+        incr attempts; attempt_without_effect (Error denied) None)
       ["denied"; "available"] in
     Alcotest.(check bool) "caller denial remains an error" true (Result.is_error result);
     Alcotest.(check int) "caller denies immediate second attempt" 1 !attempts;
     Alcotest.(check int) "existing deferred retry path retains the successor" 1 (List.length !deferred))
-    [401;403]
+    candidate_access_errors
 ;;
 
 let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
-  List.iter (fun code ->
-    let denied = access_error_from_http code in
+  let cases =
+    (access_error_from_http 400, ["first"])
+    :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
+          (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
+    :: List.map (fun (_, error) -> error, ["first"; "last"])
+         candidate_access_errors
+  in
+  List.iter (fun (denied, expected) ->
     let attempts = ref [] in
     let result = Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
@@ -3557,13 +3582,12 @@ let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
         attempts := runtime_id :: !attempts; attempt_without_effect (Error denied) None)
       ["first"; "last"] in
-    let expected = if code = 400 then ["first"] else ["first"; "last"] in
     Alcotest.(check (list string)) "no candidate beyond the declared suffix"
       expected (List.rev !attempts);
     match result with
     | Error error -> Alcotest.(check string) "original terminal diagnostic retained"
         (Agent_core.Error.to_string denied) (Agent_core.Error.to_string error)
-    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") [400;401;403]
+    | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") cases
 ;;
 
 let () =

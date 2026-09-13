@@ -4505,11 +4505,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · A:add-ons · a:failover slot"
+    | None -> "  Standalone LLM lanes · o:Lane Add-ons · a:append slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · A:add-ons · a:failover slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -13778,34 +13778,14 @@ let render_terminal_too_small state ~rows ~cols =
     growing the terminal restores the unchanged selected surface. *)
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"lane-addons"
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:"1:timeline  2:links  3:installations  4:workers  5:rows  Tab:area  j/k:select  J/K:scroll  r:refresh  Esc:back"
+    ~hints:(if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
+      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
     ~body:(fun ~budget c ->
-      match Masc_tui_lane_addons.visual_lines
-        ~failed_note:Masc_tui_types.page_failed_note
-        ~height:budget ~width:(framed_inner_width cols) view with
-      | Some lines ->
-          let scroll = max 0 (min view.scroll (List.length lines-budget)) in
-          lines |> List.filteri (fun i _ -> i>=scroll && i<scroll+budget)
-          |> List.iter (fun (line : Masc_tui_lane_addons.visual_line) ->
-            if line.active then c.push_selected (String.concat "" (List.map snd line.cells))
-            else c.push (String.concat "" (List.map (fun (tone,text) ->
-              let style = match tone with
-                | Masc_tui_lane_addons.Normal -> Ansi.reset
-                | Masc_tui_lane_addons.Dim -> Theme.recede ()
-                | Masc_tui_lane_addons.Accent -> Theme.info ()
-                | Masc_tui_lane_addons.Attention -> Theme.warn () in
-              style ^ text ^ Ansi.reset) line.cells)))
-      | None ->
-          let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
-          let scroll = max 0 (min view.scroll (List.length lines - budget)) in
-          lines
-          |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
-          |> List.iteri (fun index line ->
-              if index=0 && scroll=0 then
-                c.push_styled ~style:(Ansi.bold ^ Theme.info ()) line
-              else c.push line))
+      Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
+      |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
+      |> List.iter c.push)
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

@@ -114,7 +114,7 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
-  let view = {UI.initial with snapshot=Some snapshot;focus=UI.Configurations;configuration_cursor=1} in
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
   check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
@@ -127,7 +127,7 @@ let configuration_and_ports () =
   let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
-  let lines = UI.lines ~width:100 view @ UI.lines ~width:100 {view with focus=UI.Instances} in
+  let lines = UI.lines ~width:100 view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
   check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
@@ -168,7 +168,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;
+  let view = {UI.initial with presentation=UI.Technical;snapshot=Some snapshot;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -186,82 +186,6 @@ let metric_fields_and_receipts_remain_readable () =
       ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
     [40;80;200]
 
-let selection_stays_visible () =
-  let module Row = Masc.Lane_addon_types in
-  let rows = List.init 80 (fun index -> ({
-    Row.id=Printf.sprintf "row-%d" index; lane_id=Printf.sprintf "lane-%d" index;
-    kind=Row.Event; title=String.make 160 'x'; observed_at=float_of_int index;
-    subject_id="fixture"; clock=None; actor=None; fields=[]; evidence=[]; related_ids=[]
-  } : Row.row)) in
-  let instance : UI.instance = {id=String.make 120 'i'; run_id="run"; addon_id="fixture";
-    title=String.make 120 't'; revision="1"; phase=Row.Attached; observation_seq=1;
-    rows_count=80; source_path=None; binding=`Assoc []; outputs=[];
-    skills_directory=None; incarnation="instance"; action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
-  let snapshot : UI.snapshot = {instances=[instance]; configuration=None;
-    output={rows;coverage=[]}; complete=None} in
-  List.iter (fun (width,height) ->
-    let request : UI.action_request = {instance_id=instance.id;incarnation=instance.incarnation;
-      request_id="long-receipt";action=`Assoc []} in
-    let view = {UI.initial with snapshot=Some snapshot;focus=UI.Rows;row_cursor=79;
-      last_action=Some request;receipt=Some (`String (String.make 1000 'r'))} in
-    let lines = UI.lines ~height ~width view in
-    let first_screen = List.filteri (fun index _ -> index < height) lines in
-    check bool "last selection visible without manually scrolling inventory" true
-      (List.exists (String.starts_with ~prefix:"> [ ] lane-79") first_screen);
-    check bool "long labels fit a single row" true
-      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
-    check bool "selected lane detail has exact identity" true (List.mem "Row row-79" lines);
-    check bool "unselected row details are not expanded" false (List.mem "Row row-0" lines))
-    [40,16;80,24;120,50]
-
-let concurrent_scene () =
-  let module Row = Masc.Lane_addon_types in
-  let owner = "35e30f7a-66d1-4e44-a4ed-762be081ee91" in
-  let row id lane observed_at clock : Row.row = {
-    id;lane_id=owner ^ "/" ^ lane;kind=Row.Event;title=id;observed_at;
-    subject_id="shared";clock;actor=None;fields=[];evidence=[];related_ids=[]} in
-  let rows = [row "browser read" "browser" 1789257600. (Some {domain="dom";value="revision-2"});
-    row "frame advanced" "game" 1789257600. (Some {domain="frame";value="154618"});
-    row "next day" "game" 1789344000. None] in
-  let snapshot : UI.snapshot = {instances=[];configuration=None;complete=Some false;
-    output={rows;coverage=[{source_id="frames";incarnation=owner;cursor=None;complete=false;detail=Some "source unavailable"}]}} in
-  let view = {UI.initial with snapshot=Some snapshot} in
-  let visual view = Option.get (UI.visual_lines ~height:30 ~width:120 view) in
-  let lines view = UI.lines ~height:30 ~width:120 view in
-  check bool "same timestamp is one aligned row" true
-    (List.exists (fun (line : UI.visual_line) ->
-      let cells = List.map snd line.cells in
-      List.exists (fun text -> String.contains text '>') cells && List.length cells>=3) (visual view));
-  check bool "partial source summary remains visible" true
-    (List.exists (String.starts_with ~prefix:"PARTIAL") (lines view));
-  check bool "full date survives" true
-    (List.exists (String.starts_with ~prefix:"2026-09-14") (lines view));
-  let next = UI.move_lane view 1 in
-  check (option string) "horizontal comparison keeps shared timestamp" (Some "frame advanced")
-    (Option.map (fun (row : Row.row) -> row.id) (UI.selected_row next));
-  let previous = UI.move_lane next (-1) in
-  check int "back to simultaneous event" view.row_cursor previous.row_cursor;
-  let next = UI.move_observation next 1 in
-  check (option string) "vertical move follows observed chronology" (Some "next day")
-    (Option.map (fun (row : Row.row) -> row.id) (UI.selected_row next));
-  let extreme = {snapshot with output={snapshot.output with rows=[row "extreme" "time" Float.max_float None]}} in
-  ignore (lines {view with snapshot=Some extreme});
-  List.iter (fun width ->
-    check bool "visual cells stay within terminal width" true
-      (List.for_all (fun line -> Masc_tui_message_layout.display_width line<=width)
-        (UI.lines ~height:20 ~width {view with selected=["browser read"]}))) [40;64;120]
-
-let failure_state_is_truthful () =
-  let idle = UI.lines ~height:20 ~width:80 UI.initial in
-  check bool "empty state does not claim a server reading" true
-    (List.exists (String.starts_with ~prefix:"No reading yet") idle);
-  let failed = UI.lines ~height:20 ~width:80
-    {UI.initial with error=Some "GET failed: connection refused"} in
-  check bool "failed request is labelled as a failure" true
-    (List.exists (String.starts_with ~prefix:"Load failed:") failed);
-  check bool "failure is not presented as an empty successful reading" false
-    (List.exists (String.starts_with ~prefix:"No reading yet") failed)
-
 let guided_actions () =
   let schema = Yojson.Safe.from_string {|{
     "type":"object","required":["context","request_id","action"],"additionalProperties":false,
@@ -275,7 +199,7 @@ let guided_actions () =
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     observation_seq=1;rows_count=0;source_path=None;binding=`Assoc [];outputs=[];
-    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
+    skills_directory=None;action_schema=Some schema} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in
@@ -332,7 +256,7 @@ let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     observation_seq=1;rows_count=0;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
@@ -344,12 +268,6 @@ let context_flow_uses_declared_connections () =
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
     output={rows=[];coverage=[]};complete=None} in
   let view = {UI.initial with presentation=UI.Flow;snapshot=Some snapshot} in
-  check bool "flow exposes the selected action target" true
-    (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
-  let moved = UI.lines ~width:160 {view with instance_cursor=1} in
-  check bool "flow target follows instance selection" true
-    (List.mem "Action target: Project metric · metric-worker" moved
-      && List.mem "> project-metric · Project metric · attached" moved);
   check bool "flow names the actual configured dependency" true
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
   let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
@@ -371,7 +289,4 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
-  test_case "concurrent scene preserves clocks, coverage and selection" `Quick concurrent_scene;
-  test_case "failed reads remain distinct from empty reads" `Quick failure_state_is_truthful;
-  test_case "large inventories keep the selected lane visible" `Quick selection_stays_visible;
   test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]

@@ -921,9 +921,12 @@ def tab_to_keepers_list(
     the second row waits out its whole timeout and reports a selection that
     never moved rather than the press that was swallowed.
 
-    Only the two walks that arrive here by tab need this. The other row steps
-    return to a list that is already filled, and pressing into that is not the
-    same act.
+    Three walks need it: two press j for the second keeper, one presses f for
+    the selected keeper's changes. The other tab arrivals at Keepers are
+    waypoints on the ring -- they tab straight on to another surface and never
+    touch a row -- and the remaining row steps return to a list that is already
+    filled from a detail screen. Pressing into a filled list is not the same
+    act as pressing into one that may not exist yet.
     """
     start = len(output)
     tab_until(process, master_fd, output, b"MASC Keepers")
@@ -10694,7 +10697,7 @@ def open_changes(
     for it, which walks the ring past a surface that is not on it, so they
     could not arrive however many presses they were given.
     """
-    tab_until(process, master_fd, output, b"MASC Keepers")
+    tab_to_keepers_list(process, master_fd, output)
     return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
 
 

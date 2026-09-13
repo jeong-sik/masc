@@ -42,6 +42,11 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     let operation = admit store in
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     suspend store operation |> ignore;
+    let before_priority = get store in
+    (match Store.move_queued_to_front store ~now:4. ~operation_id:original with
+     | Error (Store.Invalid_input _) -> ()
+     | _ -> fail "priority bypassed an unresolved approval");
+    check bool "priority refusal preserves the original approval and input" true (get store = before_priority);
     check bool "unresolved wait is not claimable" false (Store.has_claimable_queued store ~now:4. |> ok);
     check bool "no repeated waiting child" true (claim store = None);
     Store.submit store ~now:4. ~operation_id:other ~source ~input:(`String "independent work") |> ok |> ignore;

@@ -323,6 +323,8 @@ type lifecycle_reservation_snapshot =
   ; purpose : lifecycle_transaction_purpose
   }
 
+type turn_switch = { interrupt_token : string; switch : Eio.Switch.t }
+
 type registry_entry = {
   base_path : string;
       (** Canonical workspace identity from
@@ -375,7 +377,7 @@ type registry_entry = {
   turn_attempt_state : turn_attempt_state option Atomic.t;
       (** Objective per-Keeper turn-attempt history, updated via CAS on this
           per-entry atomic. This observation never controls dispatch. *)
-  current_turn_switch : Eio.Switch.t option Atomic.t;
+  current_turn_switch : turn_switch option Atomic.t;
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)
   board_cursor_ts : float;

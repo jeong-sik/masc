@@ -12,7 +12,7 @@ let row name state : Tui_decode.keeper_turn_row =
 let running ?preview ~lane ~started name =
   row name
     (Tui_decode.Keeper_turn_running
-       { lane; started_at_unix = started; preview })
+       { lane; started_at_unix = started; preview; interrupt_token = None })
 ;;
 
 let texts lines =

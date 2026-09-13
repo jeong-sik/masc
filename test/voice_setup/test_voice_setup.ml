@@ -33,7 +33,7 @@ default_model = "eleven_multilingual_v2"
 default_voice = "SAz9YHcvj6GT2YYXdXww"
 
 [voice.tts.agent_voices]
-artemis = "CwhRBWXzGAHq8TQ4Fs17"
+voice-setup-fixture = "CwhRBWXzGAHq8TQ4Fs17"
 
 # 2026-09-03: local whisper first. Measured 0.85 s on a real utterance.
 # Leaving api_key_env out is what keeps the Authorization header absent.
@@ -254,7 +254,7 @@ let test_an_agent_voice_is_set_and_cleared () =
     Alcotest.(check (option string))
       "the agent that was already mapped is left alone"
       (Some "CwhRBWXzGAHq8TQ4Fs17")
-      (List.assoc_opt "artemis" (voices (read path))))
+      (List.assoc_opt "voice-setup-fixture" (voices (read path))))
 
 (* Moving an endpoint from a hosted provider to a local one has to drop
    api_key_env, or it sends an Authorization header the local server never
@@ -423,6 +423,27 @@ let test_a_dotted_keeper_voice_can_be_written_replaced_and_removed () =
     Alcotest.(check (option string)) "the literal keeper key was removed"
       None (List.assoc_opt "team.alpha" (voices ())))
 
+
+(* A voice chosen for a command-run endpoint goes on the section when there is
+   no section yet, and on the endpoint only when one already exists to collide
+   with.
+
+   The distinction is load-bearing rather than tidy: an endpoint voice outranks
+   [voice.tts.agent_voices], so writing one where it is not needed retires
+   every per-keeper voice at that endpoint without saying so. Measured on a
+   fresh workspace 2026-09-13 -- a keeper mapped to Eddy was spoken in Yuna
+   with the endpoint line present, in Eddy without it. *)
+let test_a_local_voice_goes_on_the_section_until_one_exists () =
+  Alcotest.(check bool)
+    "a fresh workspace: the voice is the workspace default"
+    true
+    (Voice_setup.voice_placement ~section_exists:false = Voice_setup.On_the_section);
+  Alcotest.(check bool)
+    "a workspace whose section names another provider's voice: on the endpoint"
+    true
+    (Voice_setup.voice_placement ~section_exists:true = Voice_setup.On_the_endpoint)
+;;
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -451,6 +472,9 @@ let () =
             test_provider_voices_do_not_replace_the_existing_section_voice
         ; Alcotest.test_case "dotted keeper voice can be replaced and removed" `Quick
             test_a_dotted_keeper_voice_can_be_written_replaced_and_removed
+
+        ; Alcotest.test_case "a local voice goes on the section until one exists"
+            `Quick test_a_local_voice_goes_on_the_section_until_one_exists
         ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
             test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick

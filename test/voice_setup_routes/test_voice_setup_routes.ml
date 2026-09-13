@@ -423,7 +423,7 @@ let test_a_field_the_change_does_not_read_is_refused () =
     (`Assoc
        [ "change", `String "set_agent_voice"
        ; "section", `String "stt"
-       ; "agent", `String "vesta"
+       ; "agent", `String "voice-route-fixture"
        ; "voice", `String "aria"
        ])
 
@@ -431,7 +431,7 @@ let test_a_field_the_change_does_not_read_is_refused () =
    them together turned a malformed payload into a deletion. *)
 let test_set_agent_voice_without_a_voice_is_refused () =
   refused ~what:"set_agent_voice with no voice field"
-    (`Assoc [ "change", `String "set_agent_voice"; "agent", `String "vesta" ])
+    (`Assoc [ "change", `String "set_agent_voice"; "agent", `String "voice-route-fixture" ])
 
 let test_an_explicit_null_voice_clears_the_mapping () =
   with_workspace (fun ~base_path ~path ->
@@ -439,7 +439,7 @@ let test_an_explicit_null_voice_clears_the_mapping () =
       tts_section_changes
         [ `Assoc
             [ "change", `String "set_agent_voice"
-            ; "agent", `String "vesta"
+            ; "agent", `String "voice-route-fixture"
             ; "voice", `String "aria"
             ]
         ]
@@ -452,7 +452,7 @@ let test_an_explicit_null_voice_clears_the_mapping () =
       let clear =
         `Assoc
           [ "change", `String "set_agent_voice"
-          ; "agent", `String "vesta"
+          ; "agent", `String "voice-route-fixture"
           ; "voice", `Null
           ]
       in
@@ -679,6 +679,55 @@ let test_a_padded_id_is_stored_trimmed () =
          Alcotest.(check bool) "and the observation names the trimmed id" true
            (List.mem "padded" ids)))
 
+(* Removal reads the same id the write stored. The removal path handed the raw
+   value to the exact-match TOML editor while the write path trimmed, so a
+   padded id matched no stanza and the response still said applied: the
+   endpoint stayed and the caller was told it was gone.
+
+   Two endpoints, because a section left with none does not load -- the parser
+   requires [endpoints] to be an array and the edit is refused before it is
+   written. That is its own question (#35729), and a removal proof does not
+   need to answer it. *)
+let test_a_padded_id_still_names_the_endpoint_to_remove () =
+  with_workspace (fun ~base_path ~path ->
+    let add =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String "whisper-remote"
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "http://127.0.0.1:2023/v1"
+            ]
+        ]
+    in
+    (match Actions.apply ~base_path (request (revision ~base_path) [ add ]) with
+     | Error error -> Alcotest.fail (Actions.error_message error)
+     | Ok _ -> ());
+    let remove =
+      `Assoc
+        [ "change", `String "remove_endpoint"
+        ; "section", `String "stt"
+        ; "id", `String "  whisper-local  "
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) [ remove ]) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      Alcotest.(check bool) "the stanza is gone from runtime.toml" false
+        (Astring.String.is_infix ~affix:"whisper-local" (read path));
+      (match Actions.observe ~base_path with
+       | Error error -> Alcotest.fail (Actions.error_message error)
+       | Ok json ->
+         let ids =
+           match member "endpoints" (member "stt" json) with
+           | `List endpoints -> List.map (string_member "id") endpoints
+           | _ -> []
+         in
+         Alcotest.(check (list string)) "and only the other one is left"
+           [ "whisper-remote" ] ids))
+
 (* Capture thresholds, the playback allowlist and the Gate's bypasses are in
    effect, so a response calling itself the full configuration has to carry
    them. *)
@@ -814,6 +863,8 @@ let () =
         ; Alcotest.test_case "a repeated field" `Quick test_a_repeated_field_is_refused
         ; Alcotest.test_case "a padded id is stored trimmed" `Quick
             test_a_padded_id_is_stored_trimmed
+        ; Alcotest.test_case "a padded id removes the endpoint it names" `Quick
+            test_a_padded_id_still_names_the_endpoint_to_remove
         ] )
     ; ( "every settings section is described"
       , [ Alcotest.test_case "capture, playback and gate" `Quick

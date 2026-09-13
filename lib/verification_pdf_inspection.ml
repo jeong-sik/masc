@@ -107,7 +107,7 @@ let max_page_pixels = 2048
 let max_pages = 64
 let max_total_image_bytes = 24 * 1024 * 1024
 
-let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
       ?(max_extracted_bytes = max_extracted_bytes)
       ~base_path ~max_image_bytes ~bytes () =
   let* () = if String.length bytes > max_source_bytes then
@@ -144,16 +144,13 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
             ~cwd:root (program :: arguments) in
         let detail = String.trim stderr in
-        match status with
-        | Unix.WEXITED 0 ->
+        match Process_eio.exit_reason_of_status status with
+        | Process_eio.Completed 0 ->
           if detail <> "" then diagnostics := (program ^ ": " ^ detail) :: !diagnostics;
           Ok ()
-        (* The runner synthesizes 124 for its own timeout, the way timeout(1)
-           does. Poppler's tools do not use that code, so 124 under a budget is
-           read as the budget rather than as the program's own answer. *)
-        | Unix.WEXITED 124 ->
+        | Process_eio.Timed_out ->
           Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
-        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
           Error (Command_failed {program;status;detail}) in
       let xml_path = Filename.concat root "pages.xhtml" in
       let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
@@ -195,3 +192,13 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
     | Sys_error detail -> Error (Storage_failed detail)
     | Unix.Unix_error (code,operation,_) ->
       Error (Storage_failed (operation ^ ": " ^ Unix.error_message code))
+
+let inspect ?max_pages ?max_total_image_bytes ?max_extracted_bytes
+    ~base_path ~max_image_bytes ~bytes () =
+  inspect_with_budget ~poppler_budget_sec ?max_pages ?max_total_image_bytes
+    ?max_extracted_bytes ~base_path ~max_image_bytes ~bytes ()
+
+module For_testing = struct
+  let inspect_with_budget ~budget_sec ~base_path ~max_image_bytes ~bytes () =
+    inspect_with_budget ~poppler_budget_sec:budget_sec ~base_path ~max_image_bytes ~bytes ()
+end

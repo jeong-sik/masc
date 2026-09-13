@@ -65,3 +65,10 @@ val inspect :
     holding the caller's verification slot. The size budgets default to {!max_pages} and
     {!max_total_image_bytes}; they are arguments so a test can reach the
     refusal with a document small enough to write inline. *)
+
+module For_testing : sig
+  val inspect_with_budget :
+    budget_sec:float -> base_path:string -> max_image_bytes:int -> bytes:string ->
+    unit -> (t, error) result
+  (** The real subprocess inspection with a short test-only shared deadline. *)
+end

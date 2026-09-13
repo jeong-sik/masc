@@ -427,7 +427,7 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
       | Verification_pdf_inspection.Image_policy_rejected _
       | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
-      | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+      | Poppler_budget_spent _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_pdf_inspection.error_to_string error)

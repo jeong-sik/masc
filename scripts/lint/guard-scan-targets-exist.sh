@@ -69,8 +69,8 @@ scan_entries() {
   rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
     --glob '!guard-scan-targets-exist.sh' \
-    '^[[:space:]]*"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
-    -r '$1' \
+    '(^|[[:space:]])"((lib|dashboard|bin)/[A-Za-z0-9/_.-]+\.[a-z]+)"[[:space:]]*\\?[[:space:]]*$' \
+    -r '$2' \
     "$tree/scripts" 2>/dev/null || true
   rg --line-number --no-heading --only-matching \
     --glob '*.sh' \
@@ -120,8 +120,7 @@ case "$MODE" in
     : >"$scratch/lib/present.ml"
     : >"$scratch/lib/bare_present.ml"
     : >"$scratch/lib/glob_present.ml"
-    # Arguments are not array entries, even when the last quoted argument
-    # names a source file. The earlier argument must not become a path prefix.
+    # A preceding argument must not become part of the captured path.
     printf 'check "test/scenario.py" "lib/present.ml"\n' \
       >>"$scratch/scripts/probe.sh"
     want="scripts/probe.sh|lib/absent.ml

@@ -217,6 +217,11 @@ val write_list_sidebar :
 
 val data_unreliable_row : cols:int -> string -> string
 
+val overview_pulse_text : Masc_tui_types.state -> now:float -> string
+(** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
+    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
+    any keeper-turn reading has come back. *)
+
 val burn_hud_text : Masc_tui_types.state -> string option
 (** The tab row's [/burn] reading without styling: the fleet's cost, and each
     Keeper's token total as a braille bar when any Keeper has spent one.
@@ -286,10 +291,13 @@ val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 val keeper_control_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
+  ?taken:string list ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
-(** The Keeper keys alone. The footer carries the armed or running action as a
-    status item ({!keeper_action_status}), so the fitter keeps that sentence
-    whole instead of treating it as a droppable key. *)
+(** The Keeper keys alone, less any whose single keys are in [taken] -- the
+    keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).
+    The footer carries the armed or running action as a status item
+    ({!keeper_action_status}), so the fitter keeps that sentence whole instead
+    of treating it as a droppable key. *)
 
 val keeper_action_status :
   Masc_tui_types.state -> Masc_tui_footer.status_item list

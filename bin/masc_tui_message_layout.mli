@@ -606,7 +606,8 @@ val last_page_start : height:int -> int list -> int
 
 val span_text : float -> string
 (** A span of seconds in the largest unit that still carries a remainder:
-    [42s], [2m14s], [11h39m], [8d15h]. At most seven cells, so a column sized
+    [42s], [2m14s], [11h39m], [8d15h], and from a hundred days the days alone,
+    [255d]. At most six cells below a hundred thousand days, so a column sized
     for the longest reading holds every shorter one. A negative span reads as
     [0s]; a caller that would rather say nothing checks first.
 

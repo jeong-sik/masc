@@ -58,16 +58,22 @@ let observation_count observation =
   | Current rows -> string_of_int (List.length rows)
   | Not_observed | Unavailable _ | Stale _ -> observation_name observation
 
-(* The name, then the reason the source gave for it. *)
-let observation_detail observation =
+(* The name, then the reason the source gave for it; [current] says what a
+   current reading reads as. *)
+let observation_detail_with ~current observation =
   match observation with
-  | Current rows -> string_of_int (List.length rows)
+  | Current value -> current value
   | Not_observed -> observation_name observation
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
       observation_name observation ^ ": previous reading, refresh failed: "
       ^ Terminal_text.single_line detail
+
+let observation_detail observation =
+  observation_detail_with
+    ~current:(fun rows -> string_of_int (List.length rows))
+    observation
 
 let calculate_kpis (state : state) =
   let turns =
@@ -447,10 +453,21 @@ let render_section_tools ~cols (state : state) : string list =
     Printf.sprintf "  %s%sMemory OS Knowledge Base & Fact Store%s"
       Ansi.bold (Theme.info ()) Ansi.reset
   in
-  let mem_lines =
+  (* The same four states the Gate rows below draw. This read "not loaded --
+     visit Memory surface to fetch" whatever had happened: arriving here
+     already asks for memory health, the same request the Memory surface
+     makes, so the advice sent the reader to repeat it, and a read that had
+     failed read as one never made. *)
+  let memory =
+    observe_source ~observed:(Option.is_some state.memory_health)
+      ~error:state.memory_health_error state.memory_health
+  in
+  let memory_status =
+    "    Memory health: " ^ observation_detail_with ~current:(fun _ -> "") memory
+  in
+  let memory_rows =
     match state.memory_health with
-    | None ->
-        [ "    (memory telemetry not loaded — visit Memory surface to fetch)" ]
+    | None -> []
     | Some mhs ->
         let total_facts = mhs.mhs_total_facts in
         let header =
@@ -476,6 +493,12 @@ let render_section_tools ~cols (state : state) : string list =
               mhs.mhs_keepers
         in
         header :: rows
+  in
+  let mem_lines =
+    match memory with
+    | Current _ -> memory_rows
+    | Stale _ -> memory_status :: memory_rows
+    | Unavailable _ | Not_observed -> [ memory_status ]
   in
 
   let title_gate =

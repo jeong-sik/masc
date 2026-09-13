@@ -150,7 +150,7 @@ let check_say_voice endpoint ~voice =
   if String.equal voice ""
   then Ok ()
   else (
-    match list_voices endpoint with
+    match list_voices_via_command_endpoint endpoint with
     | Error message ->
       Error
         (Printf.sprintf "the voices say has could not be listed to check \"%s\": %s"

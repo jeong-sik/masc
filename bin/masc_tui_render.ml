@@ -379,23 +379,8 @@ let render_overview (state : state) =
         in
         let pulse_suffix =
           if cols >= 92 then
-            let activity_samples =
-              match state.keeper_turn_finishes with
-              | [] -> [ 0; 0; 0; 0; 0; 0; 0; 0 ]
-              | finishes ->
-                  let now = Unix.gettimeofday () in
-                  let buckets = Array.make 8 0 in
-                  List.iter
-                    (fun (_, ts) ->
-                      let delta = max 0.0 (now -. ts) in
-                      let idx = min 7 (int_of_float (delta /. 15.0)) in
-                      let slot = 7 - idx in
-                      if slot >= 0 && slot < 8 then buckets.(slot) <- buckets.(slot) + 1)
-                    finishes;
-                  Array.to_list buckets
-            in
-            let spark = Chart.sparkline activity_samples in
-            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset spark
+            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset
+              (overview_pulse_text state ~now:(Unix.gettimeofday ()))
           else ""
         in
         Printf.sprintf
@@ -1727,7 +1712,7 @@ let render_question_reader (state : state) =
    scanning for, so those are the ones that get a mark. *)
 (* The widths now live beside their column names in [Render_schedule], which
    is the one place the header and the rows both read. The age column is sized
-   for the widest [span_text] draws, "1d00h": a board's oldest live threads are
+   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
 (* Four cells of lead sit ahead of the mark on the header and on every row, so
@@ -6242,11 +6227,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
-    let tab_hint = Masc_tui_keys.keeper_detail_tab_hint state.detail_tab in
     let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs Ansi.dim tab_hint Ansi.reset
+        Ansi.reset tabs
     in
     box_line buf cols title;
 
@@ -6319,7 +6303,19 @@ let render_keeper_detail (state : state) =
        [fit_width] instead, which keeps the front and loses the back -- where
        [Left / Esc] and [q] sit -- so at 80 columns the row ended "t:c…" and
        named no way out. [key:label] for the roster pane's key too. *)
-    let hints = keeper_control_hints state (Some (keeper_reading state k)) in
+    (* The open tab's own keys lead, and a Keeper control on a key the tab
+       answers itself leaves the row. They were a strip at the end of the
+       title row, which the frame cut at 120 columns ("o:act…", "L:log…"),
+       while this row said "s:shutdown" and "o:container logs" on the
+       Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
+       container logs the strip called "actual logs". *)
+    let hints =
+      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      ^ "  "
+      ^ keeper_control_hints
+          ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
+          state (Some (keeper_reading state k))
+    in
     let hints =
       if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
       else hints
@@ -12322,13 +12318,21 @@ let render_presets (state : state) =
         ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
-  if total = 0 then begin
-    incr drawn;
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (match state.presets_snapshot with
-       | None -> "  불러오는 중..."
-       | Some _ -> "  아직 프리셋이 없습니다 · s 로 지금 상태를 저장하세요")
-  end;
+  (* A read that failed said "불러오는 중..." under its own failure row: the
+     empty row asked only whether a snapshot had arrived. *)
+  (match state.presets_snapshot, state.presets_error with
+   | _, Some _ ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_failed_note
+   | None, None ->
+       incr drawn;
+       box_line_styled buf cols ~style:(Theme.recede ()) page_unread_note
+   | Some snapshot, None ->
+       Option.iter
+         (fun line ->
+           incr drawn;
+           box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line))
+         (Masc_tui_preset_text.pane_empty_line snapshot));
   List.iteri
     (fun index (manifest : Tui_decode.preset_manifest) ->
       if index >= first && index < first + list_height then begin
@@ -12593,13 +12597,17 @@ let render_config_models (state : state) =
           see, and [e] would act on a row that is off screen. *)
        let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
-       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        let scroll =
          if cursor_line < scroll then cursor_line
          else if cursor_line >= scroll + table_height
          then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
+       (* The window is cut at the scroll the cursor settled, not the stored
+          one. Cut before, a cursor that moved further than a row -- a page
+          key, a list that shrank -- drew its rows outside the window, and
+          they came out blank. *)
+       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)
        for i = 0 to table_height - 1 do

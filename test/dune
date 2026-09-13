@@ -3403,7 +3403,13 @@
 (test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
- (libraries alcotest masc masc_tui_preset_text masc_tui_fetched))
+ (libraries
+  alcotest
+  masc
+  masc_tui_fetched
+  masc_tui_keys
+  masc_tui_preset_text
+  masc_tui_types))
 
 (test
  (name test_tui_surface_needs)
@@ -3577,6 +3583,7 @@
  (libraries
   alcotest
   masc_tui_footer
+  masc_tui_keys
   masc_tui_render_prim
   masc_tui_theme
   masc_tui_types))
@@ -4985,6 +4992,7 @@
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
+(include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 
@@ -6034,3 +6042,5 @@
  (name test_runtime_adapter_credential_requirement)
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))
+
+(include stanzas/test_browser_bidi_peer.inc)

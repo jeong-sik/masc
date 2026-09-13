@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
+ (libraries masc masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
  (name masc_reliable_change_g1_check)

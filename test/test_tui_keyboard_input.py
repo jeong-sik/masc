@@ -11111,7 +11111,7 @@ def config_navigation_interaction() -> Interaction:
         master_fd: int,
         _slave_fd: int,
         output: bytearray,
-        _base_path: str,
+        base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Config")
         wait_for_output(
@@ -11122,6 +11122,21 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
+        # The paths row keeps each path's tail and the binary age. Cut from
+        # the right at 28 and 32 cells, the workspace under /var/folders and
+        # its .masc both read as the same "/var/folders/bv/…" prefix.
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        paths_row = rows.get(screen_row_of(rows, b"  base "), b"")
+        # The random suffix of the harness directory is what tells two
+        # workspaces apart; a whole basename can be longer than a path's
+        # share of a 100-column row.
+        suffix = os.path.basename(base_path)[-8:].encode()
+        for needle in (suffix + b"   masc ", suffix + b"/.masc", b"binary age"):
+            if needle not in paths_row:
+                raise AssertionError(
+                    f"the Config paths row lost {needle!r}: {paths_row!r}"
+                )
 
         status = send_and_wait(
             process, master_fd, output, b"v", b"Pending restart: keeper.pending"

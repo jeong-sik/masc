@@ -1701,8 +1701,9 @@ let render_question_reader (state : state) =
   box_divider buf cols;
   box_line buf cols
     (if Option.is_some state.ask_text_entry then "  Writing answer · Enter saves locally before you send"
-     else Printf.sprintf "  Lines %d-%d/%d · PgUp/PgDn or wheel to read"
-       (if lines = [] then 0 else scroll + 1) (min (List.length lines) (scroll + room)) (List.length lines));
+     else
+       Printf.sprintf "  Lines %s · PgUp/PgDn or wheel to read"
+         (Masc_tui_scroll.window_text ~scroll ~height:room (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf
@@ -2349,19 +2350,17 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   end;
 
   (* Reading without a position is guessing: the post body and the comment
-     thread each name where they stand, the same "rows X-Y of Z" shape the
-     other reading surfaces carry. *)
+     thread each name where they stand, in the window the other reading
+     surfaces draw. *)
   if total_lines > content_height || detail_line_count > comment_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "post rows %d-%d of %d%s"
-         (min total_lines (scroll.body_offset + 1))
-         (min total_lines (scroll.body_offset + content_height))
-         total_lines
+      (Printf.sprintf "post %s%s"
+         (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
+            ~height:content_height total_lines)
          (if detail_line_count > comment_height then
-            Printf.sprintf "  \xc2\xb7  comments rows %d-%d of %d"
-              (min detail_line_count (scroll.comment_offset + 1))
-              (min detail_line_count (scroll.comment_offset + comment_height))
-              detail_line_count
+            "  \xc2\xb7  comments "
+            ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
+                ~height:comment_height detail_line_count
           else ""));
   box_bottom buf cols;
   scroll.normalized_scroll
@@ -4788,7 +4787,7 @@ let render_lane_run_list (state : state) ~lane_id =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "run") scroll);
+      (Printf.sprintf "[runs %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -5059,12 +5058,6 @@ let lane_run_stacked_lines ~width (detail : Tui_decode.lane_run_detail) =
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
   @ indent (lane_run_output_lines ~width detail)
 
-let lane_run_pane_progress ~scroll ~height total =
-  if total = 0 then "0/0"
-  else if height <= 0 then Printf.sprintf "0/%d" total
-  else
-    Printf.sprintf "%d-%d/%d" (scroll + 1) (min total (scroll + height)) total
-
 let lane_run_split_line buf cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
   let divider = " │ " in
@@ -5108,7 +5101,10 @@ let render_lane_run_detail (state : state) ~run_id =
     | None, Some _ -> 2
     | (Some _ | None), None -> 0
   in
-  let scroll, max_scroll =
+  (* The position the footer carries: [None] where the drawing already says
+     it -- nothing to read yet, or two panes whose titles each name their
+     own window. *)
+  let scroll, position =
     match detail, state.lane_run_detail_error with
     | None, error ->
       let content_height = max 1 (rows - 5 - error_rows) in
@@ -5121,7 +5117,7 @@ let render_lane_run_detail (state : state) ~run_id =
       for _ = 2 to content_height do
         box_empty buf cols
       done;
-      0, 0
+      0, None
     | Some detail, (Some _ | None) ->
       let summary = lane_run_summary_lines detail in
       List.iter
@@ -5141,7 +5137,7 @@ let render_lane_run_detail (state : state) ~run_id =
           max 0 (rows - List.length summary - 6 - error_rows)
         in
         if payload_rows = 0
-        then 0, 0
+        then 0, None
         else begin
           let content_height = payload_rows - 1 in
           let input_max_scroll =
@@ -5164,12 +5160,12 @@ let render_lane_run_detail (state : state) ~run_id =
             ~left:
               ( Ansi.bold
               , Printf.sprintf "%s  %s" input_title
-                  (lane_run_pane_progress ~scroll:input_scroll
+                  (Masc_tui_scroll.window_text ~scroll:input_scroll
                      ~height:content_height (List.length input_lines)) )
             ~right:
               ( Ansi.bold
               , Printf.sprintf "%s  %s" output_title
-                  (lane_run_pane_progress ~scroll:output_scroll
+                  (Masc_tui_scroll.window_text ~scroll:output_scroll
                      ~height:content_height (List.length output_lines)) );
             let output_lines_window = Rows.of_list ~first:output_scroll ~height:content_height output_lines in
           for index = 0 to content_height - 1 do
@@ -5185,7 +5181,7 @@ let render_lane_run_detail (state : state) ~run_id =
             in
             lane_run_split_line buf cols ~left_width ~left ~right
           done;
-          scroll, max_scroll
+          scroll, None
         end
       end
       else begin
@@ -5207,13 +5203,13 @@ let render_lane_run_detail (state : state) ~run_id =
           | None -> box_empty buf cols
           | Some (style, line) -> box_line_styled buf cols ~style line
         done;
-        scroll, max_scroll
+        scroll, Some (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
       end
   in
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~scroll ~max_scroll));
+       ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~position));
   finish_surface state ~clamped:(Lane_run_detail_scroll scroll)
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
@@ -6276,7 +6272,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Scroll indicator *)
     if total_lines > content_height then begin
-      let indicator = Printf.sprintf "%s[%d/%d]%s" Ansi.dim (scroll + 1) (total_lines - content_height + 1) Ansi.reset in
+      let indicator =
+        Ansi.dim
+        ^ Masc_tui_scroll.window_text ~scroll ~height:content_height total_lines
+        ^ Ansi.reset
+      in
       box_line buf cols indicator
     end;
 
@@ -6737,7 +6737,7 @@ let render_system_logs (state : state) =
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry") scroll);
+      (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -6885,7 +6885,7 @@ let render_verification_list (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
+      (Printf.sprintf "[requests %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
@@ -7046,7 +7046,7 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
 ;;
 
 (* The queue stays beside the request under review. Opening one used to hide the others, and the others
@@ -7056,7 +7056,7 @@ let render_verification_detail (state : state) request =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, max_scroll =
+  let scroll, position =
     if cols < keeper_split_threshold_cols then
       verification_detail_pane state ~rows ~cols request buf
     else begin
@@ -7083,8 +7083,7 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%s  (%d/%d)"
-            (Masc_tui_keys.footer_hints state.view) scroll max_scroll));
+         (Printf.sprintf "%s  %s" (Masc_tui_keys.footer_hints state.view) position));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -7340,7 +7339,7 @@ let render_harness_list (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
+      (Printf.sprintf "[verdicts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   let link_hint =
     match List.nth_opt verdicts state.harness_cursor with
@@ -7498,7 +7497,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement
@@ -7509,7 +7508,7 @@ let render_harness_detail (state : state) verdict =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, max_scroll =
+  let scroll, position =
     if cols < keeper_split_threshold_cols then
       harness_detail_pane state ~rows ~cols verdict buf
     else begin
@@ -7537,8 +7536,8 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh"
-            scroll max_scroll));
+            "j/k:scroll  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh  %s"
+            position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
 
@@ -8327,7 +8326,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
-  scroll, max_scroll
+  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height total
 ;;
 
 (* The run list stays beside the run. Opening one used to hide the others, and the others
@@ -8337,7 +8336,7 @@ let render_fusion_detail (state : state) run_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
-  let scroll, max_scroll =
+  let scroll, position =
     if cols < keeper_split_threshold_cols then
       fusion_detail_pane state ~rows ~cols run_id buf
     else begin
@@ -8380,7 +8379,7 @@ let render_fusion_detail (state : state) run_id =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints_fusion_detail ~scroll ~max_scroll));
+         (Masc_tui_keys.footer_hints_fusion_detail ~position));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 
@@ -8556,7 +8555,7 @@ let render_repository_list (state : state) =
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[%d repositories, scroll %d]" shown scroll)
+            (Printf.sprintf "[repositories %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
       end;
       (match context_lines with
        | [] -> ()
@@ -8905,7 +8904,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     done;
   if total > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%s, scroll %d]  esc closes" (Masc_tui_message_layout.count_noun total "line") scroll)
+      (Printf.sprintf "[lines %s]  esc closes" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
   else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
@@ -9096,7 +9095,7 @@ let render_changes_list (state : state) =
    | Some _ -> ());
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
+      (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
@@ -9466,7 +9465,7 @@ let render_connectors (state : state) =
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "[%d connectors, scroll %d]" shown scroll)
+            (Printf.sprintf "[connectors %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
       end)
 
 let runtime_refresh_badge refresh_state =
@@ -9848,7 +9847,9 @@ let render_runtime (state : state) =
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let scroll_hint =
-    if shown > content_height then Printf.sprintf "[%d rows, scroll %d]  " shown scroll else ""
+    if shown > content_height then
+      Printf.sprintf "[rows %s]  " (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
+    else ""
   in
   let hints =
     Printf.sprintf "%sj/k:scroll  Enter:detail  p:%s  Tab:next  q:quit  r:live refresh"
@@ -10083,7 +10084,7 @@ let render_tools (state : state) =
   done;
   if drawable > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun drawable "row") scroll);
+      (Printf.sprintf "[rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -10309,14 +10310,13 @@ let render_keeper_calls (state : state) =
     done
   end;
   if scroll > 0 || total_rows > content_height then
-    let last_visible = min total_rows (scroll + content_height) in
+    let window =
+      Masc_tui_scroll.window_text ~scroll ~height:content_height total_rows
+    in
     let detailed_footer =
-      Printf.sprintf "[%s · rows %d-%d of %d]" (Masc_tui_message_layout.count_noun shown "call") (scroll + 1)
-        last_visible total_rows
+      Printf.sprintf "[%s · %s]" (Masc_tui_message_layout.count_noun shown "call") window
     in
-    let compact_footer =
-      Printf.sprintf "[%d/%d]" (scroll + 1) total_rows
-    in
+    let compact_footer = "[" ^ window ^ "]" in
     let footer =
       if Message_layout.display_width detailed_footer <= framed_inner_width cols
       then detailed_footer
@@ -10397,7 +10397,9 @@ let render_acting_evidence (state : state) entry =
     | None -> box_empty buf cols
     | Some line -> box_line buf cols line
   done;
-  box_line_styled buf cols ~style:Ansi.dim (Printf.sprintf "  [%d evidence rows, scroll %d]" (List.length lines) scroll);
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  [evidence rows %s]"
+       (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
       ~hints:"j/k:scroll  PgUp/PgDn:page  Esc:back to events");
@@ -10612,7 +10614,7 @@ let render_acting (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "row") scroll)
+      (Printf.sprintf "[rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
@@ -13442,8 +13444,8 @@ let render_patch_modal (state : state) =
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
     ~hints:
-      (Printf.sprintf "[%s, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
-         (Masc_tui_message_layout.count_noun total "line") scroll)
+      (Printf.sprintf "[lines %s]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         "  old   new     diff preview (syntax colored)";

@@ -799,10 +799,10 @@ let cancels_two_press ~input_seen ~key ~second_press =
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays
    [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
-   [scroll] is the clamped position the renderer computed, so the footer
-   agrees with what is on screen. *)
-let footer_hints_fusion_detail ~scroll ~max_scroll =
-  Printf.sprintf "%s  (%d/%d)"
+   [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
+   so the footer agrees with what is on screen. *)
+let footer_hints_fusion_detail ~position =
+  Printf.sprintf "%s  %s"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
         ; b Navigate "PgUp/PgDn" "page"
@@ -810,7 +810,7 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
         ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
         ]
         @ listing_meta))
-    scroll max_scroll
+    position
 
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
@@ -824,15 +824,18 @@ let footer_hints_lanes_run_list =
      ]
      @ listing_meta)
 
-let footer_hints_lanes_run_detail ~scroll ~max_scroll =
-  Printf.sprintf "%s  (%d/%d)"
-    (hints_of_bindings
-       ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-        ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-        ; b Act "Left / Esc" "back" ~help:"back to the run list"
-        ]
-        @ listing_meta))
-    scroll max_scroll
+let footer_hints_lanes_run_detail ~position =
+  let hints =
+    hints_of_bindings
+      ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+       ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+       ; b Act "Left / Esc" "back" ~help:"back to the run list"
+       ]
+       @ listing_meta)
+  in
+  match position with
+  | None -> hints
+  | Some position -> hints ^ "  " ^ position
 
 let footer_hints_git_changes =
   hints_of_bindings

@@ -577,9 +577,10 @@ type model_evidence =
 type model_message =
   { text : string
   ; replay_evidence : model_evidence option
+  ; instruction_resolution : Keeper_event_queue.hitl_resolution option
   }
 
-let plain_model_message text = { text; replay_evidence = None }
+let plain_model_message text = { text; replay_evidence = None; instruction_resolution = None }
 
 let replay_evidence_effect_to_string = function
   | Evidence_applied -> "applied"
@@ -652,6 +653,7 @@ let replay_model_message
         "\n"
         [ user_message; ""; canonical_replay_evidence_fragment replay_evidence ]
   ; replay_evidence = Some replay_evidence
+  ; instruction_resolution = None
   }
 ;;
 
@@ -774,10 +776,10 @@ let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
 
 let user_message_with_hitl_resolution ~base_path ~user_message = function
   | Some
-      { Keeper_event_queue.approval_id
+      ({ Keeper_event_queue.approval_id
       ; decision = Keeper_event_queue.Hitl_approved
       ; _
-      } ->
+      } as resolution) ->
     (match
        Keeper_approval_queue.approved_resolution_delivery
          ~base_path
@@ -788,12 +790,13 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; state = Keeper_approval_queue.Resolution_unconsumed
          ; replay_outcome = None
          } ->
-       plain_model_message
+       let message = plain_model_message
          (approved_resolution_message
             ~approval_id
             ~tool_name:request.tool_name
             ~input:request.input
-            ~user_message)
+            ~user_message) in
+       { message with instruction_resolution = Some resolution }
      | Ok
          { request
          ; state = Keeper_approval_queue.Resolution_consumed
@@ -870,11 +873,11 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
                 ~fallback:(Printf.sprintf "- approval_id: %s" approval_id)
             ]))
   | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Keeper_event_queue.Hitl_rejected rationale
-      ; _
-      } ->
-    plain_model_message
+      ({ Keeper_event_queue.approval_id
+       ; decision = Keeper_event_queue.Hitl_rejected rationale
+       ; _
+       } as resolution) ->
+    let message = plain_model_message
       (String.concat
          "\n"
          [ user_message
@@ -889,7 +892,8 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
                   ; "- decision: rejected"
                   ; Printf.sprintf "- rationale: %s" rationale
                   ])
-         ])
+         ]) in
+    { message with instruction_resolution = Some resolution }
   | None -> plain_model_message user_message
 ;;
 

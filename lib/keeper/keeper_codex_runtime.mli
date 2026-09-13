@@ -17,6 +17,7 @@ type attempt_outcome =
 
 val run :
   ?required_native_posture:Runtime_native_tools.posture ->
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

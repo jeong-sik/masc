@@ -997,6 +997,7 @@ let run_named
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_request_attribution
+    ?official_client_continuation
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -1347,7 +1348,11 @@ let run_named
            && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
           Error (Keeper_required_tools.to_core_error
             {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
-        else match recovery_view, runtime.Runtime.execution with
+        else match official_client_continuation with
+        | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
+            || Runtime_execution.checkpoint_owner runtime.Runtime.execution <> Runtime_execution.Official_client ->
+          Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
+        | Some _ | None -> match recovery_view, runtime.Runtime.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
@@ -1467,6 +1472,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1595,6 +1601,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1706,6 +1713,7 @@ let run_named
             ~context_injector
             ~context
             ~terminal_effect_state
+            ?official_client_continuation
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->

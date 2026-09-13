@@ -291,7 +291,16 @@ let clamp_index (state : Masc_tui_types.state) =
   let n = List.length (menu_entries state) in
   state.msx_menu_index <- (if n = 0 then 0 else max 0 (min (n - 1) state.msx_menu_index))
 
-let menu_title = " MSX \xe2\x80\x94 pick a game   (up/down move, enter load, esc back)"
+let menu_title = " MSX \xe2\x80\x94 pick a game"
+
+(* The menu's keys, on its bottom row, in the [key:action] form every other
+   screen's footer uses. They were a sentence inside the title instead, spelled
+   two ways for one screen -- "(up/down move, enter load, esc back)" on the game
+   menu and "Enter selects, Esc cancels" on the disk menu -- and neither said
+   that [j] and [k] move as well. *)
+let menu_hints = function
+  | Masc_tui_types.Boot_game -> "j/k:move  Enter:load  Esc:back"
+  | Change_disk -> "j/k:move  Enter:swap disk  Esc:cancel"
 
 let entry_label (state : Masc_tui_types.state) = function
   | Watch ->
@@ -315,7 +324,7 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   Buffer.add_string buf "\027[2J\027[H";
   Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> menu_title
-    | Change_disk -> " MSX — change disk (no reboot); Enter selects, Esc cancels"));
+    | Change_disk -> " MSX — change disk (no reboot)"));
   Buffer.add_string buf "\027[0K\r\n";
   let status_rows =
     match status with
@@ -343,16 +352,18 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
            Buffer.add_string buf line;
            Buffer.add_string buf "\027[0K\r\n")
          entries);
-  (* Pad the body so a previously longer list leaves no ghost rows behind, and
-     stop the clearing one newline short of the bottom. A newline written on the
-     last row scrolls the screen by one, and the row that scrolls off is the
-     first -- the title, which is the only place this screen says [esc] goes
-     back. Measured at 150x44 with no cartridges: the screen held two lines, the
-     sentence about the empty directory and a blank, and nothing said how to
-     leave. *)
+  (* Pad the body so a previously longer list leaves no ghost rows behind, put
+     the keys on the bottom row, and write no newline there. A newline written
+     on the last row scrolls the screen by one, and the row that scrolls off is
+     the first -- the title. Measured at 150x44 with no cartridges: the screen
+     held two lines, the sentence about the empty directory and a blank, and
+     nothing said how to leave. *)
   let drawn = 1 + status_rows + max 1 (List.length entries) in
   let last_row = max 4 (rows - 1) in
   for row = drawn to last_row do
+    if row = last_row then
+      Buffer.add_string buf
+        ("\027[2m" ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode) ^ "\027[0m");
     Buffer.add_string buf "\027[0K";
     if row < last_row then Buffer.add_string buf "\r\n"
   done;

@@ -46,6 +46,13 @@ let contains hay needle =
   let rec go i = i + n <= m && (at i 0 || go (i + 1)) in
   n = 0 || go 0
 
+(* The bottom row: nothing is written after it, so it is what follows the
+   last newline. *)
+let after_last_newline out =
+  match String.rindex_opt out '\n' with
+  | None -> out
+  | Some i -> String.sub out (i + 1) (String.length out - i - 1)
+
 (* --- The spectator ---------------------------------------------------- *)
 
 let test_empty_frame () =
@@ -87,6 +94,9 @@ let test_menu_lists_inventory () =
   check bool "opening sets the screen flag" true state.msx_open;
   check bool "and the menu flag" true state.msx_menu_open;
   check bool "the menu names itself" true (contains out "pick a game");
+  check bool "the title no longer spells the keys" false (contains out "esc back");
+  check bool "the bottom row names them the footer way" true
+    (contains (after_last_newline out) "j/k:move  Enter:load  Esc:back");
   check bool "and lists the first cartridge" true (contains out "dig-dug.rom");
   check bool "and the second" true (contains out "pac-man.rom")
 
@@ -153,6 +163,8 @@ let test_change_disk_menu () =
   state.msx_carts <- ["cart.rom"; "A.dsk"; "B.DSK"];
   let out = captured (fun write -> Masc_tui_msx.open_menu ~write ~mode:Masc_tui_types.Change_disk state) in
   check bool "menu identifies disk replacement" true (contains out "change disk");
+  check bool "and names its own keys on the bottom row" true
+    (contains (after_last_newline out) "Enter:swap disk  Esc:cancel");
   check bool "cartridges excluded from replacement menu" false (contains out "cart.rom");
   check bool "uppercase disk extension accepted" true (contains out "B.DSK");
   let write _ = () in

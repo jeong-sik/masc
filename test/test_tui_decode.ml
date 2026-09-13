@@ -4069,9 +4069,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
    [configuration_state]. Decoding that word into a variant is what lets the
    detail pane say which of the two it is. *)
 let test_decode_standalone_lane_configuration_is_a_closed_set () =
-  (* All four lanes, because the snapshot decoder demands each known lane
-     exactly once and a one-lane fixture never reaches the configuration
-     word at all. Only the board lane's state varies. *)
+  (* Every known lane, because the snapshot decoder demands each one exactly
+     once and a one-lane fixture never reaches the configuration word at all.
+     Only the board lane's state varies. *)
   let snapshot configuration_state =
     `Assoc
       [ "schema", `String "masc.standalone_llm_lanes.v1"
@@ -4087,6 +4087,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
                 "Board Attention"
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
+            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
             ] )
       ]
@@ -4149,6 +4150,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
               "board_attention_exact" "Board Attention"
           ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
           ; standalone_lane_json "librarian_exact" "Librarian"
+          ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
           ]
@@ -4193,6 +4195,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         ~selected_slots:
           [ `Assoc [ "slot_id", `String "qwen-primary"; "count", `Int 3 ] ]
         "librarian_exact" "Librarian"
+    ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
     ]
@@ -4212,14 +4215,29 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
-      Alcotest.(check int) "all four lanes" 4 (List.length snapshot.sls_lanes);
+      (* Against the fixture, not a literal: this read "all four lanes" 4 and
+         a fifth known lane broke it without anything about decoding changing. *)
+      Alcotest.(check int) "every lane in the fixture survives" (List.length lanes)
+        (List.length snapshot.sls_lanes);
       let first = List.hd snapshot.sls_lanes in
       Alcotest.(check string) "running status" "running"
         (Tui_decode.standalone_lane_status_to_string first.sl_status);
       Alcotest.(check (option string)) "consumer purpose"
         (Some "Judges one durable Board candidate for Keeper attention.")
         first.sl_purpose;
-      let verifier = List.nth snapshot.sls_lanes 3 in
+      (* By id, not position. The index was 3 while the verifier was the
+         fourth lane; a lane added ahead of it moved the verifier and left
+         index 3 naming another lane, which this would then have read. *)
+      let verifier =
+        match
+          List.find_opt
+            (fun (lane : Tui_decode.standalone_lane) ->
+              String.equal lane.sl_lane_id "verifier_exact")
+            snapshot.sls_lanes
+        with
+        | Some lane -> lane
+        | None -> Alcotest.fail "the verifier lane did not survive the decode"
+      in
       Alcotest.(check (option string)) "older v1 row remains readable" None
         verifier.sl_purpose;
       Alcotest.(check string)
@@ -5496,6 +5514,7 @@ let keeper_turns_json =
               ; ( "turn"
                 , `Assoc
                     [ ("lane", `String "autonomous")
+                    ; ("interrupt_token", `Null)
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -5548,6 +5567,7 @@ let test_decode_keeper_turns_reads_the_preview () =
                 ; ( "turn"
                   , `Assoc
                       [ ("lane", `String "autonomous")
+                      ; ("interrupt_token", `String "token")
                       ; ("started_at_unix", `Float 1.0)
                       ; ( "preview"
                         , `Assoc
@@ -5593,6 +5613,7 @@ let test_decode_keeper_turns_rejects_unknown_lane () =
                 ; ( "turn"
                   , `Assoc
                       [ ("lane", `String "warp")
+                      ; ("interrupt_token", `String "token")
                       ; ("started_at_unix", `Float 1.0)
                       ] )
                 ]

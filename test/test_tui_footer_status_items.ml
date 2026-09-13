@@ -26,6 +26,20 @@ let check_one_line label text =
   in
   Alcotest.(check int) label 1 newlines
 
+let test_literal_search_status_survives_hint_fitting () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let hints = "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close  q:quit" in
+  List.iter (fun width ->
+    let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+      ~dim:"" ~reset:"" ~max_cells:width ~port:8935 ~hints () in
+    check_bool "literal query and count are never split as hint items" true
+      (contains ~needle:prefix rendered);
+    check_bool "quit remains available" true (contains ~needle:"q:quit" rendered);
+    check_at_most_cells "footer remains bounded" width (String.trim rendered)) [60;100;200];
+  let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+    ~dim:"" ~reset:"" ~max_cells:10 ~port:8935 ~hints () in
+  check_at_most_cells "even the literal prefix can be cell-truncated" 10 (String.trim rendered)
+
 let test_port_closes_every_footer () =
   check_string "port closes a plain footer"
     "<dim>  j/k:move  Tab:next  | Port: 8935<reset>\n"
@@ -645,7 +659,9 @@ let test_a_row_in_another_grammar_loses_its_door () =
 
 let tests =
   [ ( "tui-footer-status-items"
-    , [ Alcotest.test_case "port closes every footer" `Quick
+    , [ Alcotest.test_case "literal search status survives hint fitting" `Quick
+          test_literal_search_status_survives_hint_fitting
+      ; Alcotest.test_case "port closes every footer" `Quick
           test_port_closes_every_footer
       ; Alcotest.test_case "extra facts precede port" `Quick
           test_extra_facts_precede_port

@@ -1031,14 +1031,57 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertEqual(after['endpoints'][1]['default_voice'], 'Yuna')
             self.assertEqual(after['endpoints'][1]['kind'], 'macos_say')
 
-    def test_a_new_tts_section_gets_both_defaults(self):
+    def test_a_new_tts_section_keeps_per_keeper_voice_overrides_effective(self):
         import tomllib
         with self.workspace() as (base, runtime):
             result = self.configure(base, '--voice', 'Yuna')
             self.assertEqual(result.returncode, 0, result.stderr)
             tts = tomllib.loads(runtime.read_text())['voice']['tts']
             self.assertEqual(tts['default_voice'], 'Yuna')
-            self.assertEqual(tts['endpoints'][0]['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            endpoint = tts['endpoints'][0]
+            self.assertEqual(endpoint['id'], 'macos-say')
+            self.assertEqual(endpoint['kind'], 'macos_say')
+            # An endpoint voice outranks per-Keeper mappings. The fresh
+            # section owns this default so those mappings remain effective.
+            self.assertNotIn('default_voice', endpoint)
+
+    def test_a_directory_that_was_never_initialized_is_told_to_run_init(self):
+        # Voice is a section of the configuration masc init writes. Measured
+        # before this: exit 1 and the raw Sys_error text for the missing file,
+        # which names neither the workspace nor what to run.
+        with tempfile.TemporaryDirectory(prefix='voice-no-init-') as directory:
+            base = Path(directory)
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('No masc workspace at', result.stderr)
+            self.assertIn('masc init --base-path', result.stderr)
+            self.assertNotIn('Sys_error', result.stderr)
+            self.assertEqual(list(base.iterdir()), [])
+
+    def test_setting_the_same_voice_again_keeps_per_keeper_voices_effective(self):
+        # The second run finds a [voice.tts] section -- the first run's -- and
+        # that section is say's own, so its default is the place for the voice.
+        # Measured before the placement asked who owns the default: the second
+        # run put default_voice on the endpoint and a keeper mapped to another
+        # voice spoke in this one. A workspace already left that way is
+        # repaired by the next run, because the endpoint is written whole.
+        import tomllib
+        with self.workspace() as (base, runtime):
+            for _ in range(2):
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            self.assertNotIn('default_voice', tts['endpoints'][0])
+        stale = ('\n[[voice.tts.endpoints]]\nid = "macos-say"\nkind = "macos_say"\n'
+                 'enabled = true\ndefault_voice = "Yuna"\n\n[voice.tts]\ndefault_voice = "Yuna"\n')
+        with self.workspace(stale) as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertNotIn('default_voice', tts['endpoints'][0])
 
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):

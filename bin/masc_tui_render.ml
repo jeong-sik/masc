@@ -1844,14 +1844,6 @@ let render_board_compose (state : state) =
     ~cols buf
 
 
-(* Rows the Board list spends before any post: the box, its title and the
-   hearth census under it, the column header and its rule, then the closing
-   rule, the border, the detail line and the footer. Nine until the census
-   line joined them; naming it is what lets a tenth reader check the
-   arithmetic instead of trusting a literal that two places have to agree
-   on. *)
-let board_list_chrome_rows = 11
-
 (* Every hearth on the board and how many posts it holds, with the one being
    read marked. [f] walked this list and drew none of it, so narrowing was a
    press into the dark: a reader could not see which hearths existed, which
@@ -1914,10 +1906,6 @@ let board_hearth_census_line ~cols (state : state) =
 
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1934,139 +1922,155 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
+  let board_list_error =
+    Terminal_text.optional_single_line state.board_list_error
+  in
   (* No sort here. The row under this one says it in the words that answer
      what the order is -- "latest changed first" rather than "updated" -- and
      it is the row with space for them. "updated" is the token the board list
      is asked for (the request's sort_by) and the token the workspace config
-     keeps, so a title that spelled it showed the operator a protocol value. *)
-  let header = Printf.sprintf "%s (%d)%s  %s  %s"
+     keeps, so a title that spelled it showed the operator a protocol value.
+
+     A count only once a list has answered. Before that, or after a first
+     read that failed, "(0)" read as a board with nothing on it. A count
+     already on screen stays when a later refresh fails: those posts are
+     still the last reading. *)
+  let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
-    count hearth timestamp
+    (match state.board_posts, board_list_page state ~error:board_list_error with
+     | _ :: _, _ | [], Page_empty -> Printf.sprintf "(%d)" count
+     | [], (Page_unread | Page_failed) ->
+         title_missing_reading ~error:board_list_error)
+    hearth timestamp
     (connection_badge state) in
 
-  box_top buf cols;
-  box_line buf cols header;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (* The sort first. It has no other home on this surface now, and this row
-       is cut to the frame's inner width: at 34 columns the key hint alone
-       spent all 30 cells, so the order the rows are in was invisible while
-       the key to change it was not. H is in the sheet under [?]. *)
-    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
-       (board_sort_explanation state.board_sort));
-  box_line buf cols (board_hearth_census_line ~cols state);
-  box_divider buf cols;
-  (* The header is laid out by the same arithmetic as the rows below it,
-     because a header laid out by its own is a header that stops describing
-     them. It did: the rows size their title to [cols - 68] and the header
-     claimed a fixed 20, so at eighty columns the header ran eight cells
-     long. The overflow pushed SCORE into the frame's edge and REPLIES off
-     it -- two columns still drawn on every row, with nothing left saying
-     what they were. The mark ahead of the id is one cell and the header
-     reserved two, which put every label one cell right of its data.
-
-     The column description in [Render_schedule] is the one place either of
-     them asks. *)
   let title_w = board_title_width ~cols in
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (String.make board_table_lead ' '
-     ^ Render_schedule.board_header_row ~title_width:title_w);
-  box_divider buf cols;
+  (* The frame, its fill and the footer are the contract's: this surface
+     counted them by hand and counted two rows it no longer draws, so the
+     footer stood two rows above the composer. *)
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
+    ~title:header ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~body:(fun ~budget c ->
+      (* The header is laid out by the same arithmetic as the rows below it,
+         because a header laid out by its own is a header that stops
+         describing them. It did: the rows size their title to [cols - 68]
+         and the header claimed a fixed 20, so at eighty columns the header
+         ran eight cells long. The overflow pushed SCORE into the frame's edge
+         and REPLIES off it -- two columns still drawn on every row, with
+         nothing left saying what they were. The mark ahead of the id is one
+         cell and the header reserved two, which put every label one cell
+         right of its data.
 
-  let board_list_error =
-    Terminal_text.optional_single_line state.board_list_error
-  in
-  let render_list_error err =
-    box_line buf cols (data_unreliable_row ~cols err)
-  in
-  if count = 0 then begin
-    (match board_list_error with
-     | Some err -> render_list_error err
-     | None ->
-         box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
-    for _ = 1 to rows - board_list_chrome_rows do
-      box_empty buf cols
-    done
-  end else begin
-    Option.iter render_list_error board_list_error;
-    let error_rows = if Option.is_some board_list_error then 1 else 0 in
-    let content_height = max 0 (rows - board_list_chrome_rows - error_rows) in
-    let scroll_offset =
-      if state.board_cursor >= content_height then
-        state.board_cursor - content_height + 1
-      else 0
-    in
-    (* One clock read for the whole page, so two rows drawn in the same frame
-       cannot report ages a tick apart. *)
-    let now_unix = Unix.gettimeofday () in
-    let board_posts_window = Rows.of_list ~first:scroll_offset ~height:content_height state.board_posts in
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll_offset in
-      match Rows.at board_posts_window idx with
-      | None -> box_empty buf cols
-      | Some p -> begin
-        let is_selected = idx = state.board_cursor in
-        (* The age is since the post or one of its comments last moved. A
-           board's list had no timestamp at all, so "what is still alive" --
-           the question the [recent] and [updated] sort orders answer -- could
-           only be read off the order the rows happened to arrive in. Spelled
-           with the same ladder the Approvals queue uses, so a span reads the
-           same on both. *)
-        let hearth_text =
-          match Terminal_text.optional_single_line p.bp_hearth with
-          | Some h when not (String.equal h "") -> "#" ^ h
-          | _ -> ""
-        in
-        let score_text =
-          if p.bp_votes > 0 then Printf.sprintf "▲%+d" p.bp_votes
-          else if p.bp_votes < 0 then Printf.sprintf "▼%d" p.bp_votes
-          else " 0"
-        in
-        let replies_text =
-          if p.bp_comment_count > 0 then Printf.sprintf "%d" p.bp_comment_count
-          else "0"
-        in
-        let values =
-          { Render_schedule.brow_mark = board_kind_mark p.bp_kind
-          ; brow_id = Terminal_text.single_line p.bp_id
-          ; brow_hearth = hearth_text
-          ; brow_author = Terminal_text.single_line p.bp_author
-          ; brow_title = Terminal_text.single_line p.bp_title
-          ; brow_age = Message_layout.span_text (now_unix -. p.bp_updated_at)
-          ; brow_score = score_text
-          ; brow_replies = replies_text
-          }
-        in
-        let styles =
-          { Render_schedule.bstyle_id = Theme.recede ()
-          ; bstyle_hearth =
-              if String.equal hearth_text "" then Ansi.dim else (Theme.info ())
-          ; bstyle_author = Theme.ok ()
-          ; bstyle_age = Ansi.dim
-          ; bstyle_score = board_score_style p.bp_votes
-          ; bstyle_replies =
-              if p.bp_comment_count > 0 then (Theme.ok ()) else Ansi.dim
-          }
-        in
-        let content =
-          String.make board_table_lead ' '
-          ^ Render_schedule.board_row ~styles ~title_width:title_w values
-        in
-        if is_selected then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr content)
-        else
-          box_line buf cols content
-      end
-    done
-  end;
+         The column description in [Render_schedule] is the one place either
+         of them asks.
 
-  box_bottom buf cols;
-
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
-
-  finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
-      ~cols buf
+         Each entry draws one row, so the list's height is asked of the rows
+         above it rather than kept beside them as a number. *)
+      let heading =
+        [ (fun () ->
+            (* The sort first. It has no other home on this surface now, and
+               this row is cut to the frame's inner width: at 34 columns the
+               key hint alone spent all 30 cells, so the order the rows are in
+               was invisible while the key to change it was not. H is in the
+               sheet under [?]. *)
+            c.push_styled ~style:(Theme.recede ())
+              (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
+                 (board_sort_explanation state.board_sort)))
+        ; (fun () -> c.push (board_hearth_census_line ~cols state))
+        ; c.push_divider
+        ; (fun () ->
+            c.push_styled ~style:(Theme.recede ())
+              (String.make board_table_lead ' '
+               ^ Render_schedule.board_header_row ~title_width:title_w))
+        ; c.push_divider
+        ]
+      in
+      List.iter (fun draw -> draw ()) heading;
+      let render_list_error err = c.push (data_unreliable_row ~cols err) in
+      if count = 0 then
+        (match board_list_page state ~error:board_list_error with
+         | Page_failed -> Option.iter render_list_error board_list_error
+         | Page_unread -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
+         | Page_empty ->
+             c.push (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset))
+      else begin
+        Option.iter render_list_error board_list_error;
+        let error_rows = if Option.is_some board_list_error then 1 else 0 in
+        let content_height =
+          max 0 (budget - List.length heading - error_rows)
+        in
+        let scroll_offset =
+          if state.board_cursor >= content_height then
+            state.board_cursor - content_height + 1
+          else 0
+        in
+        (* One clock read for the whole page, so two rows drawn in the same
+           frame cannot report ages a tick apart. *)
+        let now_unix = Unix.gettimeofday () in
+        let board_posts_window =
+          Rows.of_list ~first:scroll_offset ~height:content_height
+            state.board_posts
+        in
+        for i = 0 to content_height - 1 do
+          let idx = i + scroll_offset in
+          match Rows.at board_posts_window idx with
+          | None -> ()
+          | Some p ->
+            let is_selected = idx = state.board_cursor in
+            (* The age is since the post or one of its comments last moved.
+               A board's list had no timestamp at all, so "what is still
+               alive" -- the question the [recent] and [updated] sort orders
+               answer -- could only be read off the order the rows happened
+               to arrive in. Spelled with the same ladder the Approvals queue
+               uses, so a span reads the same on both. *)
+            let hearth_text =
+              match Terminal_text.optional_single_line p.bp_hearth with
+              | Some h when not (String.equal h "") -> "#" ^ h
+              | _ -> ""
+            in
+            let score_text =
+              if p.bp_votes > 0 then Printf.sprintf "▲%+d" p.bp_votes
+              else if p.bp_votes < 0 then Printf.sprintf "▼%d" p.bp_votes
+              else " 0"
+            in
+            let replies_text =
+              if p.bp_comment_count > 0 then
+                Printf.sprintf "%d" p.bp_comment_count
+              else "0"
+            in
+            let values =
+              { Render_schedule.brow_mark = board_kind_mark p.bp_kind
+              ; brow_id = Terminal_text.single_line p.bp_id
+              ; brow_hearth = hearth_text
+              ; brow_author = Terminal_text.single_line p.bp_author
+              ; brow_title = Terminal_text.single_line p.bp_title
+              ; brow_age =
+                  Message_layout.span_text (now_unix -. p.bp_updated_at)
+              ; brow_score = score_text
+              ; brow_replies = replies_text
+              }
+            in
+            let styles =
+              { Render_schedule.bstyle_id = Theme.recede ()
+              ; bstyle_hearth =
+                  if String.equal hearth_text "" then Ansi.dim
+                  else Theme.info ()
+              ; bstyle_author = Theme.ok ()
+              ; bstyle_age = Ansi.dim
+              ; bstyle_score = board_score_style p.bp_votes
+              ; bstyle_replies =
+                  if p.bp_comment_count > 0 then Theme.ok () else Ansi.dim
+              }
+            in
+            let content =
+              String.make board_table_lead ' '
+              ^ Render_schedule.board_row ~styles ~title_width:title_w values
+            in
+            if is_selected then
+              c.push_selected (Masc_tui_theme.strip_sgr content)
+            else c.push content
+        done
+      end)
 
 (* Owned by the single render loop, like the chat Markdown cache. Only the
    currently read document is retained; input and live status are never cached. *)

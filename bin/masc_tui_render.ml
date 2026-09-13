@@ -13129,12 +13129,9 @@ let help_viewport (state : state) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 2048 in
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  framed_shadow_top buf cols;
   (* A choice says which question, how many names and which line; the
      prompt is a filter over those names, not a jump query. *)
   let title, prompt, action =
@@ -13153,51 +13150,42 @@ let render_palette (state : state) =
      palette) and the prompt follows it. It was "Quick Jump & Navigation" with
      a lightning glyph between them: the glyph said nothing, and the entries
      are not all jumps -- settings, the gate modes, a task or a post run from
-     the same list, which is why Enter reads "run". *)
-  framed_shadow_line buf cols
-    (screen_title title ^ "  "
-     ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-     ^ (Terminal_text.single_line state.palette_query)
-     ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
-  framed_shadow_divider buf cols;
-  let content_height = framed_content_height ~rows in
-  let first =
-    if cursor < content_height then 0
-    else cursor - content_height + 1
-  in
-  matches
-  |> List.filteri (fun i _ -> i >= first && i < first + content_height)
-  |> List.iteri (fun visible_index (label, _) ->
-       let selected = first + visible_index = cursor in
-       if selected then
-         framed_shadow_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
-       else
-         framed_shadow_line buf cols ("   " ^ label));
-  if total = 0 then
-    framed_shadow_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
-  framed_shadow_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       (* [key:label] items, two spaces apart, the way every other footer is
-          written. In the dotted form this row was one item with no colon, so
-          {!Masc_tui_footer} could shed no whole key and keep no door: it fell
-          through to the cell cut, where [Esc] survived only when the budget
-          happened to reach it. test_a_row_in_another_grammar_loses_its_door
-          measures that across widths. The count keeps no colon on purpose --
-          it is not a key, and it is the first thing a narrow row should give
-          up. *)
-       ~hints:
-         (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
-            (if total = 0 then 0 else cursor + 1)
-            total action));
-  finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
+     the same list, which is why Enter reads "run".
 
-(* The patch review overlay. It drew its own frame with a block shadow down
-   the right edge, a lightning glyph in its title, and a key row inside the box
-   that the footer under it repeated, and it counted its rows by hand
-   ([fixed_chrome = 9]). [surface_chrome] owns the frame, the fill and the
-   footer's row now, drawing the overlay's box, so the keys on screen are the
-   footer's alone. *)
+     The overlay contract draws the box and fills the rows under a short list
+     of matches, so the footer stays on the composer's row. *)
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"palette"
+    ~frame:Chrome_overlay
+    ~title:
+      (screen_title title ^ "  "
+       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
+       ^ (Terminal_text.single_line state.palette_query)
+       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+    (* [key:label] items, two spaces apart, the way every other footer is
+       written. In the dotted form this row was one item with no colon, so
+       {!Masc_tui_footer} could shed no whole key and keep no door: it fell
+       through to the cell cut, where [Esc] survived only when the budget
+       happened to reach it. test_a_row_in_another_grammar_loses_its_door
+       measures that across widths. The count keeps no colon on purpose --
+       it is not a key, and it is the first thing a narrow row should give
+       up. *)
+    ~hints:
+      (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
+         (if total = 0 then 0 else cursor + 1)
+         total action)
+    ~body:(fun ~budget c ->
+      let first = if cursor < budget then 0 else cursor - budget + 1 in
+      matches
+      |> List.filteri (fun i _ -> i >= first && i < first + budget)
+      |> List.iteri (fun visible_index (label, _) ->
+           if first + visible_index = cursor then
+             c.push_selected (" \xe2\x96\xb8 " ^ label)
+           else c.push ("   " ^ label));
+      if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
+
+(* The patch review overlay. [surface_chrome] owns the box, the fill and the
+   footer's row, so the rows are not counted here and the keys on screen are
+   the footer's alone. *)
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let path_label =
@@ -13257,10 +13245,8 @@ let render_patch_modal (state : state) =
                    width))
           diff_rows)
 
-(* The link preview overlay, through the same contract and for the same
-   reasons: its frame carried a block shadow, its title a globe glyph, and a
-   key row inside the box repeated the footer. The footer no longer repeats
-   the site label either -- the title already names it. *)
+(* The link preview overlay, through the same contract. The title names the
+   site, so the footer carries only keys. *)
 let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let url_opt =

@@ -2563,13 +2563,11 @@ let test_the_config_frame_is_the_shared_contract () =
     (in_config "config_content_height")
 ;;
 
-(* The patch review, link preview and deletion record overlays are the shared
-   contract's as well. The first two drew their own frame with a block shadow
-   down the right edge and a key row inside the box that the footer repeated,
-   counting their rows by hand (9 and 7); the third filled no row under a short
-   record, so its footer stood mid-screen. The shadow frame is not theirs to
-   draw any more, and neither is the box by hand. *)
-let test_the_patch_and_link_overlays_are_the_shared_contract () =
+(* The patch review, link preview, deletion record and command palette overlays
+   are the shared contract's as well: it draws their box and fills the rows
+   under a short body, so the footer stays on the composer's row. Drawn by
+   hand, a short body put the footer mid-screen. *)
+let test_the_overlays_are_the_shared_contract () =
   List.iter
     (fun binding_name ->
       let calls callee =
@@ -2581,13 +2579,12 @@ let test_the_patch_and_link_overlays_are_the_shared_contract () =
       check int (binding_name ^ " finishes no frame by hand") 0
         (calls "finish_surface");
       List.iter
-        (fun shadow ->
-          check int (Printf.sprintf "%s draws no %s" binding_name shadow) 0
-            (calls shadow))
-        [ "framed_shadow_top"; "framed_shadow_line"; "framed_shadow_line_styled"
-        ; "framed_shadow_divider"; "framed_shadow_empty"; "framed_shadow_bottom"
-        ; "framed_top"; "framed_bottom" ])
-    [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions" ]
+        (fun by_hand ->
+          check int (Printf.sprintf "%s draws no %s" binding_name by_hand) 0
+            (calls by_hand))
+        [ "framed_top"; "framed_bottom" ])
+    [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions"
+    ; "render_palette" ]
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
@@ -2731,9 +2728,9 @@ let () =
           `Quick
           test_the_config_frame_is_the_shared_contract;
         test_case
-          "the patch and link overlays are the shared contract"
+          "the overlays are the shared contract"
           `Quick
-          test_the_patch_and_link_overlays_are_the_shared_contract;
+          test_the_overlays_are_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

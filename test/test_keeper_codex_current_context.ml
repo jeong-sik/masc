@@ -78,7 +78,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -86,7 +86,7 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation
+      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages:[Agent_core.Types.user_msg "Previous completed work"]
       ~model_input_projection:None ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
@@ -169,11 +169,14 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let observed : Keeper_semantic_execution.official_client_checkpoint =
     { client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
       tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame } in
+  let steering = run ~instructions:"Keeper instructions" ~world:"Newer steering" () in
+  successful steering;
   let checkpoint = Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
-    ~observed ~expected:(Some settled) |> require in
+    ~observed ~expected:steering.Keeper_codex_runtime.settled_session |> require in
+  check bool "steering advances admission turn" true (not (String.equal observed.turn_id checkpoint.turn_id));
   let before = List.length (read_requests capture) in
   let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
-  successful (run ~official_client_continuation:checkpoint ~goal
+  successful (run ~official_client_continuation:checkpoint ~official_client_original_turn:observed ~goal
     ~instructions:"Keeper instructions" ~world:"Newer steering" ());
   let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
   check bool "cooperative continuation resumes the original vendor thread" true
@@ -182,6 +185,16 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
     (List.exists (fun row -> let method_ = member "method" row in
       method_ = `String "thread/start" || method_ = `String "thread/inject_items") rows);
   let params = List.find (fun row -> member "method" row = `String "turn/start") rows |> member "params" in
+  let resume = List.find (fun row -> member "method" row = `String "thread/resume") rows |> member "params" in
+  let snapshot = resume |> member "developerInstructions" |> text
+    |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
+  check string "saved unfinished turn remains distinct from newer steering" observed.turn_id
+    (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text);
+  check string "admission references latest settled turn" checkpoint.turn_id
+    (snapshot |> member "admission_vendor_turn" |> member "turn_id" |> text);
+  check bool "original operation identity accompanies saved turn" true
+    (snapshot |> member "original_vendor_turn" |> member "execution_scope"
+      = Keeper_execution_scope_id.to_json (Keeper_execution_scope_id.direct_operation operation_id));
   let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
   check string "the model receives only continuation intent" goal sent
 

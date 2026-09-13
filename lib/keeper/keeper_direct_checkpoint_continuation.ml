@@ -9,6 +9,8 @@ type authority = Agent_core of Agent_core.Checkpoint.t | Official_client of Sema
 type admission = { authority : authority; observed : Semantic.gate_checkpoint }
 let checkpoint admission = match admission.authority with Agent_core checkpoint -> Some checkpoint | Official_client _ -> None
 let official_client admission = match admission.authority with Official_client checkpoint -> Some checkpoint | Agent_core _ -> None
+let official_client_original_turn admission = match admission.observed with
+  | Semantic.Official_client checkpoint -> Some checkpoint | Semantic.Agent_core _ -> None
 let official_resume_message ~operation_id =
   Printf.sprintf "Continue the unfinished direct operation %s already present in this conversation. Apply any newer user steering, preserve completed tool results, and continue only remaining work. Do not repeat completed effects."
     (Keeper_chat_operation.Operation_id.to_string operation_id)

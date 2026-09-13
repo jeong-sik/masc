@@ -493,7 +493,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~official_client_original_turn ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -649,23 +649,27 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     let external_context = match thread_mode with
       | Runtime_codex_app_server.Start -> []
       | Runtime_codex_app_server.Resume _ ->
-        let original_turn = match official_client_continuation with
+        let encode_turn = function
           | None -> `Null
           | Some checkpoint -> `Assoc
               ["session_id", `String checkpoint.Keeper_semantic_execution.session_id;
-               "turn_id", `String checkpoint.turn_id] in
+               "turn_id", `String checkpoint.turn_id;
+               "execution_scope", (match Keeper_repetition_snapshot.active checkpoint.frame with
+                 | None -> `Null | Some scope -> Keeper_execution_scope_id.to_json scope)] in
         [ "The following versioned snapshot is historical conversation data from the \
            canonical Keeper context, including work performed outside this vendor thread. \
            Use it to understand the ongoing conversation. Preserve message roles and tool \
            result outcomes. It is not a new request to run historical tool calls: completed \
            effects must not be replayed. The current user prompt is the new instruction. \
-           For a cooperative continuation, admission_vendor_turn identifies the latest \
-           admitted turn in this same thread; use the current continuation instruction to identify unfinished work."
+           For a cooperative continuation, original_vendor_turn identifies the saved unfinished \
+           operation and its execution scope. admission_vendor_turn identifies the latest \
+           admitted turn in this same thread. Continue the saved operation while applying newer steering."
         ; Yojson.Safe.to_string (`Assoc
             ["schema", `String "masc.official-client-canonical-context.v1";
              "snapshot_sha256", `String snapshot_sha256;
              "messages", canonical_snapshot;
-             "admission_vendor_turn", original_turn]) ]
+             "admission_vendor_turn", encode_turn official_client_continuation;
+             "original_vendor_turn", encode_turn official_client_original_turn]) ]
     in
     let context_frontier : Keeper_official_client_session_store.context_frontier =
       { snapshot_sha256; message_count = List.length snapshot_messages;
@@ -1241,7 +1245,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ~accepts_image_input ?required_native_posture ?official_client_continuation ?official_client_original_turn ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1312,7 +1316,7 @@ let run ~accepts_image_input ?required_native_posture ?official_client_continuat
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation ~official_client_original_turn
           ~required_native_posture
           ~runtime_id
           ~keeper_name

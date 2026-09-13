@@ -2792,14 +2792,20 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               (* See terminal delivery race: the first resolver is authoritative. *)
               ignore (Eio.Promise.try_resolve resolve_delivery result : bool)
             in
+            (* Every adapter reads the bus until the publisher closes it. A
+               terminal event says what to deliver; it does not end the read,
+               because a reader that leaves early strands the publisher on a
+               full bus and the turn never settles. *)
             let drain_events () =
               let rec loop () =
                 match Keeper_chat_events.subscribe events with
-                | Keeper_chat_events.Run_finished _
-                | Keeper_chat_events.Event_error _ -> ()
-                | _ -> loop ()
+                | Keeper_chat_events.Closed -> ()
+                | Keeper_chat_events.Next _ -> loop ()
               in
               loop ()
+            in
+            let no_terminal_before_close =
+              "Keeper turn closed its event bus without a terminal event"
             in
             let fork_adapter run =
               Eio.Fiber.fork ~sw (fun () ->
@@ -2820,36 +2826,40 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  in
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
-                 let rec loop projection =
-                   let { Keeper_chat_events.seq; ts; event } =
-                     Keeper_chat_events.subscribe_published events
-                   in
-                   (* The bus stamped [ts] once at publish; the journal line
-                      carries the same value, so a since_seq replay of this
-                      event reproduces this frame byte for byte. *)
-                   let projection, projected =
-                     Server_keeper_chat_agui_projection.project
-                       ~timestamp:ts
-                       ~redact_text
-                       ~redact_json
-                       projection
-                       event
-                   in
-                   Option.iter
-                     (fun event ->
-                        note_operation_wire_event ~operation_id event;
-                        Keeper_chat_broadcast.operation_event
-                          ~keeper_name
-                          ~operation_id
-                          ~seq:(Some seq)
-                          ~event;
-                        publish_operation_live_event ~operation_id ~seq:(Some seq) event)
-                     projected;
-                   if Server_keeper_chat_agui_projection.is_terminal event
-                   then settle_delivery (Ok ())
-                   else loop projection
+                 let rec loop ~terminal_seen projection =
+                   match Keeper_chat_events.subscribe_published events with
+                   | Keeper_chat_events.Closed ->
+                     if not terminal_seen
+                     then settle_delivery (Error no_terminal_before_close)
+                   | Keeper_chat_events.Next { Keeper_chat_events.seq; ts; event } ->
+                     (* The bus stamped [ts] once at publish; the journal line
+                        carries the same value, so a since_seq replay of this
+                        event reproduces this frame byte for byte. *)
+                     let projection, projected =
+                       Server_keeper_chat_agui_projection.project
+                         ~timestamp:ts
+                         ~redact_text
+                         ~redact_json
+                         projection
+                         event
+                     in
+                     Option.iter
+                       (fun event ->
+                          note_operation_wire_event ~operation_id event;
+                          Keeper_chat_broadcast.operation_event
+                            ~keeper_name
+                            ~operation_id
+                            ~seq:(Some seq)
+                            ~event;
+                          publish_operation_live_event ~operation_id ~seq:(Some seq) event)
+                       projected;
+                     let is_terminal =
+                       Server_keeper_chat_agui_projection.is_terminal event
+                     in
+                     if is_terminal && not terminal_seen then settle_delivery (Ok ());
+                     loop ~terminal_seen:(terminal_seen || is_terminal) projection
                  in
-                 loop Server_keeper_chat_agui_projection.initial)
+                 loop ~terminal_seen:false Server_keeper_chat_agui_projection.initial)
              | Keeper_continuation_channel.Discord { channel_id; _ } ->
                (match Env_config_discord.bot_token_opt () with
                 | Some token ->
@@ -2912,7 +2922,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                   fork_adapter (fun () ->
                     let rec loop reply =
                       match Keeper_chat_events.subscribe events with
-                      | Keeper_chat_events.Reply_details details ->
+                      | Keeper_chat_events.Closed ->
+                        settle_delivery (Error no_terminal_before_close)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Reply_details details) ->
                         loop
                           (match details.turn_outcome with
                            | Keeper_turn_outcome.Visible_reply
@@ -2925,7 +2937,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            | Keeper_turn_outcome.Terminal_effect_settled
                            | Keeper_turn_outcome.Awaiting_gate_approval
                            | Keeper_turn_outcome.No_visible_reply -> None)
-                      | Keeper_chat_events.Run_finished _ ->
+                      | Keeper_chat_events.Next (Keeper_chat_events.Run_finished _) ->
                         settle_delivery
                           (match reply with
                            (* A run that produced no visible reply has been
@@ -2936,10 +2948,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                              Channel_gate_imessage_state.send_message
                                ~chat_guid:target_chat_guid ~content:reply ()
                              |> Result.map_error
-                                  Imessage_applescript.error_to_string)
-                      | Keeper_chat_events.Event_error { message } ->
-                        settle_delivery (Error message)
-                      | _ -> loop reply
+                                  Imessage_applescript.error_to_string);
+                        drain_events ()
+                      | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
+                        settle_delivery (Error message);
+                        drain_events ()
+                      | Keeper_chat_events.Next _ -> loop reply
                     in
                     loop None))
              | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
@@ -2955,7 +2969,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  in
                  let rec loop reply =
                    match Keeper_chat_events.subscribe events with
-                   | Keeper_chat_events.Reply_details details ->
+                   | Keeper_chat_events.Closed ->
+                     settle_delivery (Error no_terminal_before_close)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Reply_details details) ->
                      loop
                        (match details.turn_outcome with
                         | Keeper_turn_outcome.Visible_reply
@@ -2968,17 +2984,19 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         | Keeper_turn_outcome.Terminal_effect_settled
                         | Keeper_turn_outcome.Awaiting_gate_approval
                         | Keeper_turn_outcome.No_visible_reply -> None)
-                   | Keeper_chat_events.Run_finished _ ->
+                   | Keeper_chat_events.Next (Keeper_chat_events.Run_finished _) ->
                      (match pending_continuation () with
                       | Ok (Some _) -> settle_delivery (Ok ())
                       | Error detail -> settle_delivery (Error detail)
                       | Ok None -> commit
                           (match reply with
                            | Some reply -> Keeper_event_queue.Delegate_replied reply
-                           | None -> Keeper_event_queue.Delegate_no_reply))
-                   | Keeper_chat_events.Event_error { message } ->
-                     commit (Keeper_event_queue.Delegate_failed message)
-                   | _ -> loop reply
+                           | None -> Keeper_event_queue.Delegate_no_reply));
+                     drain_events ()
+                   | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
+                     commit (Keeper_event_queue.Delegate_failed message);
+                     drain_events ()
+                   | Keeper_chat_events.Next _ -> loop reply
                  in
                  loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->
@@ -2993,7 +3011,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                   ~channel_user_id:payload.channel_user_id
               else operation_payload.source.submitted_by
             in
-            let outcome =
+            let run_turn () =
               process_single_turn
                 ~user_row_origin:operation_payload.source.user_row_origin
                 ~submission:
@@ -3020,6 +3038,21 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ~message_id:("keeper-operation-message-" ^ operation_id)
                 ~agent_name
                 ~events
+            in
+            (* The turn is the bus's only publisher; when it returns, by value
+               or by exception, nothing can publish again, so the bus closes
+               here and the adapter's read ends. A cancelled child cancels the
+               adapter as well, so a cancelled close changes nothing. *)
+            let outcome =
+              match run_turn () with
+              | outcome ->
+                Keeper_chat_events.close events;
+                outcome
+              | exception exn ->
+                let bt = Printexc.get_raw_backtrace () in
+                (try Keeper_chat_events.close events with
+                 | Eio.Cancel.Cancelled _ -> ());
+                Printexc.raise_with_backtrace exn bt
             in
             let delivery = Eio.Promise.await delivery in
             let operation_state () =

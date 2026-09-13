@@ -167,15 +167,43 @@ type published =
   ; event : keeper_chat_event
   }
 
+type 'a next =
+  | Next of 'a
+  | Closed
+
+(* The bus carries the turn's events and, last, the publisher's declaration
+   that no event follows. Consumers read until they take that declaration, so
+   a consumer can never leave while the publisher still has events to add —
+   the departed-consumer wedge (2026-09-13, msx-retro-mania: a mid-turn
+   [Event_error] ended the Dashboard adapter, 512 thinking deltas later the
+   single publisher fiber suspended forever in [Eio.Stream.add], and the
+   Owner turn slot was never released). *)
+type item =
+  | Item of published
+  | End_of_turn
+
 type t =
-  { stream : published Eio.Stream.t
+  { stream : item Eio.Stream.t
   ; on_publish : (seq:int -> ts:float -> keeper_chat_event -> unit) option
   ; now : unit -> float
   ; mutable next_seq : int
+  ; mutable closed : bool
+  ; mutable drained : bool
   }
 
+(* Backpressure window between the single publisher fiber and the turn's
+   adapter. A slow adapter suspends the publisher once this many events wait;
+   the journal hook has already recorded each of them. *)
+let bus_capacity = 512
+
 let create ?(now = Time_compat.now) ?on_publish () =
-  { stream = Eio.Stream.create 512; on_publish; now; next_seq = 0 }
+  { stream = Eio.Stream.create bus_capacity
+  ; on_publish
+  ; now
+  ; next_seq = 0
+  ; closed = false
+  ; drained = false
+  }
 ;;
 
 (* [publish] is the single choke point every turn event passes through — route
@@ -192,6 +220,8 @@ let create ?(now = Time_compat.now) ?on_publish () =
    only the calling fiber — that keeps sibling fibers responsive but is not
    what makes the ordering safe. *)
 let publish t event =
+  if t.closed
+  then invalid_arg "Keeper_chat_events.publish: the turn's event bus is closed";
   let seq = t.next_seq in
   t.next_seq <- seq + 1;
   (* One clock reading per event. The journal line and every live projection
@@ -213,14 +243,43 @@ let publish t event =
           "keeper_chat_events: on_publish hook failed seq=%d: %s"
           seq
           (Printexc.to_string exn)));
-  Eio.Stream.add t.stream { seq; ts; event }
+  Eio.Stream.add t.stream (Item { seq; ts; event })
 ;;
 
-let subscribe t = (Eio.Stream.take t.stream).event
-let subscribe_published t = Eio.Stream.take t.stream
+let close t =
+  if not t.closed
+  then (
+    t.closed <- true;
+    Eio.Stream.add t.stream End_of_turn)
+;;
+
+let subscribe_published t =
+  if t.drained
+  then Closed
+  else (
+    match Eio.Stream.take t.stream with
+    | Item published -> Next published
+    | End_of_turn ->
+      t.drained <- true;
+      Closed)
+;;
+
+let subscribe t =
+  match subscribe_published t with
+  | Next published -> Next published.event
+  | Closed -> Closed
+;;
 
 let take_nonblocking t =
-  Option.map (fun published -> published.event) (Eio.Stream.take_nonblocking t.stream)
+  if t.drained
+  then None
+  else (
+    match Eio.Stream.take_nonblocking t.stream with
+    | Some (Item published) -> Some published.event
+    | Some End_of_turn ->
+      t.drained <- true;
+      None
+    | None -> None)
 ;;
 
 let json_opt key value =

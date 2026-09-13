@@ -7277,6 +7277,7 @@ def chat_visibility_modes_interaction(
         )
         # Same TOOLS-lane token colouring: cross-check needles that span
         # word boundaries must tolerate SGR runs and padding inside them.
+        settled_at = pane_start
         for needle in (
             b"gate:auto_judge",
             "\u25c6".encode(),
@@ -7301,26 +7302,26 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
-        initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        # Each row comes from the frame that drew it. The pane redraws only what
-        # changed, so the frame carrying a new transcript row need not carry the
-        # header above it -- asking one frame for both fails on a screen showing
-        # both. The row addresses are still what the pane decided.
-        title = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
-        title_row = frame_row_of(frame_containing(initial, title), title)
-        identity_row = frame_row_of(
-            frame_containing(initial, b"gate:auto_judge"), b"gate:auto_judge"
+            settled_at = max(settled_at, end_of_needle(output, needle, pane_start))
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=settled_at,
+            timeout=5.0,
         )
-        if identity_row != title_row + 1:
+        initial += bytes(output[pane_start:])
+        # The Skill can arrive before the gate identity. Reconstruct the
+        # accumulated screen at the completed observation barrier instead of
+        # selecting the first frame that happened to contain the Skill name.
+        completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+        observed_rows = screen_rows(completed)
+        title_row = screen_row_of(
+            observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -11200,15 +11201,14 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter closes the prompt and keeps the query for n/N. The footer keeps
-    # saying so -- the query, how many rows it matched and the keys that walk
-    # them -- ahead of the surface's own hints (#35410); before, the query left
-    # the footer while n/N went on hunting it. The diff renderer resends only
-    # the rows that changed, so the redrawn footer row is the needle.
-    send_and_wait(
-        process, master_fd, output, b"\r",
-        b"\x1b[2m  /hi (1) n/N  j/k:scroll  h/l:pan",
+    # Enter retains the query for n/N and removes its editing cursor.
+    # The settled footer still starts with the retained search, not the
+    # generic hints that were drawn before search began.
+    settled = send_and_wait(
+        process, master_fd, output, b"\r", b"/hi (1) n/N",
     )
+    if "▌".encode() in screen_text(settled):
+        raise AssertionError(f"Enter left the search prompt editing: {settled!r}")
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
     # The added row now arrives lexed, so the wait needle is the keyword
@@ -12375,20 +12375,17 @@ def fusion_list_detail_interaction(
         )
         verdict_start = len(output)
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
-        # The pane opens on "HTTP [loading...]" and the linked goal lands in a
-        # later frame, so the frame that first carries the heading need not
-        # carry the goal. Wait for the slowest piece, then read every needle
-        # from this verdict's own frames rather than from the one that opened
-        # it.
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"masc://planning/goal-ssim-501",
-            start=verdict_start,
-            timeout=10.0,
-        )
-        verdict_plain = CSI_RE.sub(b"", bytes(output[verdict_start:]))
+        # The heading precedes asynchronous task/goal enrichment. Inspect one
+        # completed screen after both the linked goal and footer are present.
+        observed = (b"masc://planning/goal-ssim-501", b"Left/Esc:list")
+        for needle in observed:
+            wait_for_output(process, master_fd, output, needle,
+                            start=verdict_start, timeout=10.0)
+        settled_at = max(end_of_needle(output, needle, verdict_start)
+                         for needle in observed)
+        wait_for_output(process, master_fd, output, FRAME_END,
+                        start=settled_at, timeout=10.0)
+        verdict_plain = screen_text(bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)]))
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them
         # met on a screen, so a verdict said "approve" without saying what it

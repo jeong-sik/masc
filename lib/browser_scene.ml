@@ -66,6 +66,7 @@ type kind =
       disabled : bool;
       href : string option;
     }
+type region_ref = { node_id : string; role : region_role; label : string }
 (* HTML local names are observed browser data. Classify the closed heading
    subset once at this boundary so TUI presentation can render an outline
    without repeatedly matching tags or inventing selectors. *)
@@ -85,6 +86,7 @@ let text_role_of_tag tag =
 
 type node = { node_id : string; kind : kind; tag : string; text : string;
   heading_level : int option;
+  ancestor_region : region_ref option;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 let text_role (node : node) =
   match node.kind with
@@ -119,6 +121,18 @@ let number = function
   | _ -> Error "scene finite coordinate required"
 let get parse name json = let* value = field name json in parse value
 let nonempty json = let* value = string json in if value <> "" then Ok value else Error "empty scene identity"
+let optional_region_ref json =
+  match field "ancestorRegion" json with
+  | Error _ | Ok `Null -> Ok None
+  | Ok (`Assoc fields) when List.sort String.compare (List.map fst fields) =
+      ["label"; "nodeId"; "role"] ->
+      let value = `Assoc fields in
+      let* node_id = get nonempty "nodeId" value in
+      let* role = get (fun json ->
+        let* value = nonempty json in Ok (region_role_of_string value)) "role" value in
+      let* label = get nonempty "label" value in
+      Ok (Some {node_id; role; label})
+  | Ok _ -> Error "scene ancestorRegion must contain nodeId, role and label or null"
 let nonnegative json = let* value = number json in if value >= 0. then Ok value else Error "scene size must be nonnegative"
 let positive json = let* value = number json in if value > 0. then Ok value else Error "scene dimension must be positive"
 let list parse = function
@@ -136,6 +150,7 @@ let node json =
   let* node_id = get nonempty "nodeId" json in
   let* tag = get nonempty "tag" json in let* text = get string "text" json in
   let* heading_level = optional_heading_level json in
+  let* ancestor_region = optional_region_ref json in
   let* rects = get (list rect) "rects" json in
   let* () = if rects <> [] then Ok () else Error "scene node has no rectangles" in
   let* color = get string "color" json in let* font_size = get nonnegative "fontSize" json in
@@ -153,7 +168,7 @@ let node json =
   let source_context = match field "sourceContext" json with
     | Ok value -> Browser_source_context.of_json value
     | Error _ -> Browser_source_context.Unmapped in
-  Ok {node_id;kind;tag;text;heading_level;rects;color;font_size;font_weight;white_space;source_context}
+  Ok {node_id;kind;tag;text;heading_level;ancestor_region;rects;color;font_size;font_weight;white_space;source_context}
 let scope_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->
       let* document_id = get nonempty "documentId" (`Assoc fields) in

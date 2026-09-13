@@ -745,6 +745,56 @@ let test_retained_observation_commits_through_production_hook () =
         (row |> member "planned_index" |> to_int))
 ;;
 
+let test_plain_tool_commits_before_hook_returns ~success () =
+  with_temp_base_path @@ fun base_path ->
+  let module Log = Masc.Keeper_tool_call_log in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Log.reset_for_testing ())
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Log.reset_for_testing ();
+      Log.init ~base_path ();
+      Eio.Switch.run @@ fun sw ->
+      Log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      (* An autonomous plain tool has neither a result-ready subscriber nor
+         retained file evidence. Its row must still commit before completion. *)
+      let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+          ~config:(Masc.Workspace.default_config base_path)
+          ~meta_ref:(ref (make_meta "plain-reader"))
+          ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
+          ~trace_id:"plain-trace" ~keeper_turn_id:1
+          ~on_after_turn_ordinal:ignore () in
+      let invocation = Agent_core.Tool_contract.Invocation.create
+          ~tool_use_id:"plain-call" ~turn:1
+          ~completion:Agent_core.Tool_contract.Continue_after_success
+          ~schedule:{ planned_index=0; batch_index=0; batch_size=1;
+                      execution_mode=Agent_core.Tool_contract.Serial } in
+      let revision = Log.committed_revision () in
+      if success then
+        ignore ((Option.get hooks.Agent_core.Hooks.post_tool_use)
+          (Agent_core.Hooks.PostToolUse {
+            invocation; tool_name="masc_status"; input=`Assoc [];
+            output=Ok {Agent_core.Types.content="ready"; content_blocks=None; _meta=None};
+            result_bytes=5; duration_ms=1. }))
+      else
+        ignore ((Option.get hooks.Agent_core.Hooks.post_tool_use_failure)
+          (Agent_core.Hooks.PostToolUseFailure {
+            invocation; tool_name="masc_status"; input=`Assoc [];
+            stage=Agent_core.Hooks.Validation_before_execution;
+            duration_ms=1.; error="invalid input" }));
+      check int "hook did not leave execution evidence in the async queue" 0
+        (Log.queued_count_for_testing ());
+      check bool "history freshness changes before hook returns" true
+        (Log.committed_revision () > revision);
+      let rows = Log.read_recent ~keeper_name:"plain-reader" () in
+      check int "execution row is readable before ToolCompleted publication" 1
+        (List.length rows))
+;;
+
 let rejected_rows_for ?on_tool_result_ready ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
@@ -1485,7 +1535,11 @@ let () =
       , [ test_case "production hook retains roots until durable commit" `Quick
             test_retained_observation_commits_through_production_hook ] )
     ; ( "rejected_tool_calls"
-      , [ test_case
+      , [ test_case "autonomous plain success commits before completion" `Quick
+            (test_plain_tool_commits_before_hook_returns ~success:true)
+        ; test_case "autonomous rejected call commits before completion" `Quick
+            (test_plain_tool_commits_before_hook_returns ~success:false)
+        ; test_case
             "a call refused before execution leaves a row"
             `Quick
             test_a_rejected_call_leaves_a_row

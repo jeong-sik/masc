@@ -2284,12 +2284,41 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
 
 let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
   let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
-  let status = fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id in
-  if run_id = "" then status else
-    match Yojson.Safe.from_string status with
-    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("keeper_decisions",
-        Fusion_decision.read_for_keeper ~config ~keeper:meta.name ~run_id |> Fusion_decision.read_to_yojson) :: fields))
-    | _ -> status
+  let registry = Fusion_run_registry.global () in
+  if run_id = "" then fusion_status_json ~registry ~keeper:meta.name ~run_id else
+    let run =
+      match Fusion_run_registry.get registry ~run_id with
+      | Some run when String.equal run.keeper meta.name -> Some run
+      | Some _ | None -> None
+    in
+    let source = Fusion_decision.source ~keeper:meta.name ~run_id in
+    let evidence = match source with
+      | Ok post ->
+        `Assoc
+          [ "state", `String "available"
+          ; "run_id", `String run_id
+          ; "evidence_sha256", `String (Fusion_decision.evidence_sha256 post)
+          ; "post", Board.post_to_yojson post
+          ]
+      | Error error ->
+        `Assoc
+          [ "state", `String "unavailable"
+          ; "detail", `String (Fusion_decision.error_to_string error)
+          ]
+    in
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool true
+         ; "found", `Bool (Option.is_some run || Result.is_ok source)
+         ; "run_id", `String run_id
+         ; "run", (match run with
+             | Some run -> Fusion_run_registry.run_to_yojson run
+             | None -> `Null)
+         ; "evidence", evidence
+         ; "keeper_decisions",
+           (Fusion_decision.read_for_keeper ~config ~keeper:meta.name ~run_id
+            |> Fusion_decision.read_to_yojson)
+         ])
 ;;
 
 (* Image files use the existing sandbox Read boundary before entering the

@@ -44,22 +44,30 @@ type gate_obligation = private
 val gate_obligation : approval_id:string -> tool_name:string -> input_hash:string ->
   (gate_obligation, string) result
 type runtime_suffix = private { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
-type gate_binding = private { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option }
 val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list -> (runtime_suffix, string) result
-val gate_binding : approval_ids:string list -> obligations:gate_obligation list -> runtime_suffix:runtime_suffix option -> (gate_binding, string) result
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
+type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_checkpoint =
+  { client_kind : official_client_kind; runtime_id : string; session_id : string;
+    turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
+type gate_checkpoint = Agent_core of Keeper_checkpoint_ref.t | Official_client of official_client_checkpoint
 type gate_wait = private
-  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
+  { checkpoint : gate_checkpoint; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   (gate_wait, string) result
+val official_client_gate_wait : checkpoint:official_client_checkpoint -> session_scope:session_scope ->
+  obligations:gate_obligation list -> (gate_wait, string) result
 val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   runtime_retry:runtime_retry -> (gate_wait, string) result
+type gate_binding = private { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option; unconfirmed_wait:gate_wait option }
+val gate_binding : approval_ids:string list -> obligations:gate_obligation list -> runtime_suffix:runtime_suffix option -> (gate_binding, string) result
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
 val equal_gate_wait : gate_wait -> gate_wait -> bool
+val gate_binding_with_wait : binding:gate_binding -> waiting:gate_wait -> (gate_binding, string) result
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -110,6 +118,7 @@ type action =
   | Resume_runtime_retry of runtime_retry
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
+  | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
   | Discharge_gate of gate_obligation

@@ -895,15 +895,22 @@ let agent_rl_key_of_request request =
   let agent_name = agent_from_request request in
   Rate_limit.agent_key_of_token_or_name ?token ?agent_name ()
 
+type agent_quota = Exempt_observation | Metered_operation
+
+let read_request_quota = function
+  | `GET | `HEAD -> Exempt_observation
+  | _ -> Metered_operation
+
 (** Check the per-agent rate limit for a request.  Returns [Ok ()] when the
     request is allowed.  Returns [Error ()] and sends a 429 response when the
     per-agent limit is exceeded.  Anonymous requests (no token, no agent
     header) are always allowed through — the per-IP limit in
     [bin/main_eio.ml:try_rate_limit_block] covers that case. *)
-let check_agent_rate_limit request reqd =
-  match agent_rl_key_of_request request with
-  | None -> Ok ()  (* anonymous — covered by per-IP limit *)
-  | Some rl_key ->
+let check_agent_rate_limit ?(quota = Metered_operation) request reqd =
+  match quota, agent_rl_key_of_request request with
+  | Exempt_observation, _ -> Ok ()
+  | Metered_operation, None -> Ok ()  (* anonymous — covered by per-IP limit *)
+  | Metered_operation, Some rl_key ->
       if Rate_limit.check_agent_global ~key:rl_key then
         Ok ()
       else begin
@@ -1110,7 +1117,9 @@ and with_read_auth handler request reqd =
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_read_request ~base_path request with
       | Ok () ->
-          (match check_agent_rate_limit request reqd with
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)

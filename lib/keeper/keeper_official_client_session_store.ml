@@ -1,4 +1,4 @@
-type client_kind =
+type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
@@ -826,6 +826,18 @@ let reconcile_tool_surface plan ~tool_surface_sha256 =
   | Some _ ->
     { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
 ;;
+
+let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint)
+    ~expected ~client_kind ~runtime_id ~tool_surface_sha256 =
+  match expected with
+  | Some {phase=Settled settled; client_kind=stored_kind; runtime_id=stored_runtime;
+      tool_surface_sha256=stored_surface; _}
+    when client_kind = checkpoint.client_kind && stored_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id && stored_runtime = checkpoint.runtime_id
+      && settled.session_id = checkpoint.session_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256
+      && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some _ | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
 
 let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =

@@ -1739,6 +1739,7 @@ let process_single_turn ~user_row_origin ~submission
   (* Capture this attempt's incoming identity before dispatch consumes it. *)
   let resumed_from = pending_direct_continuation () |> Result.map (function
       | Some (Keeper_direct_gate_continuation.Bound_checkpoint reference) -> Some reference
+      | Some (Keeper_direct_gate_continuation.Bound_official_client _)
       | Some Keeper_direct_gate_continuation.Checkpoint_reconciliation | None -> None) in
   let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
       ?stream_lifecycle () =

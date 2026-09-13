@@ -326,7 +326,6 @@ let tools_pane_strip (state : state) =
     ; name Masc_tui_types.Tools_usage "Skill 사용 집계"
     ; name Masc_tui_types.Tools_catalog "전체 도구"
     ]
-  ^ Ansi.dim ^ "  p:다음 탭" ^ Ansi.reset
 ;;
 
 let tools_display_lines (state : state) =

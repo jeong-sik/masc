@@ -644,15 +644,19 @@ let restore_instructions ~base_path instructions =
       match Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path keeper with
       | Some path when Sys.file_exists path ->
         (match
-           Keeper_toml_loader.edit_keeper_toml_fields_strict_staged
-             ~path
-             [ "instructions", Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string text) ]
+           Runtime.with_manifest_config_lock ~manifest_path:path
+             ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+             (fun () ->
+               Keeper_toml_loader.edit_keeper_toml_fields_strict_staged
+                 ~path
+                 [ "instructions", Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string text) ]
+               |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
          with
          | Ok () -> { acc with applied = keeper :: acc.applied }
-         | Error failure ->
+         | Error detail ->
            { acc with
              skipped =
-               (keeper, Fs_compat.atomic_replace_failure_to_string failure) :: acc.skipped
+               (keeper, detail) :: acc.skipped
            })
       | Some _ | None -> { acc with skipped = (keeper, "no keeper TOML") :: acc.skipped })
     { applied = []; skipped = [] }

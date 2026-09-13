@@ -416,21 +416,28 @@ let media_result t tool ~name ~args ~start_time =
          | Keeper_producer meta ->
            (* The bounded probe identifies the format only. Its potentially
               text-projected body never becomes image input or hash evidence. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
               (match (Option.is_some (Verification_media_inspection.detect ~path ~bytes:probe)), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                   ~config:t.config ~meta ~path ?cwd ()))
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd
+                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
+            (* The parent bounded this read; this branch replaced the three
+               predicates with one detector. Both hold: whatever [detect]
+               recognises escalates, and none of it loads past the ceiling. *)
             | Ok probe when Option.is_some (Verification_media_inspection.detect ~path ~bytes:probe) ->
-              Keeper_tool_filesystem_runtime.read_complete_owned_bytes
-                ~ownership_root:t.ownership_root ~path ?cwd ()
+              Keeper_tool_filesystem_runtime.read_owned_bytes
+                ~ownership_root:t.ownership_root ~path ?cwd
+                ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
             | result -> result)
        in
        (match Result.map (fun bytes -> bytes, Verification_media_inspection.detect ~path ~bytes) bytes with

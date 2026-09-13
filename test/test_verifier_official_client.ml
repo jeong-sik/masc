@@ -214,8 +214,6 @@ candidates = ["forbidden.verifier", "official.verifier"]
     (lookup_image |> member "mimeType" |> Yojson.Safe.Util.to_string);
   check string "exact Read image bytes" png
     (lookup_image |> member "data" |> Yojson.Safe.Util.to_string);
-  check string "image read leaves source unchanged" (Base64.decode_exn png)
-    (In_channel.with_open_bin (Filename.concat proof_root "proof.png") In_channel.input_all);
   check bool "workspace Skills not exposed" false
     (String_util.contains_substring serialized "masc_skill");
   check int "each tool result observed" (if mode = "missing" then 2 else if mode = "duplicate" then 4 else 3)

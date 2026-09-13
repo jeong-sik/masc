@@ -759,6 +759,39 @@ let test_image_result_reaches_a_model_that_accepts_images () =
     check (option string) "the receipt is untouched" (Some "screenshot receipt") !handoff)
 ;;
 
+let test_dispatched_image_capability_survives_runtime_replacement () =
+  List.iter (fun enabled -> with_active_raw_trace (fun ~path:_ ~active ->
+    let saved = Runtime.For_testing.snapshot () in
+    let config_path = Filename.temp_file "official-image-capability-" ".toml" in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved; Unix.unlink config_path) (fun () ->
+      let load enabled =
+        Out_channel.with_open_bin config_path (fun out -> Printf.fprintf out {|[providers.official]
+protocol = "claude-code"
+command = "/bin/true"
+is-non-interactive = true
+[models.image]
+api-name = "image-capability-fixture"
+max-context = 400000
+tools-support = true
+[models.image.capabilities]
+supports-image-input = %b
+[official.image]
+[runtime]
+default = "official.image"
+|} enabled);
+        (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+        match Runtime.get_runtime_by_id "official.image" with Some runtime -> runtime | None -> fail "image fixture not materialized" in
+      let dispatched = load enabled in
+        let replacement = load (not enabled) in
+        check bool "replacement independently changes capability" (not enabled)
+          (Runtime_agent.runtime_accepts_image_input ~runtime:replacement);
+        let tool, _ = one_dynamic_tool
+          ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime:dispatched)
+          ~active (image_result ~receipt:"original runtime receipt" ~media_type:"image/png" ~data:"aW1n") in
+        let result = tool.call ~call_id:"frozen-image-capability" (`Assoc []) in
+        check bool "actual tool delivery follows dispatched runtime, not same-ID replacement" enabled result.success))) [true;false]
+;;
+
 let test_codex_tool_result_image_media_type_is_checked_before_settling () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let handoff = ref None in
@@ -2165,6 +2198,8 @@ let () =
             test_image_result_is_refused_when_the_model_takes_no_image
         ; test_case "image result reaches a model that accepts images" `Quick
             test_image_result_reaches_a_model_that_accepts_images
+        ; test_case "dispatched image capability survives same-ID runtime replacement" `Quick
+            test_dispatched_image_capability_survives_runtime_replacement
         ; test_case "codex tool-result image media type checked before settling" `Quick
             test_codex_tool_result_image_media_type_is_checked_before_settling
         ; test_case "codex tool-result image data checked before settling" `Quick

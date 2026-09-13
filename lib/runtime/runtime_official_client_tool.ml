@@ -57,6 +57,14 @@ let official_client_image_media_types =
   [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
 ;;
 
+let validate_base64_image_data data =
+  if String.trim data = "" then Error "must not be empty"
+  else if String.exists (fun c -> c = '\n' || c = '\r') data then Error "must not contain newlines"
+  else match Base64.decode data with
+    | Ok _ -> Ok ()
+    | Error _ -> Error "must contain valid Base64 data"
+;;
+
 let project_content transport ~content ~content_blocks =
   (* DET-OK: [None] is the producer's text-only result, so [content] is the payload;
      [Some] stays authoritative even when empty, and unsupported media error below. *)
@@ -81,10 +89,9 @@ let project_content transport ~content ~content_blocks =
      initial-image path refuses the same shapes before dispatch; a tool result
      is model input too. *)
   let base64_payload ~media_type data =
-    if String.trim data = "" then malformed "carries no base64 data"
-    else if String.exists (fun c -> c = '\n' || c = '\r') data
-    then malformed "base64 data must not contain newlines"
-    else Ok (media_type, data)
+    match validate_base64_image_data data with
+    | Ok () -> Ok (media_type,data)
+    | Error detail -> malformed ("base64 data " ^ detail)
   in
   let checked_base64 ~media_type data =
     if not (List.mem media_type official_client_image_media_types)

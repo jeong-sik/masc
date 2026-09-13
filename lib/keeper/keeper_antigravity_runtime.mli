@@ -11,6 +11,7 @@ type attempt_outcome =
     closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
+  accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->

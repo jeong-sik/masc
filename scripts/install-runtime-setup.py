@@ -1567,7 +1567,7 @@ def select_sandbox(binary, base_path, port=8945):
                          else 'PDF document inspection · install missing tools')
         except SetupError:
             pdf_label = 'PDF document inspection · could not check tools'
-        action = pick('3 · Prepare imp’s workspace', labels + [
+        action = pick('4 · Prepare imp’s workspace', labels + [
             'Refresh after installing or starting a service',
             'Show common choices' if advanced else 'Advanced sandbox choices', pdf_label, 'Finish later'])[0]
         if action == len(rows):
@@ -1614,6 +1614,130 @@ def select_sandbox(binary, base_path, port=8945):
             mode = 'inherit'
             print('The new sandbox allows internet access for guest commands. MASC model connections and WebFetch have separate server-side controls; Advanced choices can disable guest networking.', file=sys.stderr)
         return arguments + ['--network-mode', mode]
+
+
+def local_voices(binary):
+    """The voices this machine has, as `say` prints them.
+
+    The list is not a convenience. `say` does not fail on a voice it does not
+    have -- it exits 0 and speaks in the system voice -- so a name typed from
+    memory is silently a different voice, and a name that exists in several
+    languages picks one of them. Measured on macOS 26: "Eddy" read Korean in
+    English at 4.7KB where "Eddy (한국어(한국))" gave 72KB.
+    """
+    result = subprocess.run([str(binary), 'voice-local-setup', '--list-voices'],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if result.returncode != 0 or not result.stdout:
+        return []
+    try:
+        listing = json.loads(result.stdout)
+    except ValueError:
+        return []
+    voices = listing.get('voices')
+    return voices if isinstance(voices, list) else []
+
+
+def whisper_model_path(binary):
+    """Where the prerequisite catalog puts the model, read from the catalog.
+
+    The voice section has to name the file the download actually wrote, so the
+    path is taken from the action that writes it rather than spelled twice.
+    A computer whose catalog only links the downloads page has no such action,
+    and the reader is asked for the path instead.
+    """
+    result = subprocess.run([str(binary), 'prerequisite-actions', 'whisper'],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if result.returncode != 0 or not result.stdout:
+        return None
+    try:
+        catalog = json.loads(result.stdout)
+    except ValueError:
+        return None
+    for action in catalog.get('actions') or []:
+        effect = action.get('effect') or {}
+        for step in effect.get('argv_steps') or []:
+            if not isinstance(step, list) or '-o' not in step:
+                continue
+            destination = step.index('-o') + 1
+            if destination < len(step):
+                return step[destination]
+    return None
+
+
+def preferred_language():
+    for name in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
+        value = os.environ.get(name)
+        if value and value not in ('C', 'POSIX'):
+            return value.split('.')[0].split('_')[0].lower()
+    return 'en'
+
+
+def select_local_voice(binary, base):
+    """Ask for a voice, and never take the journey down with it.
+
+    An optional step cannot fail the thing it is optional to. By the time this
+    runs the workspace is initialized and the model connection is saved, and
+    the sandbox step is still ahead, so a cancel here means "not this" rather
+    than "abandon setup" -- which is what it meant before, complete with a
+    `runtime setup failed` line about a step nobody had to take.
+    """
+    try:
+        ask_local_voice(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nContinuing without voice. '
+              'Run masc voice-local-setup to turn it on later.', file=sys.stderr)
+
+
+def ask_local_voice(binary, base):
+    """Turn on voice, which on a fresh mac needs nothing downloaded to speak.
+
+    `say` is in the base system and runs once per utterance, so speaking is a
+    setting rather than a service: there is no port, no process to keep alive
+    and nothing to install. Hearing needs whisper-cli and a model, which is
+    why it is asked separately and only after the answer to the first is yes.
+    """
+    voices = local_voices(binary)
+    if not voices:
+        # Not an error to report: a computer whose `say` publishes no
+        # catalogue has no voice to offer, and the journey continues.
+        return
+    language = preferred_language()
+    mine = [voice for voice in voices if str(voice.get('language', '')).lower().startswith(language)]
+    shortlist = mine or voices[:12]
+    while True:
+        labels = [terminal_text(voice.get('name') or voice.get('id')) + ' — ' + terminal_text(voice.get('language', ''))
+                  for voice in shortlist]
+        extra = ['Show every voice on this computer ({})'.format(len(voices))] if len(shortlist) < len(voices) else []
+        choice = pick('3 · Give imp a voice (optional)', labels + extra + ['Stay text only'])[0]
+        if choice == len(labels) + len(extra):
+            return
+        if extra and choice == len(labels):
+            shortlist = voices
+            continue
+        voice = shortlist[choice]
+        break
+    arguments = ['--voice', voice.get('id')]
+    # Hearing is the half that needs a download, so it is a separate question
+    # rather than a consequence of answering the first one.
+    if pick('Let imp hear you too? whisper-cli transcribes locally; the model it reads is 1.6GB.',
+            ['Speak to imp as well', 'Speaking only for now'])[0] == 0:
+        while prerequisite_menu(binary, 'whisper'):
+            pass
+        model = whisper_model_path(binary)
+        if model is None:
+            model = ask_text('Path to the whisper model file')
+        if model and Path(model).is_file() and shutil.which('whisper-cli'):
+            arguments += ['--model', model]
+        else:
+            print('Listening needs both whisper-cli and a model file, so imp will speak but not listen. '
+                  'Run masc voice-local-setup --model <file> once both are ready.', file=sys.stderr)
+    result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base] + arguments,
+                            stdout=sys.stderr)
+    if result.returncode != 0:
+        # The writer already said why on stderr, and every reason for it is a
+        # configuration one. Voice is optional, so this does not end setup.
+        print('Voice was not saved. Everything else is. Run masc voice-local-setup to try again.',
+              file=sys.stderr)
 
 
 def journey(binary, base_path, port, timeout, resume=False):
@@ -1668,6 +1792,10 @@ def journey(binary, base_path, port, timeout, resume=False):
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
+    # Before the sandbox rather than after it: voice needs no guest and no
+    # service, so a reader who leaves at the sandbox step still leaves with a
+    # keeper that can speak.
+    select_local_voice(binary, base)
     return sandbox_journey(binary, base, port)
 
 
@@ -1682,7 +1810,7 @@ def sandbox_journey(binary, base, port, refresh_owner=False):
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
-    print('\n4 · Open your first conversation', file=sys.stderr)
+    print('\n5 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.

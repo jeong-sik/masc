@@ -26,6 +26,7 @@
  (libraries
   masc.workspace_connection
   masc.voice_config
+  masc.voice_setup
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -1057,7 +1058,8 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries
+ (libraries mtime.clock.os masc_tui_esc_interrupt
+  masc_tui_answering
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_lane_declaration

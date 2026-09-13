@@ -46,6 +46,7 @@ let respond request reqd = function
 
 let dispatch ?caller state operation args =
   Runtime.dispatch ?caller ~config:(Mcp_server.workspace_config state) ~operation args
+  |> Result.map_error Runtime.error_to_string
 
 let query_fields request =
   Uri.query (Uri.of_string request.Httpun.Request.target)

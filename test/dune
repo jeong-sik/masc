@@ -1,3 +1,19 @@
+(rule
+ (alias runtest-test_dashboard_observation_quota)
+ (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
+  ../scripts/fixtures/release-evidence/runtime.toml
+  ../scripts/fixtures/release-evidence/agent-core-models-overlay.toml)
+ (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_dashboard_observation_quota)))
+
+(test
+ (name test_keeper_peer_artifact)
+ (modules test_keeper_peer_artifact)
+ (libraries masc_test_deps))
+
 (test
  (name test_keeper_codex_current_context)
  (modules test_keeper_codex_current_context)
@@ -19,6 +35,12 @@
  (libraries masc_test_deps))
 
 ; Test Environment Configuration
+
+(test
+ (name test_workspace_memory_curator_lane)
+ (modules test_workspace_memory_curator_lane)
+ (deps ../config/prompts/workspace_memory_curator.md)
+ (libraries alcotest masc masc.server masc.masc_core masc.fs_compat masc.config_dir_resolver masc.prompt_registry yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -4671,9 +4693,15 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_chat_activity)
+ (modules test_tui_chat_activity)
+ (libraries alcotest masc_tui_types masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue))
+
+(test
  (name test_keeper_turn_preview)
  (modules test_keeper_turn_preview)
- (libraries alcotest masc))
+ (libraries alcotest astring agent_core masc))
 
 (test
  (name test_tui_help_scroll)
@@ -5712,7 +5740,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -5799,8 +5827,9 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
- (deps ../addons/protocol.py ../addons/output-statistics/server.py)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py
+       ../addons/msx-observer/server.py ../addons/tests/test_packages.py)
+ (libraries masc_test_deps masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_reconcile)
@@ -5856,4 +5885,9 @@
 (test
  (name test_verification_pdf_inspection_budgets)
  (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))
+
+(test
+ (name test_runtime_adapter_credential_requirement)
+ (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))

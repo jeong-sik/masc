@@ -1083,6 +1083,35 @@ base_url = "https://voice.fixture.invalid/v1"
             tts = tomllib.loads(runtime.read_text())['voice']['tts']
             self.assertNotIn('default_voice', tts['endpoints'][0])
 
+    def test_voice_verify_checks_the_workspace_it_is_pointed_at(self):
+        # A workspace set up with --base-path is checked with --base-path. The
+        # loader finds runtime.toml through the environment, so without the flag
+        # and with nothing exported there is no workspace to check -- and the
+        # answer says that, rather than naming a JSON file nobody made.
+        # On a host without `say` the endpoint refuses; the configuration is
+        # still found, which is what this asks.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            # A fresh HOME as well: a workspace recorded as the default under the
+            # real one is found without the flag, which is right, but is not the
+            # machine this describes.
+            with tempfile.TemporaryDirectory(prefix='voice-verify-elsewhere-') as elsewhere, \
+                    tempfile.TemporaryDirectory(prefix='voice-verify-home-') as home:
+                env['HOME'] = home
+                pointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--base-path', str(base), '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertIn('macos-say', pointed.stdout, pointed.stderr)
+                self.assertNotIn('voice config missing', pointed.stdout)
+                unpointed = subprocess.run(
+                    [BINARY, 'voice-verify', '--message', 'check'],
+                    capture_output=True, text=True, env=env, cwd=elsewhere, check=False)
+                self.assertEqual(unpointed.returncode, 1)
+                self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
+
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):
             before = runtime.read_bytes()

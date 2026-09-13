@@ -475,14 +475,11 @@ let fixture_sandbox_profile () =
    must actually run its command wires the same factory the production turn
    bundle wires. The factory creates its runtime lazily: a case that never
    dispatches a guest command starts no container. What a case that did
-   dispatch owes at the end is {!teardown_fixture_sandbox}, called from the
-   fixture's own finally. *)
+   dispatch owes at the end is the removal {!with_fixture_sandbox} runs once
+   the body has returned or raised. *)
 let fixture_turn_sandbox_factory ~config ~meta =
   Some (Masc.Keeper_sandbox_factory.create ~config ~meta ())
 ;;
-
-(* How long a fixture waits for the daemon to remove one container. *)
-let fixture_sandbox_teardown_timeout_sec = 30.0
 
 (* The persistent container a fixture's keeper started, removed. The factory
    never removes it: production removes it at keeper teardown, and
@@ -490,24 +487,93 @@ let fixture_sandbox_teardown_timeout_sec = 30.0
    that cleanup takes an Eio mutex and the docker call goes through
    Process_eio, and at process exit neither effect has a handler --
    test_keeper_tool_dispatch_runtime.exe ended in Effect.Unhandled that way
-   on CI (run 34296943348). Call this inside the fixture's Eio context, in the
-   finally that also unregisters the keeper. Only a run allowed the real
-   daemon can have started a container. A removal failure is reported on
-   stderr, not raised, so it cannot stand in for the case's own result. *)
+   on CI (run 34296943348). Call this inside the fixture's Eio context, after
+   the body and before the keeper is unregistered. Only a run allowed the
+   real daemon can have started a container.
+
+   The wait for the daemon is the same [Cleanup_rm] budget production reads
+   for this removal ([Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name]),
+   so a lane that tunes it tunes both. A removal failure comes back as the
+   [Error] the runtime reported; {!with_fixture_sandbox} turns it into a case
+   failure once the body's own outcome is known. *)
 let teardown_fixture_sandbox
     ~(config : Masc.Workspace.config)
     ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+  : (unit, string) result
   =
   if Env_config_core.real_docker_allowed_under_test ()
   then
-    match
-      Masc.Keeper_sandbox_runtime.remove_persistent_containers
-        ~keeper_name:meta.name
-        ~base_path:config.base_path
-        ~timeout_sec:fixture_sandbox_teardown_timeout_sec
-        ()
-    with
-    | Ok () -> ()
-    | Error detail ->
-      Printf.eprintf "fixture sandbox teardown for %s: %s\n%!" meta.name detail
+    Masc.Keeper_sandbox_runtime.remove_persistent_containers
+      ~keeper_name:meta.name
+      ~base_path:config.base_path
+      ~timeout_sec:
+        (Env_config_sandbox.Shell_timeout.timeout_sec
+           ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+           ())
+      ()
+  else Ok ()
+;;
+
+(* What one fixture case is worth once its body has run and its sandbox has
+   been torn down. The body is run first and its outcome kept whatever the
+   teardown does; a teardown failure then carries that outcome with it, so a
+   case that failed twice reports both and a case whose body passed still
+   fails. Written as a sum so a suite can assert the arbitration without a
+   daemon. *)
+type 'a fixture_case_verdict =
+  | Case_passed of 'a
+  | Case_raised of exn * Printexc.raw_backtrace
+  | Teardown_failed of
+      { keeper_name : string
+      ; body_failure : string option
+      ; detail : string
+      }
+
+let fixture_case_verdict
+    ~keeper_name
+    ~(body : ('a, exn * Printexc.raw_backtrace) result)
+    ~(teardown : (unit, string) result)
+  : 'a fixture_case_verdict
+  =
+  match body, teardown with
+  | Ok value, Ok () -> Case_passed value
+  | Error (exn, backtrace), Ok () -> Case_raised (exn, backtrace)
+  | Ok _, Error detail -> Teardown_failed { keeper_name; body_failure = None; detail }
+  | Error (exn, _), Error detail ->
+    Teardown_failed
+      { keeper_name; body_failure = Some (Printexc.to_string exn); detail }
+;;
+
+let fixture_case_failure_message ~keeper_name ~body_failure ~detail =
+  match body_failure with
+  | None -> Printf.sprintf "fixture sandbox teardown for %s: %s" keeper_name detail
+  | Some body_failure ->
+    Printf.sprintf
+      "%s; and then fixture sandbox teardown for %s: %s"
+      body_failure
+      keeper_name
+      detail
+;;
+
+(* Run one fixture case's body, then remove the sandbox its keeper may have
+   started, and fail the case if that removal failed. Wrap the body with this
+   inside whatever [Fun.protect] still owns the keeper registration and the
+   temp dir: those run after, in the finally, whatever this decides. *)
+let with_fixture_sandbox
+    ~(config : Masc.Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+    (body : unit -> 'a)
+  : 'a
+  =
+  let body =
+    match body () with
+    | value -> Ok value
+    | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let teardown = teardown_fixture_sandbox ~config ~meta in
+  match fixture_case_verdict ~keeper_name:meta.name ~body ~teardown with
+  | Case_passed value -> value
+  | Case_raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  | Teardown_failed { keeper_name; body_failure; detail } ->
+    Alcotest.fail (fixture_case_failure_message ~keeper_name ~body_failure ~detail)
 ;;

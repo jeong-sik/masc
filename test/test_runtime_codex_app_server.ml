@@ -50,7 +50,9 @@ let truncated_token_usage_updated =
 (* Keeper context is acknowledged before its turn/start request. *)
 let context_injected = {|{"id":4,"result":{}}|}
 let turn_after_context = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
-let resumed_turn_after_context = {|{"id":5,"result":{"turn":{"id":"turn-2"}}}|}
+(* A resumed thread is sent no developer items (#35719), so turn/start is the
+   fourth request rather than the fifth. *)
+let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}}}|}
@@ -3357,12 +3359,11 @@ let test_keeper_resumes_persisted_codex_thread () =
                  | _ -> Continue)
          }
        in
-       with_fixture ~inject_items:true
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; resumed_turn_after_context
+         ; resumed_turn_result
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -3468,13 +3469,12 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> check int "initial context turn" 1 result.turns);
-       with_fixture ~inject_items:true
+       with_fixture
          ~capture_path:resume_capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; resumed_turn_after_context
+         ; resumed_turn_result
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -3527,8 +3527,18 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        in
        check (list string) "start injects current context"
          [expected_context_envelope] (developer_items start_capture);
-       check (list string) "resume injects current instructions and context"
-         [resume_instructions; expected_context_envelope] (developer_items resume_capture);
+       (* Only a new thread receives developer items. thread/inject_items
+          persists what it is given into every later request, and the context
+          is rebuilt each turn, so injecting on a resume accumulates a copy per
+          turn in the vendor history (#35719). A resume therefore writes none. *)
+       let inject_requests capture_path =
+         In_channel.with_open_bin capture_path In_channel.input_lines
+         |> List.map Yojson.Safe.from_string
+         |> List.filter (fun json ->
+           Yojson.Safe.Util.member "method" json = `String "thread/inject_items")
+         |> List.length
+       in
+       check int "resume writes no developer items" 0 (inject_requests resume_capture);
        let context_envelope_text = List.hd (developer_items start_capture) in
        let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
@@ -3736,12 +3746,11 @@ let test_production_keeper_resumes_across_trace_rotation () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> ());
-       with_fixture ~inject_items:true
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; resumed_turn_after_context
+         ; resumed_turn_result
          ; resumed_item_completed
          ; resumed_turn_completed
          ]

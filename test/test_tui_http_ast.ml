@@ -2358,8 +2358,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
   (* These calls compare or look up the raw Keeper identity before anything is
      rendered: [String.equal] checks the cached detail stamp, the typed context
-     lookup checks its own snapshot stamp, and the Gate section asks two
-     (keeper, value) lists what was set for this one. None reaches the
+     lookup checks its own snapshot stamp, the Gate section asks two
+     (keeper, value) lists what was set for this one, and
+     [detail_read_started] reads the (tab, keeper) key this pane stamped
+     its own pending read under. None reaches the
      terminal -- what the Gate rows draw is the value, sanitized where it is
      drawn -- so those raw [k_name] accesses do not belong inside a text
      sanitizer.
@@ -2373,6 +2375,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
       ; "Context_state.reading_for_keeper"
       ; "List.mem"
       ; "List.assoc_opt"
+      ; "Masc_tui_types.detail_read_started"
       ]
     "keeper_detail_pane"
     [ "k_name"

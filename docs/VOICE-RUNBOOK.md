@@ -351,7 +351,7 @@ masc reads the first 36 bytes before running whisper-cli and refuses the four
 it does not read, naming the container:
 
 ```
-masc voice-verify --audio probe.webm
+masc voice-verify --base-path ~/work --audio probe.webm
   whisper-local   whisper_cli   refused: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM
 ```
 

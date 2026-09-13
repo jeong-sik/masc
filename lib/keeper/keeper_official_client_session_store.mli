@@ -110,8 +110,10 @@ type transient_release_record =
 
 (** Delivery provenance for canonical context. Replaced configuration is an
     external snapshot available to this vendor turn, not persistent history
-    injection. No receipt asserts that the model understood its contents. *)
-type context_delivery = Prepared_start_context | Replaced_configuration
+    injection. Canonical_source_guard binds the pre-projection source used by
+    a client without replacement support; it does not claim all source bytes
+    were delivered. No receipt asserts that the model understood its contents. *)
+type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
 
 type context_frontier =
   { snapshot_sha256 : string
@@ -132,6 +134,8 @@ type t =
   ; last_transient_release : transient_release_record option
   ; updated_at : float
   }
+
+type context_admission_error = Context_frontier_missing | Canonical_context_changed
 
 type claim_plan =
   { previous_settlement : settlement option
@@ -189,6 +193,10 @@ val validate_completed_continuation :
 (** After transmitted input settles, require a different turn in the captured
     session with the same runtime and tool surface. Admission still requires
     the original turn through [validate_continuation]. *)
+
+val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
+  (unit, context_admission_error) result
+val context_admission_error_to_string : context_admission_error -> string
 
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->

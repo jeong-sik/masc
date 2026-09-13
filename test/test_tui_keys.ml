@@ -1017,7 +1017,8 @@ let test_config_pane_footer_actions () =
     in
     enabled "PgUp/PgDn"
       (List.mem pane
-         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes ]);
+         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes
+         ; Config_voice ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);

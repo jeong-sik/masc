@@ -27,10 +27,10 @@ let config_bindings =
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages runtime.toml and the detail of prompts and presets, and \
-             moves the selection a page on models and themes",
+      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+             and presets, and moves the selection a page on models and themes",
       Some [ Config_runtime; Config_models; Config_prompts; Config_presets
-           ; Config_themes ]
+           ; Config_themes; Config_voice ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]

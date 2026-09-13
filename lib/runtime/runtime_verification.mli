@@ -68,7 +68,7 @@ type report =
   | Measured of result
   | Unmeasured of unmeasured
 
-val of_json : Yojson.Safe.t -> (report, string) result
+val of_json : Yojson.Safe.t -> (report, string) Stdlib.result
 (** Read back exactly what [to_json] or [unavailable_to_json] wrote. Refuses,
     naming the reason, a document with another schema, a missing or extra key,
     a failure code this module does not write, a detail that the code never

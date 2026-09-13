@@ -102,8 +102,10 @@ let test_refusal () = fixture (fun base runtime binary spec original ->
    report carries the command's own code, and a document whose status says
    verified while it carries a failure, that carries a key the writer never
    writes, or that names another runtime is refused as unreadable. On
-   origin/main the verified-with-failure and extra-key documents pass the
-   literal schema/status match and the batch reports the runtime verified. *)
+   origin/main the extra-key document passes the literal schema/status/checks
+   match and the batch reports the runtime verified; the verified-with-failure
+   document was already rejected there, but as a plain verification failure
+   rather than as an unreadable report. *)
 let test_verification_report () = fixture (fun base _runtime binary spec _original ->
   let specs=[spec "new"] in
   let id=(Runtime_setup_spec.render (spec "new")).runtime_id in

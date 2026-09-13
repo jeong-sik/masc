@@ -118,10 +118,11 @@ let unfinished_run_reason (stop_reason : Runtime_agent.stop_reason) =
 ;;
 
 let schema = "masc.runtime_verification.v1"
+let unavailable_status = "unavailable"
 
 let status_of_failure = function
   | None -> "verified"
-  | Some (Unavailable _) -> "unavailable"
+  | Some (Unavailable _) -> unavailable_status
   | Some
       ( Provider_rejected _ | Timed_out | Tool_not_called | Tool_result_not_consumed
       | Empty_response | Model_unreported ) -> "failed"
@@ -164,7 +165,7 @@ let unavailable_to_json ?detail ~runtime_id ~code ~message () =
     ; "runtime_id", `String runtime_id
     ; "model", `Null
     ; "observed_model", `Null
-    ; "status", `String "unavailable"
+    ; "status", `String unavailable_status
     ; ( "checks"
       , `Assoc
           [ "response", `Bool false
@@ -340,7 +341,7 @@ let of_json json =
   | None, None -> Error "a report without a model must carry a failure"
   | None, Some (code, message, detail) ->
     let* () =
-      if String.equal status "unavailable"
+      if String.equal status unavailable_status
       then Ok ()
       else Error (Printf.sprintf "status %S on a report without a model" status)
     in

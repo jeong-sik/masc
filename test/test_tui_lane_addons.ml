@@ -451,7 +451,57 @@ let guided_installation () =
   check string "quoted Unicode binding survives serialization" "quoted \"topic\" and 한국어"
     (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get)
 
+let object_array_fields () =
+  let module Form = Masc_tui_schema_form in
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"records":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"object","properties":{"label":{"type":"string","minLength":1},"kind":{"type":"string","const":"record"},"note":{"type":"string"}},"required":["label","kind"],"additionalProperties":false}}},"required":["records"],"additionalProperties":false}|} in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | _ -> fail "array editing must not submit the enclosing form" in
+  let add text form = form |> edit "a" |> Form.insert_text ~text |> edit "\019" |> edit "enter" in
+  let initial = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  let array = edit "\005" initial in
+  check bool "opening an array does not create a required value" true
+    (Result.is_error (Form.value (edit "esc" array)));
+  check bool "empty array enforces declared minItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" array));
+  let child = edit "a" array in
+  check bool "item validates required fields before review" true
+    (Result.is_error (Form.handle ~key:"\019" child));
+  let two = array |> add "첫번째" |> add "second" in
+  let too_many = add "third" two in
+  check bool "multiple items enforce declared maxItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" too_many));
+  let fixed = too_many |> edit "d" |> edit "k" |> edit "e" |> edit "\021"
+    |> Form.insert_text ~text:"edited" |> edit "\019" |> edit "enter" in
+  let applied = edit "\019" fixed in
+  let item label = `Assoc ["kind",`String "record";"label",`String label] in
+  let expected = `Assoc ["records",`List [item "edited";item "second"]] in
+  check bool "object items preserve order, constants and absent optional fields" true
+    ((Form.value applied |> ok)=expected);
+  let reviewed = edit "\019" applied in
+  let submitted = match Form.handle ~key:"enter" reviewed |> ok with
+    | Form.Submit json -> json | _ -> fail "only enclosing review Enter submits" in
+  check bool "enclosing form submits the reviewed array" true (submitted=expected);
+  let discarded = applied |> edit "\005" |> edit "d" |> edit "esc" in
+  check bool "canceling array edits preserves its committed value" true
+    ((Form.value discarded |> ok)=expected);
+  let optional_schema = match schema with `Assoc fields ->
+    `Assoc (("required",`List [])::List.remove_assoc "required" fields) | _ -> assert false in
+  let optional = Form.create ~schema:optional_schema ~initial:(`Assoc []) |> ok in
+  let optional = optional |> edit "\005" |> edit "a" |> edit "esc" |> edit "esc" in
+  check bool "canceling new optional item never activates its array" true
+    ((Form.value optional |> ok)=`Assoc []);
+  let primitive_schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"values":{"type":"array","items":{"type":"string"}}},"required":["values"],"additionalProperties":false}|} in
+  let primitive = Form.create ~schema:primitive_schema ~initial:(`Assoc []) |> ok in
+  check bool "primitive arrays remain direct JSON input" true
+    (Result.is_error (Form.handle ~key:"\005" primitive));
+  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" |> edit "\019" in
+  check bool "primitive array JSON remains valid" true
+    ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "edit object array items through nested schema forms" `Quick object_array_fields;
   test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;

@@ -15,8 +15,8 @@
 행동 메뉴는 JSON Schema의 enum/const와 필수 object 필드로 닫힌 값을 열거하고
 기존 서버와 같은 validator로 검사한다. 특정 패키지 이름이나 행동 이름을 추측하지 않는다.
 자유 입력 또는 선택적 매개변수가 있는 스키마는 필드 폼을 연다. Tab/화살표로 필드를 이동하고,
-Left/Right로 enum·boolean 값을 고른다. 텍스트는 그대로 입력하며 숫자·배열은 해당
-JSON 값으로 입력한다. Ctrl-U는 값을 지우고, Ctrl-S는 전체 입력을 검증해 검토 화면을
+Left/Right로 enum·boolean 값을 고른다. 텍스트는 그대로 입력한다. 객체 배열은 Ctrl-E로 항목을 추가·편집하며,
+숫자와 기본값 배열은 JSON 값으로 입력한다. Ctrl-U는 값을 지우고, Ctrl-S는 전체 입력을 검증해 검토 화면을
 연다. 검토 화면의 Enter가 한 번 제출한다. PageUp/PageDown으로 긴 입력을 읽는다.
 붙여넣기는 현재 필드에 텍스트로 들어가며 실행 키로 해석되지 않는다. 검토 화면에서는
 붙여넣기가 입력을 바꾸지 않는다. 선택적 객체는 하위 필드를 직접 채울 때만 포함된다.
@@ -87,8 +87,11 @@ reads the real manifest and inspects its declared image in the Docker engine.
 An inspection failure is shown as unverified, never as proof that an image is
 missing. Preview does not create a container or pull/build an image.
 
-Enter installation ID, run ID and the package-advertised binding fields. Arrays
-use JSON input; text can be pasted. `Ctrl-S`, then Enter, creates a local TOML
+Enter installation ID, run ID and the package-advertised binding fields. Object
+arrays use `Ctrl-E` to open an item editor: `a` adds, `e` edits, `d` removes and
+`j/k` select. Each item uses the same schema field form and its own explicit
+review. `Ctrl-S` applies the array after validating its declared item limits;
+Esc discards array edits. Primitive arrays retain direct JSON input; text can be pasted. `Ctrl-S`, then Enter, creates a local TOML
 draft. Review it and press `s` to use the existing declaration save/application
 path. A saved declaration is not proof of an attached worker: inspect desired,
 applied, instance and observation state afterwards. Existing files are protected
@@ -101,3 +104,8 @@ It returns the resolved manifest path, package metadata (including binding schem
 and presentation), and image inspection `available` plus digest or `unverified`
 plus the engine error. These values describe the preview read, not a reservation
 of package files or image tags for a later installation.
+
+Object-array editing is generic: it reads the advertised `items` object schema,
+without source names or package-specific branches. Opening an editor or canceling
+a new item does not create an optional array. Completing an item changes only the
+local array; the enclosing action or installation still requires its final review.

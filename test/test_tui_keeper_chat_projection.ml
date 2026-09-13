@@ -1034,6 +1034,50 @@ let test_operation_reconciliation_projection () =
   | Ok _ -> fail "cancelled operation projected to the wrong state"
   | Error error -> fail (Chat.stream_error_to_string error)
 
+let test_batch_preserves_original_user_history_once () =
+  let module Store = Keeper_chat_operation_store in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let module History = Masc.Keeper_chat_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let base_dir = Filename.temp_dir "batch-original-history" "" in
+  let keeper_name = "batch-history" in
+  let store = Store.open_or_create ~path:(Filename.concat base_dir "operations.sqlite3") |> store_ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
+    let continuation_channel = Keeper_continuation_channel.dashboard ~thread_id:"keeper:batch-history" |> ok in
+    let source = Payload.source_to_json ~submitted_by:"operator" ~thread_id:"keeper:batch-history"
+      ~continuation_channel ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+      ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~user_row_origin:History.Needs_append |> ok in
+    let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
+      ["batch-original-one"; "batch-original-two"] in
+    List.iter2 (fun operation_id message ->
+      let input = Payload.input_to_json ~message ~user_blocks:[] ~turn_instructions:None
+        ~surface_context:None ~attachments:[] in
+      ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> store_ok)) ids ["original one"; "original two"];
+    let claimed = match Store.claim_next ~batch:Masc.Keeper_chat_operation_batch.select store ~now:2. |> store_ok with
+      | Some operation -> operation | None -> fail "no shared claim" in
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    let persist () = Server_routes_http_keeper_stream.For_testing.persist_batch_user_rows
+      ~base_dir ~keeper_name members |> ok in
+    persist (); persist ();
+    let rows = History.load_all ~base_dir ~keeper_name in
+    check (list string) "original messages appear once, aggregate is not another user row"
+      ["original one"; "original two"] (List.map (fun (row : History.chat_message) -> row.content) rows);
+    List.iter2 (fun operation_id (row : History.chat_message) ->
+      let expected_id = Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_chat_operation.Operation_id.to_string operation_id) |> ok in
+      let expected = { Keeper_chat_delivery_identity.delivery_key=Operation expected_id;
+        transcript_slot=Accepted_user } in
+      check bool "each accepted user row retains original request identity" true
+        (row.delivery_provenance = Some expected)) ids rows;
+    ignore (Store.succeed_running store ~now:3. ~operation_id:claimed.operation_id ~outcome_ref:"history-turn" |> store_ok);
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    check bool "terminal membership retains identities but releases original bodies" true
+      (List.for_all (fun (member : Keeper_chat_operation.t) -> member.input = None) members))
+;;
+
 let test_batch_member_events_pass_request_bound_stream_decode () =
   let module Events = Masc.Keeper_chat_events in
   let module Projection = Server_keeper_chat_agui_projection in
@@ -1376,6 +1420,8 @@ let () =
             test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
+        ; test_case "batch accepted-user history preserves original identities" `Quick
+            test_batch_preserves_original_user_history_once
         ; test_case "batch member stream retains strict request identity" `Quick
             test_batch_member_events_pass_request_bound_stream_decode
         ; test_case "batch reconciliation keeps original request binding" `Quick

@@ -350,6 +350,8 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
     settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
+  val persist_batch_user_rows : base_dir:string -> keeper_name:string ->
+    Keeper_chat_operation.t list -> (unit, string) result
   val operation_execution_of_outcome :
     operation_state:(unit -> (Keeper_chat_operation.state, string) result) ->
     pending_continuation:(unit -> (Keeper_direct_gate_continuation.pending option, string) result) ->

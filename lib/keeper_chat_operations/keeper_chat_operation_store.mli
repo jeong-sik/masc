@@ -61,7 +61,10 @@ type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, str
     input atomically with claim; resumed executions never acquire new members. *)
 val claim_next : ?batch:batch_selector -> t -> now:float -> (Operation.t option, error) result
 val batch_operations : t -> operation_id:Operation.Operation_id.t -> (Operation.t list, error) result
-(** Ordered members, including the execution owner. A singleton returns itself. *)
+(** Ordered original member inputs and digests, including the execution owner.
+    The claimed owner carries the aggregate input; this read preserves each
+    original user message for transcript delivery. Terminal bodies are released.
+    A singleton returns itself. *)
 
 val list_queued
   :  t

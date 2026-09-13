@@ -1946,11 +1946,14 @@ def keeper_runtime_phase_and_identity_interaction(
         start=0,
         timeout=3.0,
     )
+    # The roster column, not the chat header: "configured: " is the header's
+    # label for the configured runtime (#35455), and the roster row draws the
+    # phase straight against the model name.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"paused configured: anthropic.claude-sonnet-4",
+        b"paused anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -1959,12 +1962,13 @@ def keeper_runtime_phase_and_identity_interaction(
     # toggle on purpose. The footer named no key for it, so the single action
     # that worked was the one the screen never mentioned. The needle carries the
     # reset that follows the key, which is what separates an offered hint from
-    # the dim `\x1b[2mx delete` an unavailable one would draw.
+    # the dim `\x1b[2mx:delete` an unavailable one would draw. The footer moved
+    # to the key table's key:label form, so the label follows a colon now.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"x\x1b[0m delete",
+        b"x\x1b[0m:delete",
         start=0,
         timeout=3.0,
     )

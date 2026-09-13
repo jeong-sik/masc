@@ -6175,10 +6175,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in
     let run_lines =
-      match state.fusion_runs with
-      | None -> ["  Loading Fusion runs..."]
-      | Some _ ->
-          let runs = selected_keeper_runs state in
+      let failure detail =
+        (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset
+      in
+      match Masc_tui_types.keeper_runs_view state with
+      | Masc_tui_fetched.Absent -> [ Ansi.dim ^ page_unread_note ^ Ansi.reset ]
+      | Masc_tui_fetched.Loading -> [ loading_row "loading Fusion runs" ]
+      | Masc_tui_fetched.Failed detail -> [ failure detail ]
+      | Masc_tui_fetched.Ready (runs, stale) ->
+          Option.to_list (Option.map failure stale) @
           "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
           (if runs = [] then ["  No retained Fusion runs for this Keeper"]
            else List.mapi (fun index (run : Tui_decode.fusion_run) ->

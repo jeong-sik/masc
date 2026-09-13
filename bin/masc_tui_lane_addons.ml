@@ -564,7 +564,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                 snapshot.output.rows
             else []
         | Configurations ->
-            (match snapshot.configuration with
+            ["No Add-ons installed."] @ (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
              | Some config ->
                  window view.configuration_cursor (fun (d : declaration) ->

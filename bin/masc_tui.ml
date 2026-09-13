@@ -16589,6 +16589,11 @@ and is loaded on demand through keeper_skill.
                  | None,None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
+                      | "q" ->
+                          (* q always leaves the add-on surface while keeping
+                             the editable draft available on reopen. *)
+                          state.lane_addons_cached <- view;
+                          state.lane_addons <- None
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with
@@ -16668,6 +16673,9 @@ and is loaded on demand through keeper_skill.
                          let width = framed_inner_width cols in
                          let last = List.length (Addons.lines ~width view) - 1 in
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
+                     | "left" | "right" when (match view.focus with Addons.Timeline | Addons.Connections -> true | _ -> false) ->
+                         let delta = if key = "right" then 1 else -1 in
+                         update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.focus with
@@ -16676,7 +16684,8 @@ and is loaded on demand through keeper_skill.
                               update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | Some snapshot, (Addons.Timeline | Addons.Connections) -> update (Addons.move_lane view delta)
+                          | Some snapshot, (Addons.Timeline | Addons.Connections) ->
+                              update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)); scroll=0; document_key=None }
                           | None, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
@@ -20011,8 +20020,8 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
                  | Lanes_overview ->
-                     (* Back to the Runtime parent it hangs off, loaded. *)
-                     goto_surface state ~mailbox:async_messages Runtime)
+                     (* Lanes is a primary surface; Esc returns to the ring. *)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Acting | Metrics | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor

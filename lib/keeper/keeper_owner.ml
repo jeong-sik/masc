@@ -993,14 +993,34 @@ let start
         let exact_interrupt target =
           match target with
           | Observed_turn { current; interrupt_token } ->
-            (match Atomic.get current with
+            Ok (match Atomic.get current with
              | Some turn when String.equal turn.interrupt_token interrupt_token ->
                Some (fun () -> Eio.Switch.fail turn.switch Keeper_registry_types.Operator_interrupt)
              | Some _ | None -> None)
           | Direct_operation expected ->
-            (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
-             | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
-             | _ -> None)
+            (* A member can observe Run_started before Batch_bound reaches its
+               socket. Resolve only its immutable durable membership, never
+               substitute whichever operation happens to be running. *)
+            (match run_operation_read t ~label:"resolve exact interrupt execution" (fun () ->
+               Chat_operation_store.get t.operation_store expected) with
+             | Error _ as error -> error
+             | Ok operation ->
+               let expected = match Option.bind operation (fun operation -> operation.Chat_operation.batch_membership) with
+                 | Some member -> member.execution_id
+                 | None -> expected in
+               Ok (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
+                 | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
+                 | _ -> None))
+        in
+        let signal_exact target =
+          let resolved = match target with None -> Ok None | Some target -> exact_interrupt target in
+          match resolved with
+          | Error error -> false, Some (error_to_string error)
+          | Ok None -> false, None
+          | Ok (Some interrupt) ->
+            (try interrupt (); true, None with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> false, Some (Printexc.to_string exn))
         in
         let commit_meta state command =
           match !(t.store_error) with
@@ -1137,8 +1157,10 @@ let start
             Eio.Promise.resolve resolve (Error Owner_stopping);
             loop state shutdown_operation_id)
           else
-          let interrupt = exact_interrupt target in
-          let pending_authority = match interrupt, target, expected_control_token with
+          let authorization =
+            let ( let* ) = Result.bind in
+            let* interrupt = exact_interrupt target in
+            let* pending = match interrupt, target, expected_control_token with
             | None, Direct_operation operation_id, Some token
               when String.equal token (chat_control_token t)
                 && not !(t.child_active)
@@ -1150,13 +1172,14 @@ let start
                 | None | Some {Chat_operation.state = Queued; _} -> true
                 | Some {Chat_operation.state = (Running _ | Succeeded _ | Failed _ | Cancelled _); _} -> false)
             | (Some _ | None), (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
-          (match pending_authority with
+            Ok (interrupt, pending) in
+          (match authorization with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
-           | Ok false when Option.is_none interrupt ->
+           | Ok (None, false) ->
              Eio.Promise.resolve resolve (Ok
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
-           | Ok _ ->
+           | Ok (interrupt, _) ->
              let paused = match (Keeper_owner_reducer.projection state).meta with
                | Some meta when meta.paused -> Ok state
                | _ -> commit_meta state
@@ -1196,36 +1219,20 @@ let start
              (match resumed with
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
-                let signalled, interrupt_error = match Option.bind observed exact_interrupt with
-                  | None -> false, None
-                  | Some interrupt ->
-                    (try interrupt (); true, None
-                     with
-                     | Eio.Cancel.Cancelled _ as exn -> raise exn
-                     | exn -> false, Some (Printexc.to_string exn)) in
+                let signalled, interrupt_error = signal_exact observed in
                 Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; resumed = can_resume; interrupt_error }));
                 start_child_if_needed state shutdown_operation_id;
                 loop state shutdown_operation_id))
         | Command (Interrupt_running_operation expected, resolve) ->
-          let inventory = Atomic.get t.operation_projection in
-          let response =
-            match inventory.running_operation_id with
-            | Some running when Operation_id.equal running expected ->
-                (match Atomic.get t.child_cancel with
-                 | None ->
-                     Operation_interrupt_failed
-                       "the exact operation is running without a cancellable child"
-                 | Some cancel ->
-                     (try
-                        cancel.interrupt ();
-                        Operation_interrupt_signalled
-                      with
-                      | exn ->
-                          Operation_interrupt_failed (Printexc.to_string exn)))
-            | running_operation_id ->
-                Operation_not_current { running_operation_id }
-          in
-          Eio.Promise.resolve resolve (Ok response);
+          let response = match exact_interrupt (Direct_operation expected) with
+            | Error _ as error -> error
+            | Ok None -> Ok (Operation_not_current
+                {running_operation_id = (Atomic.get t.operation_projection).running_operation_id})
+            | Ok (Some interrupt) ->
+              Ok (try interrupt (); Operation_interrupt_signalled with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
+          Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
@@ -1279,12 +1286,7 @@ let start
                | Ok state -> state, outcome = Applied && can_resume, None
                | Error (state, error) -> state, false, Some (error_to_string error) in
              let signalled, interrupt_error = if outcome <> Applied || Option.is_some resume_error then false, resume_error
-               else match Option.bind intent.target exact_interrupt with
-                 | None -> false, None
-                 | Some interrupt ->
-                   (try interrupt (); true, None with
-                    | Eio.Cancel.Cancelled _ as exn -> raise exn
-                    | exn -> false, Some (Printexc.to_string exn)) in
+               else signal_exact intent.target in
              let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed; interrupt_error} in
              Eio.Promise.resolve resolve (Ok (acceptance, receipt));
              start_child_if_needed state shutdown_operation_id;

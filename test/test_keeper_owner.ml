@@ -1428,6 +1428,61 @@ let test_owner_coalesces_compatible_messages_and_preserves_other_conversations (
     (List.length (owner_ok (Owner.batch_operations owner (List.nth ids 1))))
 ;;
 
+let test_batch_member_interrupt_before_wire_binding ~interactive () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let before_claim, mark_before_claim = Eio.Promise.create () in
+  let release, release_claim = Eio.Promise.create () in
+  let started = Eio.Stream.create 2 in
+  let first_claim = ref true in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    if !first_claim then (first_claim := false; Eio.Promise.resolve mark_before_claim (); Eio.Promise.await release);
+    let operation = match owner_ok (claim ()) with Some operation -> operation | None -> fail "no queued operation" in
+    (* Deliberately publish no Run_started/Batch_bound wire event. The only
+       authority available to interruption is the durable membership. *)
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel () in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ())}
+    ~operation_executor:(Some execute) ~keeper_name:"member-interrupt"
+    ~initial_meta:(Some (make_meta "member-interrupt")) ()) in
+  let thread_id = "keeper:member-interrupt" in
+  let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id with
+    | Ok channel -> channel | Error detail -> fail detail in
+  let source = match Keeper_chat_operation_payload.source_to_json ~submitted_by:"alice" ~thread_id
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None ~external_message_id:None
+      ~workspace_id:None ~extra_mentions:[] ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let input message = Keeper_chat_operation_payload.input_to_json ~message ~user_blocks:[]
+    ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let leader = operation_id "member-interrupt-leader" and follower = operation_id "member-interrupt-follower"
+  and next = operation_id "member-interrupt-next" in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:leader ~source ~input:(input "first")));
+  Eio.Promise.await before_claim;
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:follower ~source ~input:(input "second")));
+  Eio.Promise.resolve release_claim ();
+  check bool "shared owner started" true (Chat_operation.Operation_id.equal leader (Eio.Stream.take started));
+  if interactive then (
+    let _, receipt = owner_ok (Owner.submit_interactive_operation owner ~operation_id:next ~source ~input:(input "next")
+      ~intent:{control_token = Owner.chat_control_token owner; target = Some (Direct_operation follower)}) in
+    check bool "interactive follower signal resolves durable owner" true receipt.signalled)
+  else (
+    let receipt, _ = owner_ok (Owner.pause_and_interrupt owner (Direct_operation follower)) in
+    (match receipt with Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "follower Esc did not stop shared owner"));
+  List.iter (fun id -> ignore (await_terminal owner id 1_000)) [leader; follower];
+  if not interactive then (
+    ignore (owner_ok (Owner.submit_operation owner ~operation_id:next ~source ~input:(input "next")));
+    ignore (owner_ok (Owner.apply_meta owner (Resume {updated_at = "resume-after-member-stop"}))));
+  check bool "independent successor started" true (Chat_operation.Operation_id.equal next (Eio.Stream.take started));
+  let token = Owner.chat_control_token owner in
+  let stale, after = owner_ok (Owner.pause_and_interrupt owner (Direct_operation follower)) in
+  (match stale with Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "settled member interrupted another execution");
+  check string "stale member does not change control authority" token after;
+  check bool "successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
+  ignore (owner_ok (Owner.pause_and_interrupt owner (Direct_operation next)));
+  ignore (await_terminal owner next 1_000)
+;;
+
 let test_operation_executor_exception_is_terminal_and_next_runs () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -3465,6 +3520,8 @@ let () =
             test_gate_wait_releases_owner_without_repeated_children
         ; test_case "compatible direct messages share an execution" `Quick
             test_owner_coalesces_compatible_messages_and_preserves_other_conversations
+        ; test_case "Esc resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:false)
+        ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case

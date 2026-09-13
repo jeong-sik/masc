@@ -27,6 +27,7 @@ type action_menu = {
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  subscription_panel : Masc_tui_lane_subscriptions.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -55,3 +56,4 @@ val open_actions : request_id:string -> t -> (t, string) result
 val move_action : t -> int -> t
 val submit_action : t -> (action_request, string) result
 val pending_action : t -> action_request option
+val subscription_targets : t -> Masc_tui_lane_subscriptions.target list

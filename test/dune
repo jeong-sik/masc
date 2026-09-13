@@ -3760,6 +3760,8 @@
   masc
   masc_tui_composer
   masc_tui_composer_projection
+  masc_tui_render_prim
+  masc_tui_theme
   masc_tui_types)
  (deps
   (source_tree ../bin)))

@@ -604,6 +604,16 @@ let reconcile_spent_selection
   =
   match selection.source.Keeper_event_queue.payload with
   | Schedule_due _ -> Ok Selection_actionable
+  | Hitl_resolved {approval_id; decision=Keeper_event_queue.Hitl_approved; _}
+    when Keeper_approval_queue.continuation_settled_chat_projection_present
+      ~base_path:config.Workspace_utils.base_path ~keeper_name ~approval_id ->
+    (* The native input receipt proves delivery, independently of whether the
+       model chose to spend a non-replayable one-shot grant. Keep that grant's
+       authority untouched while retiring the delivered input wake. *)
+    (match Keeper_registry_event_queue.ack_pending_result
+       ~base_path:config.Workspace_utils.base_path keeper_name ~selection with
+     | Ok () -> Ok Spent_grant_replay_acknowledged
+     | Error message -> Error ("native continuation input ack failed: " ^ message))
   | Hitl_resolved
       { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
     (* An approved grant is one-shot, but consumption alone is not terminal:

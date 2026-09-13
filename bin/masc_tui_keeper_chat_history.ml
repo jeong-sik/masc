@@ -371,6 +371,7 @@ let turn_id_of_fields fields =
   | Ok (Some provenance) ->
       let request_id =
         match provenance.Delivery_identity.delivery_key with
+        | Delivery_identity.Operation_native {operation_id=request_id; _}
         | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
         | Delivery_identity.Operation request_id
         | Delivery_identity.Fusion_run request_id
@@ -395,7 +396,8 @@ let operation_id_of_fields fields =
       (Some
          { Delivery_identity.delivery_key =
              (Delivery_identity.Operation request_id
-              | Delivery_identity.Operation_checkpoint {operation_id=request_id; _})
+              | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+              | Delivery_identity.Operation_native {operation_id=request_id; _})
          ; _
          }) ->
       Some (Delivery_identity.Request_id.to_string request_id)

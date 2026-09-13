@@ -1,0 +1,5 @@
+{
+  "path": "scripts/verify-installed-workspace-memory-discovery.py",
+  "sha256": "857382403ef10d57c8c1f40ed1dca41e39702e38b39c057ca996f94152274e7a",
+  "scope": "corrected probe, actual installed851 baseline; failed at absent publication"
+}

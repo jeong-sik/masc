@@ -2925,12 +2925,18 @@ module Browser_lane_view = struct
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ -> None
+  (* The browser a read goes to, when there is one. Live with none chosen has
+     no browser to name; this used to answer "choose browser", and every row
+     that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
-    | Automation, _ -> "browser"
-    | Live, Some client -> browser_name client.browser
-    | Live, None -> "choose browser"
+    | Automation, _ -> Some "browser"
+    | Live, Some client -> Some (browser_name client.browser)
+    | Live, None -> None
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
+    match browser_label t with
+    | Some browser ->
+      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
+    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;

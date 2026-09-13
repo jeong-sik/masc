@@ -140,3 +140,34 @@ This increment is event-driven visual reading and scrolling. It does not yet
 forward pointer clicks or text entry, stream video, or claim an interactive FPS.
 Rendering uses the existing [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
 or iTerm2 image path; unsupported terminals retain the explicit image diagnostic.
+
+
+### Followed document readiness
+
+The live extension records `follow_link` immediately and delays only the next
+semantic scene read until Firefox commits a new top document. Fragment navigation
+requires the source native document ID and the observed destination URL. The
+existing `executeScript` call still uses `runAt: document_end`, so images and other
+load-completion work do not delay visible content extraction.
+
+Firefox native document IDs identify lifecycle events; MASC scene document IDs
+identify observed DOM targets. They are separate identities. Navigation errors
+can name the source document during both a successful transition and a failed
+destination. Neither error text nor the first tab `complete` update determines
+readiness. After commit, a rejected injection remains a read failure and the
+completed follow receipt is retained. A transition with no commit or matching
+fragment event can wait until the existing native transport deadline; this is
+not a guarantee of immediate recovery from every navigation failure.
+
+A follow observation is removed on consumption, completion, tab closure,
+superseding follow, disconnect, or its original transport deadline. Read waiters
+also use their command's remaining deadline. Cancellation during preflight is
+checked before registering observations and immediately before injecting an
+action. No browser action is replayed by this mechanism.
+
+The native host now supplies `deadlineMs` from its existing extension timeout.
+Install the matching host and extension together. Extension 0.7.0 adds the
+`webNavigation` permission for these document events.
+
+References: [Firefox navigation events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/webNavigation),
+[document replacement during injection](https://bugzilla.mozilla.org/show_bug.cgi?id=2047009).

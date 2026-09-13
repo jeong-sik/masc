@@ -146,7 +146,7 @@ let action_identity_and_uncertainty () =
     request_id=request.request_id;requester="operator";executor=None;input_sha256=Action.input_digest input;
     action=request.action;state=Action.Outcome_unknown;result=None;detail=Some "worker disconnected after dispatch"} in
   let received = UI.action_receipt request (Action.to_json receipt) |> ok in
-  let lines = UI.lines ~width:100 {UI.initial with last_action=Some request;action_receipt=Some received} in
+  let lines = UI.lines ~width:100 {UI.initial with technical_details=true;last_action=Some request;action_receipt=Some received} in
   check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
   check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
   check bool "different request cannot satisfy status read" true
@@ -263,6 +263,7 @@ let failure_state_is_truthful () =
     (List.exists (String.starts_with ~prefix:"No reading yet") failed)
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;

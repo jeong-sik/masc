@@ -32,6 +32,46 @@ const openTurn = (view: { container: Element }) => fireEvent.click(view.containe
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); clearStoredToken(); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
 afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
 describe('historical autonomous tool outputs', () => {
+  it.each([409, 403])('withholds linked ordinary trace output and success after HTTP %i', async status => {
+    const stale = 'UNVERIFIED ordinary trace result'
+    const ordinary = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const,
+      turnRef: 'trace-writer#428',
+      traceSteps: [{ kind: 'tool' as const, name: 'Edit', status: 'ok' as const,
+        executionId: id, result: stale }],
+    }))
+    recordToolCallOutputs([response().entry])
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${ordinary} emptyText="empty" groupToolCalls=${true} variant="messenger" />`)
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-output-state')).not.toBe('ok')
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(view.container.textContent).not.toContain(stale)
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+    if (status === 409) expect(view.getByRole('alert').textContent).toContain('중복')
+    else expect(view.getByRole('alert').getAttribute('data-access-state')).toBe('admin-required')
+    expect(step.getAttribute('data-chat-trace-output-state')).not.toBe('ok')
+    expect(step.getAttribute('data-chat-trace-execution-status')).toBe('ok')
+    expect(step.querySelector('.chat-block-tstep-status')?.getAttribute('aria-label'))
+      .toBe('실행 보고: 성공 · 결과 확인 불가')
+    expect(view.container.textContent).not.toContain(stale)
+    expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it('keeps ordinary activity without an execution ID readable without a lookup', () => {
+    const text = 'Unlinked activity result'
+    const ordinary = entries.map(entry => ({ ...entry, source: 'direct_assistant' as const,
+      turnRef: 'trace-writer#428',
+      traceSteps: [{ kind: 'tool' as const, name: 'Read', status: 'ok' as const, result: text }],
+    }))
+    const view = render(html`<${ChatTranscript} keeperName="writer" entries=${ordinary} emptyText="empty" groupToolCalls=${true} variant="messenger" />`)
+    if (!view.container.querySelector('[data-chat-trace-step="tool"]')) openTurn(view)
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(view.getByText(text)).toBeTruthy()
+    expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(get).not.toHaveBeenCalled()
+  })
   it('does not trust a hydrated row when exact lookup reports duplicate evidence', async () => {
     recordToolCallOutputs([response().entry])
     vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 409 }))

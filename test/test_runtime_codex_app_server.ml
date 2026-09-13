@@ -611,13 +611,13 @@ let test_image_reaches_the_turn_input () =
 (* A media type the item cannot carry is rejected before the process boundary,
    so the caller learns which image is wrong instead of reading a turn rejection
    attributed to the thread. *)
-let test_unsupported_image_media_type_is_rejected () =
+let test_unsupported_image_media_type_is_rejected ?(media_type="image/tiff") ?(base64_data="AAAA") ?(expected="image/tiff") () =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ()) with cli_path = "/bin/true" }
     in
     let image =
-      { Runtime_codex_app_server.media_type = "image/tiff"; base64_data = "AAAA" }
+      { Runtime_codex_app_server.media_type; base64_data }
     in
     match
       Runtime_codex_app_server.validate_turn
@@ -629,7 +629,7 @@ let test_unsupported_image_media_type_is_rejected () =
     | Ok () -> fail "an unsupported media type must not validate"
     | Error (Runtime_codex_app_server.Invalid_config detail) ->
       check bool "names the media type" true
-        (String_util.contains_substring detail "image/tiff")
+        (String_util.contains_substring detail expected)
     | Error other -> fail (Runtime_codex_app_server.error_to_string other))
 ;;
 
@@ -4422,7 +4422,10 @@ let () =
       , [ test_case "image reaches the turn input" `Quick
             test_image_reaches_the_turn_input
         ; test_case "unsupported media type is rejected" `Quick
-            test_unsupported_image_media_type_is_rejected
+            (fun () -> test_unsupported_image_media_type_is_rejected ())
+        ; test_case "malformed Base64 image is rejected before client dispatch" `Quick
+            (fun () -> test_unsupported_image_media_type_is_rejected
+              ~media_type:"image/png" ~base64_data:"%%%" ~expected:"valid Base64" ())
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn

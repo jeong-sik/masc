@@ -96,6 +96,7 @@ def main(executable: str) -> None:
             key(b"q", b"MASC Lanes")
             key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
+            key(b"D", b"TOML installations")
             key(b"n", b"New TOML filename:")
             key(b"terminal.toml\r", b"Draft edited; s saves")
             if requests:

@@ -20,6 +20,7 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
   | Act of action_request | Action_status of action_request
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type t = {
+  technical_details : bool; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
@@ -48,3 +49,8 @@ val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
 
 val action_json : action_request -> Yojson.Safe.t
 val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string) result
+
+val open_actions : request_id:string -> t -> (t, string) result
+val move_action : t -> int -> t
+val submit_action : t -> (action_request, string) result
+val pending_action : t -> action_request option

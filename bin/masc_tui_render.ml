@@ -9267,15 +9267,16 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           c.push_divider ();
           let room = max 1 (budget - 4) in
           let start = max 0 (cursor - room + 1) in
-          view.clients |> List.iteri (fun index (client : client) ->
+          listed_clients view |> List.iteri (fun index (client : client) ->
             if index >= start && index < start + room then
               let line = Printf.sprintf "  %s%s · %s" (browser_name client.browser)
                 (if Some client = view.selected_client then " (selected)" else "") (Terminal_text.single_line client.client_id) in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
-          if view.clients = [] then (
-            c.push_styled ~style:(Theme.recede ())
-              (if busy view then "  Waiting for active connections…" else "  No active native browser connections");
+          (match browser_lane_picker_empty_line view with
+           | None -> ()
+           | Some line ->
+            c.push_styled ~style:(Theme.recede ()) line;
             if awaiting_browser view then (
               c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
               c.push_styled ~style:(Theme.recede ()) "  Setup: connectors/browser/host/README.md";
@@ -11564,12 +11565,11 @@ let render_resources (state : state) =
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           1
       | None ->
-          if total = 0 then begin
-            framed_line pane_buf pane_cols
-              (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset);
-            1
-          end
-          else 0
+          (match resources_empty_note state.resources_list with
+           | Some note ->
+               framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
+               1
+           | None -> 0)
     in
     let list_rows_budget = max 0 (list_rows_budget - status_rows) in
     let first =

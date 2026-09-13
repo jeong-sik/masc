@@ -1,10 +1,10 @@
-(** A ceiling on the tool schemas every Keeper turn carries.
+(** A ceiling on the complete model-visible tool schema inventory.
 
     [test_keeper_system_prompt_bytes] pins the assembled system prompt, which is
     the smaller half of the fixed per-turn cost. The tool array is the larger
     one and had no measurement at all: a tool added with a generous schema, or a
-    description that grows a paragraph at a time, costs every turn of every
-    Keeper and nothing said so.
+    description that grows a paragraph at a time, enlarges the available surface
+    and nothing said so.
 
     This is a ratchet, not a golden. Shrinking passes and reports the slack, so
     a PR that trims a description is never asked to edit a number to stay green
@@ -12,10 +12,11 @@
     duration. Growth past the ceiling fails and has to be argued for in
     the PR that causes it.
 
-    What is measured is what the model receives: [model_visible_schemas]
-    projects the descriptors a Keeper can call, and each carries the name,
-    description, and input_schema that go on the wire. Serialized as compact
-    JSON, so whitespace in the OCaml source does not move the number. *)
+    [model_visible_schemas] projects the descriptors a Keeper can call, before
+    deferred loading selects a particular turn's tools. Each carries the name,
+    description, and input_schema serialized as compact JSON, so whitespace in
+    the OCaml source does not move the number. This is a development measurement
+    guard, not a runtime budget or a restriction on Keeper activity. *)
 
 open Alcotest
 
@@ -168,6 +169,14 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
+(* 2026-09-13: 109,398 across 126 tools (CI 34705880512 at 09c8510e). The
+   whole +162 is masc_fusion's task_id parameter description; no tool is
+   added. What it bought: the parameter now says what happens when neither
+   task_id nor goal_id is given -- the runtime picks the caller's active Task
+   from authoritative ownership -- and that the captured contract and Goal
+   criteria are separate from the caller's own summary. Without that a Keeper
+   omits the argument expecting no Task, or restates the contract into the
+   summary. Set to the measurement with no added headroom. *)
 (* 2026-09-13: the DOS lane adds seven deferred tools -- masc_dos_load, _eject,
    _screen, _step, _press, _type, _peek. CI 34705960512 measured 114,705 bytes
    / 133 tools before trimming; the declarations then lost 883 rendered bytes
@@ -192,7 +201,21 @@ open Alcotest
    the machine's mutex; the caps and the ceiling inside Dos_lane.press_resolved
    bound it, and keys_pressed is how the caller learns the sequence stopped
    early. 430 bytes of headroom over the measured result. *)
-let ceiling_bytes = 114_500
+(* 2026-09-13: native CI 34708251602 measured 110,899 bytes / 128 tools at
+   bb9d1de3d1. The two declaration read/save tools add 1,663 rendered bytes
+   to the previous 109,236-byte surface. They let Dashboard and Keeper edit
+   the same installation TOML through one owner; adding a domain package
+   needs no further tool. Set the ratchet to this measurement with no slack.
+   This is the whole available catalog, including deferred tools, not a
+   per-turn payload limit or Keeper activity budget. *)
+(* Combining main's 114,500-byte baseline with the independently measured
+   1,663-byte declaration editor addition preserves main's existing headroom.
+   The combined production renderer is checked by the following native CI;
+   this arithmetic is not a claim that the combined source has run yet. *)
+(* Merge the main ceiling with Fusion's independently measured +162 JSON
+   bytes. This preserves main's existing headroom; it adds none for the merge.
+   The combined production surface is measured by CI, not inferred as passing. *)
+let ceiling_bytes = 116_163 + 162
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -205,8 +228,9 @@ let schema_json (schema : Masc_domain.tool_schema) =
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   List.iter (fun (schema : Masc_domain.tool_schema) ->
-    if String.equal schema.name "keeper_workspace_memory_read" then
-      Printf.printf "workspace memory reader schema: %d bytes\n%!"
+    if List.mem schema.name
+      ["keeper_workspace_memory_read"; "masc_lane_declaration_read"; "masc_lane_declaration_save"] then
+      Printf.printf "model-visible schema %s: %d bytes\n%!" schema.name
         (String.length (Yojson.Safe.to_string (schema_json schema)))) schemas;
   let bytes =
     List.fold_left
@@ -214,6 +238,8 @@ let measured () =
       0
       schemas
   in
+  Printf.printf "model-visible schema inventory: %d bytes / %d tools; ceiling: %d bytes\n%!"
+    bytes (List.length schemas) ceiling_bytes;
   (List.length schemas, bytes)
 ;;
 
@@ -355,6 +381,8 @@ let all_surface_golden_names =
   ; "masc_dos_step"
   ; "masc_dos_type"
   ; "masc_lane_attach"
+  ; "masc_lane_declaration_read"
+  ; "masc_lane_declaration_save"
   ; "masc_lane_act"
   ; "masc_lane_action_status"
   ; "masc_lane_detach"
@@ -424,6 +452,7 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
     failf
       "model-visible tool schemas grew to %d bytes across %d tools, over the %d ceiling \
        by %d.\n\
+       This inventory includes deferred tools; this check is not a runtime budget. \
        This is the CLI lane's bill: an official-client turn carries all of it, because \
        that transport answers requests and never originates, so no tool can be supplied \
        mid-turn (runtime_official_client_mcp.ml). An agent_core-lane Keeper carries \

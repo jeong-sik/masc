@@ -1,0 +1,11 @@
+{
+  "selected_id": "vrf-c77fc80f7268210060b16693b4620730",
+  "selected_rows": 2,
+  "undecodable_rows": [
+    {
+      "line": 2,
+      "error": "'utf-8' codec can't decode byte 0x93 in position 2898: invalid start byte",
+      "contains_selected_id": false
+    }
+  ]
+}

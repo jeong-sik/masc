@@ -380,11 +380,12 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
     ~base_path:t.config.base_path ~max_image_bytes ~bytes () with
   | Error error ->
     let failure_class = match error with
-      (* A document refused for its size is the submitter's to fix, the same as
-         a page over the image limit, and not a fault of this runtime. *)
+      (* A document refused for its size is the submitter's to fix, same as a
+         page over the image limit -- not a fault of this runtime. *)
       | Verification_pdf_inspection.Image_policy_rejected _
-      | Too_many_pages _ | Rendered_bytes_exceeded _ -> Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+      | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
+      | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
+      | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_pdf_inspection.error_to_string error)
@@ -423,21 +424,25 @@ let media_result t tool ~name ~args ~start_time =
          | Keeper_producer meta ->
            (* The bounded probe identifies the format only. Its potentially
               text-projected body never becomes image input or hash evidence. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
               (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                   ~config:t.config ~meta ~path ?cwd ()))
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd
+                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
             | Ok probe when is_pdf path probe ->
-              Keeper_tool_filesystem_runtime.read_complete_owned_bytes
-                ~ownership_root:t.ownership_root ~path ?cwd ()
+              Keeper_tool_filesystem_runtime.read_owned_bytes
+                ~ownership_root:t.ownership_root ~path ?cwd
+                ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
             | result -> result)
        in
        (match bytes with

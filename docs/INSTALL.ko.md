@@ -2,11 +2,50 @@
 
 [English](INSTALL.md)
 
-이 문서는 **0.35.5 설치 계약**입니다. 태그와 자산 제공 여부는
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-아래 다운로드 명령은 `v0.35.5`과 같은 버전의 설치기를 선택합니다.
+## 빠른 시작
 
-0.35.2 설치기를 사용 중이라면 해당 태그의 문서를 참고하세요. 다중 선택은 0.35.2부터 지원합니다.
+최신 릴리스의 설치기를 내려받은 뒤, 다운로드가 성공했을 때만 실행합니다.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
+```
+
+설치기는 workspace 위치를 묻습니다. 설치 후 설정 화면이 열리지 않으면 다음
+명령으로 모델 연결과 sandbox를 설정하세요. 아래 경로는 기본 설치 위치입니다.
+`--prefix`를 바꿨다면 그 경로의 `masc`를 실행하세요.
+
+```bash
+"$HOME/.local/bin/masc" setup
+```
+
+Claude Code와 Codex는 해당 CLI가 `PATH`에 있으면 목록에 나옵니다. 연결 검사가
+실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 준비가
+필요하면 설치·시작 동작을 제안합니다. macOS에서는 공식 다운로드나 안내 페이지를
+열며, MASC가 업체 설치기의 서명이나 체크섬을 검증하는 것은 아닙니다. Linux에서는
+제안된 배포판 패키지 명령을 실행합니다.
+
+설치 중 셸 PATH 변경에 동의했다면 새 터미널에서 `masc`를 쓸 수 있습니다.
+변경을 건너뛰었거나 비대화형으로 설치했다면 설치 경로를 PATH에 직접 추가하세요.
+기본 경로는 `export PATH="$HOME/.local/bin:$PATH"`이며, `--prefix`를 바꿨다면
+그 디렉터리를 사용합니다.
+
+스크립트를 먼저 읽어보려면 이렇게 하세요.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+less /tmp/masc-install.sh && # q로 나갑니다
+bash /tmp/masc-install.sh
+```
+
+먼저 다운로드하면 스크립트를 읽어볼 수 있고, 다운로드 실패 시 불완전한
+설치기를 실행하지 않습니다.
+
+나머지는 참고 자료입니다. 무엇이 설치되는지, 모델을 어떻게 고르는지, sandbox가
+어떻게 다른지, 업그레이드와 삭제는 어떻게 하는지를 다룹니다. 태그와 자산 제공
+여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서
+확인하세요. 다중 선택은 0.35.2부터 지원합니다.
 
 ## 플랫폼과 준비물
 
@@ -54,7 +93,7 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
 
-기본 sandbox에는 실행 중인 Docker 엔진이 필요하며, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. `masc setup` 전에 준비해 주세요.
+기본 sandbox에는 실행 중인 Docker 엔진이 필요하고, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. 둘 다 미리 준비해 두면 좋지만, 없어도 설정 화면이 무엇이 빠졌는지 알려주고 설치를 제안합니다.
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
@@ -86,22 +125,32 @@ masc prerequisite-actions pdf-tools --execute poppler_install
 
 ## 설치
 
+위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하려면 이렇게
+하세요.
+
 ```bash
-TAG=v0.35.12
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
+```
+
+최신 릴리스가 아니라 특정 릴리스를 설치하려면 그 태그의 설치기를 받아 고정합니다.
+
+```bash
+TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-  -o /tmp/masc-install.sh
+  -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+태그에서 받은 `install.sh`는 그 태그의 자산을 설치하고, `--version`이 없으면
+설치기가 최신 릴리스를 찾습니다.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
+디렉터리를 PATH에 직접 추가하세요. 기본 경로라면
+`export PATH="$HOME/.local/bin:$PATH"`를 실행합니다. 이 명령에는 설치 옵션을 붙이지 않습니다.
 
-선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
-
-재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
 `.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
@@ -129,7 +178,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | 실행 상황 | 동작 |
 |---|---|
-| 터미널에서 첫 설치 | 여러 연결·모델 선택 후 실제 응답·도구 검사 |
+| 터미널에서 첫 설치 | workspace 설치 후 설정이 열리지 않으면 `masc setup` 실행. 여러 연결·모델 선택 후 실제 응답·도구 검사 |
 | 입력 파이프/자동화, 출처가 하나 | 해당 출처 선택; 연결 probe 결과 별도 표시 |
 | 입력 파이프/자동화, 출처가 없거나 여러 개 | 선택 보류; 강제 `--wizard`는 `--provider` 필요 |
 | `--provider <id>` | 기존 workspace에서도 지정 공급자 선택 |
@@ -160,7 +209,7 @@ bash /tmp/masc-install.sh --version "$TAG" \
 | `<base-path>/.masc/config/` | 내장 runtime/model overlay 및 기본 설정 seed. 운영 중 도구·프롬프트도 내장 자산에서 관리 |
 | `<base-path>/.masc/microvm/shim/` | Linux guest용 exec shim과 SHA256 sidecar. `--no-guest-shim`으로 생략 가능 |
 
-**0.35.5 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 설치합니다.
+**설치된 바이너리**는 `activation_mode = "manual"`인 `imp` 하나와 `browser-lanes` skill을 준비합니다.
 `imp`의 기본 sandbox는 Docker이며, 모델과 실행 환경을 준비한 뒤 직접 시작합니다.
 설치기는 설정을 바이너리에서 가져옵니다. 지침은 시작점이라 그대로 고쳐 쓰면 됩니다. 모델 가중치, 모델 CLI, API 키, Docker,
 Apple Container, SSH 서버, 브라우저/확장, Slack/Discord 계정, 자동 시작 서비스는
@@ -193,10 +242,7 @@ Ollama는 선택한 모델만 필요에 따라 로드하고 실제 설정·실�
 CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를 설치하거나 로그인하지
 않습니다. **Configure later**로 미룰 수 있고 imp는 자동으로 시작하지 않습니다.
 
-## `imp`와 첫 대화 (0.35.5)
-
-이 경로는 **0.35.5 설치 계약**입니다. 다운로드 전에
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
+## `imp`와 첫 대화
 
 `masc`를 실행하세요. `MASC_BASE_PATH` export는 필요 없습니다. 저장된 작업 공간이
 없으면 제안되는 `~/MASC` 디렉터리를 Enter로 선택하거나 다른 위치를 고르세요.
@@ -208,7 +254,9 @@ CLI 인증 저장소에 남으며, 마법사는 CLI·모델 가중치·Docker를
 로그인을 열고 같은 선택으로 다시 시도할 수 있습니다. 선택한 모델은 저장 전에
 실제 응답·도구 검사를 통과해야 합니다.
 
-샌드박스 화면은 서비스 상태, 누락된 준비물, 고급 선택지를 보여줍니다. 서비스가
+샌드박스 화면은 서비스 상태, 누락된 준비물, 고급 선택지를 보여줍니다. 준비되지
+않은 서비스를 고르면 이 컴퓨터에서 쓸 수 있는 설치·시작 동작을 띄웁니다. 같은
+목록은 `masc prerequisite-actions <서비스>`로도 볼 수 있습니다. 서비스가
 실행 중이어도 이미지 준비와 imp 부팅은 별개입니다. 새 백엔드를 고를 때 빠른
 경로는 게스트 명령에 인터넷 접근을 허용합니다. 현재 설정된 백엔드를 선택하면
 그 네트워크 정책을 유지하고, 고급 설정에서 명시적으로 바꿀 수 있습니다. 게스트
@@ -263,7 +311,7 @@ Debian base image와 패키지를 받는 네트워크가 필요합니다.
 
 | 실행 환경 | 준비 | 검증 범위 |
 |---|---|---|
-| Linux + Docker | Docker daemon을 별도 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
+| Linux + Docker | 설정 화면의 동작으로든 직접이든 Docker daemon을 설치·시작하고 `masc sandbox-image` 실행 | 서버 설치와 이미지 생성/도구 실행은 별도 검사 |
 | Apple Silicon + Apple Container | macOS 26 및 `container` 설치, 아래 runtime 지정 빌드 | macOS 14 서버 CI 통과만으로 이 backend를 증명하지 않음 |
 | Linux + nerdctl/Kata | containerd/nerdctl/Kata와 가상화 지원, backend 명시, 해당 store에 이미지 생성 | 작업 볼륨을 멱등 생성·inspect 확인; 실제 Kata 검증 필요, policy networking 미지원 |
 | remote SSH | 원격 endpoint와 인증·shim·도구 준비 | 로컬 Docker/microVM 이미지와 독립적인 원격 환경 |
@@ -426,7 +474,7 @@ ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable che
 증명하지 않습니다. `keeper-create` CLI의 성공·인증 거부 종료도 별도 검사합니다.
 
 `workflow_dispatch`는 브랜치 artifact 검증용이며 공개 릴리스를 생성하지 않습니다.
-검증된 커밋에 `v0.35.5` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
+검증된 커밋에 `vX.Y.Z` 태그를 push하면 네 빌드와 자산 검증을 거쳐 GitHub Release와
 `SHA256SUMS`를 게시합니다. 태그, CI 성공, 실제 release assets, 설치 후 실행 결과는
 각각 확인해야 합니다.
 

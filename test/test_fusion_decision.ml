@@ -95,7 +95,7 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
 let test_request_context_snapshot () = with_fixture (fun config task_id goal_id ->
   let args = `Assoc ["prompt", `String "Choose A or B"; "task_id", `String task_id;
     "goal_id", `String goal_id; "decision_context", `String "A has better measured latency"] in
-  let snapshot = Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:(Some turn_ref) ~args
+  let snapshot = Fusion_request_context.capture ~current_task:None ~config ~keeper:"fusion-keeper" ~turn_ref:(Some turn_ref) ~args
     |> require "capture" in
   let wire = Fusion_request_context.to_yojson snapshot in
   let restored = Fusion_request_context.of_yojson wire |> require "restore" in
@@ -110,22 +110,63 @@ let test_request_context_snapshot () = with_fixture (fun config task_id goal_id 
   check string "snapshot roundtrip preserves actual panel prompt" (Fusion_request_context.render snapshot) (Fusion_request_context.render restored);
   Goal_store.upsert_goal config ~id:goal_id ~title:"Changed later" ~target_value:"9" () |> require "later update" |> ignore;
   check bool "later Goal edit does not rewrite captured input" true (wire = Fusion_request_context.to_yojson restored);
-  rejected (Fusion_request_context.capture ~config ~keeper:"foreign" ~turn_ref:(Some turn_ref) ~args);
-  rejected (Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:None
+  rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"foreign" ~turn_ref:(Some turn_ref) ~args);
+  rejected (Fusion_request_context.capture ~current_task:None ~config ~keeper:"fusion-keeper" ~turn_ref:None
     ~args:(`Assoc ["prompt", `String "question"; "task_id", `String task_id; "goal_id", `String "unrelated"]));
   let unavailable_base = Filename.concat config.Workspace.base_path "not-a-directory" in
   let channel = open_out unavailable_base in close_out channel;
   let unavailable_config = Workspace.default_config unavailable_base in
-  let unscoped = Fusion_request_context.capture ~config:unavailable_config ~keeper:"fusion-keeper" ~turn_ref:None
+  let unscoped = Fusion_request_context.capture ~current_task:None ~config:unavailable_config ~keeper:"fusion-keeper" ~turn_ref:None
     ~args:(`Assoc ["prompt", `String "Unscoped question"]) |> require "unscoped needs no store access" in
   check string "unscoped question remains usable" "Unscoped question" (Fusion_request_context.question unscoped);
-  let goal_only = Fusion_request_context.capture ~config ~keeper:"fusion-keeper" ~turn_ref:None
+  let goal_only = Fusion_request_context.capture ~current_task:None ~config ~keeper:"fusion-keeper" ~turn_ref:None
     ~args:(`Assoc ["prompt", `String "question"; "goal_id", `String goal_id]) |> require "goal-only context" in
   check bool "goal-only discussion does not invent Task or turn" true
     Yojson.Safe.Util.(member "task" (Fusion_request_context.to_yojson goal_only) = `Null
       && member "turn_ref" (Fusion_request_context.to_yojson goal_only) = `Null))
 
+let test_current_work_context () = with_fixture (fun config task_id goal_id ->
+  (* Metadata can predate a claim in this same turn. Use the runtime's actual
+     ownership resolver rather than copying the explicit ID into arguments. *)
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "fusion-keeper";
+    "trace_id", `String "decision-trace"]) |> require "meta before claim projection" in
+  check bool "metadata does not already supply the task" true (meta.current_task_id = None);
+  let current_task () =
+    Keeper_current_task_reconcile.owned_active_task_id_result_for_meta ~config ~meta in
+  let input = `Assoc ["prompt", `String "Assume speech is forbidden";
+    "decision_context", `String "Caller interpretation, not the acceptance contract"] in
+  let captured = Fusion_request_context.capture ~current_task:(Some current_task) ~config ~keeper:meta.name
+    ~turn_ref:(Some turn_ref) ~args:input |> require "automatic current work context" in
+  let wire = Fusion_request_context.to_yojson captured in
+  check string "recently claimed Task reaches panel context" task_id
+    Yojson.Safe.Util.(member "task" wire |> member "id" |> to_string);
+  check bool "actual acceptance contract survives caller paraphrase" true
+    Yojson.Safe.Util.(member "task" wire |> member "contract" |> member "completion_contract"
+      = `List [`String "Decision must preserve measured behavior"]);
+  let goals = Goal_store.list_goals_result config () |> require "original Goals" in
+  let goal = List.find (fun (goal : Goal_store.goal) -> goal.id = goal_id) goals in
+  check bool "actual Goal criterion reaches the same immutable snapshot" true
+    (Yojson.Safe.Util.member "goals" wire = `List [`Assoc ["id", `String goal_id;
+      "criterion", Goal_store.criterion_to_yojson (Goal_store.criterion_of_goal goal)]]);
+  let fail_current () = Error "authoritative backlog unavailable" in
+  (match Fusion_request_context.capture ~current_task:(Some fail_current) ~config ~keeper:meta.name
+     ~turn_ref:None ~args:input with
+   | Error (Fusion_request_context.Source_unavailable _) -> ()
+   | Error (Fusion_request_context.Invalid_context _) | Ok _ -> fail "read failure became unscoped advice");
+  let explicit = Fusion_request_context.capture ~current_task:(Some fail_current) ~config ~keeper:meta.name
+    ~turn_ref:None ~args:(`Assoc ["prompt", `String "Explicit Goal discussion"; "goal_id", `String goal_id])
+    |> require "explicit Goal does not read unrelated current task" in
+  check bool "explicit Goal discussion remains Goal-only" true
+    (Yojson.Safe.Util.member "task" (Fusion_request_context.to_yojson explicit) = `Null);
+  let foreign = {meta with name="other-keeper"} in
+  let empty = Fusion_request_context.capture
+    ~current_task:(Some (fun () -> Keeper_current_task_reconcile.owned_active_task_id_result_for_meta ~config ~meta:foreign))
+    ~config ~keeper:foreign.name ~turn_ref:None ~args:input |> require "no owned work remains a valid question" in
+  check bool "another keeper's task is not inferred" true
+    (Yojson.Safe.Util.member "task" (Fusion_request_context.to_yojson empty) = `Null))
+
 let () = run "Fusion decision attribution" ["behavior", [
+  test_case "omitted task selection captures current owned work without hiding read failures" `Quick test_current_work_context;
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage]]

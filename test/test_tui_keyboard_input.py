@@ -1843,6 +1843,11 @@ def navigate_with_arrows_and_quit(
     _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    # The header is drawn before the asynchronous roster, and Down on a list
+    # that has not arrived moves nothing, so the wait for beta ran out on the
+    # Linux runner while a faster machine got the roster first. Start from a
+    # roster that exists; the arrows below are still what this scenario checks.
+    select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(
         process,
         master_fd,

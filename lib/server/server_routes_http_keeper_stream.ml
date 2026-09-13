@@ -1660,7 +1660,7 @@ let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.tra
    caller presents the typed transcript provenance and execution ownership
    selected at its persistence boundary; this function never infers either
    from a connector label or message content. *)
-let process_single_turn ~user_row_origin ~submission
+let process_single_turn ~batch_binding ~user_row_origin ~submission
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
@@ -1672,6 +1672,8 @@ let process_single_turn ~user_row_origin ~submission
   let redact_text = Keeper_secret_redaction.redact_text redaction in
   Keeper_chat_events.publish events
     (Run_started { run_id; thread_id });
+  Option.iter (fun (operation_id, execution_id) ->
+    Keeper_chat_events.publish events (Batch_bound {operation_id; execution_id})) batch_binding;
   Keeper_chat_events.publish events
     (Text_message_start { message_id; role = Assistant });
   let completed_stream_lifecycle =
@@ -3029,6 +3031,8 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             in
             let outcome =
               process_single_turn
+                ~batch_binding:(Option.map (fun (member : Keeper_chat_operation.batch_membership) ->
+                  operation.operation_id, member.execution_id) operation.batch_membership)
                 ~user_row_origin:(match batch_members with
                   | [] | [_] -> operation_payload.source.user_row_origin
                   | _ -> Keeper_chat_store.Already_persisted_upstream)

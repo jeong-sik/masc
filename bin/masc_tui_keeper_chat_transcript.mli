@@ -221,6 +221,8 @@ val create :
 
 val keeper_name : t -> string
 val request_id : t -> string
+val execution_id : t -> string
+(** Shared batch execution owner, or the singleton request identity. *)
 val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)

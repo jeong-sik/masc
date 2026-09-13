@@ -564,6 +564,22 @@ let decode_acceptance ?expected_request_id json =
       Error (Request_id_mismatch { expected; received = operation_id })
   | None | Some _ -> Ok { state; queued_count }
 
+type batch_binding = { operation_id : string; execution_id : string }
+
+let decode_batch_binding ?expected_request_id json =
+  let surface = "KEEPER_CHAT_BATCH_BOUND.value" in
+  let* fields = exact_object_fields ~surface ~allowed:["operation_id"; "execution_id"] json
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let read_id field =
+    let* value = required_string ~surface field fields |> Result.map_error (fun detail -> Malformed_event detail) in
+    let* _ = Keeper_chat_operation.Operation_id.of_string value |> Result.map_error (fun detail -> Malformed_event detail) in
+    Ok value in
+  let* operation_id = read_id "operation_id" in
+  let* execution_id = read_id "execution_id" in
+  match expected_request_id with
+  | Some expected when operation_id <> expected -> Error (Request_id_mismatch {expected; received=operation_id})
+  | Some _ | None -> Ok {operation_id; execution_id}
+
 type reply_details = {
   reply : string;
   turn_outcome : turn_outcome;
@@ -680,7 +696,7 @@ let current_custom_names =
   ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
   ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
-  ; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
+  ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ]
 
@@ -930,7 +946,9 @@ let decode_custom_event ~request state fields =
           [ "type"; "threadId"; "timestamp"; "runId"; "name"; "value" ]
         fields
     in
-    if String.equal name "KEEPER_REPLY_DETAILS" then
+    if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
+      let* _ = decode_batch_binding ~expected_request_id:request.request_id value in Ok state
+    else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with
       | Some _ -> Error Duplicate_reply_details
       | None ->

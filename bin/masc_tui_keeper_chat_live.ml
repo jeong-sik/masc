@@ -18,6 +18,7 @@ type tool_occurrence =
 
 type delta =
   | Run_started
+  | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
   | Runtime_attempt_started of
       { runtime_id : string option
       ; attempt_index : int option
@@ -183,6 +184,12 @@ let custom_deltas_unvalidated fields =
               [ Accepted
                   { admission; queue_length = acceptance.Projection.queued_count }
               ]))
+  | Some "KEEPER_CHAT_BATCH_BOUND" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_CHAT_BATCH_BOUND requires value"]
+     | Some value -> match Projection.decode_batch_binding value with
+       | Ok binding -> [Batch_bound binding]
+       | Error error -> [Undecodable (Projection.stream_error_to_string error)])
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with
      | Some `Null -> [ Runtime_attempt_started { runtime_id = None; attempt_index = None } ]

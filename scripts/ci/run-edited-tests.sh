@@ -324,7 +324,24 @@ self_test() {
       got=$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' | sort -u \
         | tr '\n' ' ' | sed 's/ $//')
     fi
-    if [ "${got}" = "${want}" ]; then
+    local matches=false
+    if [ "${allow_additional:-false}" = true ]; then
+      matches=true
+      for required in ${want}; do
+        case " ${got} " in
+          *" ${required} "*) ;;
+          *) matches=false ;;
+        esac
+      done
+      # The shared dispatcher is not a reason to launch the entire keyboard
+      # suite. Only explicitly attributed focused PTY scenarios belong here.
+      case " ${got} " in
+        *" test/test_tui_keyboard_input.py "*) matches=false ;;
+      esac
+    elif [ "${got}" = "${want}" ]; then
+      matches=true
+    fi
+    if [ "${matches}" = true ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
@@ -332,6 +349,12 @@ self_test() {
       echo "     got:  ${got:-<nothing>}"
       failures=$((failures + 1))
     fi
+  }
+  check_required() {
+    # Live umbrella modules gain legitimate watchers as other PRs add tests.
+    # Assert the required coverage and exclusion, without freezing that set.
+    local allow_additional=true
+    check "$@"
   }
 
   # The regression this mapping exists for: #34247 edited only this module and
@@ -356,7 +379,7 @@ self_test() {
   # neither can say that a key in this file reaches them. It declares this file
   # because the claim it holds -- that every session mover has a key -- is a
   # fact about this dispatcher.
-  check "an umbrella module selects its guards and declared PTY scenario" \
+  check_required "an umbrella module selects its guards and declared PTY scenario" \
     "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
@@ -374,7 +397,7 @@ self_test() {
   # moves it.
   # test_tui_tab_strip joined when it began reading this file: the Runtime
   # header's two views must be drawn by tab_strip, and render_runtime is here.
-  check "a watched source reaches the guard that declares it" \
+  check_required "a watched source reaches the guard that declares it" \
     "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching

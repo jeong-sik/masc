@@ -32,6 +32,15 @@ const openTurn = (view: { container: Element }) => fireEvent.click(view.containe
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); clearStoredToken(); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
 afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
 describe('historical autonomous tool outputs', () => {
+  it('does not trust a hydrated row when exact lookup reports duplicate evidence', async () => {
+    recordToolCallOutputs([response().entry])
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 409 }))
+    const view = render(transcript()); openTurn(view)
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('중복'))
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
   it('rechecks denied historical output after the operator changes credentials', async () => {
     vi.mocked(get).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 403 }))
       .mockResolvedValue(response())
@@ -124,7 +133,7 @@ describe('historical autonomous tool outputs', () => {
       expect(step.querySelector('.chat-block-tool-body')).toBeNull()
       expect(view.container.textContent).not.toContain(secret)
       expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
-      expect(get).toHaveBeenCalledTimes(source === 'historical' ? 1 : 0)
+      expect(get).toHaveBeenCalledTimes(1)
     },
   )
   it('opens a retained Edit outside the recent tail and resolves its verified manifest', async () => {

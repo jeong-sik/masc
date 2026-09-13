@@ -3279,11 +3279,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
-  // Tool results never travel on the chat stream — they are joined here from
-  // the tool-call output store by canonical execution_id. Null until result
-  // readiness and output hydration have both landed.
-  const keeper = useContext(KeeperToolOutputScope)
-  const lookup = useToolOutputLookup(entry.executionId, lookupToolCallOutput(keeper, entry.executionId))
+  // Only the exact endpoint establishes a unique result for this execution.
+  const lookup = useToolOutputLookup(entry.executionId)
   const outputEntry = lookup.output
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
@@ -3470,7 +3467,6 @@ function isUnlinkedTraceTool(
 
 function ToolTraceStep({
   entry,
-  output: suppliedOutput,
   canMarkMissing = false,
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
@@ -3480,7 +3476,6 @@ function ToolTraceStep({
   structuralSummary = false,
 }: {
   entry: KeeperConversationEntry | null
-  output: ToolCallEntry | null
   canMarkMissing?: boolean
   coverageState?: ToolOutputCoverageState
   hydrationFailureReason?: string | null
@@ -3490,7 +3485,7 @@ function ToolTraceStep({
   structuralSummary?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const lookup = useToolOutputLookup(entry?.executionId ?? traceStep?.executionId, suppliedOutput)
+  const lookup = useToolOutputLookup(entry?.executionId ?? traceStep?.executionId)
   const output = lookup.output
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
@@ -3915,7 +3910,6 @@ function ToolTraceCard({
                         return html`<${ToolTraceStep}
                           key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
                           entry=${item.entry}
-                          output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
@@ -3929,7 +3923,6 @@ function ToolTraceCard({
                       ? html`<${ToolTraceStep}
                           key=${`tool-entry-${item.entry.id}`}
                           entry=${item.entry}
-                          output=${item.output}
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
                           coverageState=${coverageStateForEntry(item.entry)}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}

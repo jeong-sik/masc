@@ -240,8 +240,8 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
          (match config.Voice_config.stt with
           | None -> Alcotest.fail "speech in should be configured"
           | Some stt ->
-            Alcotest.(check string) "the model the wizard was given"
-              "large-v3-turbo" stt.Voice_config.default_model;
+            Alcotest.(check (option string)) "the model the wizard was given"
+              (Some "large-v3-turbo") stt.Voice_config.default_model;
             let landed =
               List.find_opt
                 (fun (endpoint : Voice_config.endpoint) ->

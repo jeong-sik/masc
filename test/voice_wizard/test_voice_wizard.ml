@@ -115,7 +115,8 @@ let test_say_writes_no_model () =
          (function
            | Voice_setup.Set_default_model _ -> true
            | Voice_setup.Put_endpoint _ | Voice_setup.Remove_endpoint _
-           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_agent_voice _ -> false)
+           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
+           | Voice_setup.Set_agent_voice _ -> false)
          changes);
     Alcotest.(check bool) "the voice is written" true
       (List.exists
@@ -123,7 +124,7 @@ let test_say_writes_no_model () =
            | Voice_setup.Put_endpoint (_, endpoint) ->
              endpoint.Voice_config.default_voice = Some "Yuna"
            | Voice_setup.Set_tts_default_voice _ | Voice_setup.Remove_endpoint _
-           | Voice_setup.Set_default_model _ | Voice_setup.Set_agent_voice _ -> false)
+           | Voice_setup.Set_default_model _ | Voice_setup.Set_send_on_stop _ | Voice_setup.Set_agent_voice _ -> false)
          changes)
 
 let test_the_questions_depend_on_the_provider () =
@@ -265,8 +266,9 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
       (match config.Voice_config.stt with
        | None -> Alcotest.fail "speech in should be configured"
        | Some stt ->
-         Alcotest.(check string) "the model the wizard was given" "scribe_v2"
-           stt.Voice_config.default_model;
+         Alcotest.(check (option string)) "no shared model invented" None stt.Voice_config.default_model;
+         Alcotest.(check (list (option string))) "the endpoint owns the wizard model"
+           [Some "scribe_v2"] (List.map (fun (endpoint : Voice_config.endpoint) -> endpoint.model) stt.endpoints);
          Alcotest.(check (list string)) "and the endpoint it was given"
            [ "whisper-local" ]
            (List.map
@@ -308,6 +310,33 @@ let test_mcp_writes_no_unused_model () =
          (function Voice_setup.Set_default_model _ -> true | _ -> false)
          changes)
 
+let test_mixed_stt_models_survive_both_installation_orders () =
+  let draft provider endpoint_id model address =
+    { (Voice_wizard.blank ~section:Voice_setup.Stt ~provider) with
+      endpoint_id; model; address }
+  in
+  let local = draft Voice_wizard.Whisper_cli "local" "/models/local.bin" "" in
+  let remote = draft Voice_wizard.Openai_compatible "remote" "remote-model" "http://fixture.invalid/v1" in
+  List.iter (fun drafts -> with_config runtime_base (fun path ->
+    List.iter (fun draft ->
+      let changes = match Voice_wizard.changes draft with
+        | Ok changes -> changes | Error _ -> Alcotest.fail "complete draft rejected" in
+      let revision = match Voice_setup.observe ~runtime_config_path:path with
+        | Ok (revision, _) -> revision
+        | Error error -> Alcotest.fail (Voice_setup.error_message error) in
+      match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
+      | Ok _ -> () | Error error -> Alcotest.fail (Voice_setup.error_message error)) drafts;
+    match Voice_config.parse_runtime_toml_text (read path) with
+    | Ok (Some { Voice_config.stt = Some stt; _ }) ->
+      Alcotest.(check (option string)) "no provider model becomes a shared default" None stt.default_model;
+      List.iter (fun (id, expected) ->
+        let endpoint = List.find (fun (endpoint : Voice_config.endpoint) -> endpoint.id = id) stt.endpoints in
+        Alcotest.(check (option string)) id (Some expected)
+          (Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint))
+        [ "local", "/models/local.bin"; "remote", "remote-model" ]
+    | _ -> Alcotest.fail "mixed STT configuration did not load"))
+    [ [local; remote]; [remote; local] ]
+
 let () =
   Alcotest.run
     "voice_wizard"
@@ -339,7 +368,9 @@ let () =
             test_a_tool_endpoint_carries_its_url_as_mcp_url
         ] )
     ; ( "what it writes"
-      , [ Alcotest.test_case "a complete draft writes a configuration that loads" `Quick
+      , [ Alcotest.test_case "mixed STT models survive both installation orders" `Quick
+            test_mixed_stt_models_survive_both_installation_orders
+        ; Alcotest.test_case "a complete draft writes a configuration that loads" `Quick
             test_a_complete_draft_writes_a_configuration_that_loads
         ] )
     ]

@@ -94,6 +94,7 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   ; enabled = true
   ; timeout_seconds
   ; default_voice = None
+  ; model = None
   ; command = None
   }
 

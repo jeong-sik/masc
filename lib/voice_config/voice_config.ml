@@ -16,6 +16,7 @@ type endpoint = {
   timeout_seconds : float option;
   default_voice : string option;
   command : string option;
+  model : string option;
 }
 
 type voice_tuning = {
@@ -34,7 +35,7 @@ type tts_config = {
 }
 
 type stt_config = {
-  default_model : string;
+  default_model : string option;
   endpoints : endpoint list;
   send_on_stop : bool;
 }
@@ -263,6 +264,7 @@ let parse_endpoint ~ctx json =
         ; "timeout_seconds"
         ; "default_voice"
         ; "command"
+        ; "model"
         ]
       json
   in
@@ -285,6 +287,11 @@ let parse_endpoint ~ctx json =
      installed under, and this overrides it for a path the PATH does not
      carry. *)
   let command = Json_util.get_string_nonempty json "command" in
+  let* model =
+    match Json_util.assoc_member_opt "model" json with
+    | None -> Ok None
+    | Some _ -> Result.map Option.some (require_string ~ctx ~field:"model" json)
+  in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -319,6 +326,7 @@ let parse_endpoint ~ctx json =
       timeout_seconds;
       default_voice;
       command;
+      model;
     }
 
 let rec parse_endpoints ~ctx acc = function
@@ -388,6 +396,39 @@ let parse_agent_voice_settings json =
         (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
            (Json_util.kind_name other) (Json_util.excerpt other))
 
+(* A section fallback has one vocabulary. A mixed command/HTTP chain must
+   bind each model explicitly rather than treating a file path as a remote ID. *)
+let model_at_endpoint ~default_model (endpoint : endpoint) =
+  match endpoint.model with Some _ as model -> model | None -> default_model
+
+let parse_section_model ~ctx json endpoints =
+  let* default_model =
+    match Json_util.assoc_member_opt "default_model" json with
+    | None -> Ok None
+    | Some (`String value) -> Ok (trim_nonempty_json (`String value))
+    | Some value -> Error (Printf.sprintf "%s.default_model must be string, got %s"
+                            ctx (Json_util.kind_name value))
+  in
+  let consumes_remote (endpoint : endpoint) =
+    match endpoint.kind with Openai_compat | Elevenlabs_direct -> true
+    | Whisper_cli | Macos_say | Voice_mcp -> false
+  in
+  let unbound = List.filter (fun (endpoint : endpoint) -> Option.is_none endpoint.model) endpoints in
+  let mixed = List.exists consumes_remote unbound
+              && List.exists (fun (endpoint : endpoint) -> endpoint.kind = Whisper_cli) unbound in
+  let rec validate = function
+    | [] -> Ok default_model
+    | (endpoint : endpoint) :: rest ->
+      if not (kind_needs_default_model endpoint.kind) then validate rest
+      else match endpoint.model, default_model with
+      | Some _, _ -> validate rest
+      | None, Some _ when not mixed -> validate rest
+      | None, _ -> Error (Printf.sprintf
+          "%s.endpoints[%s].model is required; %s.default_model cannot supply this endpoint%s"
+          ctx endpoint.id ctx (if mixed then " in a mixed command/HTTP chain" else ""))
+  in
+  validate endpoints
+
 let parse_tts json =
   match Json_util.assoc_member_opt "tts" json with
   | None | Some `Null -> Ok None
@@ -407,27 +448,7 @@ let parse_tts json =
       in
       let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
       let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
-      (* Required when any endpoint in the section will be asked for it by
-         name: a blank name is then a request the provider answers with an
-         error after the audio has been sent. A section whose endpoints all
-         take no model -- say, on a fresh mac -- is not made to invent one. *)
-      let* default_model =
-        if List.exists
-             (fun (endpoint : endpoint) -> kind_needs_default_model endpoint.kind)
-             endpoints
-        then Result.map Option.some (require_string ~ctx:"tts" ~field:"default_model" tts_json)
-        else
-          (* Absent stays absent rather than becoming a blank standing for it:
-             a section whose endpoints take no model has none, and every reader
-             below has to say what it does about that. *)
-          (match Json_util.assoc_member_opt "default_model" tts_json with
-           | None -> Ok None
-           | Some (`String _ as value) -> Ok (trim_nonempty_json value)
-           | Some value ->
-             Error
-               (Printf.sprintf "tts.default_model must be string, got %s"
-                  (Json_util.kind_name value)))
-      in
+      let* default_model = parse_section_model ~ctx:"tts" tts_json endpoints in
       Ok
         (Some
            {
@@ -448,15 +469,9 @@ let parse_stt json =
   | None | Some `Null -> Ok None
   | Some (`Assoc _ as stt_json) ->
       let open Result in
-      (* Always required here, unlike the speaking section. Every kind that
-         transcribes needs it: the three that reach an address are asked for it
-         by name, and whisper-cli is asked for it as the file it loads. There is
-         no transcriber that takes none. *)
-      let* default_model =
-        require_string ~ctx:"stt" ~field:"default_model" stt_json
-      in
       let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
       let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
+      let* default_model = parse_section_model ~ctx:"stt" stt_json endpoints in
       (* Optional and false by default: absent is the operator not having
          asked for a spoken sentence to send itself. *)
       let* send_on_stop =
@@ -841,6 +856,11 @@ let active_endpoint_json endpoints =
 (* An absent section renders as [null], not as an object of empty strings: a
    reader that finds no model there is told there is none, rather than handed
    a name of length zero to display or send. *)
+let active_model default_model endpoints =
+  match select_endpoint endpoints with
+  | None -> None
+  | Some endpoint -> model_at_endpoint ~default_model endpoint
+
 let public_json config =
   Tool_args.ok_assoc
     [
@@ -854,16 +874,17 @@ let public_json config =
                    one: a section whose endpoints take no model has none, and
                    [""] here would read as a model named "". *)
                 ( "default_model"
-                , match tts.default_model with
+                , match active_model tts.default_model tts.endpoints with
                   | Some model -> `String model
                   | None -> `Null );
                 ("default_voice", `String tts.default_voice);
                 ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices tts)));
                 ( "available_models"
                 , `List
-                    (match tts.default_model with
-                     | Some model -> [ `String model ]
-                     | None -> []) );
+                    (tts.endpoints
+                     |> List.filter_map (model_at_endpoint ~default_model:tts.default_model)
+                     |> unique_strings
+                     |> List.map (fun model -> `String model)) );
                 ("active_endpoint", active_endpoint_json tts.endpoints);
               ] );
       ( "stt",
@@ -872,7 +893,7 @@ let public_json config =
         | Some stt ->
             `Assoc
               [
-                ("default_model", `String stt.default_model);
+                ("default_model", (match active_model stt.default_model stt.endpoints with Some model -> `String model | None -> `Null));
                 ("active_endpoint", active_endpoint_json stt.endpoints);
                 (* The TUI reads this to decide whether ending a capture also
                    sends; without it on the wire the setting cannot reach the

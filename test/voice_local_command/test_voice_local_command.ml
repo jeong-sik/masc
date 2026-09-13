@@ -36,6 +36,7 @@ let endpoint ?command ~kind id =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; model = None
   ; command
   }
 
@@ -465,6 +466,34 @@ let test_a_present_optional_model_must_still_be_a_string () =
         Alcotest.(check bool) "the refusal names the setting" true
           (Astring.String.is_infix ~affix:"tts.default_model" message))
     [ `Int 123; `Bool false; `Null; `List [] ]
+let test_mixed_models_reach_their_transport_requests () =
+  let decode text = match Voice_config.parse_json (Yojson.Safe.from_string text) with
+    | Ok { Voice_config.stt = Some stt; _ } -> stt
+    | Ok _ -> Alcotest.fail "missing STT" | Error message -> Alcotest.fail message in
+  let stt = decode {|{"stt":{"default_model":"remote-model","endpoints":[
+    {"id":"local","kind":"whisper_cli","model":"/models/local.bin"},
+    {"id":"remote","kind":"openai_compat","base_url":"http://fixture.invalid/v1"}]}}|} in
+  List.iter (fun (endpoint : Voice_config.endpoint) ->
+    let model = match Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint with
+      | Some model -> model | None -> Alcotest.fail "model did not resolve" in
+    match endpoint.kind with
+    | Voice_config.Whisper_cli ->
+      let argv = argv_of (Overlay.stt_command_for_endpoint endpoint
+                           ~audio_file:"/tmp/input.wav" ~model) in
+      Alcotest.(check (list string)) "local path reaches the command"
+        ["whisper-cli"; "-m"; "/models/local.bin"; "-l"; "auto"; "-nt"; "-f"; "/tmp/input.wav"] argv
+    | Voice_config.Openai_compat ->
+      (match Overlay.stt_request_for_endpoint endpoint ~api_key:"" ~audio_file:"/tmp/input.wav" ~model with
+       | Error message -> Alcotest.fail message
+       | Ok request -> Alcotest.(check (option string)) "remote ID reaches the HTTP form"
+           (Some "remote-model") (List.assoc_opt "model" request.Overlay.form_fields))
+    | _ -> Alcotest.fail "unexpected endpoint") stt.endpoints;
+  match Voice_config.parse_json (Yojson.Safe.from_string
+    {|{"stt":{"default_model":"ambiguous","endpoints":[{"id":"local","kind":"whisper_cli"},
+    {"id":"remote","kind":"openai_compat","base_url":"http://fixture.invalid/v1"}]}}|}) with
+  | Ok _ -> Alcotest.fail "one shared model cannot be both a file and a remote model ID"
+  | Error _ -> ()
+
 let () =
   Alcotest.run
     "voice_local_command"
@@ -481,7 +510,9 @@ let () =
             test_each_kind_names_the_container_it_writes
         ] )
     ; ( "transcribing"
-      , [ Alcotest.test_case "whisper is asked for the model and the file" `Quick
+      , [ Alcotest.test_case "mixed models reach their transport requests" `Quick
+            test_mixed_models_reach_their_transport_requests
+        ; Alcotest.test_case "whisper is asked for the model and the file" `Quick
             test_whisper_is_asked_for_the_model_and_the_file
         ; Alcotest.test_case "the language is detected not configured" `Quick
             test_the_language_is_detected_not_configured

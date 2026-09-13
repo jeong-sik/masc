@@ -1046,13 +1046,17 @@ base_url = "https://voice.fixture.invalid/v1"
             # section owns this default so those mappings remain effective.
             self.assertNotIn('default_voice', endpoint)
 
-    def test_a_local_model_cannot_replace_a_remote_stt_model(self):
+    def test_a_local_model_preserves_the_remote_stt_model(self):
+        import tomllib
         with self.workspace(self.REMOTE_STT) as (base, runtime):
-            before = runtime.read_bytes()
+            before = tomllib.loads(runtime.read_text())['voice']['stt']
             result = self.configure(base, '--voice', 'Yuna', '--model', '/fixture/ggml.bin')
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Existing STT endpoints share a provider model', result.stderr)
-            self.assertEqual(runtime.read_bytes(), before)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = tomllib.loads(runtime.read_text())['voice']['stt']
+            self.assertEqual(after['default_model'], before['default_model'])
+            self.assertEqual(after['endpoints'][0], before['endpoints'][0])
+            self.assertEqual(after['endpoints'][1]['kind'], 'whisper_cli')
+            self.assertEqual(after['endpoints'][1]['model'], '/fixture/ggml.bin')
 
     def test_standalone_source_is_not_shadowed_by_partial_toml(self):
         for contents in ('{"tts":null,"stt":null}', 'invalid JSON'):

@@ -41,6 +41,7 @@ type endpoint = {
   timeout_seconds : float option;
   default_voice : string option;
   command : string option;
+  model : string option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the
@@ -81,9 +82,9 @@ type tts_config = {
 }
 
 type stt_config = {
-  default_model : string;
-      (** Required once the [stt] section exists: every transcription
-          transport consumes a model name or a model file path. *)
+  default_model : string option;
+      (** Optional shared fallback. Every transcriber must resolve a model
+          from its endpoint or a shared fallback with one transport vocabulary. *)
   endpoints : endpoint list;
   send_on_stop : bool;
       (** Whether ending a capture also sends what was heard.
@@ -226,9 +227,9 @@ val parse_json : Yojson.Safe.t -> (t, string) result
     a file.
 
     [tts] and [stt] are optional sections and parse to [None] when absent;
-    present, each requires a non-empty [endpoints] list. [stt] requires a
-    [default_model]; [tts] requires [default_voice] and requires a model only
-    when one of its endpoints consumes it. [capture] is
+    present, each requires a non-empty [endpoints] list. A model-consuming
+    endpoint requires its own [model] or an unambiguous section [default_model].
+    [tts] also requires [default_voice]. [capture] is
     optional and defaults per key to {!default_capture}; a key it does not
     know, or a key of the wrong type, is an [Error] naming
     [capture.<key>], the same way an unknown endpoint field is. *)
@@ -333,3 +334,7 @@ val public_json : t -> Yojson.Safe.t
 
     An absent [tts] or [stt] section renders as [null], so a reader finds
     no model there rather than a model named [""]. *)
+
+(** Resolve an endpoint's own model before a section fallback. Parsed mixed
+    command/HTTP chains always carry explicit endpoint models. *)
+val model_at_endpoint : default_model:string option -> endpoint -> string option

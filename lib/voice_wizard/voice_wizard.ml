@@ -172,6 +172,7 @@ let endpoint_of_draft draft : Voice_config.endpoint =
        | Voice_setup.Stt -> None)
   (* Command providers use their installed names. This wizard does not accept
      an executable path override. *)
+  ; model = optional draft.model
   ; command = None
   }
 ;;
@@ -180,22 +181,7 @@ let changes draft =
   match gaps draft with
   | _ :: _ as gaps -> Error gaps
   | [] ->
-    (* The section's model is set alongside the endpoint, not after it: a
-       section whose endpoints are asked for one must name it, so an endpoint
-       written on its own would leave a file the loader refuses.
-
-       say is not asked for one, so nothing is written for it -- a blank would
-       be written over a model that a sibling endpoint in the same section does
-       need. *)
-    let model =
-      match draft.provider with
-      | Elevenlabs | Openai_compatible | Whisper_cli ->
-        [ Voice_setup.Set_default_model (draft.section, String.trim draft.model) ]
-      | Macos_say | Mcp_tool -> []
-    in
-    Ok
-      (model
-       @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
+    Ok [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ]
 ;;
 
 type step =
@@ -291,6 +277,7 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
+     @ text "model" endpoint.Voice_config.model
      @
      match endpoint.Voice_config.timeout_seconds with
      | Some seconds -> [ "timeout_seconds", `Float seconds ]

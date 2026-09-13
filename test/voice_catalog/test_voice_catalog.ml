@@ -100,6 +100,7 @@ let endpoint ~kind ~base_url =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; model = None
   ; command = None
   }
 

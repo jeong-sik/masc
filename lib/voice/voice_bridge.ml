@@ -208,7 +208,6 @@ let transcribe_audio ~audio_file ?language_code () =
        model to send, so nothing is sent. *)
     Error "voice config has no [stt] section, so STT is not set up"
   | Ok { Voice_config.stt = Some stt; _ } ->
-    let model = stt.Voice_config.default_model in
     let endpoints = available_stt_endpoints stt in
     let rec try_endpoints attempted = function
       | [] ->
@@ -219,12 +218,19 @@ let transcribe_audio ~audio_file ?language_code () =
       | endpoint :: rest ->
         let transcription =
           match transcriber_of_endpoint endpoint with
-          | Over_http -> transcribe_via_http_stt endpoint ~audio_file ~model
-          | By_command ->
-            Result.map (fun text -> `Assoc [ "text", `String text ])
-              (transcribe_via_command endpoint ~audio_file ~model)
-          | Does_not_transcribe ->
-            Error "this endpoint transport does not transcribe"
+          | Does_not_transcribe -> Error "this endpoint transport does not transcribe"
+          | (Over_http | By_command) as transport ->
+            let* model =
+              match Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint with
+              | Some model -> Ok model
+              | None -> Error "STT endpoint has no model"
+            in
+            (match transport with
+             | Over_http -> transcribe_via_http_stt endpoint ~audio_file ~model
+             | By_command ->
+               Result.map (fun text -> `Assoc [ "text", `String text ])
+                 (transcribe_via_command endpoint ~audio_file ~model)
+             | Does_not_transcribe -> Error "this endpoint transport does not transcribe")
         in
         let decoded =
           let* json = transcription in
@@ -528,7 +534,7 @@ let probe_tts ?(agent_id = "probe") ~message () =
                         endpoint ~message ~voice ~output_file)
                   | Voice_runtime_overlay.Over_http ->
                     attempt (fun ~voice ~output_file ->
-                      match tts.Voice_config.default_model with
+                      match Voice_config.model_at_endpoint ~default_model:tts.default_model endpoint with
                       | None ->
                         Error
                           "this endpoint is asked for a model by name and [voice.tts] \
@@ -581,10 +587,13 @@ let probe_stt ~audio_file () =
                        then "reached, and heard nothing in the audio"
                        else Printf.sprintf "heard %s" spoken)
                   in
-                  let model = stt.Voice_config.default_model in
                   match transcriber_of_endpoint endpoint with
-                  | Does_not_transcribe ->
-                    Skipped "this endpoint kind does not transcribe"
+                  | Does_not_transcribe -> Skipped "this endpoint kind does not transcribe"
+                  | (Over_http | By_command) as transport ->
+                    match Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint with
+                    | None -> Refused "STT endpoint has no model"
+                    | Some model -> match transport with
+                  | Does_not_transcribe -> Skipped "this endpoint kind does not transcribe"
                   | Over_http ->
                     (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
@@ -1147,7 +1156,6 @@ let agent_speak_json
       in
       cleanup_old_audio_files ();
       let endpoints = available_tts_endpoints ?provider tts in
-      let model = tts.Voice_config.default_model in
       let rec try_endpoints attempted = function
         | [] ->
           Error
@@ -1155,6 +1163,7 @@ let agent_speak_json
                "all configured TTS endpoints failed: %s"
                (String.concat " | " (List.rev attempted)))
         | endpoint :: rest ->
+          let model = Voice_config.model_at_endpoint ~default_model:tts.default_model endpoint in
           (match
              attempt_tts_endpoint
                ~sw

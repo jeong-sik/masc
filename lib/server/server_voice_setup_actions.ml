@@ -159,7 +159,7 @@ let ( let* ) = Result.bind
 
 let endpoint_allowed_fields =
   [ "id"; "kind"; "enabled"; "timeout_seconds"; "base_url"; "mcp_url"; "health_url";
-    "api_key_env"; "default_voice" ]
+    "api_key_env"; "default_voice"; "model" ]
 
 let endpoint_of_json json =
   let what = "an endpoint" in
@@ -179,6 +179,7 @@ let endpoint_of_json json =
   let* health_url = optional_string ~what fields "health_url" in
   let* api_key_env = optional_string ~what fields "api_key_env" in
   let* default_voice = optional_string ~what fields "default_voice" in
+  let* model = optional_string ~what fields "model" in
   Ok
     { Voice_config.id
     ; kind
@@ -195,6 +196,7 @@ let endpoint_of_json json =
     (* Not taken from the request. A command kind knows the name it is
        installed under, and an override is a path this route cannot check;
        someone who needs one edits the file. *)
+    ; model
     ; command = None
     }
 
@@ -213,6 +215,7 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
+     @ text "model" endpoint.Voice_config.model
      (* Which program a command kind actually runs. Omitted, the observation
         described an endpoint by a default it may have overridden. The request
         still does not take it -- a path this route cannot check is not one to
@@ -381,7 +384,7 @@ let observe ~base_path =
            section_json
              ~endpoints:(List.map endpoint_json stt.Voice_config.endpoints)
              ~extra:
-               [ "default_model", `String stt.Voice_config.default_model
+               [ "default_model", (match stt.Voice_config.default_model with Some model -> `String model | None -> `Null)
                (* Behaviourally significant and it was missing: with this on,
                   ending a capture sends the transcript straight away, and a
                   client that could not see it showed the default-off flow. *)
@@ -499,6 +502,7 @@ let catalogue_endpoint_of_json json =
     ; enabled = true
     ; timeout_seconds = None
     ; default_voice = None
-    ; command = None
+    ; model = None
+  ; command = None
     }
 ;;

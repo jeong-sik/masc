@@ -61,6 +61,8 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
       ; enabled
       ; timeout_seconds
       ; default_voice
+      ; command = _
+      ; model
       }
     =
     endpoint
@@ -74,6 +76,7 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
   ; ( "timeout_seconds"
     , Option.map (fun seconds -> Toml_line_editor.Float seconds) timeout_seconds )
   ; string_field "default_voice" default_voice
+  ; string_field "model" model
   ]
 ;;
 
@@ -143,7 +146,7 @@ let checked contents changes =
           (function
             | Put_endpoint (Tts, endpoint) -> endpoint.Voice_config.default_voice
             | Put_endpoint (Stt, _) | Remove_endpoint _ | Set_default_model _
-            | Set_tts_default_voice _ | Set_agent_voice _ -> None)
+            | Set_tts_default_voice _ | Set_send_on_stop _ | Set_agent_voice _ -> None)
           changes
       in
       (match initial_voice with

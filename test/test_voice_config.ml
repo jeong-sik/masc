@@ -152,7 +152,7 @@ let test_load_detailed_valid_config () =
     (fun () ->
       match Vc.load_detailed () with
       | Ok config ->
-        check string "stt model from config" "scribe_v1"
+        check (option string) "stt model from config" (Some "scribe_v1")
           (stt_of config).Vc.default_model
       | Error Vc.Not_configured ->
         fail "expected Ok, got Not_configured"

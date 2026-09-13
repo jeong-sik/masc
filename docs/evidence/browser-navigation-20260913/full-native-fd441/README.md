@@ -22,7 +22,9 @@ The successful harness used ROOT.resolve() as a workaround only; product repair
 was still pending at capture time. It does not erase the failed startup result.
 
 The gestures subdirectory preserves actual gesture capture and HTTP observations,
-including stale-viewport rejection. TUI PNGs are terminal replays; firefox-final.png
+including stale-viewport rejection. Textual tui-alpha/beta/gamma PNGs are terminal replays. Gesture tui-image PNGs
+are actual transmitted screenshot payloads decoded from native PTY placements;
+firefox-final.png
 is an actual separate Firefox screenshot. They are not atomic aligned captures.
 No Slack session was used; Slack remains deferred.
 
@@ -31,3 +33,9 @@ Run `python3 audit.py` from any directory in a repository archive. It reuses
 slices against the five stored scene blobs and receipt references, plus checksums.
 Semantic answer review remains manual. No token, login file, runtime/provider
 configuration, previous package backup or complete provider trace is included.
+
+The audit also checks full component identity, 55-frame prefix provenance, no
+post-start input, four successful gesture actions, decoded PNG placements, DOM
+effects and stale-viewport refusal/fresh document binding. Immediate scroll image
+change is recorded, not forced to match a preceding run. canonical-probe.py
+archives the successful harness source with ROOT.resolve() explicitly visible.

@@ -21,6 +21,12 @@ selected region. A tag alone is not evidence that a region contains the
 requested posts. Do not start with the page's full div tree or a guessed CSS
 selector.
 
+If the observed document exposes an RSS or Atom alternate link, read
+browser-lanes' extraction reference before choosing it. Use the feed only when
+the current tools can read that observed URL and it covers the requested
+source, period, and content. Never invent a feed URL or treat a feed-only
+result as proof of the browser page's complete visible state.
+
 For every reported item retain its observed permalink, page URL, author label,
 visible time, text, and any count with its visible label. Keep navigation,
 recommendations, advertisements, moderation notices, and cached snippets out

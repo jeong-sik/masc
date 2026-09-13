@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import shutil
@@ -19,9 +20,13 @@ parser.add_argument("--binary", default=shutil.which("masc-browser-host"))
 parser.add_argument("--server", default=os.environ.get("MASC_HTTP_BASE_URL"))
 parser.add_argument("--token-file")
 parser.add_argument("--manifest-dir", help="Override Firefox's native messaging manifest directory")
+parser.add_argument("--host-name", default="masc_browser_host",
+                    help="Native messaging host name (use a unique name for an isolated profile)")
 args = parser.parse_args()
 if not args.base_path:
     parser.error("--base-path or MASC_BASE_PATH is required")
+if not re.fullmatch(r"[a-z0-9_]+(?:\.[a-z0-9_]+)*", args.host_name):
+    parser.error("--host-name must contain nonempty lowercase alphanumeric or underscore segments separated by '.'")
 if not args.binary:
     parser.error("--binary must name a built masc-browser-host executable, or install it on PATH")
 source = Path(args.binary).expanduser().resolve()
@@ -84,9 +89,9 @@ if args.server:
 # Firefox supplies its manifest path and extension id. Forward these after
 # the explicit configuration; no token value is written into this launcher.
 atomic_file(launcher, ("#!/bin/sh\nexec " + shlex.join(command) + ' "$@"\n').encode(), 0o755)
-manifest = manifest_dir / "masc_browser_host.json"
+manifest = manifest_dir / (args.host_name + ".json")
 atomic_file(manifest, (json.dumps({
-    "name": "masc_browser_host",
+    "name": args.host_name,
     "description": "MASC OCaml Firefox browser lane host",
     "path": str(launcher),
     "type": "stdio",

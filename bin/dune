@@ -1061,6 +1061,8 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries mtime.clock.os masc_tui_esc_interrupt
+  ;; [sch_last_wake_status] is the schedule contract's wake_status.
+  masc.masc_schedule
   masc_tui_answering
   masc.voice_wizard
   masc.voice_setup
@@ -1416,6 +1418,9 @@
   ;; Lane_run_gate_advisory payload, but masc_tui_render names its
   ;; Keeper_approval_queue_rules_types constructors directly.
   masc.keeper_contract
+  ;; Same rule for a schedule's actor: masc_tui_loader parses the wire
+  ;; kind through Schedule_contract_values and words its constructors.
+  masc.masc_schedule
   masc_tui_footer
   masc_tui_approval_detail
   masc_tui_roster_pane

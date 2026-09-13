@@ -3172,6 +3172,18 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
 let schedule_status_color status =
   semantic_status_color status
 
+(* The wake's status is the contract's own word, so the list column is as
+   wide as the widest word the contract can send and no wider: the value
+   was a string, and the column a literal 10 that happened to fit
+   "succeeded". Measured once from the contract's list, the column and
+   the vocabulary cannot drift apart. *)
+let schedule_wake_word = Schedule_contract_values.wake_status_to_string
+
+let schedule_wake_word_cells =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 Schedule_contract_values.wake_status_strings
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -3353,10 +3365,11 @@ let render_schedule_list (state : state) =
                let subject = schedule_row_subject row in
                let status_color = schedule_status_color row.sch_status in
                let last_wake =
-                 Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
+                 Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+                   row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
+                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s \xc2\xb7 %s  %s"
                    status_color
                    (* The column still lines up: the padding goes after the
                       bracket, not inside it. *)
@@ -3373,7 +3386,7 @@ let render_schedule_list (state : state) =
                    (fit_width (Terminal_text.single_line subject)
                       subject_width)
                    (schedule_status_color last_wake)
-                   (fit_width (Terminal_text.single_line last_wake) 10)
+                   (fit_width last_wake schedule_wake_word_cells)
                    Ansi.reset
                    (* The enqueue result and what became of the wake are two
                       facts, and the list carried only the first: a wake the
@@ -3534,11 +3547,16 @@ let schedule_wake_lines
       ~(history : schedule_wake_history option)
       ~(history_error : (string * string) option) =
   let last_wake_fields =
-    [ field
-        ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
-             row.sch_last_wake_status)
-        "Status" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status)
+    [ (let word =
+         Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+           row.sch_last_wake_status
+       in
+       field
+         ~style:
+           (if Option.is_some row.sch_last_wake_status then
+              schedule_status_color word
+            else Ansi.dim)
+         "Status" word)
     ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
     ; field
         ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
@@ -3574,18 +3592,18 @@ let schedule_wake_lines
              (fun (wake : schedule_wake) ->
                 let started = timestamp wake.swk_started_at_iso in
                 let finished = timestamp wake.swk_finished_at_iso in
+                (* The status is the row's label, drawn through [field] so
+                   the times start in the column every other value on the
+                   page starts in. A literal 12 here put them two cells to
+                   the left of the Reaction time below. *)
+                let word = schedule_wake_word wake.swk_status in
                 let head =
-                  ( schedule_status_color wake.swk_status
-                  , Printf.sprintf "  %-12s %s \xe2\x86\x92 %s"
-                      (Terminal_text.single_line wake.swk_status) started finished )
+                  field ~style:(schedule_status_color word) word
+                    (Printf.sprintf "%s \xe2\x86\x92 %s" started finished)
                 in
                 match wake.swk_error with
                 | None -> [ head ]
-                | Some err ->
-                    [ head
-                    ; ( Theme.bad ()
-                      , "               " ^ Terminal_text.single_line err )
-                    ])
+                | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
 let schedule_detail_lines ~width (row : schedule_row)

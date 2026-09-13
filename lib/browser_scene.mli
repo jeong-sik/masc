@@ -2,7 +2,16 @@ type navigation_source = { url : string; document_id : string }
 val navigation_source_of_json : Yojson.Safe.t -> (navigation_source, string) result
 (** A semantic viewport observation, not a browser paint/display list. *)
 type rect = { x : float; y : float; width : float; height : float }
-type kind = Text | Raster | Region of string | Control of { clickable : bool; editable : bool; disabled : bool }
+type kind =
+  | Text
+  | Raster
+  | Region of string
+  | Control of {
+      clickable : bool;
+      editable : bool;
+      disabled : bool;
+      href : string option;
+    }
 type node = { node_id : string; kind : kind; tag : string; text : string;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 type t = { document_id : string; url : string; title : string; width : float; height : float;

@@ -1,6 +1,15 @@
 type navigation_source = { url : string; document_id : string }
 type rect = { x : float; y : float; width : float; height : float }
-type kind = Text | Raster | Region of string | Control of { clickable : bool; editable : bool; disabled : bool }
+type kind =
+  | Text
+  | Raster
+  | Region of string
+  | Control of {
+      clickable : bool;
+      editable : bool;
+      disabled : bool;
+      href : string option;
+    }
 type node = { node_id : string; kind : kind; tag : string; text : string;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
 type t = { document_id : string; url : string; title : string; width : float; height : float;
@@ -12,6 +21,12 @@ let field name = function
   | _ -> Error "scene must be an object"
 let string = function `String value -> Ok value | _ -> Error "scene string required"
 let boolean = function `Bool value -> Ok value | _ -> Error "scene boolean required"
+let optional_href json =
+  match field "href" json with
+  | Error _ -> Ok None
+  | Ok `Null -> Ok None
+  | Ok (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Ok _ -> Error "scene control href must be a nonempty string or null"
 let number = function
   | `Int value -> Ok (float_of_int value)
   | `Float value when Float.is_finite value -> Ok value
@@ -44,7 +59,8 @@ let node json =
     | "region" -> let* role = get nonempty "role" json in Ok (Region role)
     | "control" -> let* clickable = get boolean "clickable" json in
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
-      Ok (Control {clickable;editable;disabled})
+      let* href = optional_href json in
+      Ok (Control {clickable;editable;disabled;href})
     | _ -> Error "unknown semantic scene node kind" in
   let source_context = match field "sourceContext" json with
     | Ok value -> Browser_source_context.of_json value
@@ -118,7 +134,7 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
 
 let read_request = function
   | `Assoc fields ->
-      let allowed = ["lane";"clientId";"tabId";"view";"scope";"maxChars"] in
+      let allowed = ["lane";"clientId";"tabId";"view";"scope";"maxChars";"expectedUrl";"navigationSource"] in
       let keys = List.map fst fields in
       let* () = if List.for_all (fun key -> List.mem key allowed) keys
         && List.length keys=List.length (List.sort_uniq String.compare keys)
@@ -131,9 +147,16 @@ let read_request = function
         | _ -> Error "scene view must be content or regions" in
       let* scope = match List.assoc_opt "scope" fields with
         | None -> Ok None | Some json -> Result.map Option.some (scope_of_json json) in
+      let* expected_url = match List.assoc_opt "expectedUrl" fields with
+        | None -> Ok None
+        | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+        | _ -> Error "expectedUrl must be a nonempty string" in
+      let* navigation_source = match List.assoc_opt "navigationSource" fields with
+        | None -> Ok None
+        | Some json -> Result.map Option.some (navigation_source_of_json json) in
       let* max_chars = match List.assoc_opt "maxChars" fields with
         | None -> Ok 50_000
         | Some (`Int value) when value>=1 && value<=100_000 -> Ok value
         | _ -> Error "maxChars must be between 1 and 100000" in
-      read ~view ?scope request ~max_chars
+      read ~view ?scope ?expected_url ?navigation_source request ~max_chars
   | _ -> Error "scene request must be an object"

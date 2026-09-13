@@ -104,6 +104,11 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`Enter` follows an observed same-tab HTTP(S) link directly and reads the
+destination with its follow receipt; the old region scope is never reused for
+the destination. Other enabled controls use the ordinary observed click.
+If the destination read is still pending or fails, the footer exposes `r`/`s`/`v`
+as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,
 and truncation flag, so a Keeper can preserve the same reading scope.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.

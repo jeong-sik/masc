@@ -42,6 +42,14 @@
 - TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
 - Chat: persist tool execution results before completion events and refuse stale cached or trace-only output when exact result retrieval fails (#35919, #35924).
 - Keeper: pause admission when interrupting chat, and allow cancellation during official-client MCP tool dispatch (#35928, #35936).
+- Agent core: use the same provider-turn ordinal in hooks, tracing and diagnostic logs, including resumed turns; avoid duplicate INFO completion records (#35348).
+- Keeper: treat inventory shutdown as a normal shutdown boundary, and describe scheduled verification retries accurately (#35347, #35352).
+- TUI: open the original page URL when an inline image cannot be drawn; retain cached input after converter failures and offer an explicit retry for refused previews (#35346, #35349, #35525).
+- TUI: finish known-lost-terminal cleanup without further terminal output, keep Git overlay scrolling within its geometry, and draw dividers using the terminal-aware palette (#35345, #35351, #35463).
+- TUI: distinguish Memory loading failures from waiting and name fields rejected by strict response decoding (#35457, #35460).
+- Board: relay MSX events on media changes and include verification identity in verification post titles (#35350).
+- Keeper: attribute failed cycles to the dispatched runtime candidate and distinguish verification retry from terminal stop causes in logs and Board reports (#35353, #35354).
+- Schedules: reject due wakes whose owner is absent from the authoritative Keeper store (#35361).
 
 ### Added
 
@@ -59,16 +67,12 @@
 - TUI: the palette reaches both halves of Task Review, a detail read that is waiting says how long it has waited, `/` says how many entries matched and stays after Enter, the composer row on every surface names the slash command being typed, and Lane Add-ons open from the Lanes screen (#35668, #35502, #35410, #35910, #35915).
 - Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
 - Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
-- TUI: the turn dashboard folds to one line, which returns Ctrl-S to the surface (#35458).
+- Browser: compose navigation with landing-page region observations (#35513).
+- TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
+- Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
+- TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
 - TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
 - TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
-- TUI: the judge legend names the marks the list actually draws (#35467).
-- TUI: Resources search and navigation to the beginning/end of either pane (#35370).
-- TUI: Planning shows the name of a goal that has left (#35408).
-- TUI: task throughput and lead time are counted per assignee (#35357).
-- TUI: an open Browser Lane follows the current page, and browser text renders without repeating DOM labels (#35470, #35533).
-- Browser: navigation composes with landing-page regions (#35513).
-- Goals: a goal records when it was opened, and one that goals.json no longer holds is read back rather than treated as gone (#35375, #35388).
 - Skills: builtin packages refresh as complete packages (#35442).
 - TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
 - Voice: setup runs over HTTP and refuses unknown input by name, every endpoint is probed over HTTP rather than only from the CLI, and an endpoint can be asked which voices it has (#35431, #35609, #35629).
@@ -87,6 +91,12 @@
 ### Verification limits
 
 - Native `inspect-file` tests passed all nine cases on macOS and Linux for #35921. End-to-end official-client attachment, image tool-result and follow-up conversation verification remains deferred; this release does not claim that matrix passed.
+
+### Documentation
+
+- Align the benchmark's arm A description with its actual kimi-cli runner (#35395).
+- Update the G1 revision 2 contract and registration evidence, and document proposed typed Goal-store failures and explicit next-actor outcomes (#35485, #35524, #35479, #35480).
+- Align the documentation site's installation version with the published release, record browser composition measurements and shared-page limits, and document the proposed refusal of submissions without a contract (#35529, #35531, #35477).
 
 ## [0.35.14] - 2026-09-12
 

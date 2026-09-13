@@ -66,7 +66,7 @@ let fusion ~author ~visibility ~source ?(content="Original independent advice") 
 
 module Store = Workspace_verification_store
 module Evidence = Verification_collaboration_evidence
-let board_ref post = "board:" ^ Board.Post_id.to_string post.Board.id
+let board_ref (post : Board.post) = "board:" ^ Board.Post_id.to_string post.Board.id
 let capture config authority references =
   Evidence.capture ~config ~authority ~references |> require "capture submission"
 let surfaces config references =

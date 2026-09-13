@@ -2539,6 +2539,20 @@ let test_the_board_header_and_rows_share_one_layout () =
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")
 ;;
 
+(* The answering overlay is the contract's as well. A short list closed its
+   box under the preview panel and put the footer mid-screen; the list now
+   fills its height so the panel and the footer keep the bottom rows. *)
+let test_the_answering_overlay_is_the_shared_contract () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_answering" ~callee
+  in
+  check int "the answering overlay draws through the contract" 1
+    (calls "surface_chrome");
+  check int "the answering overlay finishes no frame by hand" 0
+    (calls "finish_surface")
+;;
+
 (* The Board list's frame is the shared contract's, not a count of its own.
 
    It spent [rows - 11] on posts while it drew nine fixed rows: the constant
@@ -2587,17 +2601,7 @@ let test_the_overlays_are_the_shared_contract () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
-       ~identifiers:[ "framed_chrome_rows" ]);
-  (* The answering overlay is the contract's as well; its list fills its
-     height so the preview panel and the footer keep the bottom rows. *)
-  let answering callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name:"render_answering" ~callee
-  in
-  check int "the answering overlay draws through the contract" 1
-    (answering "surface_chrome");
-  check int "the answering overlay finishes no frame by hand" 0
-    (answering "finish_surface")
+       ~identifiers:[ "framed_chrome_rows" ])
 ;;
 
 (* The runtime.toml pane's frame is the shared contract's too. It subtracted
@@ -2770,6 +2774,10 @@ let () =
           "the board header and rows share one layout"
           `Quick
           test_the_board_header_and_rows_share_one_layout;
+        test_case
+          "the answering overlay is the shared contract"
+          `Quick
+          test_the_answering_overlay_is_the_shared_contract;
         test_case
           "the overlays are the shared contract"
           `Quick

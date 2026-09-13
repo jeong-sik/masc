@@ -9339,6 +9339,11 @@ def standalone_lane_fixture(
             "Selects the next Memory OS snapshot from immutable Keeper history.",
             False,
         ),
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory "
+            "changes; semantic verification is not performed.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -9393,6 +9398,12 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                # The decoder takes the registry's lane list as the wire contract
+                # and refuses a snapshot missing one (#35688 added this lane), so
+                # the fixture lists it where the server projection does.
+                standalone_lane_fixture(
+                    "workspace_curator_exact", "Workspace Curator"
+                ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -10387,10 +10398,14 @@ def keeper_lanes_ia_interaction(
 
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        # The projection lists the workspace curator between Librarian and
+        # Verifier (#35688), so the walk to Verifier passes its row.
+        send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10444,6 +10459,7 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k", banded_curator)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")
@@ -12368,7 +12384,8 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            b"left/Esc:list",
+            # #35734 spells hint keys the way the key table does: "Left", not "left".
+            b"Left/Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(

@@ -1277,12 +1277,15 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
           snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
         ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
         ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
-    let unbound_json = match to_yojson settled with
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
       | _ -> fail "binding encoding is not an object" in
-    match of_yojson unbound_json with
-    | Ok binding -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
-        (binding.context_frontier = None && binding.phase = settled.phase)
+    Yojson.Safe.to_file state_path unbound_json;
+    match load ~base_path ~keeper_name with
+    | Ok (Some binding) -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = released.phase)
+    | Ok None -> fail "existing vendor session disappeared with optional proof"
     | Error detail -> fail detail)
 ;;
 

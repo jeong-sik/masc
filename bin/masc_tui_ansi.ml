@@ -504,7 +504,8 @@ module Terminal_text = struct
     Option.value ~default (optional_single_line value)
 
   let single_lines values = List.map single_line values
-  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let short_timestamp text =
+    Masc.Tui_decode.short_timestamp_for_terminal ~localtime:Unix.localtime text
   (* The screen's clock is the terminal's zone. This is the one place that
      names it, so every row clock and the header clock agree. *)
   let clock_timestamp text =

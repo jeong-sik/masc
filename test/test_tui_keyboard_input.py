@@ -11731,7 +11731,7 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25T09:30:20",
+            b"2026-08-25 09:30:20",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -13325,6 +13325,9 @@ def run_keyboard_regression(executable: str) -> None:
         description="Schedule operational detail and page navigation",
         interact=schedule_detail_interaction(),
         http_fixtures=schedule_fixtures,
+        # The recorded times are drawn in the terminal's zone; UTC keeps the
+        # expected "2026-08-25 09:30:20" the same on every machine.
+        extra_env={"TZ": "UTC"},
     )
     run_terminal_scenario(
         executable,

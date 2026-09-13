@@ -52,10 +52,13 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
-val short_timestamp_for_terminal : string -> string
-(** Keep at most the first 19 source bytes, then sanitize the result. Slicing
-    before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
-    raw C1 byte. Empty timestamps render as [(never)]. *)
+val short_timestamp_for_terminal :
+  localtime:(float -> Unix.tm) -> string -> string
+(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
+    converts to, then sanitized. A timestamp the codec cannot read keeps at most
+    its first 19 source bytes; slicing before the terminal boundary ensures a
+    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
+    [(never)]. *)
 
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string

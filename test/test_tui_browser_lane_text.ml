@@ -16,6 +16,25 @@ let () =
   print_endline "PASS page multiline and blank-line projection"
 
 let () =
+  let node role = `Assoc [
+    "kind", `String "region"; "nodeId", `String "n1"; "role", `String role;
+    "tag", `String "main"; "text", `String "Reading surface";
+    "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 100; "height", `Int 40]];
+    "color", `String "rgb(0,0,0)"; "fontSize", `Int 14;
+    "fontWeight", `String "400"; "whiteSpace", `String "normal" ] in
+  let json = `Assoc [
+    "schema", `String "masc.browser.scene.v1"; "documentId", `String "doc";
+    "url", `String "https://example.org"; "title", `String "Example";
+    "viewport", `Assoc ["width", `Int 100; "height", `Int 40;
+      "scrollX", `Int 0; "scrollY", `Int 0];
+    "nodes", `List [node "MAIN"]; "truncated", `Bool false;
+    "view", `String "regions"; "scope", `Null ] in
+  (match Masc.Browser_scene.of_json json with
+   | Ok {nodes=[{kind=Region Masc.Browser_scene.Main;_}];_} -> ()
+   | Ok _ | Error _ -> failwith "scene parser did not classify the observed role");
+  print_endline "PASS semantic region roles are typed at the scene boundary"
+
+let () =
   let draft = "https://example.org/discussion/" ^ String.make 100 'q' ^ "/한글" in
   let row = Masc_tui_types.browser_lane_url_line ~cols:80 draft in
   if not (String.ends_with ~suffix:"/한글▏" row) then
@@ -84,7 +103,7 @@ let () =
     | None -> failwith "selected target context missing"
     | Some text -> Yojson.Safe.from_string text in
   let client = "10000000-0000-4000-8000-000000000001" in
-  let region = {node with node_id="channels";kind=Region "navigation";tag="nav";text="Channels"} in
+  let region = {node with node_id="channels";kind=Region Masc.Browser_scene.Navigation;tag="nav";text="Channels"} in
   let open Yojson.Safe.Util in
   let region_context = copied_target Live (Some client) region in
   let region_action = region_context |> member "defaultAction" in
@@ -142,6 +161,13 @@ let () =
   assert ((Lane.accept_scene ~generation:42 (Ok scene) focused).scene=None);
   let scoped_scene = {scene with content={content with scope=Some target}} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) focused).scene=Some scoped_scene);
+  let scrolled = {focused with load=Loading (42,Scene_scroll {
+      tab_id=1;document_id=content.document_id;expected_url=content.url;scene_view=Browser_lane.Content;
+      scope=None;delta_y=600})} in
+  let scrolled_scene = {scene with content={content with scroll_y=600.}} in
+  assert ((Lane.accept_scene ~generation:42 (Ok scrolled_scene) scrolled).scene=Some scrolled_scene);
+  let replaced_scene = {scrolled_scene with content={scrolled_scene.content with document_id="new-document"}} in
+  assert ((Lane.accept_scene ~generation:42 (Ok replaced_scene) scrolled).scene=None);
   let clicked = {focused with load=Loading (42,Scene_click {tab_id=1;
     document_id=content.document_id;node_id=node.node_id;expected_url=content.url;scope=Some target})} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) clicked).scene=Some scoped_scene);
@@ -223,3 +249,83 @@ let () =
   if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
     failwith "repeated selected text must retain its identity and first row";
   print_endline "PASS repeated scene node ids keep one number each"
+
+let () =
+  let region node_id role text : Masc.Browser_scene.node =
+    { node_id; kind = Region (Masc.Browser_scene.region_role_of_string role); tag = role; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Regions; scope = None;
+    nodes = [region "nav" "navigation" "Navigation";
+             region "main" "main" "Timeline";
+             region "article" "article" "One post"] }
+  in
+  let scene : Lane.scene = {source = Live; client_id = None; tab_id = 3;
+    content; elapsed_ms = 1.} in
+  let view = {(Lane.create ()) with selected_tab = Some 3; scene = Some scene} in
+  (match Lane.primary_region_target view with
+   | Ok (index, target) ->
+       assert (index = 1 && target.Browser_lane.node_id = "main")
+   | Error _ -> failwith "unique main landmark was not selected");
+  let article_only = {view with scene = Some {scene with content =
+    {content with nodes = [region "article" "article" "One post"]}}} in
+  (match Lane.primary_region_target article_only with
+   | Ok (_, target) -> assert (target.Browser_lane.node_id = "article")
+   | Error _ -> failwith "article fallback was not selected");
+  let ambiguous = {view with scene = Some {scene with content =
+    {content with nodes = [region "main-a" "main" "A"; region "main-b" "main" "B"]}}} in
+  assert (Lane.primary_region_target ambiguous = Error Lane.Ambiguous_primary_region);
+  assert (Masc.Browser_scene.region_role_of_string "MAIN" = Masc.Browser_scene.Main);
+  assert (Masc.Browser_scene.region_role_of_string "section" = Masc.Browser_scene.Section);
+  assert (Masc.Browser_scene.region_role_of_string "region" = Masc.Browser_scene.Named_region);
+  assert (Masc.Browser_scene.region_role_of_string " CustomRole " = Masc.Browser_scene.Unknown "CustomRole");
+  let guard : Lane.navigation_guard = {
+    expected_url = "https://example.org/feed#post";
+    navigation_source = {url = content.url; document_id = content.document_id} } in
+  (match Lane.primary_region_action {view with scene = None; scene_guard = Some guard} with
+   | Lane.Primary_guarded_regions {tab_id; guard = actual} ->
+       assert (tab_id = 3 && actual = guard)
+   | _ -> failwith "primary shortcut dropped the follow navigation guard");
+  print_endline "PASS primary landmark shortcut stays exact and ambiguity-safe"
+
+let () =
+  let region node_id role text : Masc.Browser_scene.node =
+    { node_id; kind = Masc.Browser_scene.Region role; tag = "article"; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Regions; scope = None;
+    nodes = [region "nav" Masc.Browser_scene.Navigation "Navigation";
+             region "post-a" Masc.Browser_scene.Article "Post A";
+             region "sidebar" Masc.Browser_scene.Complementary "Suggestions";
+             region "post-b" Masc.Browser_scene.Article "Post B"] }
+  in
+  let scene : Lane.scene = {source = Live; client_id = None; tab_id = 4;
+    content; elapsed_ms = 1.} in
+  let view = {(Lane.create ()) with selected_tab = Some 4; scene = Some scene} in
+  let next = Lane.move_scene_article ~backwards:false {view with scene_cursor = 0} in
+  assert (next.scene_cursor = 1);
+  let following = Lane.move_scene_article ~backwards:false next in
+  assert (following.scene_cursor = 3);
+  let wrapped = Lane.move_scene_article ~backwards:false following in
+  assert (wrapped.scene_cursor = 1);
+  let previous = Lane.move_scene_article ~backwards:true following in
+  assert (previous.scene_cursor = 1);
+  let previous_wrapped = Lane.move_scene_article ~backwards:true next in
+  assert (previous_wrapped.scene_cursor = 3);
+  let no_articles = {view with scene = Some {scene with content =
+    {content with nodes = [region "main" Masc.Browser_scene.Main "Timeline"]}}} in
+  assert ((Lane.move_scene_article ~backwards:false no_articles).scene_cursor = no_articles.scene_cursor);
+  let content_scene = {view with scene = Some {scene with content =
+    {content with view = Content; nodes = [region "post-a" Masc.Browser_scene.Article "Post A"]}}} in
+  assert ((Lane.move_scene_article ~backwards:false content_scene).scene_cursor = content_scene.scene_cursor);
+  print_endline "PASS article navigation uses typed regions and skips non-article landmarks"

@@ -152,9 +152,10 @@ let transition ctx goal_id ?note ?evidence action =
 ;;
 
 let stored_phase config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some goal -> Goal_phase.to_string goal.Goal_store.phase
-  | None -> fail ("goal not found: " ^ goal_id)
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_phase.to_string goal.Goal_store.phase
+  | Goal_store.Goal_absent -> fail ("goal not found: " ^ goal_id)
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
 ;;
 
 let ledger_record config goal_id =
@@ -683,7 +684,7 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
      Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
    with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation writes no ledger row, so the wedge starts with none at all —
      the same hole the scan re-arms, reached without a row to empty. *)
   (match Goal_verification.get_record config ~goal_id with
@@ -742,7 +743,7 @@ let test_scan_preserves_source_failure () =
   with_workspace @@ fun config ->
   (match Goal_store.upsert_goal config ~title:"Review source"
       ~metric:"cases" ~target_value:"1" () with
-   | Ok _ -> () | Error detail -> fail detail);
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
   Fs_compat.save_file path "unreadable primary";
@@ -825,10 +826,11 @@ let test_target_edit_during_review_invalidates_approval () =
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   review_while_editing_goal config ctx goal_id
     [ [ "target_value", `String "300" ] ];
-  (match Goal_store.get_goal config ~goal_id with
-   | Some goal -> check (option string) "the new target is retained"
+  (match Goal_store.find_goal config ~goal_id with
+   | Goal_store.Goal_found goal -> check (option string) "the new target is retained"
        (Some "300") goal.Goal_store.target_value
-   | None -> fail "goal disappeared after editing its target");
+   | Goal_store.Goal_absent -> fail "goal disappeared after editing its target"
+   | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u));
   check_obsolete_proof_not_applied config goal_id
 ;;
 
@@ -840,10 +842,11 @@ let test_target_aba_during_review_invalidates_approval () =
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   review_while_editing_goal config ctx goal_id
     [ [ "target_value", `String "300" ]; [ "target_value", `String "3" ] ];
-  (match Goal_store.get_goal config ~goal_id with
-   | Some goal -> check (option string) "the target returned to its original text"
+  (match Goal_store.find_goal config ~goal_id with
+   | Goal_store.Goal_found goal -> check (option string) "the target returned to its original text"
        (Some "3") goal.Goal_store.target_value
-   | None -> fail "goal disappeared after changing its target twice");
+   | Goal_store.Goal_absent -> fail "goal disappeared after changing its target twice"
+   | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u));
   check_obsolete_proof_not_applied config goal_id
 ;;
 
@@ -857,9 +860,10 @@ let test_priority_edit_during_review_preserves_approval () =
        [ "id", `String goal_id; "priority", `Int 2 ]));
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   review_while_editing_goal config ctx goal_id [ [ "priority", `Int 1 ] ];
-  (match Goal_store.get_goal config ~goal_id with
-   | Some goal -> check int "priority edit is retained" 1 goal.Goal_store.priority
-   | None -> fail "goal disappeared after editing its priority");
+  (match Goal_store.find_goal config ~goal_id with
+   | Goal_store.Goal_found goal -> check int "priority edit is retained" 1 goal.Goal_store.priority
+   | Goal_store.Goal_absent -> fail "goal disappeared after editing its priority"
+   | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u));
   check string "priority does not change the reviewed success criterion"
     "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
@@ -1001,8 +1005,10 @@ let test_pending_before_phase_waits_for_explicit_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Pending persisted before phase" in
-  let goal = match Goal_store.get_goal config ~goal_id with
-    | Some goal -> goal | None -> fail "missing Goal" in
+  let goal = match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent -> fail "missing Goal"
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u) in
   (match Goal_verification.mark_proof_pending config ~goal_id
       ~criterion:(Goal_store.criterion_of_goal goal) with
    | Ok _ -> () | Error message -> fail message);
@@ -1074,7 +1080,10 @@ let test_pending_proof_binds_submitted_evidence () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Immutable submitted discussion" in
-  let goal = match Goal_store.get_goal config ~goal_id with Some goal -> goal | None -> fail "missing goal" in
+  let goal = match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent -> fail "missing goal"
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u) in
   let criterion = Goal_store.criterion_of_goal goal in
   let item content = Workspace_verification_store.Evidence_collaboration {
     reference="board:submitted-source"; content;

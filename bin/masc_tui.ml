@@ -1791,6 +1791,7 @@ let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
+  | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
@@ -4562,6 +4563,28 @@ let launch_lane_declaration state ~mailbox ~edit request =
           | exn -> Error (Printexc.to_string exn) in
         enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
 
+let launch_lane_subscriptions state ~mailbox request =
+  let module Subs = Masc_tui_lane_subscriptions in
+  match state.lane_addons with
+  | None -> ()
+  | Some view when view.loading -> ()
+  | Some view ->
+      state.lane_addons_generation <- state.lane_addons_generation + 1;
+      let generation=state.lane_addons_generation in
+      state.lane_addons <- Some {view with generation;loading=true;error=None};
+      let host=server_peer_host and port=state.port in
+      let run () =
+        let result = try
+          Result.bind (Masc_tui_http.post_json ~host ~port
+            ~path:"/api/v1/lane-addons/subscriptions"
+            ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn) in
+        enqueue_async mailbox (Lane_subscriptions_loaded (generation,result)) in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+       | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
+
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
@@ -4656,7 +4679,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4678,7 +4701,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4708,6 +4731,13 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Result.bind
+              (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
+                 ~expected_url ~delta_y)
+              (fun () -> Masc_tui_http.fetch_browser_scene
+                 ?scope ~expected_url ~scene_view
+                 ~host ~port ~view ~tab_id ())))
         | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
               ~host ~port ~view ~tab_id ~scene_view ~scope))
@@ -11475,6 +11505,11 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Lane_subscriptions_loaded (generation,result) ->
+      map_lane_addons state (fun view ->
+        if view.generation<>generation then view else
+        {view with loading=false;subscription_panel=Option.map
+          (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -11488,7 +11523,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
-              && Option.is_none view.action_menu ->
+              && Option.is_none view.action_menu && Option.is_none view.subscription_panel ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -16515,8 +16550,29 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                (match view.action_menu, view.draft with
-                 | Some _, _ ->
+                (match view.subscription_panel,view.action_menu, view.draft with
+                 | Some panel,_,_ ->
+                     let module Subs = Masc_tui_lane_subscriptions in
+                     let set panel = update {view with subscription_panel=Some panel;scroll=0} in
+                     (match key with
+                      | "esc" | "q" -> update {view with subscription_panel=Subs.back panel;scroll=0}
+                      | "J" | "K" ->
+                          let _,cols=get_terminal_size () in
+                          let last=List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
+                          update {view with scroll=max 0 (min last (view.scroll + if key="J" then 1 else -1))}
+                      | _ when view.loading -> ()
+                      | "j" | "down" -> set (Subs.move panel 1)
+                      | "k" | "up" -> set (Subs.move panel (-1))
+                      | "a" -> set (Subs.add panel)
+                      | "d" -> set (Subs.remove panel)
+                      | "r" -> launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
+                      | "\r" | "\n" | "enter" ->
+                          let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                          let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
+                          set panel;
+                          Option.iter (launch_lane_subscriptions state ~mailbox:async_messages) request
+                      | _ -> ())
+                 | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
                       | "j" | "down" -> update (Addons.move_action view 1)
@@ -16530,7 +16586,7 @@ and is loaded on demand through keeper_skill.
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Some detail})
                       | _ -> ())
-                 | None, Some draft ->
+                 | None,None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
@@ -16549,7 +16605,7 @@ and is loaded on demand through keeper_skill.
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
-                 | None, None ->
+                 | None,None, None ->
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -16581,6 +16637,13 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "S" ->
+                         if not view.loading then (
+                           let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                           let panel=Masc_tui_lane_subscriptions.initial ~keepers
+                             ~targets:(Addons.subscription_targets view) in
+                           update {view with subscription_panel=Some panel;document_key=None;scroll=0};
+                           launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
                      | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
                      | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
@@ -17980,9 +18043,9 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
@@ -18032,6 +18095,28 @@ and is loaded on demand through keeper_skill.
                                (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
                            | None -> launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
                       | None -> ())
+                 | "m" when not (busy view) ->
+                     (match Browser_lane_view.primary_region_action view with
+                      | Primary_regions {tab_id} ->
+                          (* First [m] observes the landmark map. A second
+                             [m] focuses the exact main/article reference;
+                             no label or URL heuristic is used. *)
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_regions tab_id)
+                      | Primary_guarded_regions {tab_id;guard} ->
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
+                      | Primary_focus {tab_id;index;target} ->
+                          state.browser_lane <- Some {view with scene_cursor = index};
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_focus {tab_id;target})
+                      | Primary_error Browser_lane_view.No_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "No unambiguous main/article region observed; use v:regions"}
+                      | Primary_error Browser_lane_view.Ambiguous_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "Multiple main/article regions observed; use v:regions"}
+                      | Primary_unavailable -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> read {view with scene = None; scroll = 0}
@@ -18055,10 +18140,24 @@ and is loaded on demand through keeper_skill.
                             | None, Browser_lane.Content -> Scene_read tab_id in
                           launch_browser_lane state ~mailbox:async_messages operation
                       | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
+                 | "J" | "K" when Option.is_some view.scene && not (busy view) ->
+                     (match view.scene, view.selected_tab with
+                      | Some scene, Some tab_id ->
+                          let distance = int_of_float scene.content.height in
+                          let delta_y = if key = "J" then distance else -distance in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_scroll {tab_id;document_id=scene.content.document_id;
+                              expected_url=scene.content.url;
+                              scene_view=scene.content.view;scope=scene.content.scope;delta_y})
+                      | _ -> ())
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "N" | "P" when (match view.scene with
+                     | Some scene -> scene.content.view = Browser_lane.Regions
+                     | None -> false) && not (busy view) ->
+                     reveal_selection (move_scene_article ~backwards:(key = "P") view)
                  | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
                      reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
@@ -22398,7 +22497,8 @@ and is loaded on demand through keeper_skill.
            Status reads reuse the accepted request; they never submit it again. *)
         (match state.lane_addons with
          | Some view when not view.loading && Option.is_none view.draft
-              && Option.is_none view.document_key && Option.is_none view.action_menu ->
+              && Option.is_none view.document_key && Option.is_none view.action_menu
+              && Option.is_none view.subscription_panel ->
              let request = match Masc_tui_lane_addons.pending_action view with
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in

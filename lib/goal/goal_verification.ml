@@ -257,8 +257,10 @@ let ensure_dirs config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); records = [] }
 
-(* Same split as [Goal_store.load_state]: an absent store is legitimately
-   empty; a present-but-undecodable store must not license a write. *)
+(* An absent ledger is legitimately empty; a present-but-undecodable ledger
+   must not license a write. The recovery read below serves the mirror as
+   state, which RFC-0444 removed from the goal store; the ledger keeps it
+   until its own RFC (RFC-0444 §0 scopes the goal store only). *)
 type load_outcome =
   | Loaded of state
   | Undecodable of string
@@ -425,6 +427,9 @@ let archive_reopened_proof config ~goal_id ~actor ~at completion =
 
 let reopen_goal config ~goal_id ~actor ~note =
   let* goal, (outcome, phase_changed) =
+    (* The reopen chain is a string [let*]; the store's typed refusal is
+       rendered here at its end (RFC-0444 PR-1). *)
+    Result.map_error Goal_store.write_error_to_string @@
     Goal_store.transact_goal config ~goal_id (fun goal ->
       let* transition = Goal_phase.decide_transition ~phase:goal.Goal_store.phase
           ~action:Goal_phase.Reopen in

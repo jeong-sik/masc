@@ -114,7 +114,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
-  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  if modal
+     || Masc_tui_types.on_activity_screen state.view
+     || Option.is_some (browser_lane_on_screen state)
   then 0
   else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
   then Masc_tui_acting_pane.pane_cols
@@ -442,12 +444,17 @@ let render_overview (state : state) =
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
+         (* Neither name is padded to a column. Both are fixed for the
+            session, so nothing to their right moves between frames, and
+            the 24 and 20 cells they used to be padded to were blank on
+            the live workspace ("default", "me") while the transport
+            tail behind them was cut to "ws …" beside the roster pane. *)
          let cluster_line =
            Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
              Ansi.dim
-             (fit_width (Terminal_text.single_line o.ov_cluster) 24)
+             (Terminal_text.single_line o.ov_cluster)
              Ansi.reset
-             (fit_width (Terminal_text.single_line o.ov_project) 20)
+             (Terminal_text.single_line o.ov_project)
              transport_summary observer_summary
        in
        box_line buf cols cluster_line);
@@ -2398,7 +2405,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -2471,7 +2478,11 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
     , "with the completion judge - nothing to press; [c] re-arms the request" )
-  | Goal_phase.Awaiting_confirmation, _ -> (Theme.warn (), "proof passed - operator confirmation required via goal confirmation CLI")
+  (* Named by path: "goal confirmation CLI" is not a command anyone can type.
+     This screen has no key for the step it is asking for (#35996), and the
+     row has to fit the split pane, so the path is the whole instruction. *)
+  | Goal_phase.Awaiting_confirmation, _ ->
+    (Theme.warn (), "proof passed - confirm via scripts/goal-confirmation.py")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
   | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
 ;;
@@ -3168,6 +3179,18 @@ let schedule_row_subject (row : Masc_tui_types.schedule_row) =
 let schedule_status_color status =
   semantic_status_color status
 
+(* The wake's status is the contract's own word, so the list column is as
+   wide as the widest word the contract can send and no wider: the value
+   was a string, and the column a literal 10 that happened to fit
+   "succeeded". Measured once from the contract's list, the column and
+   the vocabulary cannot drift apart. *)
+let schedule_wake_word = Schedule_contract_values.wake_status_to_string
+
+let schedule_wake_word_cells =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 Schedule_contract_values.wake_status_strings
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -3349,10 +3372,11 @@ let render_schedule_list (state : state) =
                let subject = schedule_row_subject row in
                let status_color = schedule_status_color row.sch_status in
                let last_wake =
-                 Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
+                 Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+                   row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
+                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s \xc2\xb7 %s  %s"
                    status_color
                    (* The column still lines up: the padding goes after the
                       bracket, not inside it. *)
@@ -3369,7 +3393,7 @@ let render_schedule_list (state : state) =
                    (fit_width (Terminal_text.single_line subject)
                       subject_width)
                    (schedule_status_color last_wake)
-                   (fit_width (Terminal_text.single_line last_wake) 10)
+                   (fit_width last_wake schedule_wake_word_cells)
                    Ansi.reset
                    (* The enqueue result and what became of the wake are two
                       facts, and the list carried only the first: a wake the
@@ -3530,11 +3554,16 @@ let schedule_wake_lines
       ~(history : schedule_wake_history option)
       ~(history_error : (string * string) option) =
   let last_wake_fields =
-    [ field
-        ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
-             row.sch_last_wake_status)
-        "Status" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status)
+    [ (let word =
+         Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+           row.sch_last_wake_status
+       in
+       field
+         ~style:
+           (if Option.is_some row.sch_last_wake_status then
+              schedule_status_color word
+            else Ansi.dim)
+         "Status" word)
     ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
     ; field
         ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
@@ -3570,18 +3599,18 @@ let schedule_wake_lines
              (fun (wake : schedule_wake) ->
                 let started = timestamp wake.swk_started_at_iso in
                 let finished = timestamp wake.swk_finished_at_iso in
+                (* The status is the row's label, drawn through [field] so
+                   the times start in the column every other value on the
+                   page starts in. A literal 12 here put them two cells to
+                   the left of the Reaction time below. *)
+                let word = schedule_wake_word wake.swk_status in
                 let head =
-                  ( schedule_status_color wake.swk_status
-                  , Printf.sprintf "  %-12s %s \xe2\x86\x92 %s"
-                      (Terminal_text.single_line wake.swk_status) started finished )
+                  field ~style:(schedule_status_color word) word
+                    (Printf.sprintf "%s \xe2\x86\x92 %s" started finished)
                 in
                 match wake.swk_error with
                 | None -> [ head ]
-                | Some err ->
-                    [ head
-                    ; ( Theme.bad ()
-                      , "               " ^ Terminal_text.single_line err )
-                    ])
+                | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
 let schedule_detail_lines ~width (row : schedule_row)
@@ -7622,7 +7651,7 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh  %s"
+            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -8266,9 +8295,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let age = fusion_run_age ~now run in
   let started_text = Printf.sprintf "%s (%s ago)" date_time age in
   let pipeline = fusion_pipeline_diagram run in
+  (* The pipeline row names the four stops and marks the one the run is on;
+     a Flow row above it named the same four stops again with no state, and a
+     Stage row below the status named the marked stop a third time. On a
+     finished run the three read "completed / completed / completed". The
+     stops are the pipeline's to draw; the status says whether the run ended,
+     and Progress says what it is doing about the stop it is on. *)
   let run_lines =
     [ Ansi.bold, "  RUN"
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.reset
       , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
@@ -8288,9 +8322,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           Ansi.reset
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
-    ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
-    ; ( Ansi.reset
+    ]
+    (* Progress narrates a stop the run is still on. Once it has ended the
+       stage is terminal and the row would repeat the status word. *)
+    @ (match run.fur_stage with
+       | Fusion_stage_completed | Fusion_stage_failed -> []
+       | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
+       | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
+           [ Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
+    @ [ ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
     ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
@@ -9287,9 +9327,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+          let article_hint = match view.scene with
+            | Some scene when scene.content.view = Browser_lane.Regions -> "N/P:article  "
+            | Some _ | None -> "" in
+          action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
-          "r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
+          "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -9303,6 +9346,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
@@ -9743,8 +9787,12 @@ let runtime_detail_lines state target ~width =
         match preferred_at with
         | None -> []
         | Some at ->
+            (* The terminal's clock, like every other timestamp on the screen;
+               the list row beside this reads "last success 19:18:20" and the
+               detail read the same instant as "2026-08-24T10:18:20Z". *)
             runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
-              (Masc_domain.iso8601_of_unix_seconds at)
+              (Terminal_text.short_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds at))
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -9774,12 +9822,12 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
               (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
-            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
-            @ (match row.rpp_reachable with
-               | None -> []
-               | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "Reachable"
-                     (runtime_bool value))
+            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
+                (Terminal_text.short_timestamp row.rpp_checked_at)
+            (* No Reachable row: the decoder admits a probe only when its
+               reachable flag agrees with its status, so the row could only
+               repeat the status two rows above it -- "reachable" then
+               "yes". *)
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->
@@ -9826,7 +9874,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  Left/Esc:list  r:refresh  Tab:next");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Left / Esc:list  r:refresh  Tab:next");
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -13870,8 +13918,9 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:(if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
-      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
+    ~hints:(if Option.is_some view.subscription_panel then "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
+      else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
+      else "j/k:select  Tab:focus  o:observe  a:actions  S:subscriptions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
@@ -13879,8 +13928,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
-     over the whole terminal and the Activity feed already fills its own
-     screen, so neither reserves the columns. *)
+     over the whole terminal and the Activity screen, both its tabs,
+     already fills its own, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
      acting_pane_columns state ~terminal_cols);

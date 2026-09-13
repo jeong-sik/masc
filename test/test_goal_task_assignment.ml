@@ -44,7 +44,7 @@ let make_goal config ~id =
   match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
           ~metric:"m" ~target_value:"1" () with
   | Ok _ -> ()
-  | Error msg -> failf "upsert_goal %s failed: %s" id msg
+  | Error error -> failf "upsert_goal %s failed: %s" id (Goal_store.write_error_to_string error)
 ;;
 
 (* Create a single goalless task and return its minted id. A fresh workspace
@@ -191,8 +191,16 @@ let test_goal_source_failure_blocks_all_bindings () =
       check bool "valid recovery exists before corruption" true (Sys.file_exists recovery);
       corrupt primary;
       if corrupt_mirror then corrupt recovery
-      else check bool "recovery read still finds the Goal" true
-        (Option.is_some (Goal_store.get_goal config ~goal_id:"goal-a"));
+      else (
+        (* RFC-0444: a mirror that still decodes is reported as evidence of
+           the drift and is never served as the Goal. *)
+        match Goal_store.find_goal config ~goal_id:"goal-a" with
+        | Goal_store.Store_unavailable
+            { mirror = Goal_store.Mirror_decodes { goal_count = 1; _ }; _ } -> ()
+        | Goal_store.Store_unavailable u ->
+          fail ("valid mirror was not reported as decoding: " ^ Goal_store.unavailable_to_string u)
+        | Goal_store.Goal_found _ -> fail "a corrupt primary served the mirror as the Goal"
+        | Goal_store.Goal_absent -> fail "a corrupt primary read as an absent Goal");
       (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
        | Error (Goal_assignment.Goal_source_unavailable _) -> ()
        | Error e -> fail (err_to_string e)

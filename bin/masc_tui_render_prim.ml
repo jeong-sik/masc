@@ -1947,10 +1947,18 @@ let planning_phase_color = function
 
 ;;
 
-(* The goal count, the completed share and one counter per phase. With no goals
-   the row read the count, a sentence saying the count, and five zero counters
-   over a list that says "(no goals)" itself. The count is the whole reading
-   there.
+(* The goal count, the completed share and one counter per phase that has a
+   goal in it. With no goals the row read the count, a sentence saying the
+   count, and five zero counters over a list that says "(no goals)" itself.
+   The count is the whole reading there.
+
+   A phase with nothing in it is left out for the same reason: the list
+   under the row names every goal's phase, so a zero here repeats what the
+   list already does not show. Written out, the five counters with single
+   digits are 92 cells, and beside the roster pane at 150 columns the row
+   ends at "Drop:" with its count cut off -- and under the active filter
+   the list hides ended goals, so that count is not in the rows either.
+   The Overview's Keepers count names its non-active states the same way.
 
    Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
    marks the Backlog row under them wears for running, done and cancelled.
@@ -1978,17 +1986,15 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
         Ansi.reset
     in
     Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
-      (String.concat "  "
-         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
-             "Exec" rollup.pr_active
-         ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
-         ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
-             rollup.pr_awaiting_confirmation
-         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
-             "Done" rollup.pr_done
-         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
-             "Drop" rollup.pr_dropped
-         ])
+      ([ (Goal_phase.Executing, Masc_tui_theme.Glyph.progress_active, "Exec", rollup.pr_active)
+       ; (Goal_phase.Verifying, "◆", "Ver", rollup.pr_verifying)
+       ; (Goal_phase.Awaiting_confirmation, "◇", "Conf", rollup.pr_awaiting_confirmation)
+       ; (Goal_phase.Completed, Masc_tui_theme.Glyph.progress_done, "Done", rollup.pr_done)
+       ; (Goal_phase.Dropped, Masc_tui_theme.Glyph.progress_ended, "Drop", rollup.pr_dropped)
+       ]
+       |> List.filter_map (fun (phase, glyph, name, value) ->
+              if value = 0 then None else Some (counter phase glyph name value))
+       |> String.concat "  ")
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a

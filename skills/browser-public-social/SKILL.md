@@ -21,6 +21,31 @@ selected region. A tag alone is not evidence that a region contains the
 requested posts. Do not start with the page's full div tree or a guessed CSS
 selector.
 
+## TUI-first route
+
+When the page is already open in Browser Lane, keep the TUI observation as the
+shared context instead of asking the Keeper to rediscover the DOM. From the
+text reader, press `s` to open the semantic scene; pressing `s` again returns
+to the text reader. Use `v` for the observed region list and `m` for the
+guarded primary-region shortcut. On a feed with several `article` regions,
+use `n`/`p` or `Tab`/`Shift-Tab` to choose the observed article, then `Enter`
+to read that region. `Enter` on an observed same-tab HTTP(S) link follows the
+link and refreshes the destination scene; it never reuses the old article
+scope. Once the region list is visible, `N`/`P` cycle only exact observed
+`article` regions, skipping non-article regions. Use `J`/`K`
+to scroll the top-level page by the observed viewport
+height, then verify the refreshed document and post identities. Use `Ctrl-O`
+when the painted layout or a nested scroll container is needed; `j`/`k` in
+the text scene only move the terminal reader.
+
+This route is useful for Reddit listings, post pages, and X/Twitter-style
+timelines because the selection is based on observed semantic roles and
+document/node identities. It does not make a generic page parser into a site
+adapter: if the page exposes no usable `main`/`article`/named region, keep the
+region picker or continue from an actually observed control/body; report the
+missing observation rather than falling back to a guessed CSS selector or
+display-name match.
+
 If the observed document exposes an RSS or Atom alternate link, read
 browser-lanes' extraction reference before choosing it. Use the feed only when
 the current tools can read that observed URL and it covers the requested

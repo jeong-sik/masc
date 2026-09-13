@@ -402,7 +402,8 @@ let ensure_goal fixture =
             ~title:"Tool Matrix Goal" ~metric:"m" ~target_value:"1" ()
         with
         | Ok (goal, _status) -> goal
-        | Error err -> failwith ("failed to seed tool matrix goal: " ^ err)
+        | Error err ->
+          failwith ("failed to seed tool matrix goal: " ^ Goal_store.write_error_to_string err)
       in
       fixture.goal_id <- Some goal.Goal_store.id;
       goal.Goal_store.id

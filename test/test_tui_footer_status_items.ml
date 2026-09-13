@@ -562,6 +562,37 @@ let test_a_compound_leave_key_is_the_same_door () =
   Alcotest.(check bool) "and quit does too" true
     (contains ~needle:"q:quit" line)
 
+(* Three renderer literals spelled the compound without spaces. The pin read
+   it by its " Esc" tail, so [Left/Esc:back] was an unpinned item: measured on
+   the fixture server, the Board read pane at 60 cells had lost its way out
+   and kept [z:wide]. A door is a door under every spelling of the compound. *)
+let test_a_compound_leave_key_without_spaces_is_still_the_door () =
+  let hints =
+    "j/k:scroll  [/]:post  PgUp/PgDn:page  z:wide  Y:copy link  \
+     Left/Esc:back  c:reply  r:refresh  Tab:next"
+  in
+  List.iter
+    (fun width ->
+      let line =
+        Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:width ~port:8935
+          ~hints ()
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "the way out survives %d cells" width)
+        true
+        (contains ~needle:"Left/Esc:back" line))
+    [ 60; 44; 34 ];
+  (* The pair pins stay whole: [n] alone is the next-match key on surfaces
+     that search, and must not inherit the pin [y / n] carries. *)
+  let searching = "j/k:move  /:find  n / N:next / previous match  Esc:back" in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:28 ~port:8935
+      ~hints:searching ()
+  in
+  Alcotest.(check bool) "next-match is not pinned" false
+    (contains ~needle:"n / N" line);
+  Alcotest.(check bool) "the way out is" true (contains ~needle:"Esc:back" line)
+
 let test_a_label_holding_a_colon_still_reads_its_key () =
   (* [Enter:edit / use] is a label with a separator in it. Only the first
      colon ends the key, or an item like this would read as an unpinned one
@@ -1048,6 +1079,8 @@ let tests =
           test_the_cut_keeps_the_way_out
       ; Alcotest.test_case "a compound leave key is the same door" `Quick
           test_a_compound_leave_key_is_the_same_door
+      ; Alcotest.test_case "a compound leave key without spaces is still the door"
+          `Quick test_a_compound_leave_key_without_spaces_is_still_the_door
       ; Alcotest.test_case "a label holding a colon still reads its key" `Quick
           test_a_label_holding_a_colon_still_reads_its_key
       ; Alcotest.test_case "hints that fit are left alone" `Quick

@@ -2,10 +2,28 @@ type navigation_source = { url : string; document_id : string }
 val navigation_source_of_json : Yojson.Safe.t -> (navigation_source, string) result
 (** A semantic viewport observation, not a browser paint/display list. *)
 type rect = { x : float; y : float; width : float; height : float }
+type region_role =
+  | Main
+  | Navigation
+  | Complementary
+  | Named_region
+  | Section
+  | Article
+  | Header
+  | Footer
+  | Search
+  | Form
+  | Log
+  | Banner
+  | Content_info
+  | Scroll_area
+  | Unknown of string
+val region_role_of_string : string -> region_role
+val region_role_to_string : region_role -> string
 type kind =
   | Text
   | Raster
-  | Region of string
+  | Region of region_role
   | Control of {
       clickable : bool;
       editable : bool;

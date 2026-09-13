@@ -8230,9 +8230,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let age = fusion_run_age ~now run in
   let started_text = Printf.sprintf "%s (%s ago)" date_time age in
   let pipeline = fusion_pipeline_diagram run in
+  (* The pipeline row names the four stops and marks the one the run is on;
+     a Flow row above it named the same four stops again with no state, and a
+     Stage row below the status named the marked stop a third time. On a
+     finished run the three read "completed / completed / completed". The
+     stops are the pipeline's to draw; the status says whether the run ended,
+     and Progress says what it is doing about the stop it is on. *)
   let run_lines =
     [ Ansi.bold, "  RUN"
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
     ; ( Ansi.reset
       , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
@@ -8252,9 +8257,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           Ansi.reset
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
-    ; (Masc_tui_theme.tone Masc_tui_theme.Accent), "  Stage: " ^ fusion_run_stage_to_string run.fur_stage
-    ; Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage
-    ; ( Ansi.reset
+    ]
+    (* Progress narrates a stop the run is still on. Once it has ended the
+       stage is terminal and the row would repeat the status word. *)
+    @ (match run.fur_stage with
+       | Fusion_stage_completed | Fusion_stage_failed -> []
+       | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
+       | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
+           [ Ansi.dim, "  Progress: " ^ fusion_run_progress_text run.fur_stage ])
+    @ [ ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
     ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"

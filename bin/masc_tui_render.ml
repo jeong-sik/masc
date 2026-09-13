@@ -13141,7 +13141,7 @@ let render_palette (state : state) =
     match state.palette_mode with
     (* The action reads as a footer label now, so it is spelled like one:
        lower case, the way every other [key:label] item is. *)
-    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "jump")
+    | Masc_tui_types.Palette_jump -> (" MASC Command palette", ":", "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
@@ -13149,9 +13149,13 @@ let render_palette (state : state) =
         , "filter:"
         , "ask" )
   in
+  (* The title names the palette the way the key table does (":" command
+     palette) and the prompt follows it. It was "Quick Jump & Navigation" with
+     a lightning glyph between them: the glyph said nothing, and the entries
+     are not all jumps -- settings, the gate modes, a task or a post run from
+     the same list, which is why Enter reads "run". *)
   framed_shadow_line buf cols
     (screen_title title ^ "  "
-     ^ (Theme.warn ()) ^ "\xe2\x9a\xa1" ^ Ansi.reset ^ "  "
      ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
      ^ (Terminal_text.single_line state.palette_query)
      ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));

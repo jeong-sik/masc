@@ -15,6 +15,14 @@ assert wire['reply']['ok'] and wire['request']['id']==wire['reply']['id']
 actions=[x for x in load('bidi.json') if x['request']['method']=='input.performActions'];assert len(actions)==1
 assert actions[0]['request']['params']['context']==r['mapping'][str(a['input']['tabId'])]
 assert actions[0]['reply']['type']=='success'
+assert actions[0]['reply']['id']==actions[0]['request']['id']
+vp=a['input']['viewport'];origin=a['input']['from'];target=a['input']['to']
+expected_steps=[{'type':'pointerMove','x':int(origin['x']*vp['width']),'y':int(origin['y']*vp['height'])},{'type':'pointerDown','button':0},{'type':'pointerMove','duration':180,'x':int(target['x']*vp['width']),'y':int(target['y']*vp['height'])},{'type':'pointerUp','button':0}]
+assert actions[0]['request']['params']['actions']==[{'type':'pointer','id':'mouse','parameters':{'pointerType':'mouse'},'actions':expected_steps}]
+session=next(x for x in load('bidi.json') if x['request']['method']=='session.new')
+assert session['reply']['result']==r['session']
+assert load('helper-source-proof.json')['revision']==r['source_commit']
+assert {x['name']:x['exit'] for x in r['cleanup']}=={'masc':0,'firefox':-15}
 assert 'Card moved; down trusted=true; up trusted=true' in r['after']['1']['text']
 assert r['before']['2']==r['after']['2'] and r['before']['1']['url']==r['before']['2']['url']
 assert r['stale_rejection']=='observed_viewport_changed'
@@ -29,6 +37,10 @@ for image in t['images']:
  png=(c/('tui-image-'+image['name']+'.png')).read_bytes();assert decoded==png
  assert hashlib.sha256(png).hexdigest()==image['png_sha256'];hashes.append(image['png_sha256']);start=image['pty_prefix_bytes']
 assert len(set(hashes))==2
+screens=[x['response']['data']['data'] for x in t['receipts'] if x['path'].endswith('/screenshot') and x['status']==200]
+for digest in hashes:
+ assert any(ref['sha256']==digest and ref['bytes']==len((c/('http-image-'+digest+'.png')).read_bytes()) for ref in screens)
+ assert hashlib.sha256((c/('http-image-'+digest+'.png')).read_bytes()).hexdigest()==digest
 for line in (p/'SHA256SUMS').read_text().splitlines():
  sha,name=line.split(None,1);assert hashlib.sha256((p/name).read_bytes()).hexdigest()==sha,name
 print('PASS experimental HTTP/poll/context/BiDi drag route, trusted DOM, other-context isolation and PTY images')

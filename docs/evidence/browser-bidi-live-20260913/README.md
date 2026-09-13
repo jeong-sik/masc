@@ -1,13 +1,13 @@
 # Experimental BiDi live bridge
 
-This archive separates a standalone BiDi pointer proof, two failed/incorrect
-metadata cohorts, and the corrected fd441 native TUI → experimental Python bridge
+This archive separates a standalone BiDi pointer proof, a post-drag scene-adapter failure, a passing cohort with
+metadata/provenance assumptions, and the corrected fd441 native TUI → experimental Python bridge
 run. Original reports and raw protocol records are unchanged. The corrected run
 reports actual Firefox version/visibility and verified fd441 helper provenance.
 
 One TUI drag traversed typed HTTP, native polling, an explicit numeric-tab to opaque
 BiDi context map, and exactly one input.performActions. DOM events reported trusted
-down/up and moved the card; the second same-URL context stayed unchanged. Before/after
+down/up and acknowledged the valid drag endpoint; the second same-URL context stayed unchanged. Before/after
 PNGs are actual screenshot payloads matched against Kitty placements in native PTY
 bytes. They are not reconstructed webpage screenshots from text.
 
@@ -24,3 +24,9 @@ other context, native binary identities, PNG/PTY equality and checksums. The ori
 scripts remain inspection/reproduction references with owned environment prerequisites;
 the audit itself starts no process. Profiles, native manifests, login/private credentials,
 runtime config and large process/provider logs are excluded.
+
+The fixture changes acknowledgment text on a valid endpoint; it does not prove
+CSS relocation of the card or complete HTML drag-and-drop behavior. The first
+cohort failed at scene adaptation after its drag, not server startup. The second
+cohort passed its interaction but had metadata/provenance assumptions; both raw
+records remain byte-for-byte preserved under accurately named directories.

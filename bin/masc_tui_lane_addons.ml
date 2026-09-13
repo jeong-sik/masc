@@ -619,7 +619,7 @@ let action_target view =
           Option.bind view.snapshot (fun snapshot ->
             List.find_opt (fun instance -> String.equal instance.id id) snapshot.instances)))
   | Rows -> None
-  | Timeline | Connections -> None
+  | Timeline | Connections -> selected_instance view
 
 let open_actions ~request_id view =
   let* instance = match action_target view with

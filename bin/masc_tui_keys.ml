@@ -240,6 +240,12 @@ let approval_retry =
   b Act "R" "retry Auto Judge"
     ~help:"only when the blocked row is safely rearmable"
 
+(* Where a Fusion run's caller and its Board evidence are, on the list and
+   in the detail alike: one binding each, so the two footers cannot name the
+   key two ways. *)
+let fusion_caller_key = b Navigate "K" "calling Keeper"
+let fusion_board_key = b Navigate "B" "Board evidence"
+
 let for_surface = function
   | Overview ->
       [ b Navigate "j/k" "events" ~help:"scroll events"
@@ -515,8 +521,8 @@ let for_surface = function
       ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Navigate "K" "calling Keeper"
-      ; b Navigate "B" "Board evidence"
+      ; fusion_caller_key
+      ; fusion_board_key
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
@@ -891,12 +897,18 @@ let cancels_two_press ~input_seen ~key ~second_press =
    owns the live scroll numbers it appends after them. ([view] stays
    [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
    [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
-   so the footer agrees with what is on screen. *)
+   so the footer agrees with what is on screen.
+
+   [K] and [B] answer in the detail as they do on the list (masc_tui.ml
+   matches them under [Fusion_detail]); the footer left them out, and a body
+   row said "K Keeper · B Board" in its own notation instead. *)
 let footer_hints_fusion_detail ~position =
   Printf.sprintf "%s  %s"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
         ; b Navigate "PgUp/PgDn" "page"
+        ; fusion_caller_key
+        ; fusion_board_key
         ; b Act "Y" "copy"
         ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
         ]

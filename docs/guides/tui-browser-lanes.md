@@ -117,6 +117,9 @@ they leave the selection unchanged on content scenes without article roles.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
 destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.
+When `Enter` reads a region, the context row keeps the observed typed role and
+label (for example, `article · Post A`) while the body is scoped. `y` includes
+that same scope context with the document/node identity.
 `m` is the short semantic path for a page's primary reading surface: the first
 press observes `main`/`article` landmarks, and the second focuses the unique
 exact-role match. Role names are classified at the observation boundary;

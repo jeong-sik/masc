@@ -38,6 +38,11 @@ height, then verify the refreshed document and post identities. Use `Ctrl-O`
 when the painted layout or a nested scroll container is needed; `j`/`k` in
 the text scene only move the terminal reader.
 
+After an article is scoped, keep the displayed role and label with the body
+when reporting it. The copied context must retain that observed scope label
+alongside its document/node identity; do not replace it with an inferred author
+or post ID.
+
 This route is useful for Reddit listings, post pages, and X/Twitter-style
 timelines because the selection is based on observed semantic roles and
 document/node identities. It does not make a generic page parser into a site

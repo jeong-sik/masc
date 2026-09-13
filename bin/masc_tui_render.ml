@@ -9439,7 +9439,13 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some scene, _ ->
              let scope = match scene.content.view, scene.content.scope with
                | Browser_lane.Regions, _ -> "Page regions"
-               | Content, Some _ -> "Selected region"
+               | Content, Some target ->
+                   (match view.scene_scope with
+                    | Some context when context.target = target ->
+                        "Selected " ^ Masc.Browser_scene.region_role_to_string context.role
+                        ^ " · " ^ fit_width (Terminal_text.single_line context.label)
+                            (max 8 (cols - 32))
+                    | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
              "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"

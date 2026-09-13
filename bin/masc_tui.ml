@@ -4682,7 +4682,7 @@ let launch_browser_lane state ~mailbox operation =
   | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
-        scene = None; scene_cursor = 0;
+        scene = None; scene_cursor = 0; scene_scope = None;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
       (* Scene geometry belongs to its observation. Browser effects and explicit
@@ -4701,8 +4701,9 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
-            { view with scene = None; scene_cursor = 0 }
+        | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
+            { view with scene = None; scene_cursor = 0; scene_scope = None }
+        | Scene_scroll _ | Scene_click _ | Scene_focus _ -> { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
@@ -18107,7 +18108,9 @@ and is loaded on demand through keeper_skill.
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
                       | Primary_focus {tab_id;index;target} ->
-                          state.browser_lane <- Some {view with scene_cursor = index};
+                          let focused = {view with scene_cursor = index;
+                            scene_scope = Browser_lane_view.scene_scope_context_for_index view index} in
+                          state.browser_lane <- Some focused;
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id;target})
                       | Primary_error Browser_lane_view.No_primary_region ->
@@ -18170,6 +18173,8 @@ and is loaded on demand through keeper_skill.
                       | Some scene, Some node ->
                           (match scene_target_action node with
                            | Some Read_region ->
+                          state.browser_lane <- Some {view with
+                            scene_scope = Browser_lane_view.scene_scope_context_for_node view node};
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                            | Some Follow_link -> launch_browser_lane state ~mailbox:async_messages

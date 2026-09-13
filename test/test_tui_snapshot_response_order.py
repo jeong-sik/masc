@@ -168,6 +168,13 @@ def slow_poll(binary, binary_sha, source):
     def interact(process, master, _slave, output, _base):
         try:
             open_source(source, process, master, output)
+            # Opening Schedules can draw its cached zero rows while the
+            # explicit arrival read is still pending. Settle a distinct
+            # explicit reading before replacing the endpoint: otherwise its
+            # obsolete/owning arrival requests can be counted as timer polls.
+            _, primed = fixtures_and_reading(source, 1)
+            fixtures[path] = primed
+            h.send_and_wait(process, master, output, b"r", label(source, 1))
             fixtures[path] = source_read
             # No key starts this read: it comes from the actual TUI timer.
             assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)

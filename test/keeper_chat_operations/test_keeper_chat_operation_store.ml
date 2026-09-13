@@ -82,7 +82,7 @@ let test_schema_identity_and_budget () =
   check
     (list (pair string int))
     "strict tables"
-    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 4 ]
+    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
     Store.For_testing.table_column_counts;
   store_ok (Store.close store);
   let db = Sqlite3.db_open ~mode:`READONLY path in

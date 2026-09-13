@@ -125,14 +125,14 @@ let base_schema_objects =
        compare (left_kind, left_name) (right_kind, right_name))
 ;;
 let batch_table_sql =
-  "CREATE TABLE operation_batch_members (operation_id TEXT PRIMARY KEY REFERENCES operations(operation_id), execution_id TEXT NOT NULL REFERENCES operations(operation_id), position INTEGER NOT NULL CHECK (position >= 0), admitted_digest TEXT NOT NULL CHECK (length(admitted_digest) = 64), UNIQUE(execution_id, position)) STRICT"
+  "CREATE TABLE operation_batch_members (operation_id TEXT PRIMARY KEY REFERENCES operations(operation_id), execution_id TEXT NOT NULL REFERENCES operations(operation_id), position INTEGER NOT NULL CHECK (position >= 0), admitted_digest TEXT NOT NULL CHECK (length(admitted_digest) = 64), admitted_input_json TEXT, UNIQUE(execution_id, position)) STRICT"
 ;;
 let batch_schema_objects =
   [ "table", "operation_batch_members", batch_table_sql
-  ; "trigger", "batch_members_update_immutable", "CREATE TRIGGER batch_members_update_immutable BEFORE UPDATE ON operation_batch_members BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END"
+  ; "trigger", "batch_members_update_immutable", "CREATE TRIGGER batch_members_update_immutable BEFORE UPDATE ON operation_batch_members WHEN NEW.operation_id <> OLD.operation_id OR NEW.execution_id <> OLD.execution_id OR NEW.position <> OLD.position OR NEW.admitted_digest <> OLD.admitted_digest OR OLD.admitted_input_json IS NULL OR NEW.admitted_input_json IS NOT NULL OR NOT EXISTS (SELECT 1 FROM operations WHERE operation_id = OLD.execution_id AND state IN ('succeeded', 'failed', 'cancelled')) BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END"
   ; "trigger", "batch_members_delete_immutable", "CREATE TRIGGER batch_members_delete_immutable BEFORE DELETE ON operation_batch_members BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END" ]
 let expected_schema_objects = List.sort compare (base_schema_objects @ batch_schema_objects)
-let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 4 ]
+let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
 
 type commit_fault =
   | Fail_before_commit
@@ -475,14 +475,14 @@ let batch_execution_with_db db operation_id =
   with_statement db ~operation:"read batch membership"
     "SELECT execution_id, admitted_digest FROM operation_batch_members WHERE operation_id = ?" (fun stmt ->
       let* () = bind_text db stmt ~operation:"bind member id" 1 (Id.to_string operation_id) in
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.DONE -> Ok None
-      | Sqlite3.Rc.ROW ->
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
           let* execution_id = Id.of_string (Sqlite3.column_text stmt 0)
             |> Result.map_error (fun detail -> Integrity_error detail) in
           let* input_digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 1) in
           Ok (Some { Operation.execution_id; input_digest })
-      | rc -> Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
+      else Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
 ;;
 let project_batch_with_db db (operation : Operation.t) =
   let* batch_membership = batch_execution_with_db db operation.operation_id in
@@ -512,16 +512,28 @@ let batch_operations store ~operation_id =
       (match operation with Some operation -> Ok [operation] | None -> Error (Unknown_operation operation_id))
   | Some { Operation.execution_id; _ } ->
     let* ids = with_statement store.db ~operation:"read ordered batch"
-      "SELECT operation_id FROM operation_batch_members WHERE execution_id = ? ORDER BY position" (fun stmt ->
+      "SELECT operation_id, admitted_input_json, admitted_digest FROM operation_batch_members WHERE execution_id = ? ORDER BY position" (fun stmt ->
         let* () = bind_text store.db stmt ~operation:"bind execution id" 1 (Id.to_string execution_id) in
-        let rec read acc = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-          | Sqlite3.Rc.ROW -> let* id = Id.of_string (Sqlite3.column_text stmt 0)
-              |> Result.map_error (fun detail -> Integrity_error detail) in read (id :: acc)
-          | rc -> Error (Store_unavailable (sqlite_error store.db "read ordered batch" rc)) in read []) in
-    List.fold_left (fun result id -> let* acc = result in
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* id = Id.of_string (Sqlite3.column_text stmt 0)
+              |> Result.map_error (fun detail -> Integrity_error detail) in
+              let* original_input = match text_option stmt 1 with None -> Ok None
+                | Some json -> json_of_stored "batch original input" json |> Result.map Option.some in
+              let* digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 2) in
+              let* () = match original_input with
+                | None -> Ok ()
+                | Some input -> let* actual = Operation.execution_digest input |> Result.map_error (fun detail -> Integrity_error detail) in
+                  if actual = digest then Ok () else Error (Integrity_error "batch original input digest mismatch") in
+              read ((id, original_input, digest) :: acc)
+          else Error (Store_unavailable (sqlite_error store.db "read ordered batch" rc)) in read []) in
+    List.fold_left (fun result (id, original_input, digest) -> let* acc = result in
       let* operation = get store id in match operation with
-      | Some operation -> Ok (operation :: acc)
+      | Some operation ->
+        if Option.is_none original_input && not (Operation.is_terminal operation.state)
+        then Error (Integrity_error "active batch lost original input")
+        else Ok ({operation with input=original_input; execution_digest=digest} :: acc)
       | None -> Error (Integrity_error "batch member is missing")) (Ok []) ids |> Result.map List.rev
 ;;
 
@@ -1112,11 +1124,12 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
     let* candidates = with_statement db ~operation:"read fresh batch candidates"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id) ORDER BY sequence")
       (fun stmt ->
-        let rec read acc = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-          | Sqlite3.Rc.ROW -> let* operation = decode_operation stmt in
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* operation = decode_operation stmt in
               read (if scoped operation then acc else operation :: acc)
-          | rc -> Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
+          else Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
     let* plan = select head candidates |> Result.map_error (fun detail -> Invalid_input detail) in
     match plan with
     | None -> Ok head
@@ -1133,11 +1146,14 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
       let* () = List.fold_left (fun result (position, (operation : Operation.t)) ->
         let* () = result in
         with_statement db ~operation:"freeze batch member"
-          "INSERT INTO operation_batch_members(operation_id, execution_id, position, admitted_digest) VALUES (?, ?, ?, ?)" (fun stmt ->
+          "INSERT INTO operation_batch_members(operation_id, execution_id, position, admitted_digest, admitted_input_json) VALUES (?, ?, ?, ?, ?)" (fun stmt ->
             let* () = bind_text db stmt ~operation:"bind member" 1 (Id.to_string operation.operation_id) in
             let* () = bind_text db stmt ~operation:"bind batch owner" 2 (Id.to_string head.operation_id) in
             let* () = bind_int64 db stmt ~operation:"bind position" 3 (Int64.of_int position) in
             let* () = bind_text db stmt ~operation:"bind frozen digest" 4 operation.execution_digest in
+            let* input = required_option "batch member input" operation.input in
+            let* original = canonical_json "batch member input" input in
+            let* () = bind_text db stmt ~operation:"bind frozen original" 5 original in
             expect_done db stmt ~operation:"freeze batch member")) (Ok ()) (List.mapi (fun i operation -> i, operation) selected) in
       let* () = with_statement db ~operation:"freeze batch input"
         "UPDATE operations SET input_json = ?, execution_digest = ? WHERE operation_id = ? AND state = 'queued'" (fun stmt ->
@@ -1995,10 +2011,14 @@ let settle_direct_semantic_with_db db current command =
 ;;
 
 let settle_batch_members_with_db db ~execution_id =
-  with_statement db ~operation:"settle shared execution members"
+  let* () = with_statement db ~operation:"settle shared execution members"
     "UPDATE operations SET state = leader.state, input_json = NULL, started_at = leader.started_at, completed_at = leader.completed_at, outcome_ref = leader.outcome_ref, failure_kind = leader.failure_kind, failure_detail = leader.failure_detail FROM operations AS leader WHERE leader.operation_id = ? AND leader.state IN ('succeeded', 'failed', 'cancelled') AND operations.state = 'queued' AND operations.operation_id IN (SELECT operation_id FROM operation_batch_members WHERE execution_id = leader.operation_id AND operation_id <> execution_id)" (fun stmt ->
       let* () = bind_text db stmt ~operation:"bind settled batch" 1 (Id.to_string execution_id) in
-      expect_done db stmt ~operation:"settle shared execution members")
+      expect_done db stmt ~operation:"settle shared execution members") in
+  with_statement db ~operation:"release settled batch input"
+    "UPDATE operation_batch_members SET admitted_input_json = NULL WHERE execution_id = ? AND admitted_input_json IS NOT NULL AND EXISTS (SELECT 1 FROM operations WHERE operation_id = execution_id AND state IN ('succeeded', 'failed', 'cancelled'))" (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind settled batch input" 1 (Id.to_string execution_id) in
+      expect_done db stmt ~operation:"release settled batch input")
 ;;
 
 let persist_terminal store current command sql bind_terminal =

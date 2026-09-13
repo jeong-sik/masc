@@ -4297,8 +4297,10 @@ let render_keeper_list (state : state) =
      no box_tl, box_tr or edge bar for a corner to point at. *)
   box_divider buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(keeper_action_hints ~offers_back:false state selected_reading));
+    (footer_line state
+       ~status:(keeper_action_status state)
+       ~max_cells:cols
+       ~hints:(keeper_control_hints ~offers_back:false state selected_reading));
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
@@ -6349,9 +6351,11 @@ let render_keeper_detail (state : state) =
       keeper_action_hints state (Some (keeper_reading state k))
     in
     (* [key:label], the way every other hint on this row and on every other
-       footer is spelled. "h/l pane" was the one hint written as two words. *)
+       footer is spelled. "h/l pane" was the one hint written as two words.
+       The two trailing cells are the separator: the hints no longer open with
+       one of their own. *)
     let footer =
-      if keeper_roster_pane_shown state ~cols then "  h/l:pane" ^ footer
+      if keeper_roster_pane_shown state ~cols then "  h/l:pane  " ^ footer
       else footer
     in
     (* Cut to the terminal, the way every other footer is: [footer_line] takes

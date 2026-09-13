@@ -290,11 +290,11 @@ let test_ansi_korean_hint_truncates_by_cells () =
 
 (* A workspace disagreement used to replace the whole screen and swallow every
    key but r. The reads it protects are refused where they happen, so the
-   notice rides the footer instead -- and it is the last fact a narrow footer
-   gives up, after the port. *)
-let test_a_workspace_mismatch_outlives_the_port () =
-  check_string "the local path reads beside the server's own"
-    "<dim>  q:quit  | Base: /me | MISMATCH local /work/masc (r:retry) | Port: 8935<reset>\n"
+   notice rides the footer instead -- in front of the keys, which is the only
+   place on the row that outlives them. *)
+let test_a_workspace_mismatch_outlives_the_keys () =
+  check_string "the notice leads and the local path reads beside the server's own"
+    "<dim>  MISMATCH local /work/masc (r:retry)  q:quit  | Base: /me | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Server_base_path "/me"
@@ -315,6 +315,25 @@ let test_a_workspace_mismatch_outlives_the_port () =
   check_bool "the notice outlives the port" true
     (contains ~needle:"MISMATCH local /work/masc" narrow);
   check_bool "the port went first" false (contains ~needle:"Port:" narrow);
+  (* The width a surface with its own keys actually has. Before the notice led
+     the row, every item of status was given up before one key was, so this
+     row carried keys and no notice -- which is what seven live surfaces
+     drew. *)
+  let keys_fill_the_row =
+    Masc_tui_footer.line
+      ~status:[ Masc_tui_footer.Workspace_mismatch "/work/masc" ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:
+        "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  \
+         a / A:all fleet  s:sort  /:find  q:quit" ()
+  in
+  check_at_most_cells "eighty cells hold" 80 keys_fill_the_row;
+  check_bool "the notice is on the row" true
+    (contains ~needle:"MISMATCH local /work/masc" keys_fill_the_row);
+  check_bool "keys gave way instead" true
+    (contains ~needle:"\xe2\x80\xa6" keys_fill_the_row);
+  check_bool "and the door is still there" true
+    (contains ~needle:"q:quit" keys_fill_the_row);
   check_string "a workspace that agrees says nothing"
     "<dim>  q:quit  | Port: 8935<reset>\n"
     (Masc_tui_footer.line
@@ -396,8 +415,8 @@ let test_answered_glow_reads_by_name () =
        ~hints:"q:quit" ())
 
 let test_worktree_server_warning_survives_narrow_widths () =
-  check_string "the worktree warning reads in full"
-    "<dim>  q:quit  | WORKTREE server (not the root build) | Port: 8935<reset>\n"
+  check_string "the worktree warning reads in full, in front of the keys"
+    "<dim>  WORKTREE server (not the root build)  q:quit  | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:[ Masc_tui_footer.Server_worktree_binary ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
@@ -425,8 +444,8 @@ let test_build_mismatch_names_the_older_side () =
   in
   (match item with
    | Some item ->
-     check_string "an older TUI is told to restart"
-       "<dim>  q:quit  | TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc) | Port: 8935<reset>\n"
+     check_string "an older TUI is told to restart, ahead of the keys"
+       "<dim>  TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc)  q:quit  | Port: 8935<reset>\n"
        (Masc_tui_footer.line ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
           ~max_cells:120 ~port:8935 ~hints:"q:quit" ())
    | None -> Alcotest.fail "a differing pair produced no item");
@@ -657,12 +676,332 @@ let test_a_row_in_another_grammar_loses_its_door () =
     (survives "j/k:move  Enter:open chat  Esc:close"
      > survives "[j/k] Move · [Enter] Open Chat · [Esc] Close")
 
+let test_conflict_paths_remain_atomic () =
+  let path = "/work/my  repo" in
+  let notice = "MISMATCH local " ^ path ^ " (r:retry)" in
+  for max_cells = 8 to 120 do
+    let row =
+      Masc_tui_footer.line ~status:[ Masc_tui_footer.Workspace_mismatch path ]
+        ~dim:"" ~reset:"" ~max_cells ~port:8935
+        ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+    in
+    check_at_most_cells "atomic path row stays within cells" max_cells row;
+    check_bool "a displayed conflict keeps its whole path and action" true
+      (not (contains ~needle:"MISMATCH" row) || contains ~needle:notice row);
+    check_bool "a dropped conflict leaves no detached path suffix" true
+      (not (contains ~needle:"repo" row) || contains ~needle:notice row);
+    if max_cells >= 60 then
+      check_bool "whole conflict survives where it fits" true
+        (contains ~needle:notice row)
+  done
+
+let test_actionable_conflicts_outrank_worktree_provenance () =
+  let build = Masc_tui_footer.Tui_build_mismatch
+    { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server } in
+  let worktree = Masc_tui_footer.Server_worktree_binary in
+  let render status =
+    Masc_tui_footer.line ~status ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  let row = render [ worktree; build ] in
+  check_string "caller order does not choose the surviving diagnosis"
+    row (render [ build; worktree ]);
+  check_at_most_cells "both conflicts respect width" 80 row;
+  check_bool "actionable mismatch remains" true (contains ~needle:"redeploy)" row);
+  check_bool "generic provenance yields first" false (contains ~needle:"WORKTREE" row);
+  check_bool "exit remains" true (contains ~needle:"q:quit" row);
+  let workspace = Masc_tui_footer.Workspace_mismatch "/other" in
+  let three = render [ worktree; build; workspace ] in
+  check_string "all conflict priorities are independent of caller order"
+    three (render [ workspace; build; worktree ]);
+  check_bool "wrong-workspace diagnosis has first claim" true
+    (contains ~needle:"MISMATCH local /other (r:retry)" three)
+
+let keeper_control_hints =
+  "j/k:move  p:pause  w:wake  s:shutdown  d:delete  r:refresh  q:quit"
+
+let test_the_notice_that_blocks_the_row_is_the_one_given_up () =
+  (* The four cells of the omitted-key marker are a gap the drawability probe
+     cannot see: a row that drops nothing carries no marker, so counting one
+     there would reject a notice that fits a row exactly. This path lands in that
+     gap -- 70 cells, which passes the probe beside q:quit at 80 and fails the
+     real cut row by four -- while the 57-cell build mismatch fits both. Giving up
+     the lowest-ranked notice first threw the mismatch away and then the path too,
+     and the row drew no notice at all. *)
+  let path = "/w/" ^ String.make 42 'a' in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:"q:quit" ()
+  in
+  Alcotest.(check int) "the path notice is the width this case is about" 70
+    (Masc_tui_message_layout.display_width
+       ("MISMATCH local " ^ path ^ " (r:retry)"));
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice that says what to do is drawn" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that could not be drawn is given up" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_an_armed_action_outlives_every_notice () =
+  (* A conflict stays true on the next frame. An armed action is a question
+     waiting for one keypress and gone after any other, and [?] cannot recover
+     it, so it is the one thing on this row that must not be dropped. Carried in
+     the hint string it was an unpinned item and went first. *)
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Server_worktree_binary
+        ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+        ; Masc_tui_footer.Keeper_action_armed
+            { key = "d"; action = "delete"; keeper = "analyst" }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the armed action is whole" true
+    (contains ~needle:"press d again to delete analyst" row);
+  check_bool "the notices gave way for it" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "and so did the provenance warning" false
+    (contains ~needle:"WORKTREE" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_a_running_action_reads_as_one_item () =
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Keeper_action_running
+            { gerund = "deleting"; keeper = "analyst" }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:60 ~port:8935 ~hints:"j/k:move  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 60 row;
+  check_bool "it says what is running" true
+    (contains ~needle:"deleting analyst" row)
+
+let test_keys_come_back_with_the_cells_a_dropped_notice_gave_up () =
+  (* Two notices and the keys do not fit together, so the lower-ranked notice
+     goes. The cells it hands back belong to the keys it had crowded out: the
+     row is fitted again from the whole key row rather than from what was left
+     when the notice was still there. At 95 cells a single greedy pass ended
+     with the door alone. *)
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Server_worktree_binary
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:95 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 95 row;
+  check_bool "the notice that says what to do stays" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that only says where the binary came from goes" false
+    (contains ~needle:"WORKTREE" row);
+  check_bool "and two keys come back into its cells" true
+    (contains ~needle:"j/k:move" row && contains ~needle:"p:pause" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_a_notice_too_wide_to_draw_hands_its_cells_back () =
+  (* A notice wider than the row cannot be drawn whole, and this one is never
+     cut into a different path. Dropping every key first to make room for it and
+     then dropping it too left the row with nothing but the door. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line ~status:[ Masc_tui_footer.Workspace_mismatch path ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:keeper_control_hints ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice is not drawn" false (contains ~needle:"MISMATCH" row);
+  check_bool "and not drawn in pieces either" false (contains ~needle:path row);
+  check_bool "the keys it could not make room for are back" true
+    (contains ~needle:"j/k:move" row);
+  check_bool "more than the door survives" true
+    (contains ~needle:"p:pause" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row);
+  (* Whole keys, not a cell cut. The row used to fall through to truncation
+     here and end mid-word, which the footer's own contract forbids. *)
+  List.iter
+    (fun item ->
+      check_bool ("a whole key: " ^ item) true
+        (List.mem item (Str.split_delim (Str.regexp_string "  ")
+                          keeper_control_hints)))
+    (List.filter
+       (fun item -> not (String.equal item "") && not (contains ~needle:"Port" item))
+       (Str.split_delim (Str.regexp_string "  ")
+          (List.hd (Str.split_delim (Str.regexp_string Masc_tui_footer.cut_marker)
+                      (String.trim row)))))
+
+let test_status_facts_come_back_with_a_rejected_notice () =
+  (* The status facts give way for a notice the same way the keys do, so they
+     come back the same way when it goes. Shrinking in one pass left this row
+     carrying the door alone, although the answering badge and the port fit
+     once the notice was rejected. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Keeper_answering
+            { names = [ "analyst" ]; lead_elapsed_s = Some 180 }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice cannot be drawn and is not" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the keeper answering comes back" true
+    (contains ~needle:"analyst" row);
+  check_bool "and so does the port" true (contains ~needle:"Port: 8935" row);
+  check_bool "the door was never at risk" true (contains ~needle:"q:quit" row);
+  (* The same rule where the notice is drawable on its own but two of them are
+     not. Dropping the second hands the port back, which a single shrinking pass
+     had already given up for good. *)
+  let two =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch "/work/masc"
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "the narrower row respects its cells" 70 two;
+  check_bool "the notice that ranks first stays" true
+    (contains ~needle:"MISMATCH local /work/masc" two);
+  check_bool "the second one goes" false (contains ~needle:"redeploy" two);
+  check_bool "and the port it had given up comes back" true
+    (contains ~needle:"Port: 8935" two)
+
+let test_a_short_diagnosis_is_not_starved_by_a_long_one () =
+  (* The wrong-workspace notice ranks above the build mismatch, but at this
+     width it cannot be drawn at all. Reading priority before drawability let it
+     take the row down with it and hid the mismatch that fits and says what to
+     do about it. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:keeper_control_hints ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice that fits is drawn" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that does not is not" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_ansi_keeper_keys_remain_individually_droppable () =
+  (* The key:label/two-space grammar supplied by #35401, including colour
+     resets between a key and its colon and dimmed whole exit items. *)
+  let dim = "\x1b[2m" and accent = "\x1b[36m" and reset = "\x1b[0m" in
+  let hints = String.concat "  "
+    [ dim ^ "j/k:move" ^ reset
+    ; accent ^ "p" ^ reset ^ ":pause"
+    ; accent ^ "w" ^ reset ^ ":wake"
+    ; accent ^ "s" ^ reset ^ ":shutdown"
+    ; accent ^ "d" ^ reset ^ ":delete"
+    ; dim ^ "r:refresh" ^ reset
+    ; dim ^ "q:quit" ^ reset ] in
+  for max_cells = 60 to 150 do
+    let row =
+      Masc_tui_footer.line
+        ~status:[ Masc_tui_footer.Workspace_mismatch "/work/masc" ]
+        ~dim ~reset ~max_cells ~port:8935 ~hints ()
+    in
+    check_at_most_cells "coloured Keeper row respects cells" max_cells row;
+    check_bool "coloured exit is pinned" true (contains ~needle:"q:quit" row);
+    check_bool "some navigation survives alongside the conflict" true
+      (contains ~needle:"j/k:move" row);
+    if max_cells = 80 then
+      check_bool "individual later controls were omitted" false
+        (contains ~needle:":delete" row)
+  done
+
+(* A row can carry a conflict notice and a search marker at once. The notice
+   leads, the marker follows it, and the keys come after. Both are literal:
+   neither is split into hint items, and keys give way before either does. *)
+let test_a_conflict_notice_leads_the_search_marker () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let notice = "MISMATCH local /work/masc (r:retry)" in
+  let hints = "j/k:move  p:pause  w:wake  s:shutdown  q:quit" in
+  let status =
+    [ Masc_tui_footer.Server_base_path "/me"
+    ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+    ]
+  in
+  check_string "notice, then marker, then keys"
+    ("<dim>  " ^ notice ^ "  " ^ prefix ^ "  " ^ hints
+     ^ "  | Base: /me | Port: 8935<reset>\n")
+    (Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"<dim>"
+       ~reset:"<reset>" ~max_cells:200 ~port:8935 ~hints ());
+  let position needle text =
+    try Some (Str.search_forward (Str.regexp_string needle) text 0)
+    with Not_found -> None
+  in
+  List.iter
+    (fun max_cells ->
+      let row =
+        Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"" ~reset:""
+          ~max_cells ~port:8935 ~hints ()
+      in
+      check_at_most_cells "the combined row stays within cells" max_cells row;
+      match position notice row, position prefix row with
+      | Some at_notice, Some at_prefix ->
+        check_bool "the notice is drawn before the marker" true
+          (at_notice < at_prefix)
+      | Some _, None | None, Some _ | None, None -> ())
+    [ 70; 80; 100; 120 ];
+  let cut =
+    Masc_tui_footer.line ~literal_prefix:prefix ~status ~dim:"" ~reset:""
+      ~max_cells:80 ~port:8935 ~hints ()
+  in
+  check_bool "at 80 cells the notice survives" true (contains ~needle:notice cut);
+  check_bool "at 80 cells the marker survives" true (contains ~needle:prefix cut);
+  check_bool "at 80 cells a droppable key gave way instead" false
+    (contains ~needle:"s:shutdown" cut)
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "literal search status survives hint fitting" `Quick
           test_literal_search_status_survives_hint_fitting
+      ; Alcotest.test_case "a conflict notice leads the search marker" `Quick
+          test_a_conflict_notice_leads_the_search_marker
       ; Alcotest.test_case "port closes every footer" `Quick
           test_port_closes_every_footer
+      ; Alcotest.test_case "conflict paths stay atomic through fitting" `Quick
+          test_conflict_paths_remain_atomic
+      ; Alcotest.test_case "actionable conflicts outrank provenance" `Quick
+          test_actionable_conflicts_outrank_worktree_provenance
+      ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick
+          test_ansi_keeper_keys_remain_individually_droppable
+      ; Alcotest.test_case "the notice that blocks the row is given up" `Quick
+          test_the_notice_that_blocks_the_row_is_the_one_given_up
+      ; Alcotest.test_case "an armed action outlives every notice" `Quick
+          test_an_armed_action_outlives_every_notice
+      ; Alcotest.test_case "a running action reads as one item" `Quick
+          test_a_running_action_reads_as_one_item
+      ; Alcotest.test_case "keys come back with a dropped notice's cells" `Quick
+          test_keys_come_back_with_the_cells_a_dropped_notice_gave_up
+      ; Alcotest.test_case "status facts come back with a rejected notice" `Quick
+          test_status_facts_come_back_with_a_rejected_notice
+      ; Alcotest.test_case "a notice too wide hands its cells back" `Quick
+          test_a_notice_too_wide_to_draw_hands_its_cells_back
+      ; Alcotest.test_case "a short diagnosis is not starved by a long one" `Quick
+          test_a_short_diagnosis_is_not_starved_by_a_long_one
       ; Alcotest.test_case "extra facts precede port" `Quick
           test_extra_facts_precede_port
       ; Alcotest.test_case "build reads before the port" `Quick
@@ -685,8 +1024,8 @@ let tests =
           test_unavailable_status_is_omitted
       ; Alcotest.test_case "ANSI Korean hint truncates by cells" `Quick
           test_ansi_korean_hint_truncates_by_cells
-      ; Alcotest.test_case "a workspace mismatch outlives the port" `Quick
-          test_a_workspace_mismatch_outlives_the_port
+      ; Alcotest.test_case "a workspace mismatch outlives the keys" `Quick
+          test_a_workspace_mismatch_outlives_the_keys
       ; Alcotest.test_case "answering names the first keeper" `Quick
           test_answering_names_the_first_keeper
       ; Alcotest.test_case "answered glow reads by name" `Quick

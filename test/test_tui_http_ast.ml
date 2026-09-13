@@ -1622,7 +1622,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "keeper detail spells the pane key the footer way" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail" ~needle:"  h/l:pane");
+       ~binding_name:"render_keeper_detail" ~needle:"  h/l:pane  ");
   (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
      wait moved with it. The contract did not: whichever binding blocks for
      input owns the deadline, and EINTR has to come back as a retry rather

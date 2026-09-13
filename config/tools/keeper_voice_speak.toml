@@ -2,12 +2,13 @@ name = "keeper_voice_speak"
 description = """
 Speak a short utterance via the voice bridge.
 
-Blocks until local playback \
-finishes: status='spoken' with played_seconds means the user has already \
-heard it — do NOT repeat or rephrase the same content. Duplicate identical \
-messages within 30s return status='dedup_skipped' without playing. TTS or \
-playback failures are returned as errors (ok=false), not silent successes. \
-Concurrent calls are serialized by a global lock."""
+status='spoken' with played_seconds: this host played it and the user has \
+heard it — do NOT repeat or rephrase the same content. status='synthesized': \
+the clip was made and attached to the chat, but this host did not play it \
+(local_playback_status and local_playback_reason say why) — do not tell the \
+user it was played. Duplicate identical messages within 30s return \
+status='dedup_skipped'. A TTS failure is an error (ok=false). Concurrent \
+calls are serialized by a global lock."""
 
 # Held back from the request until the model asks for it by name. Not
 # called once on 2026-08-29 or 2026-08-30 across the fleet.

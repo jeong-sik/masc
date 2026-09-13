@@ -288,7 +288,92 @@ and named no language.
 This is the two halves a voice turn needs — a keeper's words become audio in
 that keeper's voice, and a recording becomes text a keeper can be sent. It is
 not a keeper turn: no model was called and nothing was appended to a chat. The
-turn itself is the two HTTP calls under [External devices](#external-devices).
+turn follows.
+
+### Talking to imp, measured
+
+The same kind of workspace, with a model connection added and the server
+started. The model was `Qwen3.8-27B` (Q4, 35.5GB) on local Ollama, already in
+memory, on an M3 Max whose load average was 25.8 from other work. The wall
+times below are that machine under that load; they say nothing about an M1
+with a cloud model.
+
+**imp does not answer until it has a sandbox.** The journey prepares one at
+step 4. Before that, a message to imp answers
+`Keeper owner not found: imp`, and booting imp with no `docker` on `PATH`
+answers `400`:
+
+```
+docker_preflight_failed: docker info failed while validating sandbox runtime: process_eio_error: Eio.Io Process Executable "docker" not found; keeper sandbox image masc-sandbox:general is not available locally: …
+```
+
+With Docker reachable and the image present, `POST /api/v1/keepers/imp/boot`
+answered `200` in 0.12s.
+
+**The token for HTTP comes from `masc login`.** A server started without
+`MASC_ADMIN_TOKEN` mints one in memory and writes no file for it:
+
+```
+masc login --base-path <base> --client-env MASC_TOKEN
+  role: admin
+  raw_token_file: <base>/.masc/auth/local-admin.token
+```
+
+That file's token was accepted by `/voice/transcribe` on a server started
+afterwards.
+
+**A spoken question gets a written answer.** `question.wav` is `say -v Yuna`
+reading `안녕하세요. 한 문장으로 자기소개를 해 주세요.` (4.8s):
+
+| Step | Wall | What came back |
+|---|---|---|
+| `POST /api/v1/voice/transcribe` | 2.5s | `안녕하세요. 한 문장으로 자기소개를 해주세요.` |
+| `POST /api/v1/keepers/chat/stream`, the transcript | 188s | one sentence of text, no audio |
+
+Of the 188s, 167 went before the first event from the model. masc recorded
+16,863 prompt tokens, none read from a cache, and 4.5 tokens a second decoded.
+
+**imp speaks only when it calls `keeper_voice_speak`.** Nothing turns a reply
+into speech on its own. Asked `방금 한 자기소개를 소리 내어 말해 주세요.`, imp
+made three calls:
+
+| At | Call | Result |
+|---|---|---|
+| 45.7s | `keeper_tool_search` for `keeper_voice_speak` | `now callable: keeper_voice_speak` |
+| 259.6s | `keeper_skill` for a `voice-speak` skill | error — no such skill; the model guessed the name |
+| 290.1s | `keeper_voice_speak` with the sentence | a 14.2s clip in 3.2s |
+| 308.0s | reply | text |
+
+No approval was asked for; the log line is
+`external effect authorized operation=keeper_voice_speak source=local_output`.
+The model's first event came 29s after the question, 200s after the tool
+search, 13s after the skill call and 4.5s after the speak call.
+
+**The clip is made and nobody hears it.** The call wrote a 14.2s WAV and put it
+on the chat line:
+
+```json
+"audio":{"token":"124eb1c9…","mime":"audio/wav","audio_url":"/api/v1/voice/audio/124eb1c9…","duration_sec":14.242993}
+```
+
+`GET` on that URL with no token answered `200 audio/wav`, 632,212 bytes. The
+call's result says
+
+```
+"status":"synthesized","local_playback_status":"skipped","local_playback_reason":"local playback disabled for agent"
+```
+
+because `[voice.local_playback]` is absent and absent means off. `spoken` is
+the status only when this host played the clip. The dashboard draws the clip
+as `<audio controls>` with no autoplay, and the TUI does not play clips at all,
+so until someone presses play in the dashboard the reply is silent.
+
+imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
+`keeper_voice_speak` at 168.9s and replied at 203.6s:
+
+```
+"오늘 음성 설정을 마쳤습니다"라는 음성을 합성해 채팅에 첨부했습니다. 다만 이 호스트에서는 에이전트의 로컬 재생이 꺼져 있어 실제로 소리 내어 재생되지는 않았으니, 첨부된 오디오 파일을 확인해 주세요.
+```
 
 ### What the commands cost
 
@@ -657,11 +742,14 @@ default, and described under Configuration above.
 
 ## External devices
 
-Any device that can make two HTTP calls can speak to a keeper. No MASC change
-is needed; this was verified end to end on 2026-09-04.
+Any device that can make two HTTP calls can send speech to a keeper and read
+its answer. Hearing the answer is a third call, and only when the keeper spoke
+— see [Talking to imp, measured](#talking-to-imp-measured).
 
 ```sh
-TOKEN=$(cat "${MASC_BASE_PATH:?set it to the base path the server runs with}/.masc/auth/admin.token")
+BASE=~/work
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 
 # 1. audio in, text out
 curl -X POST "$MASC/api/v1/voice/transcribe" \

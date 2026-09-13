@@ -4336,9 +4336,16 @@ type state = {
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
-  mutable code_entries: Tui_decode.workspace_tree_node list;
-  mutable code_entries_error: string option;
-  mutable code_entries_inflight: bool;
+  mutable code_listing:
+    (code_workspace_scope * string, Tui_decode.workspace_tree_node list)
+    Masc_tui_fetched.t;
+      (** The file pane's directory listing, keyed by scope and directory.
+          It was three cells -- rows, an error, and an in-flight flag -- and
+          the flag was one bit for every directory: a listing asked while
+          another was in flight was dropped, so moving into a directory
+          before the last one answered left it unrequested and drawn as
+          "(loading…)" until [r]. The same two cells also drew a directory
+          that answered with no entries as "(loading…)". *)
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -5274,8 +5281,7 @@ let enter_keeper_code_file state ~keeper ~path =
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
-  state.code_entries <- [];
-  state.code_entries_error <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
@@ -5789,9 +5795,7 @@ let create_state
   link_previews_mode = `Rich;
   burn_hud_visible = false;
   code_dir = "";
-  code_entries = [];
-  code_entries_error = None;
-  code_entries_inflight = false;
+  code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
@@ -5978,6 +5982,15 @@ let title_failed = "(load failed)"
 let title_missing_reading ~error =
   if Option.is_some error then title_failed else title_unread
 
+(* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
+   count once it has answered, and otherwise which of the two it is. Asked and
+   still waiting reads as not loaded, the way a title before any request does. *)
+let title_count_of_view view ~count =
+  match view with
+  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
+  | Masc_tui_fetched.Failed _ -> title_failed
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -5987,6 +6000,21 @@ type empty_page =
   | Page_unread
   | Page_failed
   | Page_empty
+
+(* The Code pane's listing for the scope and directory open now. A listing
+   answered for another key, one still loading, and one that failed hold no
+   rows for this key. *)
+let code_listing_key (state : state) = (state.code_scope, state.code_dir)
+
+let code_listing_view (state : state) =
+  Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing
+    ~key:(code_listing_key state)
+
+let code_entries (state : state) =
+  match code_listing_view state with
+  | Masc_tui_fetched.Ready rows -> rows
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Failed _ -> []
 
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with
@@ -7316,7 +7344,7 @@ let surface_row_texts (state : state) : surface -> string list option =
         Some
           (List.map
              (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-             state.code_entries)
+             (code_entries state))
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   (* The list, and only while the list is the pane: reading a post or
      writing one draws something else, and "/" there would move a cursor

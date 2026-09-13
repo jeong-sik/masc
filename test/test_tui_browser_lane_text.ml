@@ -234,7 +234,7 @@ let () =
   assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
   let located : Masc.Browser_source_context.location = {file="dashboard/src/a.ts";line=2;column=3;
     kind=Template;digest=String.make 64 'a'} in
-  let mapped = {node with source_context=Masc.Browser_source_context.Located located} in
+  let mapped = {node with heading_level=Some 2; source_context=Masc.Browser_source_context.Located located} in
   let view = {view with scene=Some {scene with content={content with nodes=[mapped]}}} in
   (match Lane.scene_context view with
    | None -> failwith "selected element context missing"
@@ -242,6 +242,7 @@ let () =
        let open Yojson.Safe.Util in
        let json=Yojson.Safe.from_string text in
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
+       assert (json |> member "headingLevel" = `Int 2);
        assert (json |> member "source" |> member "sha256" |> to_string = located.digest);
        assert (json |> member "scope" = `Null);
        assert (json |> member "truncated" = `Bool false));

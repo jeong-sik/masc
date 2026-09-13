@@ -3829,6 +3829,7 @@ module Browser_lane_view = struct
             "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
           "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;
+          "headingLevel",(match node.heading_level with None -> `Null | Some level -> `Int level);
           "href",(match node.kind with
             | Control {href = Some href; _} -> `String href
             | Region _ | Control _ | Text | Raster -> `Null);

@@ -244,6 +244,15 @@ let () =
     {view with scene=Some scoped_article; scene_cursor=0} in
   assert (scoped_article_lines = ["[>1] ## Post title"; "Post body"]
     && scoped_article_selected = Some 0);
+  let article_b = {node with node_id="article-b-body"; text="Second post";
+    ancestor_region=Some {node_id="article-b"; role=Masc.Browser_scene.Article;
+      label="Post B"}} in
+  let multiple_article_scene = {scene with content={content with
+    nodes=[article_heading; article_body; article_b]}} in
+  let multiple_article_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some multiple_article_scene; scene_cursor=0}) in
+  assert (multiple_article_lines = ["[article 1/2] Post A"; "[>1] ## Post title";
+    "Post body"; "[article 2/2] Post B"; "Second post"]);
   let spaced_heading = {heading with rects=[{x=0.;y=0.;width=800.;height=20.}]} in
   let spaced_body = {body with rects=[{x=0.;y=40.;width=800.;height=20.}]} in
   let spaced_scene = {scene with content={content with nodes=[spaced_heading;spaced_body]}} in

@@ -4125,6 +4125,21 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
+    let article_positions = Hashtbl.create 16 in
+    let article_count = ref 0 in
+    let register_article node_id =
+      if not (Hashtbl.mem article_positions node_id) then begin
+        incr article_count;
+        Hashtbl.add article_positions node_id !article_count
+      end
+    in
+    List.iter (fun (node : Masc.Browser_scene.node) ->
+      match node.kind, node.ancestor_region with
+      | Region Masc.Browser_scene.Article, _ -> register_article node.node_id
+      | _, Some {role = Masc.Browser_scene.Article; node_id; _} ->
+          register_article node_id
+      | _ -> ()) scene.content.nodes;
+    let article_total = !article_count in
     let reversed, _, selected, _, _ = List.fold_left
       (fun (reversed, offset, selected, previous_block_bottom, previous_region)
         (nodes, (anchor : Masc.Browser_scene.node), text) ->
@@ -4173,8 +4188,12 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
             (match scene.content.scope with
              | Some target when target.node_id = region.node_id -> []
              | Some _ | None ->
-                 wrap ("[" ^ Masc.Browser_scene.region_role_to_string region.role
-                       ^ "] " ^ region.label))
+                 let role = Masc.Browser_scene.region_role_to_string region.role in
+                 let heading = match Hashtbl.find_opt article_positions region.node_id with
+                   | Some position when article_total > 1 ->
+                       Printf.sprintf "[%s %d/%d] %s" role position article_total region.label
+                   | _ -> "[" ^ role ^ "] " ^ region.label in
+                 wrap heading)
         | None, _ -> [] in
       let boundary = separator @ region_header in
       let lines = wrap (prefix ^ text) in

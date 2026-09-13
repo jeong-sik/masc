@@ -41,6 +41,9 @@ the text scene only move the terminal reader.
 In a content scene, `N`/`P` selects the first observed node for each article;
 `Enter` still follows or clicks that node's observed action. Use `v` and
 `Enter` when a scoped article read is required.
+When several article ancestors are visible, the TUI boundary includes their
+observed ordinal such as `[article 2/5]`; treat that count as viewport coverage,
+not feed completeness.
 The scene status composition (`articles`, `links`, `controls`, and `images`)
 is a typed observation hint for choosing a route; it does not prove that a
 feed is complete or that every reply is loaded.

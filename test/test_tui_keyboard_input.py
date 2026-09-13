@@ -10317,8 +10317,12 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        # The title arrives before the asynchronous roster. Select from the
-        # completed screen instead of sending a key into an empty list.
+        # Selecting beta is this scenario's precondition, not its subject, and
+        # one `j` only reaches it when the roster has already arrived and left
+        # the cursor on the row above. On a slower runner it had not, so the
+        # press moved to the first row and beta never became selected --
+        # red on Linux CI, green here. select_keeper_row walks until the row
+        # reports itself selected, which is the fact this needs.
         select_keeper_row(process, master_fd, output, b"beta")
         if not wait_for_fixture_event(
             process, master_fd, output, gate.requested, timeout=10.0

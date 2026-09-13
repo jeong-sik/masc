@@ -7,6 +7,7 @@ type layer_id =
   | Connected_surfaces
   | Namespace_state
   | Workspace_memory
+  | Lane_updates
   | Repository_freshness
   | Autonomous_trigger
   | Scheduled_automation
@@ -36,6 +37,7 @@ let ordered =
   ; Connected_surfaces
   ; Namespace_state
   ; Workspace_memory
+  ; Lane_updates
   ; Repository_freshness
   ; Autonomous_trigger
   ; Scheduled_automation
@@ -60,17 +62,18 @@ let order_index = function
   | Connected_surfaces -> 3
   | Namespace_state -> 4
   | Workspace_memory -> 5
-  | Repository_freshness -> 6
-  | Autonomous_trigger -> 7
-  | Scheduled_automation -> 8
-  | Completion_authority -> 9
-  | Task_cancellations -> 10
-  | Pending_mentions -> 11
-  | Scope_messages -> 12
-  | Own_board_posts -> 13
-  | Board_activity -> 14
-  | Own_recent_actions -> 15
-  | Fleet_messages -> 16
+  | Lane_updates -> 6
+  | Repository_freshness -> 7
+  | Autonomous_trigger -> 8
+  | Scheduled_automation -> 9
+  | Completion_authority -> 10
+  | Task_cancellations -> 11
+  | Pending_mentions -> 12
+  | Scope_messages -> 13
+  | Own_board_posts -> 14
+  | Board_activity -> 15
+  | Own_recent_actions -> 16
+  | Fleet_messages -> 17
 ;;
 
 type retention =
@@ -95,6 +98,7 @@ let retention = function
   | Namespace_state -> Required
   (* Only validated SHA identities, never model-generated proposal text. *)
   | Workspace_memory -> Required
+  | Lane_updates -> Required
   (* Bounded rows: checkout name, branch, and small ints — the discovery
      itself caps the checkout count (Keeper_playground_checkouts). *)
   | Repository_freshness -> Required

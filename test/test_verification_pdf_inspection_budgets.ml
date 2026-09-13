@@ -180,10 +180,47 @@ let test_source_budget_precedes_dependency_or_process_lookup () =
   | Error error -> fail (Pdf.error_to_string error)
   | Ok _ -> fail "oversized source reached inspection"
 
+let test_poppler_calls_share_one_real_deadline () =
+  with_base_path (fun base_path ->
+    let bin = Filename.concat base_path "fake-poppler" in
+    Unix.mkdir bin 0o700;
+    let write name body =
+      let path = Filename.concat bin name in
+      let channel = open_out_bin path in
+      output_string channel ("#!/bin/sh\nset -eu\n" ^ body);
+      close_out channel;
+      Unix.chmod path 0o700 in
+    (* Each command finishes inside three seconds on its own. Together they
+       cannot. Resetting the budget for pdftoppm must fail this assertion. *)
+    write "pdftotext" {|/bin/sleep 2
+for destination do :; done
+printf '%s' '<doc><page width="200" height="200"/></doc>' > "$destination"
+|};
+    let started = Filename.concat base_path "render-started" in
+    write "pdftoppm" (Printf.sprintf {|printf started > %s
+/bin/sleep 2
+for destination do :; done
+printf '\211PNG\r\n\032\n' > "$destination.png"
+|} (Filename.quote started));
+    let original_path = Sys.getenv_opt "PATH" in
+    Fun.protect ~finally:(fun () -> Unix.putenv "PATH" (Option.value ~default:"" original_path))
+      (fun () ->
+        Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" original_path);
+        match Pdf.For_testing.inspect_with_budget ~budget_sec:3. ~base_path
+          ~max_image_bytes:per_page_limit ~bytes:two_page_pdf () with
+        | Error (Pdf.Poppler_budget_spent {program;budget_sec}) ->
+          check string "second tool spends remaining shared budget" "pdftoppm" program;
+          check (float 0.) "one document budget" 3. budget_sec;
+          check bool "renderer actually started" true (Sys.file_exists started)
+        | Error error -> fail (Pdf.error_to_string error)
+        | Ok _ -> fail "each Poppler command received a fresh budget"))
+
 let () =
   run "verification pdf inspection budgets"
     [ ( "budgets"
-      , [ test_case "a document over the page budget never renders" `Quick
+      , [ test_case "Poppler calls share one real deadline" `Quick
+            test_poppler_calls_share_one_real_deadline
+        ; test_case "a document over the page budget never renders" `Quick
             test_a_document_over_the_page_budget_never_renders
         ; test_case "pages under the per-page limit can still exceed the total" `Quick
             test_pages_under_the_per_page_limit_can_still_exceed_the_total

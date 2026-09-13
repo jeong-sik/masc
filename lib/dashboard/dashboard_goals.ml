@@ -302,11 +302,14 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
 
 
 
-let goal_store_unavailable_json detail =
+(* RFC-0444 PR-3 extends this envelope with reason, field, file, mirror and
+   reset_step members; PR-1 renders the value into the existing [error]
+   line. *)
+let goal_store_unavailable_json (unavailable : Goal_store.unavailable) =
   `Assoc
     [ "ok", `Bool false
     ; "error_code", `String "goal_store_unavailable"
-    ; "error", `String detail
+    ; "error", `String (Goal_store.unavailable_to_string unavailable)
     ]
 
 let goal_task_links_unavailable_json detail =

@@ -993,6 +993,10 @@ let add_delete_action_routes router =
              | Error (Goal_store.Persistence_failed _ as err) ->
                  respond_error ~status:`Internal_server_error ~request:req reqd
                    (Goal_store.delete_goal_error_to_string err)
+             (* RFC-0444 PR-3 replaces this line with the typed envelope. *)
+             | Error (Goal_store.Store_unavailable _ as err) ->
+                 respond_error ~status:`Internal_server_error ~request:req reqd
+                   (Goal_store.delete_goal_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "goal_id")
          )

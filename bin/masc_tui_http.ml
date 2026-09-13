@@ -1587,10 +1587,14 @@ let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
 
 (** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
 let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+    ~(keeper_name : string) ~(mode : Masc.Keeper_tool_approval_mode.mode) :
+    (unit, string) result =
   let body =
     Yojson.Safe.to_string
-      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+      (`Assoc
+        [ ("name", `String keeper_name)
+        ; ("mode", `String (Masc.Keeper_tool_approval_mode.mode_to_string mode))
+        ])
   in
   match
     post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body
@@ -2672,12 +2676,23 @@ let fetch_browser_lane_screenshot ~host ~port ~view ~tab_id =
   | Error (`Msg detail) -> Error ("invalid screenshot base64: " ^ detail)
   | Ok bytes -> Ok (screenshot, bytes)
 
-let fetch_browser_scene ?(scene_view=Browser_lane.Content) ?scope ~host ~port ~view ~tab_id () =
+type browser_follow_receipt = {
+  destination_url : string;
+  navigation_source : Masc.Browser_scene.navigation_source;
+}
+
+let fetch_browser_scene ?(scene_view=Browser_lane.Content) ?scope ?expected_url
+    ?navigation_source ~host ~port ~view ~tab_id () =
   let open Masc_tui_types.Browser_lane_view in
   let fields = match request_body {view with selected_tab = Some tab_id} with `Assoc fields -> fields | _ -> [] in
   let scope_fields = match scope with None -> [] | Some (target : Browser_lane.node_ref) ->
     ["scope",`Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id]] in
-  let body = `Assoc (fields @ ["view",`String (match scene_view with Browser_lane.Content -> "content" | Regions -> "regions")] @ scope_fields)
+  let expected_fields = match expected_url with None -> [] | Some url -> ["expectedUrl",`String url] in
+  let navigation_fields = match navigation_source with
+    | None -> []
+    | Some (source : Masc.Browser_scene.navigation_source) ->
+        ["navigationSource",`Assoc ["url",`String source.url;"documentId",`String source.document_id]] in
+  let body = `Assoc (fields @ ["view",`String (match scene_view with Browser_lane.Content -> "content" | Regions -> "regions")] @ scope_fields @ expected_fields @ navigation_fields)
     |> Yojson.Safe.to_string in
   let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
     ~path:"/api/v1/dashboard/browser-lane/scene" ~body in
@@ -2713,6 +2728,22 @@ let click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expecte
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
 
+let follow_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url =
+  let open Masc_tui_types.Browser_lane_view in
+  let fields = match request_body {view with selected_tab = Some tab_id} with
+    | `Assoc fields -> fields | _ -> [] in
+  let body = `Assoc (fields @ ["action",`String "follow_link"; "documentId",`String document_id;
+    "nodeId",`String node_id; "expectedUrl",`String expected_url]) |> Yojson.Safe.to_string in
+  let* json = post_json_with_timeout ~timeout_sec:25.0 ~host ~port
+    ~path:"/api/v1/dashboard/browser-lane/interact" ~body in
+  let* ok = get boolean "ok" json in
+  if not ok then let* detail = get string "error" json in Error detail
+  else
+    let* data = get (function `Assoc _ as value -> Ok value | _ -> Error "follow receipt data must be an object") "data" json in
+    let* destination_url = get string "destinationUrl" data in
+    let* navigation_source = get Masc.Browser_scene.navigation_source_of_json "navigationSource" data in
+    Ok {destination_url; navigation_source}
+
 let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
   let open Masc_tui_types.Browser_lane_view in
   let body = viewport_request ~tab_id ~expected_url ~action view |> Yojson.Safe.to_string in
@@ -2721,10 +2752,14 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
 
+let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
+  act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
+    ~action:(Browser_lane.Scroll {x=0; y=delta_y})
+
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

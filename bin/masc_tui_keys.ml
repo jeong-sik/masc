@@ -141,7 +141,28 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
    the name on the folded line while masc_tui.ml matches the byte. Apart,
    one of them drifts and the line names a key that does nothing. *)
 let expand_turn_key = "\019"
-let expand_turn_label = "^S"
+let expand_turn_label = "Ctrl-S"
+
+(* The control keys a body row names beside a figure or a draft. They are
+   here, beside the bindings that list them, so a row and the footer cannot
+   spell one key two ways: the composer said "^Y" under a footer saying
+   "Ctrl-Y", and the context header "^X" for a key the table did not list. *)
+let voice_speak_key = "Ctrl-Y"
+let voice_listen_key = "Ctrl-A"
+let roster_toggle_key = "Ctrl-B"
+
+(* Ctrl-X opens the context inspector from the chat. It is named on the
+   context header, beside the figure it explains, and nowhere else: the
+   footer has no room for a key whose home is that row. *)
+let context_inspector_key = "\024"
+let context_inspector_label = "Ctrl-X"
+
+(* The two voice keys, named for a reader looking at an empty draft. One
+   spelling for every row that takes a draft, so the composer row and the chat
+   pane cannot come to describe the same keys two ways. *)
+let voice_keys_hint =
+  Printf.sprintf "(%s to speak, %s to keep listening)" voice_speak_key
+    voice_listen_key
 
 
 let keepers_jump =
@@ -160,7 +181,7 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
-  ; b Meta "Ctrl-B" "keeper roster beside the chat — put away until you ask"
+  ; b Meta roster_toggle_key "keeper roster beside the chat — put away until you ask"
       ~help:"the Activity pane (Ctrl-L) answers the same question for every \
              keeper, so the column starts hidden; this brings it back on a \
              terminal wide enough to hold it"
@@ -206,6 +227,18 @@ let row_list_jumps =
 (* The same two, minus the page key, for the surfaces whose own entry already
    spells one because a detail pane under them pages too. *)
 let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
+
+(* The two keys the whole surface exists for, as one binding. Spelled apart
+   ("y" and "n") they were two items a fitted row could drop one at a time,
+   and the row that cannot lose the way to answer keeps its keys by that
+   spelling: [Masc_tui_footer.never_dropped_keys] pins "y / n", which the open
+   approval's own footer never said. *)
+let approval_decide =
+  b Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
+
+let approval_retry =
+  b Act "R" "retry Auto Judge"
+    ~help:"only when the blocked row is safely rearmable"
 
 let for_surface = function
   | Overview ->
@@ -295,9 +328,9 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
-      ; b Act "Ctrl-Y" "speak"
+      ; b Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
-      ; b Act "Ctrl-A" "keep listening"
+      ; b Act voice_listen_key "keep listening"
           ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
@@ -394,10 +427,8 @@ let for_surface = function
       ; b Act "Enter" "read the whole ask"
           ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
                  Home/End reach its ends, [ / ] step asks, Esc goes back"
-      ; b Act "y" "confirm"
-      ; b Act "n" "deny"
-      ; b Act "R" "retry Auto Judge"
-          ~help:"only when the blocked row is safely rearmable"
+      ; approval_decide
+      ; approval_retry
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "w" "Workspace Gate mode"
@@ -689,6 +720,17 @@ let hints_of_bindings bindings =
   |> String.concat "  "
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
+
+(* The keys an open approval answers to. Its footer was written out in the
+   renderer, which is how it came to spell the decision keys apart from the
+   queue behind it and to call [R] something the key table does not. *)
+let footer_hints_approval_detail =
+  hints_of_bindings
+    [ b Navigate "j/k" "scroll"
+    ; approval_decide
+    ; approval_retry
+    ; b Act "Esc" "back"
+    ]
 
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =

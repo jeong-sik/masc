@@ -1,15 +1,92 @@
+(* Which subprocess step of an observation refused to complete. Every
+   [Command_failed] names one, so the setup receipt can say where the
+   observation stopped instead of "did not complete". *)
+type phase =
+  | Observation_deadline of float
+  | Executable_lookup of string
+  | Version_probe
+  | Status_transport
+  | Transport_reported of transport_outcome
+
+(* The two failure statuses the embedded transport script writes on exit 0.
+   [captured] and [timed_out] are its two success shapes; anything else the
+   script did not write, so it is an invalid observation, not a phase. *)
+and transport_outcome =
+  | Transport_failed
+  | Transport_interrupted
+
 type error =
   | Private_home_unavailable
-  | Command_failed
+  | Command_failed of
+      { phase : phase
+      ; status : Unix.process_status option
+      ; stderr_tail : string
+      }
   | Timed_out
   | Invalid_observation
+
+(* The transport's stderr may carry a whole Python traceback; the receipt
+   needs the last lines, which is where the exception text sits. *)
+let stderr_tail_bytes = 512
+
+(* Last [stderr_tail_bytes] of the trimmed text, starting on a UTF-8
+   boundary so the receipt JSON never carries a cut glyph: continuation
+   bytes (0b10xxxxxx) after the byte cut are skipped, at most three. *)
+let stderr_tail stderr =
+  let trimmed = String.trim stderr in
+  let length = String.length trimmed in
+  if length <= stderr_tail_bytes
+  then trimmed
+  else (
+    let rec boundary index =
+      if index < length && Char.code trimmed.[index] land 0xC0 = 0x80
+      then boundary (index + 1)
+      else index
+    in
+    let start = boundary (length - stderr_tail_bytes) in
+    String.sub trimmed start (length - start))
+;;
+
+let command_failed ~phase ~status ~stderr =
+  Command_failed { phase; status; stderr_tail = stderr_tail stderr }
+;;
+
+(* A spawn that never produced a child has no exit status; its refusal text
+   takes the stderr slot so the receipt still says why nothing ran. *)
+let command_refused ~phase refusal =
+  command_failed ~phase ~status:None ~stderr:(Process_eio.spawn_refusal_to_string refusal)
+;;
+
+let phase_label = function
+  | Observation_deadline timeout_s ->
+    Printf.sprintf
+      "the observation deadline check (timeout %.17g s is not a positive finite number)"
+      timeout_s
+  | Executable_lookup command ->
+    Printf.sprintf "the executable lookup for %S (no regular executable file)" command
+  | Version_probe -> "the CLI version probe"
+  | Status_transport -> "the status-line transport"
+  | Transport_reported Transport_failed ->
+    "the status-line transport, which reported that the CLI produced no status line"
+  | Transport_reported Transport_interrupted ->
+    "the status-line transport, which reported that it was interrupted"
+;;
+
+let status_label = function
+  | None -> "no child process started"
+  | Some status -> With_process.status_to_string status
+;;
 
 let error_message = function
   | Private_home_unavailable ->
     "Antigravity's private context observation directory could not be prepared."
-  | Command_failed ->
-    "Antigravity context observation did not complete. Check the selected account and \
-     CLI."
+  | Command_failed { phase; status; stderr_tail } ->
+    Printf.sprintf
+      "Antigravity context observation did not complete during %s: %s%s. Check the \
+       selected account and CLI."
+      (phase_label phase)
+      (status_label status)
+      (if stderr_tail = "" then "" else "; stderr: " ^ stderr_tail)
   | Timed_out ->
     "Antigravity did not report its context window before the observation deadline."
   | Invalid_observation ->
@@ -19,41 +96,65 @@ let error_message = function
 
 let ( let* ) = Result.bind
 
-let parse_transport ~model ~cli_version body =
+let parse_records ~model ~cli_version rows =
+  List.fold_left
+    (fun result row ->
+       let* previous = result in
+       let* observed =
+         Runtime_antigravity_setup.parse_context
+           ~model
+           ~cli_version
+           (Yojson.Safe.to_string row)
+         |> Result.map_error (fun _ -> Invalid_observation)
+       in
+       match previous, observed with
+       | Runtime_antigravity_setup.Unknown_context, value
+       | value, Runtime_antigravity_setup.Unknown_context -> Ok value
+       | Observed_context left, Observed_context right when left = right -> Ok previous
+       | Observed_context _, Observed_context _ -> Error Invalid_observation)
+    (Ok Runtime_antigravity_setup.Unknown_context)
+    rows
+;;
+
+let parse_body ~model ~cli_version ~status ~stderr body =
   let open Yojson.Safe.Util in
   try
     let json = Yojson.Safe.from_string body in
     if json |> member "schema" <> `String "masc.antigravity_status_transport.v1"
     then Error Invalid_observation
     else (
-      match json |> member "status" with
-      | `String "timed_out" -> Error Timed_out
-      | `String "captured" ->
+      match json |> member "status" |> to_string_option with
+      | Some "timed_out" -> Error Timed_out
+      | Some "captured" ->
         let rows = json |> member "records" |> to_list in
         if rows = []
         then Error Invalid_observation
-        else
-          List.fold_left
-            (fun result row ->
-               let* previous = result in
-               let* observed =
-                 Runtime_antigravity_setup.parse_context
-                   ~model
-                   ~cli_version
-                   (Yojson.Safe.to_string row)
-                 |> Result.map_error (fun _ -> Invalid_observation)
-               in
-               match previous, observed with
-               | Runtime_antigravity_setup.Unknown_context, value
-               | value, Runtime_antigravity_setup.Unknown_context -> Ok value
-               | Observed_context left, Observed_context right when left = right ->
-                 Ok previous
-               | Observed_context _, Observed_context _ -> Error Invalid_observation)
-            (Ok Runtime_antigravity_setup.Unknown_context)
-            rows
-      | _ -> Error Command_failed)
+        else parse_records ~model ~cli_version rows
+      | Some "failed" ->
+        Error
+          (command_failed
+             ~phase:(Transport_reported Transport_failed)
+             ~status:(Some status)
+             ~stderr)
+      | Some "interrupted" ->
+        Error
+          (command_failed
+             ~phase:(Transport_reported Transport_interrupted)
+             ~status:(Some status)
+             ~stderr)
+      | Some _ | None -> Error Invalid_observation)
   with
   | Yojson.Json_error _ | Type_error _ -> Error Invalid_observation
+;;
+
+(* The transport owns exit 0 for every status it can report, including the
+   failure ones, so a non-zero exit is the shim itself dying (its own
+   traceback on stderr) and never a parseable body. *)
+let parse_transport ~model ~cli_version (status, body, stderr) =
+  match status with
+  | Unix.WEXITED 0 -> parse_body ~model ~cli_version ~status ~stderr body
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Error (command_failed ~phase:Status_transport ~status:(Some status) ~stderr)
 ;;
 
 let measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root =
@@ -111,7 +212,9 @@ let measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root 
     with
     | Ok (Unix.WEXITED 0, stdout, _) when String.trim stdout <> "" ->
       Ok (String.trim stdout)
-    | Ok _ | Error _ -> Error Command_failed
+    | Ok (status, _, stderr) ->
+      Error (command_failed ~phase:Version_probe ~status:(Some status) ~stderr)
+    | Error refusal -> Error (command_refused ~phase:Version_probe refusal)
   in
   (* The PTY transport itself owns its deadline and kills/reaps its unreaped
      child group before returning. An outer kill timeout could orphan that
@@ -133,8 +236,8 @@ let measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root 
          ; Printf.sprintf "%.17g" timeout_s
          ])
   with
-  | Ok (Unix.WEXITED 0, body, _) -> parse_transport ~model ~cli_version body
-  | Ok _ | Error _ -> Error Command_failed
+  | Ok run -> parse_transport ~model ~cli_version run
+  | Error refusal -> Error (command_refused ~phase:Status_transport refusal)
 ;;
 
 let executable_path command =
@@ -160,12 +263,14 @@ let executable_path command =
       candidates
   with
   | Some path -> Ok path
-  | None -> Error Command_failed
+  | None -> Error (command_failed ~phase:(Executable_lookup command) ~status:None ~stderr:"")
 ;;
 
 let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
   if (not (Float.is_finite timeout_s)) || timeout_s <= 0.
-  then Error Command_failed
+  then
+    Error
+      (command_failed ~phase:(Observation_deadline timeout_s) ~status:None ~stderr:"")
   else (
     try
       let ( let* ) = Result.bind in

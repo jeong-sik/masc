@@ -13,7 +13,7 @@
 
 open Masc_tui_types
 
-val tools_pane_strip : state -> string
+val tools_pane_strip : cols:int -> state -> string
 (** The pane selector drawn in the surface header, with the active pane
     marked. *)
 

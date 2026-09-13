@@ -85,6 +85,10 @@ def run(binary):
             held.set()
             assert release.wait(timeout=10.0), "test did not release scene response"
         view, scope = request["view"], request.get("scope")
+        if "expectedUrl" in request:
+            assert request["expectedUrl"] == "https://example.org/alpha#thread"
+            assert request["navigationSource"] == {
+                "url": "https://example.org/alpha", "documentId": "alpha"}
         if scope:
             assert scope == {"documentId": channel, "nodeId": channel + "-messages"}, "stale scope reused"
             nodes = [node("message", "text", f"{channel.upper()} FOCUSED VERSION {version}")]
@@ -94,10 +98,14 @@ def run(binary):
         else:
             nodes = [node("intro", "text", "ALPHA ARTICLE " + "long wrapped content " * 180),
                      node("first", "control", "FIRST ACTION", clickable=True, disabled=False, editable=False),
-                     node("last", "control", f"LAST ACTION VERSION {version}", clickable=True, disabled=False, editable=False)]
+                     node("last", "control", f"LAST ACTION VERSION {version}", clickable=True, disabled=False, editable=False),
+                     node("thread", "control", "OBSERVED THREAD", tag="a",
+                          href=f"https://example.org/{channel}#thread",
+                          clickable=True, disabled=False, editable=False)]
+        observed_url = request.get("expectedUrl", f"https://example.org/{channel}")
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "elapsed_ms": 1, "schema": "masc.browser.scene.v1", "view": view,
-            "scope": scope, "documentId": channel, "url": f"https://example.org/{channel}",
+            "scope": scope, "documentId": channel, "url": observed_url,
             "title": channel.title(), "truncated": False, "nodes": nodes,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}}}
 
@@ -105,6 +113,20 @@ def run(binary):
         "clients": [{"clientId": client, "browser": "zen"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(scene)
+
+    def follow(body):
+        request = json.loads(body)
+        requests.append(dict(request))
+        assert request["action"] == "follow_link"
+        assert request["documentId"] == "alpha" and request["nodeId"] == "thread"
+        assert request["expectedUrl"] == "https://example.org/alpha"
+        return 200, {"ok": True, "data": {
+            "action": "follow_link", "urlBefore": request["expectedUrl"],
+            "url": request["expectedUrl"],
+            "destinationUrl": "https://example.org/alpha#thread",
+            "navigationSource": {"url": request["expectedUrl"], "documentId": "alpha"}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = h.RequestHttpResponse(follow)
 
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go Browser Lane", b"ALPHA TEXT READY")
@@ -121,11 +143,19 @@ def run(binary):
             raise
         record("same-page-selection-retained", output)
 
+        h.send_and_wait(process, fd, output, b"\t", b"[>4 link] OBSERVED THREAD")
+        h.send_and_wait(process, fd, output, b"\r", b"https://example.org/alpha#thread")
+        assert any(request.get("action") == "follow_link" for request in requests)
+
         with lock:
             state["hold_next"] = True
         try:
             assert h.wait_for_fixture_event(process, fd, output, held, timeout=3.0)
-            h.send_and_wait(process, fd, output, b"\x1b[Z", b"[>2 button/link] FIRST ACTION")
+            # The followed destination is a fresh document, so selection is
+            # reset to its first readable node. Tab advances to the first
+            # actionable control from there; reverse-tab would wrap to the
+            # last observed action.
+            h.send_and_wait(process, fd, output, b"\t", b"[>2 button/link] FIRST ACTION")
             assert h.wait_for_fixture_event(process, fd, output, subsequent_cadence, timeout=3.0)
             h.send_and_wait(process, fd, output, b"\t", b"[>3 button/link] LAST ACTION VERSION 2")
             record("operator-input-during-slow-refresh", output)

@@ -12,12 +12,53 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+import ssl
+import urllib.error
+import urllib.request
+from email.message import Message
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/package-macos-runtime.py'
 spec = importlib.util.spec_from_file_location('runtime_package', SCRIPT)
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
+
+
+class PythonHttpsProbe(unittest.TestCase):
+    def test_https_rejection_is_a_validated_response(self):
+        body = io.BytesIO(b'forbidden')
+        response = urllib.error.HTTPError('https://example.com', 403, 'Forbidden', Message(), body)
+        with patch.object(urllib.request, 'urlopen', side_effect=response) as request:
+            exec(package.PYTHON_HTTPS_PROBE, {})
+        request.assert_called_once_with('https://example.com', timeout=30)
+        self.assertTrue(body.closed)
+
+    def test_network_and_certificate_errors_propagate(self):
+        for cause in (ssl.SSLCertVerificationError('untrusted certificate'),
+                      OSError('DNS lookup failed'), OSError('Tunnel connection failed: 403 Forbidden')):
+            error = urllib.error.URLError(cause)
+            with self.subTest(cause=cause), patch.object(urllib.request, 'urlopen', side_effect=error):
+                with self.assertRaises(urllib.error.URLError) as raised:
+                    exec(package.PYTHON_HTTPS_PROBE, {})
+                self.assertIs(raised.exception, error)
+
+    def test_http_downgrade_is_rejected_even_on_http_error(self):
+        for code in (200, 403):
+            body = io.BytesIO(b'response')
+            response = urllib.error.HTTPError('http://example.com', code, 'response', Message(), body)
+            effect = response if code == 403 else None
+            with self.subTest(code=code), patch.object(
+                    urllib.request, 'urlopen', return_value=response, side_effect=effect):
+                with self.assertRaisesRegex(ValueError, 'non-HTTPS'):
+                    exec(package.PYTHON_HTTPS_PROBE, {})
+            self.assertTrue(body.closed)
+
+    def test_https_success_is_retained(self):
+        body = io.BytesIO(b'ok')
+        response = urllib.error.HTTPError('https://example.com', 200, 'OK', Message(), body)
+        with patch.object(urllib.request, 'urlopen', return_value=response):
+            exec(package.PYTHON_HTTPS_PROBE, {})
+        self.assertTrue(body.closed)
 
 
 class PythonArchive(unittest.TestCase):

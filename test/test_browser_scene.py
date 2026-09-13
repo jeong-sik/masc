@@ -8,7 +8,7 @@ scene=(root/'lib/browser_scene_script.ml').read_text().split('let runtime = {js|
 interaction=(root/'lib/browser_interaction.ml').read_text().split('let script = {js|',1)[1].split('|js}',1)[0]
 guard=(root/'lib/browser_interaction.ml').read_text().split('let pointer_guard_script = {js|',1)[1].split('|js}',1)[0]
 bg=(root/'connectors/browser/extension/background.js').read_text();assert bg.startswith(scene+'\n'), 'scene runtime differs between extension and driver'
-html='''<!doctype html><meta charset="utf-8"><title>Semantic Zen fixture</title><style>body{font:22px sans-serif;margin:28px;background:#101d2c;color:#d8f4ee}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{padding:24px;border:1px solid #55958c;border-radius:16px}button,textarea{font:inherit;padding:10px}canvas{background:linear-gradient(45deg,#3baaa0,#662db1)}.hidden{display:none}</style><h1>한글과 실제 DOM</h1><p>Copy exact text: 별빛🙂 café</p><div style="visibility:hidden">HIDDEN_PARENT<span style="visibility:visible">VISIBLE_CHILD</span></div><div class="grid"><section><button id="increment" onclick="document.querySelector('#count').textContent=String(+document.querySelector('#count').textContent+1)">Increase</button><p id="count">0</p><label>Message<textarea id="message" aria-label="Message"></textarea></label><input type="password" value="SECRET_VALUE_MUST_NOT_APPEAR"></section><section><canvas width="180" height="100" style="font-size:0" aria-label="Gradient canvas"></canvas><p class="hidden">HIDDEN_MUST_NOT_APPEAR</p></section></div>'''
+html='''<!doctype html><meta charset="utf-8"><title>Semantic Zen fixture</title><style>body{font:22px sans-serif;margin:28px;background:#101d2c;color:#d8f4ee}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{padding:24px;border:1px solid #55958c;border-radius:16px}button,textarea{font:inherit;padding:10px}canvas{background:linear-gradient(45deg,#3baaa0,#662db1)}.hidden{display:none}</style><h1>한글과 실제 DOM</h1><h2><span>Nested post title</span></h2><div role="heading" aria-level="3"><span>ARIA section title</span></div><div role="heading"><span>Invalid heading level</span></div><div role="heading" aria-level="3.0"><span>Decimal heading level</span></div><p>Copy exact text: 별빛🙂 café</p><div style="visibility:hidden">HIDDEN_PARENT<span style="visibility:visible">VISIBLE_CHILD</span></div><div class="grid"><section><button id="increment" onclick="document.querySelector('#count').textContent=String(+document.querySelector('#count').textContent+1)">Increase</button><p id="count">0</p><label>Message<textarea id="message" aria-label="Message"></textarea></label><input type="password" value="SECRET_VALUE_MUST_NOT_APPEAR"></section><section><canvas width="180" height="100" style="font-size:0" aria-label="Gradient canvas"></canvas><p class="hidden">HIDDEN_MUST_NOT_APPEAR</p></section></div>'''
 class H(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   if self.path == '/redirect':
@@ -50,6 +50,10 @@ try:
  (a.out/'scene.json').write_text(json.dumps(s,ensure_ascii=False,indent=2))
  check('scene does not mutate page DOM/CSS',before==js('return document.documentElement.outerHTML;'))
  text=''.join(n['text'] for n in s['nodes']);check('Unicode survives as real text','별빛🙂 café' in text)
+ check('nested HTML heading ancestry is typed',any(n['text']=='Nested post title' and n.get('headingLevel')==2 for n in s['nodes']))
+ check('explicit ARIA heading level is typed',any(n['text']=='ARIA section title' and n.get('headingLevel')==3 for n in s['nodes']))
+ check('missing ARIA heading level stays plain',any(n['text']=='Invalid heading level' and n.get('headingLevel') is None for n in s['nodes']))
+ check('non-integer ARIA heading level stays plain',any(n['text']=='Decimal heading level' and n.get('headingLevel') is None for n in s['nodes']))
  check('hidden text and password value absent','HIDDEN_MUST_NOT_APPEAR' not in text and 'SECRET_VALUE_MUST_NOT_APPEAR' not in json.dumps(s))
  check('visibility override preserves visible descendant','VISIBLE_CHILD' in text and 'HIDDEN_PARENT' not in text)
  check('raster fallback includes zero-font-size canvas',any(n['kind']=='raster' and n['fontSize']==0 for n in s['nodes']))
@@ -132,6 +136,11 @@ try:
  js("const pane=document.querySelector('#messages');pane.replaceWith(pane.cloneNode(true));")
  try:js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','scope':scope,'maxChars':5000}]);raise AssertionError('detached scope accepted')
  except RuntimeError as e:check('replaced region rejects old scope','scene_node_detached' in str(e))
+ js("document.body.innerHTML='<main aria-label=Timeline><article aria-label=\"Post A\">Post A</article><article aria-label=\"Post B\">Post B</article></main>';" )
+ social_regions=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
+ article_nodes=[n for n in social_regions['nodes'] if n['kind']=='region' and n['role']=='article']
+ check('social feed outline exposes typed article regions',len(article_nodes)==2 and [n['text'] for n in article_nodes]==['Post A','Post B'])
+ check('social article regions retain one document identity',all(n['nodeId'] and social_regions['documentId']==regions['documentId'] for n in article_nodes))
  # Landmark-free chat layout: only actual visible overflow panes are scopes.
  js("document.body.innerHTML='<div id=chat aria-label=Messages style=\"height:100px;overflow:auto\"><div style=\"height:500px\">Channel body</div></div><div style=\"display:none;height:10px;overflow:auto\"><div style=\"height:500px\">Hidden</div></div><div style=\"height:100px;overflow:auto\">No overflow</div>';")
  fallback=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])

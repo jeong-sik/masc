@@ -58,6 +58,24 @@ val get_trigger_policy : unit -> Slack_gateway_state.trigger_policy option
 (** What that surface currently reports, or [None] before any gateway startup
     has installed one. *)
 
+(** Why the connector cannot do its job. Closed sum: the config boundary
+    reports the connector disabled or misconfigured ([Connector_unavailable]
+    carries its operator-facing reason), or one of the two credentials is
+    unset or blank. The app token is named first because without it the
+    gateway never starts at all. *)
+type credential_error =
+  | Connector_unavailable of string
+  | Missing_app_token
+  | Missing_bot_token
+
+val credential_error : unit -> credential_error option
+(** The current verdict, read from the config boundary at call time. [None]
+    when the connector is enabled and both tokens are present. This is the
+    value {!status_json} folds into its [error] field. *)
+
+val credential_error_message : credential_error -> string
+(** Operator-facing message for one verdict. Total; never blank. *)
+
 (** Typed failure modes for Slack REST actions. Closed sum. *)
 type send_error =
   | Missing_token

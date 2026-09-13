@@ -111,9 +111,10 @@ let isolated_criterion =
 ;;
 
 let current_criterion config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some goal -> Goal_store.criterion_of_goal goal
-  | None -> fail ("missing Goal criterion: " ^ goal_id)
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_store.criterion_of_goal goal
+  | Goal_store.Goal_absent -> fail ("missing Goal criterion: " ^ goal_id)
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
 ;;
 
 let proof_identity config goal_id =
@@ -214,7 +215,7 @@ let test_update_is_not_gated_by_b1 () =
         ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   (* B1 gates creation only: updating an existing row without re-stating the
      success condition is metadata maintenance, not a new declaration. *)
@@ -223,7 +224,7 @@ let test_update_is_not_gated_by_b1 () =
   with
   | Ok (_, `updated) -> ()
   | Ok (_, `created) -> fail "an existing id must update, not create"
-  | Error msg -> fail ("ungated update rejected: " ^ msg)
+  | Error error -> fail ("ungated update rejected: " ^ Goal_store.write_error_to_string error)
 ;;
 
 let test_undecodable_goal_store_reports_corruption_not_b1 () =
@@ -242,11 +243,12 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
   poison (goals_path ^ ".last-good");
   match Goal_store.upsert_goal config ~title:"x" ~metric:"m" ~target_value:"1" () with
   | Ok _ -> fail "upsert_goal wrote over an undecodable store"
-  | Error msg ->
-    check bool "fail-closed persistence error, not the B1 message" true
-      (String_util.contains_substring msg "did not decode");
-    check bool "must not read as the B1 rejection" false
-      (String_util.contains_substring msg "metric and target_value")
+  (* The refusal is the store's typed Unavailable, never the B1 rejection:
+     the create/update split is decided only on a state that was read. *)
+  | Error (Goal_store.Store_unavailable { reason = Goal_store.Not_json _; _ }) -> ()
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+          | Goal_store.Rejected _ | Goal_store.Persist_failed _ as other) ->
+    fail ("expected Store_unavailable Not_json, got: " ^ Goal_store.write_error_to_string other)
 ;;
 
 (* Ledger: record/read round-trip *)
@@ -483,9 +485,10 @@ let verifier_transition config goal_id decision evidence =
 ;;
 
 let stored_phase config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some goal -> Goal_phase.to_string goal.Goal_store.phase
-  | None -> fail ("goal not found: " ^ goal_id)
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_phase.to_string goal.Goal_store.phase
+  | Goal_store.Goal_absent -> fail ("goal not found: " ^ goal_id)
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
 ;;
 
 let ledger_record config goal_id =
@@ -878,7 +881,7 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
      Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
    with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation writes no ledger row, so the wedge starts with none at all —
      the same hole the handler re-arms, reached without a row to empty. *)
   (match Goal_verification.get_record config ~goal_id with

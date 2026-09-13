@@ -27,7 +27,7 @@ type keeper = {
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
-  k_last_proactive_outcome : string;
+  k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
   k_created_at : string;
   k_updated_at : string;
 }
@@ -946,9 +946,7 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
     k_total_tokens = usage.total_tokens;
     k_total_cost_usd = usage.total_cost_usd;
     k_last_turn_ts;
-    k_last_proactive_outcome =
-      Keeper_meta_contract.proactive_cycle_outcome_to_string
-        proactive.last_outcome;
+    k_last_proactive_outcome = Some proactive.last_outcome;
     k_created_at = meta.created_at;
     k_updated_at = meta.updated_at;
   }
@@ -957,7 +955,7 @@ let keeper_of_declaration (row : Keeper_declared_roster.t) =
   { k_origin = Declared_keeper row.requirements; k_name = row.name;
     k_trace_id = ""; k_paused = false; k_current_task_id = None;
     k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = 0.;
-    k_last_turn_ts = ""; k_last_proactive_outcome = "";
+    k_last_turn_ts = ""; k_last_proactive_outcome = None;
     k_created_at = ""; k_updated_at = "" }
 
 let decode_keeper json =
@@ -6532,7 +6530,17 @@ let decode_tool_approval_mode_overrides json =
     | [] -> Ok (List.rev acc)
     | item :: rest ->
         let* keeper = required_string_field item "keeper" in
-        let* mode = required_string_field item "mode" in
+        let* word = required_string_field item "mode" in
+        (* The server writes this through [mode_to_string]; a word its reader
+           does not know is a wire error, and it says which keeper sent it. *)
+        let* mode =
+          match Keeper_tool_approval_mode.mode_of_string word with
+          | Some mode -> Ok mode
+          | None ->
+              Error
+                (Printf.sprintf "tool approval mode for %s is not auto or yolo: %s"
+                   keeper word)
+        in
         loop ((keeper, mode) :: acc) rest
   in
   loop [] items

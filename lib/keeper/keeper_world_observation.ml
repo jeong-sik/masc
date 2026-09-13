@@ -1541,6 +1541,9 @@ let collect_board_events_without_advancing_cursor
    still open, so the observation reads it directly. *)
 let open_goal_ids ~(config : Workspace.config) =
   Goal_store.list_goals_result config ()
+  (* [active_goals] stays a string error in PR-1; RFC-0444 PR-5 carries the
+     reason and file into the observation. *)
+  |> Result.map_error Goal_store.unavailable_to_string
   |> Result.map (List.filter_map (fun (g : Goal_store.goal) ->
        if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None))
 ;;

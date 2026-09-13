@@ -204,6 +204,9 @@ type keeper_chat_event =
 
 (** {1 Stream operations} *)
 
+val bus_capacity : int
+(** Events the bus buffers before [publish] suspends the publisher. *)
+
 type t
 (** Bounded per-turn event stream plus its optional journal hook (RFC-0412
     stage 1). One publisher fiber writes it; one adapter fiber reads it.

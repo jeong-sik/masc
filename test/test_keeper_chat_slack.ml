@@ -435,6 +435,43 @@ let test_adapter_reads_past_the_terminal_until_the_bus_closes () =
   check bool "events after the terminal are read, not delivered" false
     (List.exists (fun content -> contains content "published after the terminal") !sends)
 
+(* The failure this bus contract exists for: a publisher that keeps writing
+   after the terminal while the adapter has already settled. With the reader
+   gone the writer parks in [Eio.Stream.add] once the bus is full and the turn
+   never returns. The publisher is a daemon so a regression ends as a red
+   assertion rather than a switch that never closes around it. *)
+let events_past_the_terminal = 2 * Masc.Keeper_chat_events.bus_capacity
+
+let test_publisher_is_not_wedged_behind_the_settled_adapter () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let stream = Masc.Keeper_chat_events.create () in
+  let publisher_finished = ref false in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    List.iter (Masc.Keeper_chat_events.publish stream)
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-wedge"; thread_id = "thread-wedge" }
+      ; Masc.Keeper_chat_events.Text_delta "final answer"
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-wedge" }
+      ];
+    for _ = 1 to events_past_the_terminal do
+      Masc.Keeper_chat_events.publish stream
+        (Masc.Keeper_chat_events.Text_delta "published after the terminal")
+    done;
+    Masc.Keeper_chat_events.close stream;
+    publisher_finished := true;
+    `Stop_daemon);
+  let outcomes = ref [] in
+  S.adapter_loop ~events:stream
+    ~send_plain:(fun ~content:_ -> Ok ())
+    ~send_blocks:(fun ~content:_ ~blocks:_ -> Ok ())
+    ~on_send_result:(fun result -> outcomes := result :: !outcomes)
+    ();
+  check int "delivery settles exactly once" 1 (List.length !outcomes);
+  check bool "the publisher drained past the terminal and closed" true
+    !publisher_finished
+
 let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
   let outcomes =
     run_adapter
@@ -900,6 +937,8 @@ let () =
             test_native_activity_failure_does_not_affect_delivery
         ; test_case "reads past the terminal until the bus closes" `Quick
             test_adapter_reads_past_the_terminal_until_the_bus_closes
+        ; test_case "a publisher is not wedged behind the settled adapter" `Quick
+            test_publisher_is_not_wedged_behind_the_settled_adapter
         ; test_case "a bus closed without a terminal settles once" `Quick
             test_adapter_settles_when_the_bus_closes_without_a_terminal
         ] )

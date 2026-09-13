@@ -220,6 +220,9 @@ through `n`/`p` and `Tab`/`Shift-Tab`. If no article role or article ancestor wa
 observed, the shortcut leaves the current selection unchanged. In a content
 scene this selects the first observed node; `Enter` still performs that node's
 observed action, while region scoping remains the explicit `v` → `Enter` path.
+When multiple article ancestors are visible, their compact boundaries include
+the observed ordinal (for example, `[article 2/5]`); this is the current
+viewport's observed count, not a claim that a feed is complete.
 
 Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
 observed from `BrowserRead mode=regions` as `scope`. This path selects an

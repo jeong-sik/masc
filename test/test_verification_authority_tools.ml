@@ -1049,10 +1049,13 @@ let test_goal_and_task_inspect_real_mp4 () =
       (Tool_result.is_failed (read surface path)))
     [task,outside;goal,outside;task,"escape.mp4";goal,producer_name ^ "/escape.mp4"];
   with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
-    let result = read task "clip.mp4" in
-    Alcotest.(check bool) "missing decoder is stated" true
-      (Tool_result.is_failed result && String_util.contains_substring
-        (Tool_result.message result) "video_dependency_unavailable"));
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "missing decoder keeps dependency classification" true
+        (Tool_result.failure_class result = Some Tool_result.Dependency_unavailable);
+      Alcotest.(check bool) "missing decoder is stated" true
+        (String_util.contains_substring (Tool_result.message result) "video_dependency_unavailable"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
   (* The process runner's deadline result must not reject the producer's
      evidence as a policy violation. Exercise the public dispatch projection. *)
   let fake_bin = Filename.concat dir "timeout-bin" in
@@ -1062,11 +1065,13 @@ let test_goal_and_task_inspect_real_mp4 () =
     Out_channel.with_open_bin executable (fun out -> output_string out "#!/bin/sh\nexit 124\n");
     Unix.chmod executable 0o700) ["ffmpeg"; "ffprobe"];
   with_env "PATH" fake_bin (fun () ->
-    let result = read task "clip.mp4" in
-    Alcotest.(check bool) "command deadline is a runtime failure" true
-      (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
-    Alcotest.(check bool) "timeout diagnostic explicit" true
-      (String_util.contains_substring (Tool_result.message result) "video_inspection_timeout"));
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "command deadline is a runtime failure" true
+        (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+      Alcotest.(check bool) "timeout diagnostic explicit" true
+        (String_util.contains_substring (Tool_result.message result) "video_inspection_timeout"))
+      [task,"clip.mp4";goal,producer_name ^ "/clip.mp4"]);
   let oversized = Filename.concat root "oversized.mp4" in
   Out_channel.with_open_bin oversized (fun out ->
     seek_out out (64 * 1024 * 1024);

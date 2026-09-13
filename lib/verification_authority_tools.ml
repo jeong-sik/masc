@@ -405,7 +405,13 @@ let max_media_source_bytes = Verification_pdf_inspection.max_source_bytes
 let video_result t ~name ~path ~bytes ~start_time =
   match Verification_video_inspection.inspect ~base_path:t.config.base_path ~bytes with
   | Error error ->
-    Tool_result.error ~failure_class:Tool_result.Runtime_failure
+    let failure_class = match error with
+      | Verification_video_inspection.Dependency_unavailable _ -> Tool_result.Dependency_unavailable
+      (* A decoder deadline does not establish that the submitted media is
+         invalid. Keep runtime failure distinct from an input policy refusal. *)
+      | Command_timed_out _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+        Tool_result.Runtime_failure in
+    Tool_result.error ~failure_class
       ~tool_name:name ~start_time (Verification_video_inspection.error_to_string error)
   | Ok inspection ->
     let data = `Assoc ["path",`String path; "inspection",Verification_video_inspection.to_yojson inspection] in

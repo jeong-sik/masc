@@ -66,6 +66,11 @@ type write_error =
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val keeper_id_of_filename : string -> string option
+(** Parse this store's filename suffix without filesystem access. [None] means
+    another filename kind; [Some id] is the exact stem, which may still require
+    keeper-name validation by the discovery owner. *)
+
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 (** Every keeper id this store holds a file for, sorted. Read by the deploy
     preflight: this module's decoder refuses a row carrying an unknown field,

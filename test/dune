@@ -1,3 +1,19 @@
+(rule
+ (alias runtest-test_dashboard_observation_quota)
+ (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
+  ../scripts/fixtures/release-evidence/runtime.toml
+  ../scripts/fixtures/release-evidence/agent-core-models-overlay.toml)
+ (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_dashboard_observation_quota)))
+
+(test
+ (name test_keeper_peer_artifact)
+ (modules test_keeper_peer_artifact)
+ (libraries masc_test_deps))
+
 (test
  (name test_keeper_codex_current_context)
  (modules test_keeper_codex_current_context)
@@ -19,6 +35,12 @@
  (libraries masc_test_deps))
 
 ; Test Environment Configuration
+
+(test
+ (name test_workspace_memory_curator_lane)
+ (modules test_workspace_memory_curator_lane)
+ (deps ../config/prompts/workspace_memory_curator.md)
+ (libraries alcotest masc masc.server masc.masc_core masc.fs_compat masc.config_dir_resolver masc.prompt_registry yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)

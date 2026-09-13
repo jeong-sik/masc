@@ -162,7 +162,8 @@ jobs:
           # _build/default/bin/main_eio.exe directly; this runner has no OCaml
           # toolchain, so anywhere else leaves start-masc.sh trying to build
           # from source and exiting "dune not found".
-          scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" $contract_test
+          scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" \
+            --lifecycle-out "$RUNNER_TEMP/masc-release-lifecycle" $contract_test
 
       # Manual branch runs also serve isolated runtime/TUI experiments. Keep
       # their compiled bytes even when a later unrelated release check fails.
@@ -416,9 +417,13 @@ jobs:
         run: |
           chmod +x scripts/release-evidence.sh
           mkdir -p dist
+          lifecycle_args=()
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            lifecycle_args+=("$RUNNER_TEMP/masc-release-lifecycle")
+          fi
           scripts/release-evidence.sh \
             "$MASC_BIN_DIR"/main_eio.exe \
-            dist/release-evidence-${{ matrix.arch }}.md
+            dist/release-evidence-${{ matrix.arch }}.md "${lifecycle_args[@]}"
 
       # Exercise scripts/install.sh end to end against the just-packaged
       # binaries: stage dist/ as a file:// release, install through the real

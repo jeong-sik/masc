@@ -1,0 +1,14 @@
+{
+  "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('internal-agents-monitor').getByRole('button', { name: /succeeded Workspace Curator/ })\u001b[22m\n",
+  "errors": [
+    "Unexpected API request: /dashboard/src/api/dashboard.ts",
+    "Unexpected API request: /dashboard/src/api/dashboard-memory-journal.ts",
+    "Unexpected API request: /dashboard/src/api/core.ts"
+  ],
+  "requests": [
+    "/dashboard/src/api/dashboard.ts",
+    "/dashboard/src/api/dashboard-memory-journal.ts",
+    "/dashboard/src/api/core.ts"
+  ],
+  "body": ""
+}

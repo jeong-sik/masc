@@ -318,7 +318,7 @@ let for_surface = function
           ~help:"cycle Memory journal summary / full / hidden"
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
-      ; b Act "y / n" "approval" ~help:"answer a tool approval"
+      ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "Q" "leave"
           ~help:"leave with a turn running, without interrupting it \
                  (empty draft, no capture or edit in flight)"

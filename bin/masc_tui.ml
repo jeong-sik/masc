@@ -1101,6 +1101,10 @@ let reset_message_file_changes state keeper_name =
    previous target's compose was holding ([composing_for_keeper]) is released
    by the retarget, and this is when it goes. Passed in because the drain is
    defined with the dispatch path, after this. *)
+let forget_recall (state : state) =
+  state.msg_recall_at <- None;
+  state.msg_recall_draft <- ("", [], [], None)
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name ~drain_queue =
   (* The paste goes back into the draft before the draft is put away. A spill
@@ -1115,6 +1119,9 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
      have written files while this pane was elsewhere. Compact mode still
      performs no GET; it only invalidates this presentation cache. *)
   reset_message_file_changes state keeper_name;
+  (* Recall is a walk through one Keeper's messages. A Down on the new
+     Keeper must not restore the previous Keeper's draft or image payload. *)
+  forget_recall state;
   state.msg_target_keeper_name <- Some keeper_name;
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
@@ -1253,7 +1260,21 @@ let recall_land (state : state) entries at =
   let entry = List.nth entries (count - 1 - at) in
   set_composer_text state entry.me_text;
   state.msg_recall_replaces <-
-    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
+    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id;
+  (* A queued edit owns the complete request, not just its text. Never attach
+     the draft's images to a different recalled line. *)
+  let attachments, references =
+    match state.msg_recall_replaces with
+    | Some item -> item.request.attachments, item.request.references
+    | None -> [], []
+  in
+  state.msg_attachments <- attachments;
+  state.msg_references <- references;
+  state.msg_attachments_since <-
+    (if attachments = [] then None
+     else match List.rev state.msg_history with
+       | newest :: _ -> Some (msg_anchor newest)
+       | [] -> None)
 
 let recall_older (state : state) =
   let sent = own_typed_messages state in
@@ -1263,7 +1284,9 @@ let recall_older (state : state) =
     let at =
       match state.msg_recall_at with
       | None ->
-          state.msg_recall_draft <- Buffer.contents state.msg_input;
+          state.msg_recall_draft <-
+            (Buffer.contents state.msg_input, state.msg_attachments,
+             state.msg_references, state.msg_attachments_since);
           0
       | Some at -> min (at + 1) (count - 1)
     in
@@ -1275,19 +1298,19 @@ let recall_newer (state : state) =
   match state.msg_recall_at with
   | None -> ()
   | Some 0 ->
-      state.msg_recall_at <- None;
       (* Back at the operator's own draft: it is not an edit of anything. *)
       state.msg_recall_replaces <- None;
-      set_composer_text state state.msg_recall_draft
+      let text, attachments, references, since = state.msg_recall_draft in
+      forget_recall state;
+      set_composer_text state text;
+      state.msg_attachments <- attachments;
+      state.msg_references <- references;
+      state.msg_attachments_since <- since
   | Some at ->
       let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
       if List.length sent > at then recall_land state sent at
-
-(* Typing makes the composer the operator's again: the walk is over, so a step
-   forward must not replace what they just wrote with a draft from before it. *)
-let forget_recall (state : state) = state.msg_recall_at <- None
 
 (* A queued line is drawn in the conversation, so cancelling one or pulling it
    back into the composer has to take its row with it. The row is found by the
@@ -1344,7 +1367,6 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
   end
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
-    ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
@@ -1365,23 +1387,6 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
         load_older ~before
     | Some _ | None -> ()
   in
-  let live_is_on_screen live =
-    (* [msg_live] survives leaving the chat, so a prompt for keeper A must
-       not be answered (or interrupted) from keeper B's screen. *)
-    state.msg_target_keeper_name = Some (turn_log_keeper_name live)
-  in
-  match state.msg_live, key with
-  | Some live, ("y" | "Y" | "n" | "N")
-    when live_is_on_screen live
-         && Option.is_some
-              (Keeper_chat_transcript.awaiting_approval live.tl_transcript) -> (
-      match Keeper_chat_transcript.awaiting_approval live.tl_transcript with
-      | Some awaiting ->
-          answer_approval ~tool_call_id:awaiting.Keeper_chat_transcript.call_id
-            ~allow:(String.lowercase_ascii key = "y");
-          true
-      | None -> true)
-  | _ ->
   let apply_autocomplete direction =
     let text = Buffer.contents state.msg_input in
     let keeper_names =
@@ -1413,6 +1418,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
+    forget_recall state;
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
@@ -1589,6 +1595,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          waiting line is abandoned the same way: the line stays queued and the
          next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
+      forget_recall state;
       if Option.is_some state.msg_recall_replaces
       then begin
         clear_staged_attachments state;
@@ -1646,6 +1653,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        with
        | None -> ()
        | Some (item, _rest) ->
+         forget_recall state;
          let request = item.Chat_queue.request in
          state.msg_recall_replaces <- Some item;
          (* The attachments come back with the text. They were staged for this
@@ -8651,6 +8659,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
             | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
          | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
+  | Masc_tui_command.Answer_tool_approval allow ->
+      Buffer.clear state.msg_input;
+      (match target with
+       | None -> notice ~role:Message_local "Select a Keeper first"
+       | Some target ->
+         match inflight_for_keeper state target with
+         | Some entry ->
+           (match Keeper_chat_transcript.awaiting_approval entry.log.tl_transcript with
+            | Some awaiting ->
+              launch_keeper_approval state ~mailbox entry.sent_request
+                ~tool_call_id:awaiting.call_id ~allow
+            | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
+         | None -> notice ~role:Message_local "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
       match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper ~explicit:true state ~mailbox) with
@@ -11217,6 +11238,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Open_link_preview _
          | Masc_tui_command.Open_links_list
          | Masc_tui_command.Set_embeds _
+        | Masc_tui_command.Answer_tool_approval _
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
         | Masc_tui_command.Run_next
@@ -11249,7 +11271,6 @@ let handle_composer_key state ~base_path ~mailbox key =
              on screen, so Esc here has nothing to stop. *)
           ~interrupt_turn:(fun () -> false)
           ~submit_message:(fun _ -> ())
-          ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
                    ~open_named_image:(fun () -> open_named_image state ~mailbox)
@@ -18716,19 +18737,6 @@ and is loaded on demand through keeper_skill.
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)
-                   ~answer_approval:(fun ~tool_call_id ~allow ->
-                     match
-                       Option.bind state.msg_live (fun live ->
-                         inflight_by_request_id state (turn_log_request_id live))
-                     with
-                     | Some request ->
-                         launch_keeper_approval state ~mailbox:async_messages
-                           request ~tool_call_id ~allow
-                     | None ->
-                         (* No request in flight means no turn to answer for.
-                            The prompt belongs to a turn, so this is
-                            unreachable while one is shown. *)
-                         ())
                    ~load_older:(fun ~before ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->

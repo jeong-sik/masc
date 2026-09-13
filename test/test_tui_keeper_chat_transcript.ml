@@ -1024,7 +1024,7 @@ let test_a_held_call_shows_its_question () =
         (contains ~needle:"Run Edit on a.ml?" row);
       (* Without the keys the prompt is a statement, not a question. *)
       check bool "and so is how to answer it" true
-        (contains ~needle:"[y]" row && contains ~needle:"[n]" row)
+        (contains ~needle:"/approve" row && contains ~needle:"/deny" row)
   | rows -> failf "expected one prompt row, got %d" (List.length rows)
 
 let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
@@ -1137,9 +1137,9 @@ let test_approval_controls_precede_variable_text () =
   | [row] ->
       let narrow = Masc_tui_message_layout.fit_width row 36 in
       check bool "allow and deny fit before long tool/question text" true
-        (String.starts_with ~prefix:"[y] allow  [n] deny" narrow);
+        (String.starts_with ~prefix:"/approve · /deny" narrow);
       check bool "narrow approval keeps both answer controls" true
-        (contains ~needle:"[y]" narrow && contains ~needle:"[n]" narrow)
+        (contains ~needle:"/approve" narrow && contains ~needle:"/deny" narrow)
   | _ -> fail "expected one approval attention row"
 ;;
 

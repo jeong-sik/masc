@@ -3691,6 +3691,19 @@ type detail_read_request = {
   drr_started_ns: int64;
 }
 
+type observed_interrupt_status =
+  | Interrupt_sending
+  | Interrupt_signalled
+  | Interrupt_declined of string
+  | Interrupt_failed of string
+
+type observed_interrupt =
+  { oi_keeper : string
+  ; oi_token : string
+  ; oi_started_at : float
+  ; oi_sent_ns : int64
+  ; oi_status : observed_interrupt_status }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -4162,6 +4175,8 @@ type state = {
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_observed_interrupts: observed_interrupt list;
+  mutable keeper_run_next_inflight: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -5729,6 +5744,8 @@ let create_state
   keeper_turns = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_observed_interrupts = [];
+  keeper_run_next_inflight = None;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -7561,6 +7578,96 @@ let keeper_message_activity_rows (state : state) =
       else [])
 ;;
 
+let keeper_observed_turn (state : state) keeper_name =
+  if Option.is_some state.keeper_turns_error then None
+  else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if row.ktr_keeper_name <> keeper_name then None
+    else match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token = Some token; _ } ->
+        Some (started_at_unix, token)
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_observed_interrupt (state : state) keeper_name started_at =
+  List.find_opt (fun item -> item.oi_keeper = keeper_name && item.oi_started_at = started_at)
+    state.keeper_observed_interrupts
+;;
+
+let keeper_observed_interrupt_action (state : state) keeper_name =
+  let current_token = Option.map snd (keeper_observed_turn state keeper_name) in
+  let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
+    state.keeper_observed_interrupts
+    |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
+      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+  Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
+;;
+
+let keeper_observed_interrupt_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> keeper_name then None else
+      match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
+        (match keeper_observed_interrupt state keeper_name started_at_unix with
+         | Some item -> Some (match item.oi_status with
+           | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
+           | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
+           | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
+           | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
+         | None when Option.is_some interrupt_token ->
+           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+         | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7570,6 +7677,7 @@ let keeper_message_status_rows (state : state) =
   in
   List.length state.msg_inflight
   + List.length (keeper_message_activity_rows state)
+  + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

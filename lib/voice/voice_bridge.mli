@@ -230,6 +230,12 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
+val recorder_refusal_message : Process_eio.spawn_refusal -> string
+(** What {!record_and_transcribe} answers when its recorder never started.
+    A missing executable is named with the command that installs it -- a fresh
+    mac has no sox, which carries [rec] -- and every other refusal keeps the
+    runner's own sentence rather than a guessed cause. *)
+
 val measure_noise_floor : agent_id:string -> unit -> float option
 (** One short capture, as long as the configured
     {!Voice_config.calibration_seconds}, returning the room's RMS amplitude.

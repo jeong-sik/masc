@@ -118,3 +118,26 @@ val apply
     [default_model] its section requires have to land together, and applying
     them one at a time would refuse the first half and leave the file in a
     state the loader rejects. *)
+
+type voice_placement =
+  | On_the_section (** no TTS section yet: the voice becomes the workspace default *)
+  | On_the_endpoint (** a section exists and its voice belongs to another provider *)
+
+val voice_placement : section_exists:bool -> voice_placement
+(** Where a voice chosen for a local (command-run) endpoint is written.
+
+    There are two places because a voice name is provider-shaped: [say] takes a
+    label like ["Yuna"], ElevenLabs a 20-character id. One workspace default
+    cannot serve both, so an endpoint carries its own when it has to.
+
+    But an endpoint voice outranks [voice.tts.agent_voices]
+    ({!Voice_config.voice_for_agent_at_endpoint}), so one written where it is
+    not needed makes every per-keeper voice inert. Measured on a fresh
+    workspace 2026-09-13: with it, a keeper mapped to Eddy spoke in Yuna
+    (85,908 bytes); without it, Eddy (119,044 bytes), while an unmapped keeper
+    still got Yuna.
+
+    So a fresh workspace gets the section default and per-keeper voices layer
+    over it, which is the order a reader expects. Only a workspace that already
+    has a section — whose voice is some other provider's — puts one on the
+    endpoint, and accepts that the mappings do not reach that endpoint. *)

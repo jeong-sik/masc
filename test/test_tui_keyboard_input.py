@@ -5817,6 +5817,58 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
     return interact
 
 
+def quit_names_waiting_messages_interaction(gate: GatedHttpResponse) -> Interaction:
+    """A first q says how many waiting messages a second one drops.
+
+    A line sent while a turn runs waits in the TUI, not at the server, and
+    quitting drops it: measured 2026-09-13, three sentences continuous voice
+    mode queued behind a running turn were gone after the TUI was closed and
+    reopened.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        send_and_wait(
+            process, master_fd, output, b"first-line", composer_showing(b"first-line")
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+        send_and_wait(
+            process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line")
+        )
+        send_and_wait(process, master_fd, output, b"\r", b"NEXT 1")
+        # Leave the chat while its turn still runs. The pane already says the
+        # line waits in this TUI; Overview is where the quit notice is drawn.
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"q",
+            # The events pane cuts the notice; the count is the part it keeps.
+            b"q: 1 unsent message is dropped",
+        )
+        # The held turn would otherwise keep the fixture's stream open past
+        # the session; the harness's second q ends it either way.
+        gate.release.set()
+
+    return interact
+
+
 def chat_steer_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     fixtures, gate = chat_queue_http_fixtures()
 
@@ -13591,6 +13643,16 @@ def run_send_on_stop_regression(executable: str) -> None:
             )
 
 
+def run_quit_waiting_regression(executable: str) -> None:
+    fixtures, gate = chat_queue_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="A first q names the waiting messages a second drops",
+        interact=quit_names_waiting_messages_interaction(gate),
+        http_fixtures=fixtures,
+    )
+
+
 def run_ctrl_y_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -15776,6 +15838,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "send-on-stop":
         run_send_on_stop_regression(os.path.abspath(sys.argv[1]))
         print("tui send_on_stop regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "quit-waiting":
+        run_quit_waiting_regression(os.path.abspath(sys.argv[1]))
+        print("tui quit with waiting messages regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "ctrl-y":
         run_ctrl_y_regression(os.path.abspath(sys.argv[1]))

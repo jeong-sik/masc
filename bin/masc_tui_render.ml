@@ -7076,7 +7076,10 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" request.vr_created_at
+    (* In the terminal's zone, like every other Created on a detail. This
+       one printed the server's RFC 3339 text, offset and all, under a header
+       clock in local time. *)
+  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -7085,11 +7088,15 @@ let verification_detail_lines ~width
      drawn, two of them as "No X was recorded". The pane already tells a
      reader how to read the request from its artifacts and evidence, which is
      what those rows were pointing away from. *)
+  @ [ Ansi.dim, ""; Ansi.bold, "  HOW TO READ THIS" ]
+    (* Wrapped like the evidence items under it. As one row it was cut at
+       "what the verifier can …" beside the roster pane, and a reading
+       instruction that stops mid-sentence instructs nothing. *)
+  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+       ~sanitize:Keeper_chat.terminal_safe_text
+       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
+     |> List.map (fun line -> Ansi.dim, "    " ^ line))
   @ [ Ansi.dim, ""
-    ; Ansi.bold, "  HOW TO READ THIS"
-    ; ( Ansi.dim
-      , "    Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now." )
-    ; Ansi.dim, ""
     ; Ansi.bold
     , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
         (List.length request.vr_required_artifacts)

@@ -9204,6 +9204,22 @@ def planning_review_hierarchy_interaction() -> Interaction:
             raise AssertionError(
                 f"the Task Review title repeats the badge's count: {title!r}"
             )
+        # The request's detail: Created in the terminal's zone, not the
+        # server's RFC 3339 text with its offset, and the reading note whole
+        # rather than cut at the row's end.
+        send_and_wait(process, master_fd, output, b"\r", b"VERIFICATION REQUEST")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        created = rows.get(screen_row_of(rows, b"Created"), b"")
+        if b"+09:00" in created or not re.search(rb"Created\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", created):
+            raise AssertionError(
+                f"the request's Created is not the terminal's clock: {created!r}"
+            )
+        if screen_row_of(rows, b"inspect now.") < 0:
+            raise AssertionError(
+                f"the reading note was cut instead of wrapped: {screen_text(bytes(output))!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Task Review")
         verdicts = send_and_wait(
             process,
             master_fd,

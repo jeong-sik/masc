@@ -364,6 +364,8 @@ let visual_lines ?(failed_note = "") ~height ~width view =
               [line "No observations recorded."; line ~tone:Dim "3:install a package  4:select worker and observe";
                line ~tone:Attention (match snapshot.complete with Some true -> "Slice complete · no rows"
                  | Some false -> "PARTIAL slice · no rows" | None -> "Slice completeness unknown")]
+              @ List.mapi (fun index (instance : instance) ->
+                  line (Printf.sprintf "> %s · %s" instance.title (phase_label instance.phase))) snapshot.instances
               @ List.concat_map (fun (source : Row.coverage) -> wrap ~tone:(if source.complete then Normal else Attention)
                   (source.source_id ^ " · " ^ (if source.complete then "complete" else "partial") ^
                    Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)) snapshot.output.coverage

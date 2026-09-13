@@ -2563,6 +2563,28 @@ let test_the_config_frame_is_the_shared_contract () =
     (in_config "config_content_height")
 ;;
 
+(* Code and Resources open on a title row -- name, clock, connection badge --
+   like every other surface; they opened on a pane header, so nothing on them
+   said the server was gone. The panes' height gives that row up in one place:
+   Code's list and its key handlers read [code_pane_content_height]. *)
+let test_the_pane_surfaces_open_on_a_title_row () =
+  let calls binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " draws the title row once") 1
+        (calls binding_name "pane_surface_title"))
+    [ "render_code"; "render_resources" ];
+  check bool "Code's list reads the shared pane height" true
+    (calls "render_code" "code_pane_content_height" >= 1);
+  check bool "Code's pane height gives up the title row" true
+    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+  check bool "Resources gives up the same title row" true
+    (calls "render_resources" "pane_surface_content_height" >= 1)
+;;
+
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
    token carried syntax colour. Pin the shared document renderer at the
@@ -2703,6 +2725,10 @@ let () =
           "the config frame is the shared contract"
           `Quick
           test_the_config_frame_is_the_shared_contract;
+        test_case
+          "the pane surfaces open on a title row"
+          `Quick
+          test_the_pane_surfaces_open_on_a_title_row;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

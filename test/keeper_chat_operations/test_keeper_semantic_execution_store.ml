@@ -537,7 +537,7 @@ let test_recheck_cannot_take_another_execution_source_incarnation () =
     check bool "disjoint update leaves B's record unchanged" true
       (b_before = Execution.to_json (get store b.id)))
 
-let test_input_survives_request_delivery_and_independent_work () =
+let test_input_survives_checkpoint_deferral_and_independent_work () =
   with_store (fun path store ->
     let operation_id = Chat.Operation_id.of_string "direct-input-lifetime" |> string_ok in
     let _submitted = Store.submit store ~now:1. ~operation_id
@@ -552,21 +552,29 @@ let test_input_survives_request_delivery_and_independent_work () =
     let a = Store.semantic_prepare store ~id ~input ~sources:[] ~now:3. |> execution_ok |> created in
     check string "admission digest binds actual claimed input" claimed.execution_digest a.input_sha256;
     let a = apply store a Execution.Confirm_sources |> fun a -> apply store a Execution.Begin_execution in
-    let a = apply store a (Execution.Record_observation observation) in
+    let _observed = apply store a (Execution.Record_observation observation) in
     let cp = checkpoint () in
-    let waiting = apply store a (Execution.Suspend cp) in
-    let delivered = Store.succeed_running store ~now:21. ~operation_id ~outcome_ref:"delivered-response" |> store_ok in
-    check bool "request ledger released its terminal input" true (Option.is_none delivered.input);
+    let deferred = Store.defer_direct_checkpoint store ~now:21. ~operation_id
+      ~execution_digest:claimed.execution_digest ~checkpoint:(Execution.Agent_core cp) |> store_ok in
+    let waiting = get store id in
+    check bool "checkpoint keeps original request pending with admitted input" true
+      (deferred.state = Chat.Queued && deferred.input = Some input);
     let b = running store 200 [] |> fun b -> apply store b (Execution.Settle Execution.Completed) in
     check bool "B completed and released its own input" true (Option.is_none b.input);
     Store.close store |> store_ok;
     with_open path (fun reopened ->
       let saved = get reopened id in
-      check bool "A retains its own edited input after request delivery and B" true (saved.input = Some input);
+      check bool "A retains its own edited input after checkpoint deferral and B" true (saved.input = Some input);
       check string "A input identity survived reopen" waiting.input_sha256 saved.input_sha256;
-      let resumed = apply reopened saved (Execution.Resume_checkpoint cp) in
+      let reclaimed = Store.claim_next reopened ~now:25. |> store_ok in
+      check bool "same request is reclaimed" true
+        (Option.map (fun operation -> operation.Chat.operation_id) reclaimed = Some operation_id);
+      Store.resume_direct_checkpoint reopened ~now:26. ~operation_id ~observed:(Execution.Agent_core cp) |> store_ok;
+      let resumed = get reopened id in
       assert_count "A keeps its own repetition evidence" 1 resumed;
-      let done_ = apply reopened resumed (Execution.Settle Execution.Completed) in
+      let delivered = Store.succeed_running reopened ~now:27. ~operation_id ~outcome_ref:"actual-response" |> store_ok in
+      check bool "actual delivery releases request input" true (Option.is_none delivered.input);
+      let done_ = get reopened id in
       check bool "actual semantic completion releases payload" true (Option.is_none done_.input);
       check string "terminal admission retains digest" saved.input_sha256 done_.input_sha256;
       (match Store.semantic_prepare reopened ~id ~input ~sources:[] ~now:30. |> execution_ok with
@@ -648,7 +656,7 @@ let test_corrupt_input_cannot_become_fresh_or_repaired () =
 let () =
   run "keeper semantic execution store"
     [ "admitted input", [
-        test_case "Direct input outlives delivery and independent Auto work" `Quick test_input_survives_request_delivery_and_independent_work;
+        test_case "Direct input survives checkpoint deferral and independent Auto work" `Quick test_input_survives_checkpoint_deferral_and_independent_work;
         test_case "canonical input identity rejects changed requests" `Quick test_input_canonical_idempotency_and_conflict;
         test_case "restart retains input until actual settlement" `Quick test_recovery_preserves_input_until_explicit_settlement;
         test_case "invalid input creates no partial admission" `Quick test_invalid_admitted_input_is_not_committed;

@@ -1975,6 +1975,21 @@ let test_system_prompt_flag_is_omitted_when_unset () =
     (flag_value (argv (Some "keeper instructions")) "--system-prompt")
 ;;
 
+let test_system_file_keeps_large_context_off_argv () =
+  let prompt = String.make (256 * 1024) 'x' in
+  let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt=Some prompt} in
+  match Runtime_claude_code.command ~system_prompt_file:"/tmp/private-system.txt"
+      config ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok argv ->
+    check (option string) "replacement file flag" (Some "/tmp/private-system.txt")
+      (flag_value argv "--system-prompt-file");
+    check (option string) "prompt bytes are absent from argv" None
+      (flag_value argv "--system-prompt");
+    check bool "no argument contains the large context" false (List.mem prompt argv)
+;;
+
 let test_native_posture_selects_tools_flag () =
   let argv posture = native_argv ~native:posture ~dynamic_tools:[] in
   check (option string) "none disables the built-in set" (Some "")
@@ -2020,6 +2035,7 @@ let () =
             "setting sources render in argv"
             `Quick
             test_setting_sources_render_in_argv
+        ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
         ; test_case
             "an unset system prompt omits the flag"
             `Quick

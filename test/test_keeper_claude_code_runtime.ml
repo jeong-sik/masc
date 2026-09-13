@@ -104,8 +104,9 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   output_string output "  ;;\nesac\n";
   Option.iter (fun marker ->
     output_string output ("previous_arg=''\nfor arg in \"$@\"; do\n" ^
-      "  if [ \"$previous_arg\" = '--system-prompt' ]; then printf '%s' \"$arg\" > " ^
-      shell_quote marker ^ "; fi\n  previous_arg=$arg\ndone\n")) system_marker;
+      "  if [ \"$previous_arg\" = '--system-prompt-file' ]; then cat -- \"$arg\" > " ^
+      shell_quote marker ^ "; printf '%s' \"$arg\" > " ^ shell_quote (marker ^ ".path") ^
+      "; fi\n  previous_arg=$arg\ndone\n")) system_marker;
   output_string output "session=''\n";
   output_string output "for arg in \"$@\"; do\n";
   output_string output "  case \"$arg\" in\n";
@@ -154,13 +155,15 @@ let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp li
 ;;
 
 let with_fixture_sequence
+    ?first_system_marker
+    ?second_system_marker
     ?first_prompt_marker
     ?second_prompt_marker
     first_lines
     second_lines
     f =
-  let first_path = fixture_script ?prompt_marker:first_prompt_marker first_lines in
-  let second_path = fixture_script ?prompt_marker:second_prompt_marker second_lines in
+  let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
+  let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
   let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
   Sys.remove counter_path;
   let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
@@ -936,6 +939,8 @@ let history_uses_current_schema history =
 
 let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
   let base_path = temp_workspace () in
+  let first_system_marker = Filename.concat base_path "full-system.txt" in
+  let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
   let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
   let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
   let initial_messages =
@@ -968,6 +973,7 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
              frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint)
          | _ -> fail "native Gate seed did not settle") in
        with_fixture_sequence
+         ~first_system_marker ~second_system_marker
          ~first_prompt_marker
          ~second_prompt_marker
          [ Emit prompt_too_long_statusless_result ]
@@ -990,6 +996,26 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       List.iter (fun marker ->
+         let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
+         check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
+         [first_system_marker; second_system_marker];
+       (if native_gate then (
+         let snapshot marker = In_channel.with_open_bin marker In_channel.input_all
+           |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
+         let full = snapshot first_system_marker and shrunk = snapshot second_system_marker in
+         let messages value = Yojson.Safe.Util.member "messages" value in
+         check string "large replacement file preserves full initial canonical snapshot"
+           (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json initial_messages)))
+           (Yojson.Safe.to_string (messages full));
+         check bool "projected retry is smaller in the replacement file" true
+           (List.length (Yojson.Safe.Util.to_list (messages shrunk)) < List.length initial_messages);
+         List.iter (fun value ->
+           let digest = messages value |> Yojson.Safe.to_string
+             |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+           check string "file transport preserves projected provenance hash" digest
+             Yojson.Safe.Util.(value |> member "snapshot_sha256" |> to_string)) [full; shrunk]
+       ));
        (if native_gate then
           (* A native continuation sends only its new input; the official
              session already owns the prior history, including the Gate. *)
@@ -1284,6 +1310,8 @@ let test_keeper_settles_and_resumes () =
          "SECOND_GOAL"
          (content_of_wire_message raw);
        let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
+       let scoped_path = In_channel.with_open_bin (system_marker ^ ".path") In_channel.input_all in
+       check bool "replacement context file removed after child settles" false (Sys.file_exists scoped_path);
        check bool "core instructions replace the prior prompt" true
          (String.starts_with ~prefix:"Updated core instructions" system_wire);
        let snapshot = system_wire |> String.split_on_char '\n'

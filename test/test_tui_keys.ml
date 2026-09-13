@@ -873,6 +873,35 @@ let test_the_sheet_explains_the_keeper_columns () =
         (List.length Masc_tui_keeper_mark.column_legend)
         (List.length entries)
 
+(* The listing tail is Global's to say. Each surface section used to end with
+   r refresh / Tab next / q quit again, under a Global section that already
+   names Tab / Shift-Tab, r and q. *)
+let test_the_sheet_says_the_listing_tail_once () =
+  let sections = Masc_tui_keys.help_sections () in
+  let tail = [ ("r", "refresh"); ("Tab", "next"); ("q", "quit") ] in
+  List.iter
+    (fun (title, rows) ->
+      if not (String.equal title "Global") then
+        List.iter
+          (fun row ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s does not repeat %s" title (fst row))
+              false (List.mem row rows))
+          tail)
+    sections;
+  match List.assoc_opt "Global" sections with
+  | None -> Alcotest.fail "the sheet has no Global section"
+  | Some rows ->
+      List.iter
+        (fun key ->
+          Alcotest.(check bool) ("Global names " ^ key) true
+            (List.exists (fun (k, _) -> String.equal k key) rows))
+        [ "Tab / Shift-Tab"; "r"; "q" ];
+      Alcotest.(check bool) "a surface's own r stays" true
+        (match List.assoc_opt "Config" sections with
+         | None -> false
+         | Some config -> List.mem ("r", "reload") config)
+
 let test_braille_sparkline () =
   Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
     (braille_sparkline []);
@@ -1915,6 +1944,8 @@ let () =
             test_the_sheet_names_every_keeper_mark
         ; Alcotest.test_case "the sheet explains the keeper columns" `Quick
             test_the_sheet_explains_the_keeper_columns
+        ; Alcotest.test_case "the sheet says the listing tail once" `Quick
+            test_the_sheet_says_the_listing_tail_once
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
         ; Alcotest.test_case "Config footer follows active pane and width" `Quick

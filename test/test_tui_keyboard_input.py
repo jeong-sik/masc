@@ -10705,6 +10705,14 @@ def open_changes(
     could not arrive however many presses they were given.
     """
     tab_until(process, master_fd, output, b"MASC Keepers")
+    # The Keepers title is drawn before the roster it heads. [f] opens Changes
+    # for the selected keeper, so pressed on the title alone it opened
+    # "Changes (no keeper selected)" and waited for a file that surface was
+    # never going to list -- the screen Linux CI dumped here, with the composer
+    # already saying "to alpha" because the composer does not read the list
+    # cursor. The file fixture is alpha's, so wait until alpha is the selected
+    # row before asking for its changes.
+    select_keeper_row(process, master_fd, output, b"alpha")
     return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
 
 

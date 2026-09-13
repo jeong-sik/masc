@@ -1246,7 +1246,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
       ~session_id:"session" ~updated_at:3. |> Result.get_ok in
     let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
-      ~session_id:"session" ~turn_id:"turn" ~updated_at:4. |> Result.get_ok in
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
     check bool "inflight does not claim acknowledged context" true
       ((observed started).acknowledged_turn = None);
     let settled = settle ~base_path ~keeper_name ~expected:started

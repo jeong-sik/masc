@@ -46,9 +46,10 @@ let node json =
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
       Ok (Control {clickable;editable;disabled})
     | _ -> Error "unknown semantic scene node kind" in
-  let source_context = match field "sourceContext" json with
-    | Ok value -> Browser_source_context.of_json value
-    | Error _ -> Browser_source_context.Unmapped in
+  (* The extension always emits sourceContext, null when the element carries
+     no dev-source hint. A node without the key is a producer defect, not an
+     unmapped element, so it fails the scene decode. *)
+  let* source_context = Result.map Browser_source_context.of_json (field "sourceContext" json) in
   Ok {node_id;kind;tag;text;rects;color;font_size;font_weight;white_space;source_context}
 let scope_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->

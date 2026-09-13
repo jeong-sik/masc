@@ -13967,7 +13967,8 @@ def run_browser_scene_regression(executable: str) -> None:
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
             "text": text, "rects": [{"x": 0, "y": 0, "width": 100, "height": 20}],
-            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal"}
+            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal",
+            "sourceContext": None}
         if kind == "control":
             result.update(clickable=True, editable=False, disabled=False)
         return result

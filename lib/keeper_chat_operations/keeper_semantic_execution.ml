@@ -336,8 +336,7 @@ let apply ~now action current =
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend checkpoint ->
           (match current.phase with
-           | Running -> unchanged (Suspended checkpoint)
-           | Resuming_runtime_retry _ | Resuming_gate _ -> reject ()
+           | Running | Resuming_runtime_retry _ | Resuming_gate _ -> unchanged (Suspended checkpoint)
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_runtime_retry retry ->
           (match current.phase with

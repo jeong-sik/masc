@@ -278,6 +278,13 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_checkpoint_ref.t option, error) result
+val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_checkpoint_ref.t -> (Chat_operation.t, error) result
+val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_checkpoint_ref.t -> (unit, error) result
+
 val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.runtime_retry option, error) result
 val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->

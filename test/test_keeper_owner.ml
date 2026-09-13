@@ -969,6 +969,7 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
      fail "autonomous admission blamed the wrong lane"
    | Ok (`Busy (Owner.Turn_busy None)) ->
      fail "autonomous admission reported an unpublished holder"
+   | Ok (`Busy Owner.Admission_paused) -> fail "unpaused owner unexpectedly refused admission"
    | Ok (`Busy (Owner.Shutdown_requested _)) ->
      fail "autonomous admission reported shutdown instead of the chat holder"
    | Ok (`Ran _) -> fail "autonomous admission ignored the chat holder"
@@ -1587,6 +1588,9 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   check int "both successors remain queued" 2 (Owner.operation_projection owner).queued_count;
   (match Owner.run_autonomous_if_idle owner (fun () -> fail "paused autonomy ran") with
    | Ok (`Busy Owner.Admission_paused) -> () | _ -> fail "autonomy bypassed durable pause");
+  (match Owner.run_maintenance_if_idle owner (fun () -> "operator queue control") with
+   | Ok (`Ran value) -> check string "paused queue remains controllable" "operator queue control" value
+   | _ -> fail "pause blocked operator maintenance");
   (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
    | Owner.Operation_not_current _ -> () | _ -> fail "settled execution was signalled");
   (match owner_ok (Owner.run_next_operation owner ~operation_id:third ~observed:None) with

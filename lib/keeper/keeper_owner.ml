@@ -1136,7 +1136,9 @@ let start
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
                 let result = try interrupt (); Operation_interrupt_signalled
-                  with exn -> Operation_interrupt_failed (Printexc.to_string exn) in
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn -> Operation_interrupt_failed (Printexc.to_string exn) in
                 Eio.Promise.resolve resolve (Ok result);
                 loop state shutdown_operation_id))
         | Command (Run_next_operation { operation_id; observed }, resolve) ->
@@ -1164,7 +1166,9 @@ let start
                   | None -> false, None
                   | Some interrupt ->
                     (try interrupt (); true, None
-                     with exn -> false, Some (Printexc.to_string exn)) in
+                     with
+                     | Eio.Cancel.Cancelled _ as exn -> raise exn
+                     | exn -> false, Some (Printexc.to_string exn)) in
                 Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; resumed = can_resume; interrupt_error }));
                 start_child_if_needed state shutdown_operation_id;
                 loop state shutdown_operation_id))
@@ -1402,7 +1406,9 @@ let start
              Eio.Promise.resolve
                resolve
                (Ok (Autonomous_busy (Shutdown_requested operation_id)))
-           | None when not (turn_admission_open state) ->
+           | None when (match lane with
+               | Autonomous | Chat_operation -> not (turn_admission_open state)
+               | Maintenance -> false) ->
              Eio.Promise.resolve resolve (Ok (Autonomous_busy Admission_paused))
            | None ->
              (match reject_if_stopping state (fun () -> Ok ()) with

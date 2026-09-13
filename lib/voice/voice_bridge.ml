@@ -277,7 +277,8 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
     | [] -> None
     | endpoint :: rest ->
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-      if Voice_runtime_overlay.transport_supports_http_tts adapter
+      if Voice_runtime_overlay.speaker_of_transport adapter.transport
+         = Voice_runtime_overlay.Over_http
       then (
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
@@ -441,20 +442,11 @@ let probe_tts ?(agent_id = "probe") ~message () =
          (List.map
             (fun (endpoint : Voice_config.endpoint) ->
               let outcome =
-                if not endpoint.Voice_config.enabled
-                then Skipped "disabled in the configuration"
-                else if
-                  (* say synthesizes without HTTP, so the question is whether
-                     this kind speaks at all, not whether it speaks over a
-                     wire. Asking the second one reported the kind a fresh mac
-                     actually has as not asked. *)
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Voice_mcp | Voice_config.Whisper_cli -> true
-                  | Voice_config.Openai_compat
-                  | Voice_config.Elevenlabs_direct
-                  | Voice_config.Macos_say -> false
-                then Skipped "this endpoint kind does not synthesize"
-                else (
+                (* Produce the clip the way the speak path would, so what this
+                   reports is what a turn would get rather than a second
+                   opinion, then drop it: the probe answers whether the
+                   endpoint spoke, not with what. *)
+                let attempt speak =
                   let output_file =
                     make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
                   in
@@ -464,31 +456,40 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   let voice =
                     Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
                   in
-                  (* The probe produces the audio the same two ways the speak
-                     path does, so that what it reports is what a turn would
-                     get rather than a second opinion. *)
-                  let result =
-                    match endpoint.Voice_config.kind with
-                    | Voice_config.Macos_say ->
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file
-                    | Voice_config.Openai_compat
-                    | Voice_config.Elevenlabs_direct
-                    | Voice_config.Voice_mcp
-                    | Voice_config.Whisper_cli ->
-                      (match tts.Voice_config.default_model with
-                       | None ->
-                         Error
-                           "this endpoint is asked for a model by name and [voice.tts] \
-                            names none"
-                       | Some model ->
-                         speak_via_http_tts_to_file
-                           endpoint ~agent_id ~message ~voice ~model ~output_file)
-                  in
+                  let result = speak ~voice ~output_file in
                   remove_quietly output_file;
                   match result with
                   | Ok size -> Answered (Printf.sprintf "%d bytes of audio" size)
-                  | Error reason -> Refused reason)
+                  | Error reason -> Refused reason
+                in
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else
+                  match Voice_runtime_overlay.speaker_of_endpoint endpoint with
+                  | Voice_runtime_overlay.Does_not_speak ->
+                    Skipped "this endpoint kind does not synthesize"
+                  | Voice_runtime_overlay.By_mcp_tool ->
+                    (* It does speak: agent_speak on its MCP endpoint. This
+                       probe cannot make that call -- voice-verify runs outside
+                       Eio_main.run and call_voice_mcp_endpoint needs a clock
+                       and a net -- so it says so, instead of being filed with
+                       the kind that cannot speak at all. *)
+                    Skipped
+                      "reached by an MCP tool call, which this probe does not make"
+                  | Voice_runtime_overlay.By_command ->
+                    attempt (fun ~voice ~output_file ->
+                      Voice_bridge_transport.speak_via_command_to_file
+                        endpoint ~message ~voice ~output_file)
+                  | Voice_runtime_overlay.Over_http ->
+                    attempt (fun ~voice ~output_file ->
+                      match tts.Voice_config.default_model with
+                      | None ->
+                        Error
+                          "this endpoint is asked for a model by name and [voice.tts] \
+                           names none"
+                      | Some model ->
+                        speak_via_http_tts_to_file
+                          endpoint ~agent_id ~message ~voice ~model ~output_file)
               in
               { endpoint_id = endpoint.Voice_config.id
               ; kind = endpoint.Voice_config.kind
@@ -986,7 +987,11 @@ let try_http_tts_for_browser_audio
   | None -> None
   | Some model ->
   let http_endpoints =
-    List.filter Voice_runtime_overlay.endpoint_supports_http_tts endpoints
+    List.filter
+      (fun endpoint ->
+        Voice_runtime_overlay.speaker_of_endpoint endpoint
+        = Voice_runtime_overlay.Over_http)
+      endpoints
   in
   let rec try_endpoints = function
     | [] -> None

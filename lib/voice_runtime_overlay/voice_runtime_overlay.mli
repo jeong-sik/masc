@@ -57,8 +57,21 @@ val adapter_for_endpoint : Voice_config.endpoint -> adapter
 val select_endpoints : ?provider:string -> Voice_config.endpoint list -> Voice_config.endpoint list
 val auth_env_name : ?endpoint_api_key_env:string -> adapter -> string option
 val endpoint_auth_env_name : Voice_config.endpoint -> string option
-val transport_supports_http_tts : adapter -> bool
-val endpoint_supports_http_tts : Voice_config.endpoint -> bool
+(** How a transport speaks, if it does. Replaces a boolean that answered false
+    for three unrelated reasons, so a transport added to {!transport} has to
+    choose an arm instead of silently joining the endpoints that are never
+    asked. *)
+type speaker =
+  | Over_http
+  | By_command
+  | By_mcp_tool
+  | Does_not_speak
+
+val speaker_of_transport : transport -> speaker
+
+val speaker_of_endpoint : Voice_config.endpoint -> speaker
+(** {!speaker_of_transport} for the adapter this endpoint resolves to, so an id
+    that aliases another adapter is answered for the adapter it reaches. *)
 val default_agent_voices : unit -> (string * string) list
 val default_session_url : path:string -> string
 val session_endpoint_result : Voice_config.t -> (Voice_config.endpoint, string) result

@@ -7108,6 +7108,7 @@ let keeper_turn_lane_of_string = function
 
 type keeper_turn_preview = {
   ktp_status_text : string;
+  ktp_updated_at_unix : float;
   ktp_text_tail : string;
   ktp_last_tool : string option;
 }
@@ -7170,7 +7171,13 @@ let decode_keeper_turn_row json =
                   required_nullable_string_field preview_json "last_tool"
                 in
                 let* ktp_status_text = required_string_field preview_json "status_text" in
-                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text })
+                let* ktp_updated_at_unix =
+                  match Json_util.assoc_member_opt "updated_at_unix" preview_json with
+                  | Some (`Float value) when Float.is_finite value -> Ok value
+                  | Some (`Int value) -> Ok (Float.of_int value)
+                  | _ -> Error "turn preview updated_at_unix must be a finite number"
+                in
+                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
             | Some other ->
                 Error
                   (Printf.sprintf

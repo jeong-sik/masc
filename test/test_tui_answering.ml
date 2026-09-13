@@ -423,7 +423,7 @@ let test_lanes_that_were_never_loaded_are_not_running () =
 
 let test_chat_shows_background_work_and_uncertainty () =
   let preview : Tui_decode.keeper_turn_preview =
-    { ktp_text_tail = "editing the report"; ktp_last_tool = Some "Execute"
+    { ktp_updated_at_unix = 950.; ktp_text_tail = "editing the report"; ktp_last_tool = Some "Execute"
     ; ktp_status_text = "glm · tool activity observed · last observed tool: Execute · last failure: 401" } in
   let rows =
     [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
@@ -434,7 +434,7 @@ let test_chat_shows_background_work_and_uncertainty () =
   let joined = String.concat "\n" lines in
   List.iter (fun expected -> Alcotest.(check bool) expected true
     (Astring.String.is_infix ~affix:expected joined))
-    ["autonomous"; "glm"; "Execute"; "401"; "editing the report"];
+    ["autonomous"; "glm"; "Execute"; "401"; "editing the report"; "last activity 50s ago"];
   Alcotest.(check bool) "other Keeper never appears" false
     (Astring.String.is_infix ~affix:"other" joined);
   let waiting = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"other"

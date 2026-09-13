@@ -1066,6 +1066,7 @@
   masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
+  masc_tui_queue_inspection
   masc_tui_lane_declaration
   masc.browser_lane
   masc.sse_wire
@@ -1346,10 +1347,12 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.keeper_runtime
   masc.voice_wizard
   masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_queue_inspection
   masc_tui_lane_declaration
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
@@ -1651,3 +1654,9 @@
   eio_main
   unix
   mtime.clock.os))
+
+(library
+ (name masc_tui_queue_inspection)
+ (wrapped false)
+ (modules masc_tui_queue_inspection)
+ (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity yojson))

@@ -3895,6 +3895,8 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable keeper_queue_inflight : string list;
+  mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5729,6 +5731,8 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  keeper_queue_inflight = [];
+  keeper_run_next_pending = None;
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8063,7 +8067,7 @@ let keeper_observed_interrupt_rows (state : state) =
            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
          | None when Option.is_some interrupt_token ->
-           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+           Some "Esc: stop and pause queue · /run-next: prioritize and resume · /queue: manage"
          | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
       | _ -> None) state.keeper_turns
 ;;

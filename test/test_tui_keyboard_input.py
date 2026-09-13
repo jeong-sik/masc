@@ -11479,7 +11479,10 @@ def runtime_surface_interaction(
                 b"Lane position: 1 of 2",
                 b"Probe status: reachable",
                 b"Probe transport: http",
-                b"Checked at: 2026-08-24T10:20:00Z",
+                # The terminal's clock, not the wire's: the scenario runs
+                # under TZ=UTC so the expected reading is the same on every
+                # machine.
+                b"Checked at: 2026-08-24 10:20:00",
                 b"Reachable: yes",
                 b"HTTP status: 200",
                 b"Latency: 18ms",
@@ -13406,6 +13409,9 @@ def run_keyboard_regression(executable: str) -> None:
         ),
         refresh=0.05,
         http_fixtures=runtime_fixtures,
+        # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
+        # expected "2026-08-24 10:20:00" the same on every machine.
+        extra_env={"TZ": "UTC"},
     )
     run_terminal_scenario(
         executable,

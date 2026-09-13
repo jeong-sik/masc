@@ -9743,8 +9743,12 @@ let runtime_detail_lines state target ~width =
         match preferred_at with
         | None -> []
         | Some at ->
+            (* The terminal's clock, like every other timestamp on the screen;
+               the list row beside this reads "last success 19:18:20" and the
+               detail read the same instant as "2026-08-24T10:18:20Z". *)
             runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
-              (Masc_domain.iso8601_of_unix_seconds at)
+              (Terminal_text.short_timestamp
+                 (Masc_domain.iso8601_of_unix_seconds at))
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -9774,7 +9778,8 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
               (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
-            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at" row.rpp_checked_at
+            @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
+                (Terminal_text.short_timestamp row.rpp_checked_at)
             @ (match row.rpp_reachable with
                | None -> []
                | Some value ->

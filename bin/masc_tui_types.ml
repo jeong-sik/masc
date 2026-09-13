@@ -5982,6 +5982,15 @@ let title_failed = "(load failed)"
 let title_missing_reading ~error =
   if Option.is_some error then title_failed else title_unread
 
+(* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
+   count once it has answered, and otherwise which of the two it is. Asked and
+   still waiting reads as not loaded, the way a title before any request does. *)
+let title_count_of_view view ~count =
+  match view with
+  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
+  | Masc_tui_fetched.Failed _ -> title_failed
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a

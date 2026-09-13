@@ -3491,6 +3491,61 @@ module Browser_lane_view = struct
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
+  (** The page's primary reading surface, when its semantic landmarks make
+      that choice unambiguous.  This is deliberately a closed, exact-role
+      shortcut: it never guesses from labels, text, CSS classes, or a URL.
+      A [main] landmark wins over an [article]; an ambiguous page stays under
+      operator control through the ordinary region picker. *)
+  type primary_region_error =
+    | No_primary_region
+    | Ambiguous_primary_region
+
+  let primary_region_target t =
+    let regions = scene_targets t |> List.mapi
+      (fun index (node : Masc.Browser_scene.node) -> index, node)
+      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+        match node.kind with
+        | Region role -> Some (role, index, node)
+        | Text | Raster | Control _ -> None) in
+    let choose role =
+      match List.filter (fun (candidate, _, _) -> String.equal candidate role) regions with
+      | [(_, index, node)] ->
+          (match t.scene with
+           | Some scene -> `Chosen (index, {Browser_lane.document_id=scene.content.document_id;
+                                            node_id=node.node_id})
+           | None -> `Missing)
+      | [] -> `Missing
+      | _ -> `Ambiguous in
+    match choose "main" with
+    | `Chosen target -> Ok target
+    | `Ambiguous -> Error Ambiguous_primary_region
+    | `Missing ->
+        (match choose "article" with
+         | `Chosen target -> Ok target
+         | `Ambiguous -> Error Ambiguous_primary_region
+         | `Missing -> Error No_primary_region)
+
+  type primary_region_action =
+    | Primary_regions of { tab_id : int }
+    | Primary_guarded_regions of { tab_id : int; guard : navigation_guard }
+    | Primary_focus of { tab_id : int; index : int; target : Browser_lane.node_ref }
+    | Primary_error of primary_region_error
+    | Primary_unavailable
+
+  let primary_region_action t =
+    match t.selected_tab with
+    | None -> Primary_unavailable
+    | Some tab_id ->
+        (match t.scene_guard with
+         | Some guard -> Primary_guarded_regions {tab_id;guard}
+         | None ->
+             match t.scene with
+             | Some scene when scene.content.view = Browser_lane.Regions ->
+                 (match primary_region_target t with
+                  | Ok (index, target) -> Primary_focus {tab_id;index;target}
+                  | Error error -> Primary_error error)
+             | Some _ | None -> Primary_regions {tab_id})
+
 
   let region_observed (target : Browser_lane.node_ref) (scene : scene) =
     scene.content.document_id = target.document_id

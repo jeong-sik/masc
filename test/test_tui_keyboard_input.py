@@ -14087,9 +14087,12 @@ def run_browser_scene_regression(executable: str) -> None:
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
-        send_and_wait(process, master, output, b"v", b"Channel messages")
+        # The semantic main shortcut first observes the landmark map, then
+        # focuses the unique main region without a guessed selector.
+        send_and_wait(process, master, output, b"m", b"Channel messages")
         assert scenes[-1]["view"] == "regions" and len(actions)==1
-        send_and_wait(process, master, output, b"\r", b"SCOPED CHANNEL CONTENT")
+        send_and_wait(process, master, output, b"m", b"SCOPED CHANNEL CONTENT")
+        assert scenes[-1]["scope"] == {"documentId":"document-after","nodeId":"channel-region"}
         focused = scenes[-1]
         send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"

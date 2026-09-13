@@ -297,10 +297,14 @@ let menu_title = " MSX \xe2\x80\x94 pick a game"
    screen's footer uses. They were a sentence inside the title instead, spelled
    two ways for one screen -- "(up/down move, enter load, esc back)" on the game
    menu and "Enter selects, Esc cancels" on the disk menu -- and neither said
-   that [j] and [k] move as well. *)
-let menu_hints = function
-  | Masc_tui_types.Boot_game -> "j/k:move  Enter:load  Esc:back"
-  | Change_disk -> "j/k:move  Enter:swap disk  Esc:cancel"
+   that [j] and [k] move as well. A menu with nothing in it names only the way
+   out: moving and choosing do nothing there. *)
+let menu_hints (mode : Masc_tui_types.msx_menu_mode) ~has_entries =
+  let choose, leave = match mode with
+    | Boot_game -> "Enter:load", "Esc:back"
+    | Change_disk -> "Enter:swap disk", "Esc:cancel"
+  in
+  if has_entries then String.concat "  " [ "j/k:move"; choose; leave ] else leave
 
 let entry_label (state : Masc_tui_types.state) = function
   | Watch ->
@@ -363,7 +367,10 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   for row = drawn to last_row do
     if row = last_row then
       Buffer.add_string buf
-        ("\027[2m" ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode) ^ "\027[0m");
+        ("\027[2m"
+         ^ fit_line cols
+             (" " ^ menu_hints state.msx_menu_mode ~has_entries:(entries <> []))
+         ^ "\027[0m");
     Buffer.add_string buf "\027[0K";
     if row < last_row then Buffer.add_string buf "\r\n"
   done;

@@ -151,6 +151,9 @@ let test_menu_empty_inventory () =
   let out = captured (fun write -> Masc_tui_msx.open_menu ~write state) in
   check bool "an empty inventory tells the operator where to put ROMs" true
     (contains out "carts");
+  check bool "and offers only the way out" true
+    (contains (after_last_newline out) "Esc:back"
+     && not (contains (after_last_newline out) "Enter:load"));
   let write _ = () in
   check bool "enter with nothing to pick just stays" true
     (match Masc_tui_msx.menu_consume ~write state "\r" with

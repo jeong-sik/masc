@@ -204,6 +204,9 @@ type keeper_chat_event =
 
 (** {1 Stream operations} *)
 
+val bus_capacity : int
+(** Events the bus buffers before [publish] suspends the publisher. *)
+
 type t
 (** Bounded per-turn event stream plus its optional journal hook (RFC-0412
     stage 1). One publisher fiber writes it; one adapter fiber reads it.
@@ -257,7 +260,11 @@ val publish : t -> keeper_chat_event -> unit
 
 (** [close t] declares that no event follows. Idempotent. The reader takes it
     after every event published before it; a full stream suspends this call
-    exactly as it suspends [publish]. *)
+    exactly as it suspends [publish]. A close cancelled while suspended has
+    added nothing and leaves the bus open, so a later close still ends the
+    turn. The closed flag is set when this call returns, which can be after
+    the reader has taken the sentinel; the one publisher fiber is inside this
+    call for that window, so no [publish] can land in it. *)
 val close : t -> unit
 
 (** [subscribe t] blocks until an event is available and returns it, or

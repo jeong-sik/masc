@@ -7,8 +7,9 @@ is capped at 200 controls and reports truncation; this is a DOM observation, not
 a screenshot or a complete accessibility tree.
 
 BrowserAct operates automation Firefox and defaults to `lane=automation`.
-BrowserInteract also supports explicit-tab click, fill and scroll on the live
-extension; see [Browser Lane examples](browser-lane-examples.md). BrowserSession opens an
+BrowserInteract also supports explicit-tab interactions on the live extension;
+see the [action/source table](browser-lane.md#browser-controls) and
+[Browser Lane examples](browser-lane-examples.md). BrowserSession opens an
 isolated Firefox profile. BrowserAct `open_tab` creates a task's tab and returns
 its id. Use that id for subsequent actions and reads, and close that tab when
 finished. Session close shuts down the shared browser, so callers must not close
@@ -62,7 +63,10 @@ Iframe, dialog and upload behavior is described below.
 `BrowserRead {"lane":"automation","tabId":73,"mode":"screenshot"}` captures
 the selected viewport as PNG. The same mode supports live Firefox through
 `tabs.captureTab`, without switching the operator's active tab. A changed URL across
-capture is rejected; same-URL page changes are not detected by this guard. The tool returns URL/title, dimensions and an
+capture is rejected. Live capture also compares document identity, viewport
+dimensions and scroll position before and after capture. Changes to pixels
+without a corresponding viewport-identity change are not detected by that
+guard. The tool returns URL/title, dimensions and an
 `artifact` handle; `keeper_analyze_image {"artifact":<handle>,"query":<question>}` loads
 those stored pixels into the configured Vision reader. Encoded pixels do not
 ride in the browser tool's text response. This does not inject screenshots

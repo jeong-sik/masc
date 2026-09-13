@@ -6077,6 +6077,11 @@
 
 (include stanzas/test_browser_bidi_peer.inc)
 
+(test
+ (name test_tui_queue_inspection)
+ (modules test_tui_queue_inspection)
+ (libraries alcotest astring masc masc_tui_queue_inspection yojson))
+
 (include stanzas/test_operator_media_inspection.inc)
 
 (test

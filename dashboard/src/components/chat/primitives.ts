@@ -3279,11 +3279,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
-  // Tool results never travel on the chat stream — they are joined here from
-  // the tool-call output store by canonical execution_id. Null until result
-  // readiness and output hydration have both landed.
-  const keeper = useContext(KeeperToolOutputScope)
-  const lookup = useToolOutputLookup(entry.executionId, lookupToolCallOutput(keeper, entry.executionId))
+  // Only the exact endpoint establishes a unique result for this execution.
+  const lookup = useToolOutputLookup(entry.executionId)
   const outputEntry = lookup.output
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
@@ -3470,7 +3467,6 @@ function isUnlinkedTraceTool(
 
 function ToolTraceStep({
   entry,
-  output: suppliedOutput,
   canMarkMissing = false,
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
@@ -3480,7 +3476,6 @@ function ToolTraceStep({
   structuralSummary = false,
 }: {
   entry: KeeperConversationEntry | null
-  output: ToolCallEntry | null
   canMarkMissing?: boolean
   coverageState?: ToolOutputCoverageState
   hydrationFailureReason?: string | null
@@ -3490,7 +3485,9 @@ function ToolTraceStep({
   structuralSummary?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const lookup = useToolOutputLookup(entry?.executionId ?? traceStep?.executionId, suppliedOutput)
+  const executionId = entry?.executionId ?? traceStep?.executionId
+  const traceOnly = !executionId?.trim()
+  const lookup = useToolOutputLookup(executionId)
   const output = lookup.output
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
@@ -3505,9 +3502,9 @@ function ToolTraceStep({
   let status: ToolTraceDisplayStatus
   if (output !== null) {
     status = output.success === false ? 'bad' : 'ok'
-  } else if (traceStep?.status === 'err') {
+  } else if (traceOnly && traceStep?.status === 'err') {
     status = 'bad'
-  } else if (traceStep?.status === 'ok') {
+  } else if (traceOnly && traceStep?.status === 'ok') {
     status = 'ok'
   } else if (unlinkedTraceTool) {
     status = 'unlinked'
@@ -3518,6 +3515,13 @@ function ToolTraceStep({
   } else {
     status = canMarkMissing ? 'missing' : 'pending'
   }
+  // The trace still reports how execution ended. An unread/denied result
+  // does not change that lifecycle, and the report does not verify output.
+  const reportedExecution = traceStep?.status === 'ok' ? '성공'
+    : traceStep?.status === 'err' ? '실패' : null
+  const statusTitle = !traceOnly && output === null && reportedExecution
+    ? `실행 보고: ${reportedExecution} · ${lookup.state.kind === 'idle' || lookup.state.kind === 'loading' ? '결과 확인 전' : '결과 확인 불가'}`
+    : TOOL_STATUS_TITLE[status]
   const durLabel =
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
@@ -3526,7 +3530,8 @@ function ToolTraceStep({
   // its canonical execution hydrates. Edit evidence below is an independent,
   // typed receipt projection, not permission to expose the raw tool body.
   const resultView = structuralSummary ? null
-    : output ? toolOutputDisplay(output.output) : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
+    : output ? toolOutputDisplay(output.output)
+      : (traceOnly && traceStep?.result ? { text: traceStep.result, truncated: false } : null)
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
@@ -3546,6 +3551,7 @@ function ToolTraceStep({
       data-chat-trace-entry-id=${entry?.id ?? undefined}
       data-chat-trace-link-state=${structuralSummary ? 'structural' : unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
       data-chat-trace-output-state=${status}
+      data-chat-trace-execution-status=${traceStep?.status ?? undefined}
       data-chat-trace-output-coverage=${coverageState}
     >
       <span class="chat-block-tnode"></span>
@@ -3562,8 +3568,8 @@ function ToolTraceStep({
             : null}
           <span
             class="chat-block-tstep-status ${status}"
-            title=${TOOL_STATUS_TITLE[status]}
-            aria-label=${TOOL_STATUS_TITLE[status]}
+            title=${statusTitle}
+            aria-label=${statusTitle}
           ></span>
           <span class="chat-block-tstep-dur">${durLabel}</span>
           ${hasBody ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
@@ -3915,7 +3921,6 @@ function ToolTraceCard({
                         return html`<${ToolTraceStep}
                           key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
                           entry=${item.entry}
-                          output=${item.output}
                           canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
                           coverageState=${item.entry !== null ? coverageStateForEntry(item.entry) : 'not-applicable'}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
@@ -3929,7 +3934,6 @@ function ToolTraceCard({
                       ? html`<${ToolTraceStep}
                           key=${`tool-entry-${item.entry.id}`}
                           entry=${item.entry}
-                          output=${item.output}
                           canMarkMissing=${canMarkMissingForEntry(item.entry)}
                           coverageState=${coverageStateForEntry(item.entry)}
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}

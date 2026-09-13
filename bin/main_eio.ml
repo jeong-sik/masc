@@ -3481,6 +3481,13 @@ let prerequisite_actions_cmd =
         ~dependency ~action)
       $ run_base_path $ dependency $ action)
 
+let inspect_file_cmd =
+  let path = Arg.(required & pos 0 (some string) None & info [] ~docv:"FILE"
+    ~doc:"Original PDF, PPTX or MP4 to inspect completely without modifying the file.") in
+  Cmd.v (Cmd.info "inspect-file"
+    ~doc:"Inspect original media as JSON with rendered content. No LLM verdict or Task/Goal transition.")
+    Term.(const (fun base_path path -> Masc_cli_inspect_file.run ~base_path ~path) $ base_path $ path)
+
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -3491,6 +3498,7 @@ let cmd =
       Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
+    ; inspect_file_cmd
     ; skills_refresh_cmd
     ; start_cmd
     ; login_cmd

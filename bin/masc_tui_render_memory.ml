@@ -511,7 +511,7 @@ let render_memory_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "keeper") scroll)
+        (Printf.sprintf "[keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   end;
   (match context_lines with
    | [] -> ()
@@ -721,7 +721,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun total "fact") scroll)
+        (Printf.sprintf "[facts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
   end;
   (match detail_lines with
    | [] -> ()

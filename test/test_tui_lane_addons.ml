@@ -114,7 +114,7 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
-  let view = {UI.initial with snapshot=Some snapshot;configuration_cursor=1} in
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
   check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
@@ -146,7 +146,7 @@ let action_identity_and_uncertainty () =
     request_id=request.request_id;requester="operator";executor=None;input_sha256=Action.input_digest input;
     action=request.action;state=Action.Outcome_unknown;result=None;detail=Some "worker disconnected after dispatch"} in
   let received = UI.action_receipt request (Action.to_json receipt) |> ok in
-  let lines = UI.lines ~width:100 {UI.initial with last_action=Some request;action_receipt=Some received} in
+  let lines = UI.lines ~width:100 {UI.initial with presentation=UI.Technical;last_action=Some request;action_receipt=Some received} in
   check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
   check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
   check bool "different request cannot satisfy status read" true
@@ -168,7 +168,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with snapshot=Some snapshot;
+  let view = {UI.initial with presentation=UI.Technical;snapshot=Some snapshot;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -186,7 +186,110 @@ let metric_fields_and_receipts_remain_readable () =
       ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
     [40;80;200]
 
+let guided_actions () =
+  let schema = Yojson.Safe.from_string {|{
+    "type":"object","required":["context","request_id","action"],"additionalProperties":false,
+    "properties":{
+      "context":{"type":"object","required":["instance_id","incarnation"],"additionalProperties":false,
+        "properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}}},
+      "request_id":{"type":"string","minLength":36},
+      "action":{"type":"object","required":["operation"],"additionalProperties":false,
+        "properties":{"operation":{"type":"string","enum":["capture","inspect"]}}}
+    }}|} in
+  let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
+    addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=0;source_path=None;binding=`Assoc [];outputs=[];
+    skills_directory=None;action_schema=Some schema} in
+  let snapshot : UI.snapshot = {instances=[instance];configuration=None;
+    output={rows=[];coverage=[]};complete=Some true} in
+  let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in
+  let first = UI.submit_action view |> ok in
+  check string "current worker supplies identity" "worker" first.instance_id;
+  check bool "arbitrary schema field and value are used" true
+    (first.action=`Assoc ["operation",`String "capture"]);
+  let second = UI.submit_action (UI.move_action view 1) |> ok in
+  check bool "choosing a different action uses its payload" true
+    (second.action=`Assoc ["operation",`String "inspect"]);
+  let replaced = {snapshot with instances=[{instance with id="replacement";incarnation="replacement"}]} in
+  check bool "replacement cannot inherit open menu authority" true
+    (Result.is_error (UI.submit_action {view with snapshot=Some replaced}));
+  check bool "observation-only package has no invented action" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some
+      {snapshot with instances=[{instance with action_schema=None}]}}));
+  let technical = UI.open_actions ~request_id:first.request_id
+    {UI.initial with presentation=UI.Technical;snapshot=Some snapshot} |> ok in
+  check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
+  List.iter (fun width -> check int "refresh does not move compact content"
+    (List.length (UI.lines ~width {UI.initial with snapshot=Some snapshot}))
+    (List.length (UI.lines ~width {UI.initial with loading=true;snapshot=Some snapshot}))) [10;40;100];
+  let with_document = {technical with document_key=Some "draft.toml"} in
+  check bool "menu remains visible over an open document" true
+    (List.mem "operation: \"capture\"" (UI.lines ~width:100 with_document));
+  let moved = UI.move_action {view with scroll=100} 1 in
+  check int "next choice is brought back into view" 0 moved.scroll;
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "object fixture expected" in
+  let property_fields = match schema with `Assoc fields -> List.assoc "properties" fields | _ -> fail "schema" in
+  let reverse_action = Yojson.Safe.from_string {|{"type":"object","required":["z","a"],
+    "additionalProperties":false,"properties":{"z":{"type":"string","const":"last"},"a":{"type":"string","const":"first"}}}|} in
+  let reverse_schema = replace "properties" (replace "action" reverse_action property_fields) schema in
+  let reverse_view = UI.open_actions ~request_id:first.request_id {UI.initial with
+    snapshot=Some {snapshot with instances=[{instance with action_schema=Some reverse_schema}]}} |> ok in
+  let request = UI.submit_action reverse_view |> ok in
+  check bool "request is canonical before receipt comparison" true
+    (request.action=`Assoc ["a",`String "first";"z",`String "last"]);
+  let input = UI.Action.arguments ~instance_id:request.instance_id ~request_id:request.request_id
+    ~action:request.action |> UI.Action.canonical |> ok in
+  let receipt : UI.Action.receipt = {instance_id=request.instance_id;incarnation=request.incarnation;
+    request_id=request.request_id;requester="operator";executor=Some "worker";
+    input_sha256=UI.Action.input_digest input;action=request.action;state=UI.Action.Confirmed;
+    result=Some (`Assoc []);detail=None} in
+  ignore (UI.action_receipt request (UI.Action.to_json receipt) |> ok);
+  let compact = UI.lines ~width:100 {UI.initial with snapshot=Some snapshot} in
+  check bool "first screen names installed package" true
+    (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
+  check bool "technical action schema is folded by default" false
+    (List.exists (fun line -> String.contains line '{') compact)
+
+let context_flow_uses_declared_connections () =
+  let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
+    addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=0;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None} in
+  let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
+    binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
+      "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
+  let declaration installation_id instance_id : UI.declaration =
+    {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[]} in
+  let configuration : UI.configuration = {directory="/config";complete=true;
+    declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
+  let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
+    output={rows=[];coverage=[]};complete=None} in
+  let view = {UI.initial with presentation=UI.Flow;snapshot=Some snapshot} in
+  check bool "flow exposes the selected action target" true
+    (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
+  let moved = UI.lines ~width:160 {view with instance_cursor=1} in
+  check bool "flow target follows instance selection" true
+    (List.mem "Action target: Project metric · metric-worker" moved
+      && List.mem "> project-metric · Project metric · attached" moved);
+  check bool "flow names the actual configured dependency" true
+    (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
+  let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
+  let partial_view = {view with snapshot=Some partial;error=Some "network failure"} in
+  let partial_lines = UI.lines ~width:160 partial_view in
+  check bool "failed read remains visible in flow" true
+    (List.mem "Refresh failed; graph may be stale: network failure" partial_lines);
+  check bool "partial inventory cannot establish producer absence" true
+    (List.mem "  project-observer -> project-metric · producer unresolved; inventory incomplete" partial_lines);
+  check bool "missing producer stays visible" true
+    (List.mem "  project-observer -> project-metric · producer absent in this run"
+      (UI.lines ~width:160 {view with snapshot=Some {snapshot with instances=[consumer]}}))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
+  test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;

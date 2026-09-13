@@ -80,3 +80,8 @@ val content_height
   -> int
 (** The list height after fixed chrome, an optional preview, and a conditional
     overflow indicator have each taken their declared rows. *)
+
+val window_text : scroll:int -> height:int -> int -> string
+(** Where a window of [height] rows from [scroll] stands in a list of [count]:
+    ["first-last/count"], counted from one, [0/count] with no rows to show
+    them in, and [0/0] for an empty list. *)

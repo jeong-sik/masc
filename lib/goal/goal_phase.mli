@@ -100,3 +100,10 @@ val decide_transition :
     says for the same shape (Cancel on Cancelled, Done_action on Done). Not
     every terminal pair is on it: [Dropped, Request_complete] is still an
     error, because completion is not the phase a dropped goal is in. *)
+
+val moves_goal : phase:t -> action:action -> bool
+(** Whether [action] changes the phase of a goal in [phase]: a [Move_to].
+    [Already] is accepted and writes nothing, and [Error] is refused, so
+    neither is a step the goal can take from where it is. The dashboard's next
+    actions and the TUI goal detail's lit keys both ask this, so the two cannot
+    offer different steps for the same goal. *)

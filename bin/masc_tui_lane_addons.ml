@@ -18,17 +18,23 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+type action_menu = {
+  target_id : string; target_incarnation : string; target_title : string; request_id : string;
+  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+}
 type focus = Configurations | Instances | Rows
+type presentation = Summary | Technical | Flow
 type t = {
+  presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { snapshot = None; loading = false; error = None; receipt = None;
+let initial = { presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
-  focus = Configurations; draft = None; naming = false; configuration_cursor = 0;
+  focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
 let ( let* ) = Result.bind
 let field name = function
@@ -243,7 +249,7 @@ let instance_lines view instances =
     @ (match item.action_schema with None -> [] | Some schema ->
         ["   action schema · incarnation " ^ item.incarnation]
         @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
-let lines ~width view =
+let technical_lines ~width view =
   let header = ["Optional cross-lane observations; Keeper and existing machine owners continue independently.";
     " n:new TOML  E:edit selected TOML  r:inspect  Tab:installations/instances/rows  :advanced command";
     ("Focus: " ^ match view.focus with Configurations -> "TOML installations" | Instances -> "Instances" | Rows -> "Observation rows");
@@ -292,3 +298,230 @@ let lines ~width view =
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))
+
+(* Enumerate only values explicitly closed by the package's schema. Required
+   open-ended fields have no invented default and use the advanced command. *)
+let rec finite_values = function
+  | `Assoc fields ->
+      (match List.assoc_opt "const" fields, List.assoc_opt "enum" fields with
+       | Some value, _ -> Some [value]
+       | None, Some (`List values) -> Some values
+       | _ ->
+           match List.assoc_opt "type" fields,
+                 List.assoc_opt "properties" fields,
+                 List.assoc_opt "required" fields with
+           | Some (`String "object"), Some (`Assoc properties), Some (`List required) ->
+               let rec expand = function
+                 | [] -> Some [[]]
+                 | `String key :: rest ->
+                     let values = Option.bind (List.assoc_opt key properties) finite_values in
+                     (match values, expand rest with
+                      | Some values, Some tails ->
+                          Some (List.concat_map (fun value ->
+                            List.map (fun tail -> (key,value)::tail) tails) values)
+                      | _ -> None)
+                 | _ -> None
+               in
+               Option.map (List.map (fun fields -> `Assoc fields)) (expand required)
+           | _ -> None)
+  | _ -> None
+
+let pending_action view =
+  match view.last_action, view.action_receipt with
+  | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request
+  | _ -> None
+
+let action_target view =
+  match view.focus with
+  | Instances -> selected_instance view
+  | Configurations ->
+      Option.bind (selected_declaration view) (fun declaration ->
+        Option.bind declaration.instance_id (fun id ->
+          Option.bind view.snapshot (fun snapshot ->
+            List.find_opt (fun instance -> String.equal instance.id id) snapshot.instances)))
+  | Rows -> None
+
+let open_actions ~request_id view =
+  let* instance = match action_target view with
+    | Some instance -> Ok instance
+    | None -> Error "Select an installed Add-on first (Tab:instances)." in
+  let* schema = match instance.action_schema with
+    | Some schema -> Ok schema
+    | None -> Error "This Add-on provides observations only. Press o to observe." in
+  let* () = Action.validate_schema schema in
+  let* action_schema =
+    let* properties = field "properties" schema in
+    field "action" properties in
+  let* choices = match finite_values action_schema with
+    | Some (_::_ as choices) -> Ok choices
+    | Some [] | None -> Error "This action needs parameters. D shows its schema; :act accepts an explicit action." in
+  let choices = List.filter (fun action ->
+    Result.is_ok (Action.validate ~schema ~name:"lane_act"
+      (Action.arguments ~instance_id:instance.id ~request_id ~action))) choices in
+  if choices=[] then Error "The advertised schema has no valid preset action. D shows details."
+  else Ok {view with action_menu=Some {
+    target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
+    schema;choices;cursor=0}; presentation=Summary;scroll=0;error=None}
+
+let move_action view delta =
+  {view with scroll=0;action_menu=Option.map (fun menu ->
+    {menu with cursor=max 0 (min (List.length menu.choices - 1) (menu.cursor+delta))}) view.action_menu}
+
+let submit_action view =
+  let* menu = match view.action_menu with
+    | Some menu -> Ok menu | None -> Error "Choose an action first." in
+  let* instance = match Option.bind view.snapshot (fun snapshot ->
+    List.find_opt (fun instance -> String.equal instance.id menu.target_id
+      && String.equal instance.incarnation menu.target_incarnation
+      && instance.action_schema=Some menu.schema) snapshot.instances) with
+    | Some instance -> Ok instance
+    | None -> Error "The selected Add-on changed. Refresh and choose its action again." in
+  let* action = match List.nth_opt menu.choices menu.cursor with
+    | Some action -> Ok action | None -> Error "No selected action." in
+  let* action = Action.canonical action in
+  let* _ = Action.validate ~schema:menu.schema ~name:"lane_act"
+      (Action.arguments ~instance_id:instance.id ~request_id:menu.request_id ~action) in
+  Ok {instance_id=instance.id;incarnation=instance.incarnation;request_id=menu.request_id;action}
+
+let scalar_text = function
+  | `String text -> Some text
+  | (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as value -> Some (Yojson.Safe.to_string value)
+  | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None
+
+let value_summary = function
+  | `Assoc fields -> fields |> List.filter_map (fun (key,value) ->
+      Option.map (fun value -> key ^ "=" ^ value) (scalar_text value)) |> String.concat " · "
+  | value -> Option.value ~default:(Yojson.Safe.to_string value) (scalar_text value)
+
+(* The row title is the producer's human label. Numeric/boolean readings fit
+   the overview; full strings, nested coordinates and evidence remain in D. *)
+let reading_summary fields =
+  fields |> List.filter_map (fun (key,value) -> match value with
+    | (`Int _ | `Intlit _ | `Float _ | `Bool _) ->
+        Some (key ^ "=" ^ Yojson.Safe.to_string value)
+    | _ -> None) |> String.concat " · "
+
+let compact_lines ~width view =
+  let outcome = match view.last_action,view.action_receipt with
+    | None,_ -> []
+    | Some request,None -> ["Action " ^ value_summary request.action ^ " · receipt unknown; t:check this request"]
+    | Some request,Some receipt ->
+        ["Action " ^ value_summary request.action ^ " · " ^
+          (match receipt.Action.state with
+           | Action.Queued -> "queued" | Action.Running -> "running"
+           | Action.Confirmed -> "confirmed by package"
+           | Action.Failed_before_effect -> "failed before effect"
+           | Action.Outcome_unknown -> "outcome unknown; t:check, do not resubmit")]
+        @ Option.to_list (Option.map (fun value -> "  " ^ value_summary value) receipt.result)
+        @ Option.to_list receipt.detail in
+  let content = match view.snapshot with
+    | None -> ["Reading installed Add-ons…"]
+    | Some snapshot ->
+        let installations = match snapshot.configuration with
+          | None -> ["Installation inventory unavailable"]
+          | Some configuration ->
+              (if configuration.complete then [] else ["Installation inventory incomplete"])
+              @ List.concat_map (fun (declaration : declaration) ->
+                  List.map (fun issue -> declaration.source_path ^ ": " ^ issue) declaration.issues)
+                  configuration.declarations in
+        let instances = if snapshot.instances=[] then
+          ["No Add-ons installed. n creates an installation TOML; D shows configuration details."]
+          else ["Installed Add-ons"] @ List.mapi (fun index instance ->
+            (if view.instance_cursor=index && view.focus=Instances then "> " else "  ")
+            ^ instance.title ^ " · " ^ phase_label instance.phase
+            ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
+        let configurations = if view.focus<>Configurations then [] else
+          ["Installations (E:edit)"] @ (match snapshot.configuration with None -> [] | Some config ->
+            List.mapi (fun index (declaration : declaration) ->
+              (if index=view.configuration_cursor then "> " else "  ")
+              ^ Option.value ~default:declaration.source_path declaration.installation_id
+              ^ (match declaration.applied,declaration.desired with
+                 | Some applied,Some desired when String.equal applied desired -> " · applied"
+                 | _ -> " · not applied")) config.declarations) in
+        let observations = ["Latest observations"] @
+          (if snapshot.output.rows=[] then ["  No observations yet. Select an instance and press o."]
+           else List.concat (List.mapi (fun index (row : Row.row) ->
+             [(if index=view.row_cursor && view.focus=Rows then "> " else "  ")
+              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
+              "    " ^ reading_summary row.fields]) snapshot.output.rows)) in
+        let gaps = List.filter_map (fun (coverage : Row.coverage) ->
+          if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
+            ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in
+        installations @ instances @ configurations @ observations @ gaps
+        @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
+  ["Select an Add-on, observe its output, or choose an advertised action.";
+   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
+  @ [Masc_tui_message_layout.fit_width
+       (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
+  @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
+  @ outcome @ content
+
+let rec action_fields prefix = function
+  | `Assoc fields -> List.concat_map (fun (key,value) ->
+      action_fields (if prefix="" then key else prefix ^ "." ^ key) value) fields
+  | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
+
+let flow_lines view =
+  (match selected_instance view with
+   | None -> ["No selected Add-on action target"]
+   | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
+  @ ["Project context flow (architecture; not an execution receipt)";
+   "Project request -> Keeper turn -> tools / code / tests -> retained evidence";
+   "Keeper history -> Librarian -> committed memory; tools may commit source-bound memory";
+   "Committed memories -> Workspace Curator -> attributed shared proposal";
+   "Next Keeper turn sees proposal reference -> keeper_workspace_memory_read -> sources";
+   "Shared proposal is model-proposed; tests and review establish project correctness.";
+   ""; "Installed Add-on connections (last received snapshot)"]
+  @ Option.to_list (Option.map (fun error -> "Refresh failed; graph may be stale: " ^ error) view.error)
+  @ (match view.snapshot with
+     | None -> ["Connections unavailable: no snapshot read yet"]
+     | Some snapshot ->
+         let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
+         let name instance = match List.find_opt (fun (d : declaration) -> d.instance_id=Some instance.id) declarations with
+           | Some {installation_id=Some id;_} -> id
+           | _ -> instance.id in
+         let complete = Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration in
+         let notices = (if complete then [] else ["Installation inventory incomplete; dependency identities may be unresolved"])
+           @ List.concat_map (fun (d : declaration) -> List.map (fun issue -> d.source_path ^ ": " ^ issue) d.issues) declarations in
+         notices @ (if snapshot.instances=[] then ["No Add-on instances in the received snapshot"]
+         else List.concat_map (fun instance ->
+           let target = name instance in
+           [(if Option.exists (fun selected -> selected.id=instance.id) (selected_instance view)
+             then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
+           @ (match Masc.Lane_addon_sources.dependencies instance.binding with
+              | Error detail -> ["  Invalid source binding: " ^ detail]
+              | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
+              | Ok upstream -> List.map (fun id ->
+                  let available = List.exists (fun candidate ->
+                    String.equal (name candidate) id && String.equal candidate.run_id instance.run_id)
+                    snapshot.instances in
+                  "  " ^ id ^ " -> " ^ target ^ (if available then "" else if complete then " · producer absent in this run"
+                    else " · producer unresolved; inventory incomplete")) upstream)
+           @ List.map (fun (port,selection) ->
+               "  output " ^ port ^ " -> " ^ (match selection with
+                 | Row.All_lanes -> "all supplied lanes"
+                 | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) snapshot.instances))
+  @ [""; "Add-on observation -> retained rows/evidence -> explicit selection and use";
+     "An installed observer does not automatically fix code or complete a task.";
+     "f:back to observations  D:technical details  J/K:scroll"]
+
+let lines ~width view =
+  match view.action_menu with
+  | Some menu ->
+      (["Run action on " ^ menu.target_title;
+        Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
+          (menu.cursor+1) (List.length menu.choices);
+        "J/K:scroll action details"]
+       @ (match List.nth_opt menu.choices menu.cursor with
+          | Some action -> action_fields "" action
+          | None -> ["No selected action"]))
+      |> List.concat_map (fun line ->
+        Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+          (Masc.Tui_decode.sanitize_terminal_text line))
+  | None ->
+      if view.presentation=Technical || Option.is_some view.document_key || Option.is_some view.draft
+      then technical_lines ~width view
+      else (match view.presentation with Flow -> flow_lines view | Summary | Technical -> compact_lines ~width view)
+        |> List.concat_map (fun line ->
+        Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+          (Masc.Tui_decode.sanitize_terminal_text line))

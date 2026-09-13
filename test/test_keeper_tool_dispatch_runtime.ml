@@ -8694,12 +8694,62 @@ let test_binary_write_reference_survives_replay () =
     check string "corrupt replay leaves recipient intact" bytes (Fs_compat.load_file target))
 ;;
 
+(* F016: the content_artifact branch of [Keeper_write_content.of_args] matched
+   the literal string "overwrite" while the no-content branch already asked
+   [Keeper_tool_write_mode.of_args]. Two readers of one member disagreed: the
+   typed parser lowercases before matching and reports an unknown or
+   non-string mode through [rejection_message], the literal arm accepted only
+   the exact spelling and answered every other input with one hand-written
+   sentence. This proves the artifact branch now gives the parser's verdict:
+   "Overwrite" decodes to Overwrite, an unknown spelling and a non-string
+   member both carry the parser's rejection text (byte-identical to what the
+   no-content branch says for the same input), and a real but wrong mode names
+   itself. On origin/main the first check gets an Error and the rejection
+   texts differ, so this test fails there. *)
+let test_write_content_artifact_mode_uses_typed_parser () =
+  let reference = match Tool_output.make_artifact_ref ~sha256:(String.make 64 'b')
+      ~bytes:4 ~preview:"" ~mime:"image/png" with
+    | Ok reference -> reference
+    | Error error -> fail (Tool_output.make_error_to_string error) in
+  let artifact_args mode = `Assoc (("mode", mode)
+      :: Masc.Keeper_write_content.fields (Masc.Keeper_write_content.Artifact reference)) in
+  let invalid_detail label = function
+    | Error (Masc.Keeper_write_content.Invalid detail) -> detail
+    | Error (Masc.Keeper_write_content.Unavailable detail) -> fail (label ^ ": unexpected Unavailable " ^ detail)
+    | Ok (Masc.Keeper_write_content.Artifact _) -> fail (label ^ ": unexpectedly accepted the artifact")
+    | Ok (Masc.Keeper_write_content.Text _) -> fail (label ^ ": unexpectedly decoded text")
+    | Ok Masc.Keeper_write_content.Patch_input -> fail (label ^ ": unexpectedly decoded patch input") in
+  (match Masc.Keeper_write_content.of_args (artifact_args (`String "Overwrite")) with
+   | Ok (Masc.Keeper_write_content.Artifact decoded) ->
+     check bool "case-folded overwrite keeps the same reference" true (decoded = reference)
+   | other -> fail ("case-folded overwrite: " ^ invalid_detail "case-folded overwrite" other));
+  List.iter (fun (label, mode) ->
+      let artifact_verdict = invalid_detail label (Masc.Keeper_write_content.of_args (artifact_args mode)) in
+      let no_content_verdict = invalid_detail label
+          (Masc.Keeper_write_content.of_args (`Assoc ["mode", mode])) in
+      check string (label ^ ": artifact branch repeats the typed parser rejection")
+        no_content_verdict artifact_verdict;
+      check string (label ^ ": rejection is the parser's own text")
+        (Masc.Keeper_tool_write_mode.rejection_message
+           (match mode with `String raw -> raw | other -> Yojson.Safe.to_string other))
+        artifact_verdict)
+    ["unknown spelling", `String "apend"; "non-string mode", `List [`String "overwrite"]];
+  let append_verdict = invalid_detail "append"
+      (Masc.Keeper_write_content.of_args (artifact_args (`String "append"))) in
+  check bool "append with an artifact names the mode it saw" true
+    (String_util.contains_substring append_verdict "\"append\"");
+  check bool "append with an artifact is not the unknown-mode rejection" false
+    (String.equal append_verdict (Masc.Keeper_tool_write_mode.rejection_message "append"))
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
     ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);
-    ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
+    ("binary_write", [
+      test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay;
+      test_case "artifact mode is judged by the typed write-mode parser" `Quick test_write_content_artifact_mode_uses_typed_parser]);
     ("direct_gate_resume", [
       test_case "retention IO repair recovers exact original channel history before replay" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);

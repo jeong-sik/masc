@@ -6,6 +6,7 @@ type instance = {
   revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option;
+  binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
@@ -107,8 +108,19 @@ let instance json =
   let* skills_directory = optional "skills_directory" text package in
   let* incarnation = get text "incarnation" json in
   let* action_schema = optional "action_schema" (function `Assoc _ as schema -> Ok schema | _ -> Error "expected action schema") json in
+  let* binding_schema,display = match package with
+    | `Assoc fields ->
+        let* binding_schema = match List.assoc_opt "binding_schema" fields with
+          | None | Some `Null -> Ok None
+          | Some (`Assoc _ as schema) -> Ok (Some schema)
+          | _ -> Error "expected binding schema object" in
+        let* display = match List.assoc_opt "presentation" fields with
+          | None -> Ok Masc.Lane_addon_presentation.empty
+          | Some value -> Masc.Lane_addon_presentation.of_json value in
+        Ok (binding_schema,display)
+    | _ -> Error "expected package object" in
   Ok { id; run_id; addon_id; title; revision; phase; observation_seq; rows_count;
-    source_path;binding;outputs;skills_directory;incarnation;action_schema }
+    source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -420,6 +432,16 @@ let reading_summary fields =
         Some (key ^ "=" ^ Yojson.Safe.to_string value)
     | _ -> None) |> String.concat " · "
 
+let displayed_readings instances (row : Row.row) =
+  let declared = List.concat_map (fun (instance : instance) ->
+    List.filter (fun (reading : Masc.Lane_addon_presentation.reading) ->
+      row.lane_id=instance.id ^ "/" ^ reading.lane_id) instance.display.readings) instances in
+  match declared with
+  | [] -> [reading_summary row.fields]
+  | readings -> List.map (fun (reading : Masc.Lane_addon_presentation.reading) ->
+      match Masc.Lane_addon_presentation.render reading (`Assoc row.fields) with
+      | Ok text -> text | Error detail -> reading.label ^ ": unavailable (" ^ detail ^ ")") readings
+
 let compact_lines ~width view =
   let outcome = match view.last_action,view.action_receipt with
     | None,_ -> []
@@ -462,7 +484,7 @@ let compact_lines ~width view =
            else List.concat (List.mapi (fun index (row : Row.row) ->
              [(if index=view.row_cursor && view.focus=Rows then "> " else "  ")
               ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
-              "    " ^ reading_summary row.fields]) snapshot.output.rows)) in
+              ] @ List.map (fun value -> "    " ^ value) (displayed_readings snapshot.instances row)) snapshot.output.rows)) in
         let gaps = List.filter_map (fun (coverage : Row.coverage) ->
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in

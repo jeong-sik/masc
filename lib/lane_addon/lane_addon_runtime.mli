@@ -8,9 +8,10 @@ val register_delivery_handler :
     (Yojson.Safe.t, string) result) -> unit
 val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-(** Root-domain notification only: no I/O and no package callback. Existing
-    activity can wake observers; repeated notifications coalesce visibly. *)
-val notify_activity : config:Workspace.config -> unit
+(** Root-domain notification only: no I/O and no package callback. Only sources
+    interested in the typed activity receive a capture hint. Repeated hints
+    coalesce; explicit observations take precedence over refresh hints. *)
+val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.activity -> unit
 
 type skill_export_owner = Declaration of string | Instance of string
 type skill_export = {

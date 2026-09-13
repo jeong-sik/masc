@@ -981,8 +981,10 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   in
   let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
-  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
-    ^ "Esc: back to the list" ^ Ansi.reset);
+  (* Opens on MASC and its name, like every other surface; the way out is the
+     footer's to say, and saying it here too spelled the same key twice in two
+     notations. *)
+  box_line buf cols (screen_title " MASC Approval");
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =
@@ -1042,7 +1044,7 @@ let render_approval_detail (state : state) (row : approval_row) =
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  y:confirm  n:deny  R:retry if offered  Esc:back");
+       ~hints:Masc_tui_keys.footer_hints_approval_detail);
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
@@ -5658,10 +5660,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       (if List.mem k.k_name state.keeper_yolo_names then
          (Theme.bad ()) ^ "skipped" ^ Ansi.reset
        else Ansi.dim ^ "asked" ^ Ansi.reset);
+    (* "workspace" is where the stance comes from, not what it is. The chat
+       header resolves the same inheritance before drawing it; this row left
+       the reader to go and look it up. *)
     add_row "Effects (Gate mode):"
-      (match List.assoc_opt k.k_name state.keeper_gate_modes with
-       | Some mode -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line mode ^ Ansi.reset
-       | None -> Ansi.dim ^ "workspace" ^ Ansi.reset);
+      (let inherited =
+         Option.map
+           (fun (modes : Tui_decode.gate_lane_modes) ->
+             gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+           state.gate_modes
+       in
+       match List.assoc_opt k.k_name state.keeper_gate_modes with
+       | Some mode when not (String.equal mode "workspace") ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+           ^ Ansi.reset
+       | Some _ | None ->
+           Ansi.dim ^ "workspace"
+           ^ (match inherited with
+              | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
+              | None -> "")
+           ^ Ansi.reset);
     add_row "Judge first:"
       (match List.assoc_opt k.k_name state.keeper_gate_judges with
        | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset
@@ -13734,6 +13753,7 @@ let render_agenda (state : state) =
     | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay

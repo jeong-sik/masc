@@ -35,6 +35,9 @@ scope가 null이면 생략한다. 선택 요소와 읽기 범위는 다르므로
 현재 사이트·요청에 맞는 instruction을 Available 목록에서 골라 `keeper_skill`로 읽고
 이 스킬과 합쳐 쓴다. identity는 그 목록에서 복사한다. 같은 revision의 지침을 이미
 읽어 가지고 있으면 재호출하지 않는다. 다른 사이트나 모든 참조를 미리 읽지 않는다.
+공개 Reddit·X/Twitter형 피드·스레드라면 `browser-public-social`을 사이트 지침으로
+선택하고, 요청한 페이지 계열의 reference 하나만 추가로 읽는다. 로그인·게시·투표·DM은
+이 read-only 지침의 범위가 아니다.
 
 현재 호출 목록의 `keeper_compose_<name>`는 실행 도구다. instruction을 읽었다고
 없는 composition이 생기지는 않는다. 중간 결과에 별도 판단이 필요 없는 이동+관측은

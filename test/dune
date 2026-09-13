@@ -5822,3 +5822,8 @@
  (name test_verification_pdf_inspection_budgets)
  (modules test_verification_pdf_inspection_budgets)
  (libraries masc_test_deps))
+
+(test
+ (name test_runtime_adapter_credential_requirement)
+ (modules test_runtime_adapter_credential_requirement)
+ (libraries masc_test_deps))

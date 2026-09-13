@@ -72,27 +72,34 @@ let validate_dispatch_credential
   | Runtime_execution.Antigravity_cli _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
-    let credential =
-      Runtime_adapter.effective_credential_reference
+    let requirement =
+      Runtime_adapter.credential_requirement
         ~provider_id:runtime.provider.id
         runtime.provider.credentials
     in
     if not (Llm_provider.Secret.is_empty provider_config.api_key)
     then Ok ()
     else
-      match credential with
-      | None -> Ok ()
-      | Some (Env env_key) ->
+      match requirement with
+      | Not_required -> Ok ()
+      (* An unknown provider is not turned away here. This is a pre-dispatch
+         check, and [Runtime_adapter.resolve_api_key] is where the absence is
+         answered with a refusal that names it; failing twice for one cause
+         would report the same thing in two vocabularies. What changed is that
+         the two absences are no longer one value, so this arm now says which
+         one it is letting through. *)
+      | Unknown_provider -> Ok ()
+      | Reference (Env env_key) ->
         Error
           (Required_env_credential_missing
              { provider_id = runtime.provider.id; env_key })
-      | Some (Inline _) ->
+      | Reference (Inline _) ->
         Error
           (Declared_credential_unavailable
              { provider_id = runtime.provider.id
              ; carrier = Agent_core.Error.InlineCredential
              })
-      | Some (File _) ->
+      | Reference (File _) ->
         Error
           (Declared_credential_unavailable
              { provider_id = runtime.provider.id

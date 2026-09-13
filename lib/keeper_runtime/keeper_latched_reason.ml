@@ -7,6 +7,7 @@
 type operator_actor =
   | Grpc_directive
   | Keeper_down
+  | Chat_interrupt
 
 type t = Operator_paused of { operator_actor : operator_actor }
 
@@ -16,11 +17,13 @@ let operator_actor_keeper_down = Keeper_down
 let operator_actor_to_wire = function
   | Grpc_directive -> "grpc_directive"
   | Keeper_down -> "keeper_down"
+  | Chat_interrupt -> "chat_interrupt"
 ;;
 
 let operator_actor_of_wire = function
   | "grpc_directive" -> Ok Grpc_directive
   | "keeper_down" -> Ok Keeper_down
+  | "chat_interrupt" -> Ok Chat_interrupt
   | other ->
     Error (Printf.sprintf "Keeper_latched_reason: unknown operator actor %S" other)
 ;;
@@ -30,7 +33,9 @@ let equal left right =
   | Operator_paused { operator_actor = Grpc_directive },
     Operator_paused { operator_actor = Grpc_directive }
   | Operator_paused { operator_actor = Keeper_down },
-    Operator_paused { operator_actor = Keeper_down } ->
+    Operator_paused { operator_actor = Keeper_down }
+  | Operator_paused { operator_actor = Chat_interrupt },
+    Operator_paused { operator_actor = Chat_interrupt } ->
     true
   | Operator_paused _, Operator_paused _ -> false
 ;;
@@ -38,6 +43,7 @@ let equal left right =
 let hash = function
   | Operator_paused { operator_actor = Grpc_directive } -> 0
   | Operator_paused { operator_actor = Keeper_down } -> 1
+  | Operator_paused { operator_actor = Chat_interrupt } -> 2
 ;;
 
 let pp formatter = function
@@ -58,6 +64,8 @@ let of_wire = function
     Ok (Operator_paused { operator_actor = Grpc_directive })
   | "operator_paused:actor=keeper_down" ->
     Ok (Operator_paused { operator_actor = Keeper_down })
+  | "operator_paused:actor=chat_interrupt" ->
+    Ok (Operator_paused { operator_actor = Chat_interrupt })
   | wire ->
     Error
       (Printf.sprintf

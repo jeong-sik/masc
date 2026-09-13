@@ -577,6 +577,49 @@ let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
    | Error _ as error -> error)
 ;;
 
+(* Admission changes and their exact cancellation capability are serialized by
+   the Owner, under the same lifecycle reservation as ordinary Pause/Resume. *)
+let with_chat_admission_command ~base_path ~keeper_name run =
+  let result = Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name (fun () ->
+    match get ~base_path ~keeper_name with
+    | Error error -> Error (Command_lookup_failed error)
+    | Ok owner ->
+      match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name () with
+      | Error reservation -> Error (Command_lifecycle_reserved reservation)
+      | Ok () ->
+        let entry = Keeper_registry.get ~base_path keeper_name in
+        match run owner entry with
+        | Error error -> Error (Command_rejected error)
+        | Ok result -> Ok (result, entry, (Keeper_owner.projection owner).meta)) in
+  match result with
+  | Error _ as error -> error
+  | Ok (result, entry, meta) ->
+    Option.iter (fun meta -> Option.iter (fun entry -> refresh_registry_projection entry meta) entry) meta;
+    Ok result
+;;
+
+let pause_observed_turn ~base_path ~keeper_name ~interrupt_token =
+  with_chat_admission_command ~base_path ~keeper_name (fun owner entry ->
+    match entry with
+    | None -> Ok (Keeper_owner.Operation_not_current { running_operation_id = None })
+    | Some entry -> Keeper_owner.pause_and_interrupt owner
+        (Keeper_owner.Observed_turn { current = entry.current_turn_switch; interrupt_token }))
+;;
+
+let pause_running_operation ~base_path ~keeper_name operation_id =
+  with_chat_admission_command ~base_path ~keeper_name (fun owner _ ->
+    Keeper_owner.pause_and_interrupt owner (Keeper_owner.Direct_operation operation_id))
+;;
+
+let run_next_operation ~base_path ~keeper_name ~operation_id ~interrupt_token =
+  with_chat_admission_command ~base_path ~keeper_name (fun owner entry ->
+    let observed = match entry, interrupt_token with
+      | Some entry, Some interrupt_token ->
+        Some (Keeper_owner.Observed_turn { current = entry.current_turn_switch; interrupt_token })
+      | _ -> None in
+    Keeper_owner.run_next_operation owner ~operation_id ~observed)
+;;
+
 let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
   match Keeper_owner_reducer.turn_runtime_delta_of_snapshots ~before ~after with
   | Error error -> Error (Command_rejected (Keeper_owner.Reducer_rejected error))

@@ -190,9 +190,13 @@ let test_observed_interrupt_is_idempotent () =
   Eio.Switch.run @@ fun outer ->
   let ready, publish = Eio.Promise.create () in
   let ended, finish = Eio.Promise.create () in
+  let release, allow_release = Eio.Promise.create () in
   Eio.Fiber.fork ~sw:outer (fun () ->
     (try Eio.Switch.run (fun turn ->
       Keeper_registry.set_turn_switch ~base_path:base name (Some turn);
+      Eio.Switch.on_release turn (fun () ->
+        Eio.Promise.await release;
+        Keeper_registry.clear_turn_switch_if_current ~base_path:base name turn);
       Eio.Promise.resolve publish (Option.get (Keeper_registry.current_turn_interrupt_token ~base_path:base name));
       Eio.Fiber.await_cancel ())
      with exn when Keeper_registry_types.is_operator_interrupt exn -> ());
@@ -201,10 +205,16 @@ let test_observed_interrupt_is_idempotent () =
   check "matching target receives signal"
     (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token
       = Keeper_registry.Observed_turn_signalled);
-  check "duplicate target cannot signal another turn"
+  check "signalled turn retains its identity until teardown finishes"
+    (Keeper_registry.current_turn_interrupt_token ~base_path:base name = Some interrupt_token);
+  check "duplicate target still names the settling turn"
     (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token
-      = Keeper_registry.Observed_turn_changed);
-  Eio.Promise.await ended
+      = Keeper_registry.Observed_turn_signalled);
+  Eio.Promise.resolve allow_release ();
+  Eio.Promise.await ended;
+  check "settled target cannot signal another turn"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token
+      = Keeper_registry.Observed_turn_changed)
 ;;
 
 let () =

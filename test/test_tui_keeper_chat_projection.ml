@@ -1036,7 +1036,7 @@ let test_operation_reconciliation_projection () =
 
 let test_batch_member_events_pass_request_bound_stream_decode () =
   let module Events = Masc.Keeper_chat_events in
-  let module Projection = Masc.Server_keeper_chat_agui_projection in
+  let module Projection = Server_keeper_chat_agui_projection in
   let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
     | Ok id -> id | Error detail -> fail detail in
   let events =
@@ -1044,13 +1044,13 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
     ; Events.Text_delta "hello"
     ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
-        turn_ref=Masc.Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
+        turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
     ; Events.Text_message_end
     ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in
   let _, projected = List.fold_left (fun (state, rows) event ->
     let member_event = Masc.Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
     let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id ~redact_json:Fun.id state member_event in
-    state, match frame with None -> rows | Some frame -> Masc.Ag_ui.event_to_json frame :: rows)
+    state, match frame with None -> rows | Some frame -> Ag_ui.event_to_json frame :: rows)
     (Projection.initial, []) events in
   match decode (acceptance () :: List.rev projected) with
   | Ok (Chat.Turn_completed completed) -> check string "follower receives complete shared reply" "hello" completed.reply

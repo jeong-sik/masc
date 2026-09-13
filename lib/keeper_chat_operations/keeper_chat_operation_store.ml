@@ -475,14 +475,14 @@ let batch_execution_with_db db operation_id =
   with_statement db ~operation:"read batch membership"
     "SELECT execution_id, admitted_digest FROM operation_batch_members WHERE operation_id = ?" (fun stmt ->
       let* () = bind_text db stmt ~operation:"bind member id" 1 (Id.to_string operation_id) in
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.DONE -> Ok None
-      | Sqlite3.Rc.ROW ->
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
           let* execution_id = Id.of_string (Sqlite3.column_text stmt 0)
             |> Result.map_error (fun detail -> Integrity_error detail) in
           let* input_digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 1) in
           Ok (Some { Operation.execution_id; input_digest })
-      | rc -> Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
+      else Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
 ;;
 let project_batch_with_db db (operation : Operation.t) =
   let* batch_membership = batch_execution_with_db db operation.operation_id in
@@ -514,11 +514,12 @@ let batch_operations store ~operation_id =
     let* ids = with_statement store.db ~operation:"read ordered batch"
       "SELECT operation_id FROM operation_batch_members WHERE execution_id = ? ORDER BY position" (fun stmt ->
         let* () = bind_text store.db stmt ~operation:"bind execution id" 1 (Id.to_string execution_id) in
-        let rec read acc = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-          | Sqlite3.Rc.ROW -> let* id = Id.of_string (Sqlite3.column_text stmt 0)
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* id = Id.of_string (Sqlite3.column_text stmt 0)
               |> Result.map_error (fun detail -> Integrity_error detail) in read (id :: acc)
-          | rc -> Error (Store_unavailable (sqlite_error store.db "read ordered batch" rc)) in read []) in
+          else Error (Store_unavailable (sqlite_error store.db "read ordered batch" rc)) in read []) in
     List.fold_left (fun result id -> let* acc = result in
       let* operation = get store id in match operation with
       | Some operation -> Ok (operation :: acc)
@@ -1112,11 +1113,12 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
     let* candidates = with_statement db ~operation:"read fresh batch candidates"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id) ORDER BY sequence")
       (fun stmt ->
-        let rec read acc = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-          | Sqlite3.Rc.ROW -> let* operation = decode_operation stmt in
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* operation = decode_operation stmt in
               read (if scoped operation then acc else operation :: acc)
-          | rc -> Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
+          else Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
     let* plan = select head candidates |> Result.map_error (fun detail -> Invalid_input detail) in
     match plan with
     | None -> Ok head

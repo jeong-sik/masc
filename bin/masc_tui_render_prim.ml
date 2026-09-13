@@ -1323,10 +1323,18 @@ let data_unreliable_row ~cols err =
        - Message_layout.display_width data_unreliable_close)
   in
   (* Generic HTTP bodies and diagnostics carry their actionable prefix.
-     Transport failures put the request target before their verbose reason. *)
+     Transport failures put the request target before their verbose reason.
+
+     Cut only when the error is longer than the room. [fit_width] also pads a
+     shorter one out to the room, which is right for a column and wrong for a
+     sentence: the closing bracket stood at the right edge of the frame, a
+     screen's width away from the words it closes. *)
+  let shown =
+    if Message_layout.display_width err > room then fit_width err room else err
+  in
   (Theme.bad ())
   ^ data_unreliable_open
-  ^ fit_width err room
+  ^ shown
   ^ data_unreliable_close
   ^ Ansi.reset
 

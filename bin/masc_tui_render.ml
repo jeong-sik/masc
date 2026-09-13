@@ -6350,6 +6350,10 @@ let render_keeper_detail (state : state) =
     let footer =
       keeper_action_hints state (Some (keeper_reading state k))
     in
+    (* [key:label], the way every other hint on this row and on every other
+       footer is spelled. "h/l pane" was the one hint written as two words.
+       The two trailing cells are the separator: the hints no longer open with
+       one of their own. *)
     let footer =
       if keeper_roster_pane_shown state ~cols then "  h/l:pane  " ^ footer
       else footer

@@ -4237,11 +4237,21 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
                 ]
             },
         )
-        board = send_and_wait(
-            process, master_fd, output, b"s", b"post-trend"
+        sort_start = len(output)
+        send_and_wait(process, master_fd, output, b"s", b"post-trend")
+        # The header names the order by what it does, not by its key: the pane
+        # draws Board_trending as "Sort [s]: net votes / \u221aage-hours", and no
+        # screen has drawn "sort:trending". The header row and the reordered
+        # list need not arrive in one frame, so wait for the header from the
+        # press rather than reading it out of the frame that carried the rows.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            "Sort [s]: net votes / \u221aage-hours".encode(),
+            start=sort_start,
+            timeout=3.0,
         )
-        if b"sort:trending" not in board:
-            raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (
             200,

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "masc browser lane",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Read bridge between this Firefox session and MASC (tabs, page text, controls, viewport screenshots)",
   "permissions": ["tabs", "webNavigation", "nativeMessaging", "<all_urls>"],
   "background": { "scripts": ["background.js"] },

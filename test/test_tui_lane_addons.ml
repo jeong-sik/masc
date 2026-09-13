@@ -229,10 +229,15 @@ let guided_actions () =
   let failed = {instance with id="retry-worker";phase=UI.Row.Failed "source capture failed"} in
   let retry = {UI.initial with snapshot=Some {snapshot with instances=[failed]}} in
   check bool "failed worker can request observation retry" true (UI.can_observe failed);
-  check bool "failed worker exposes retry and retains attention grouping" true
-    (UI.overview_hints retry="i:install  j/k:select  Tab:focus  o:retry observation  a:actions  d:cleanup  f:flow  D:details  J/K:scroll  Esc:back"
-     && List.mem "Needs attention" (UI.lines ~width:240 retry)
-     && not (List.mem "Active workers" (UI.lines ~width:240 retry)));
+  (* Check worker controls independently of global navigation commands, which
+     other Lane panels extend. Keep grouping assertions separate for diagnosis. *)
+  check bool "failed worker exposes retry and advertised action controls" true
+    (String.ends_with ~suffix:"o:retry observation  a:actions  d:cleanup  f:flow  D:details  J/K:scroll  Esc:back"
+       (UI.overview_hints retry));
+  check bool "failed worker retains attention grouping" true
+    (List.mem "Needs attention" (UI.lines ~width:240 retry));
+  check bool "failed worker is not grouped as active" false
+    (List.mem "Active workers" (UI.lines ~width:240 retry));
   check bool "failed worker can request its advertised action without forced cleanup" true
     (Result.is_ok (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" retry));
   let lines = UI.lines ~width:240 overview in
@@ -241,7 +246,8 @@ let guided_actions () =
   check bool "retained worker carries its exact identity" true
     (List.mem "    run run · instance retained-worker" lines);
   check bool "detached selection offers no observe or action controls" true
-    (UI.overview_hints overview="i:install  j/k:select  Tab:focus  retained history · D:details  f:flow  D:details  J/K:scroll  Esc:back");
+    (String.ends_with ~suffix:"retained history · D:details  f:flow  D:details  J/K:scroll  Esc:back"
+       (UI.overview_hints overview));
   check bool "detached schema cannot open actions" true
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" overview));
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in

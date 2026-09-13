@@ -14,7 +14,7 @@ let state () =
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
   { ktr_keeper_name = keeper_name
-  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; preview = None }
+  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = None; preview = None }
   }
 
 let live ?(keeper_name = "alpha") state admission =

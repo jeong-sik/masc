@@ -79,11 +79,29 @@ let test_declined_or_errored_interrupt_lets_esc_leave_immediately () =
     Esc.Leave
 ;;
 
+let test_observed_turn_changes_during_double_escape () =
+  let previous = Some ("old", t0, false) in
+  List.iter (fun current_token ->
+    check bool "duplicate is tied to previous action, not current turn" true
+      (Esc.observed_action ~now_ns:t0 ~current_token ~previous = Some Esc.Swallow))
+    [None; Some "old"; Some "successor"];
+  check bool "fresh explicit key can stop successor after grace" true
+    (Esc.observed_action ~now_ns:(Int64.add t0 (secs 3L))
+      ~current_token:(Some "successor") ~previous = Some Esc.Launch_interrupt);
+  check bool "a past failure cannot disable successor cancellation" true
+    (Esc.observed_action ~now_ns:t0 ~current_token:(Some "successor")
+      ~previous:(Some ("old",t0,true)) = Some Esc.Launch_interrupt);
+  check bool "failed request lets Escape leave immediately" true
+    (Esc.observed_action ~now_ns:t0 ~current_token:(Some "old")
+      ~previous:(Some ("old",t0,true)) = Some Esc.Leave)
+;;
+
 let () =
   run
     "tui_esc_interrupt"
     [ ( "esc during a live turn"
-      , [ test_case "first press launches the interrupt" `Quick
+      , [ test_case "token changes during double Escape" `Quick test_observed_turn_changes_during_double_escape
+        ; test_case "first press launches the interrupt" `Quick
             test_first_esc_launches_the_interrupt
         ; test_case "double press inside the grace window is swallowed" `Quick
             test_double_press_inside_the_grace_window_is_swallowed

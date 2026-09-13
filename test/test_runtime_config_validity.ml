@@ -380,6 +380,72 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
              failf "%s resolves to a dialect that drops reasoning deltas" label))
     glm_rows
 
+(* Every ollama_cloud row in the deployment overlay that claims reasoning must
+   say which thinking control its wire carries. A row that leaves
+   [thinking_control_format] out does not fail: [Provider_catalog] keeps the
+   provider wire base's control (Ollama_think on the native wire,
+   Reasoning_effort on /v1), which is exactly the Enable_not_encodable defect
+   the sibling rows' "none" declaration remediates (#28749). #34368 folded the
+   deepseek-v4-flash:0731 row into the untagged one and dropped both
+   [thinking_control_format] and [accepted_reasoning_efforts] while the row's
+   own comment still claimed the remediation (F255). This test reads the
+   overlay file itself, not the merged global catalog: the embedded rows lean
+   on the wire base by design and are covered in test_capabilities.
+
+   Proves: on origin/main the deepseek-v4-flash row is the one undeclared
+   ollama_cloud reasoning row and the ladder is absent; on this branch every
+   such row declares its control and the flash row carries the measured
+   ladder. The flash row is also required to be present, so the check cannot
+   pass by the row disappearing. *)
+let test_deployment_overlay_ollama_cloud_reasoning_rows_declare_thinking_control () =
+  let overlay_path =
+    Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml"
+  in
+  let overlay =
+    match Llm_provider.Model_catalog.load_file overlay_path with
+    | Error msg -> failf "deployment catalog overlay should load: %s" msg
+    | Ok overlay -> overlay
+  in
+  let ollama_cloud_reasoning_rows =
+    List.filter
+      (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         match entry.provider_name, entry.supports_reasoning with
+         | Some "ollama_cloud", Some true -> true
+         | Some "ollama_cloud", (Some false | None)
+         | Some _, _
+         | None, _ -> false)
+      (Llm_provider.Model_catalog.model_entries overlay)
+  in
+  check bool "overlay carries ollama_cloud reasoning rows" true
+    (ollama_cloud_reasoning_rows <> []);
+  List.iter
+    (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+       let label = "ollama_cloud/" ^ entry.id_prefix in
+       match entry.thinking_control_format with
+       | None ->
+         failf
+           "%s claims reasoning but declares no thinking_control_format; the row \
+            would silently inherit the provider wire base"
+           label
+       | Some (_ : Llm_provider.Capabilities.thinking_control_format) -> ())
+    ollama_cloud_reasoning_rows;
+  let flash_ladder =
+    List.find_map
+      (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         if String.equal entry.id_prefix "deepseek-v4-flash"
+         then Some entry.accepted_reasoning_efforts
+         else None)
+      ollama_cloud_reasoning_rows
+  in
+  match flash_ladder with
+  | None -> fail "overlay should carry the ollama_cloud deepseek-v4-flash reasoning row"
+  | Some ladder ->
+    check
+      (option (list string))
+      "deepseek-v4-flash declares the ladder ollama.com/v1 accepts"
+      (Some [ "none"; "low"; "medium"; "high"; "max" ])
+      ladder
+
 let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
@@ -5146,6 +5212,10 @@ let () =
             "deployment AGENT_CORE catalog covers GLM typed streaming reasoning"
             `Quick
             test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning;
+          test_case
+            "deployment overlay ollama_cloud reasoning rows declare thinking control"
+            `Quick
+            test_deployment_overlay_ollama_cloud_reasoning_rows_declare_thinking_control;
           test_case
             "deployment AGENT_CORE catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma;

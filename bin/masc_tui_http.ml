@@ -208,7 +208,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
       ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "GET failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
@@ -243,7 +243,7 @@ let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
       ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "POST failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
 
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (int * string, string) result =
@@ -2690,7 +2690,7 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

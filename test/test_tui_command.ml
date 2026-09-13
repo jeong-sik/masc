@@ -229,7 +229,11 @@ let test_about_banner () =
   let unread = Command.about_banner () in
   check bool "an unread roster says not loaded" true
     (contains_sub unread "Keepers: not loaded");
-  check bool "and does not say zero" false (contains_sub unread "Keepers: 0")
+  check bool "and does not say zero" false (contains_sub unread "Keepers: 0");
+  (* The banner is given a theme and a keeper count and nothing else, so a gate
+     state in it could only be made up. *)
+  check bool "the banner claims no gate state it was not given" false
+    (contains_sub banner "Gates:")
 
 let test_preset_commands_parse_verb_name_and_description () =
   check (list string) "preset commands"

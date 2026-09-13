@@ -884,15 +884,26 @@ let test_fleet_total_cost () =
   Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
     (fleet_total_cost_usd state)
 
+(* The golden below holds every label, so a deliberate relabelling fails it and
+   asks to be looked at -- which is what it is for. The three hops are asserted
+   on their own underneath, because losing one of those is not a relabelling: it
+   is the only place the Config screen names a surface the ring folds under it,
+   and a reader who cannot see it has no way to the surface but the palette. *)
 let test_config_footer_names_child_hops () =
-  (* The pane list here is the strip's, all seven of it: presets and voice had
-     been added to the strip without this following, and a reader who trusted
-     the footer did not learn the voice pane exists. The five short labels after
-     f are pane-scoped writes and views that were in no list at all -- which
-     pane each belongs to is in the help the ? overlay draws. *)
+  (* The five short labels after f are pane-scoped writes and views that were
+     in no list at all -- which pane each belongs to is in the help the ?
+     overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  PgUp/PgDn:page  p:runtime.toml / models / params / prompts / presets / themes / voice  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next"
-    (Masc_tui_keys.footer_hints Config)
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Config);
+  let hints = Masc_tui_keys.footer_hints Config in
+  List.iter
+    (fun hop ->
+      Alcotest.(check bool) ("Config still names " ^ hop) true
+        (List.exists (String.equal hop)
+           (String.split_on_char ' ' hints
+            |> List.filter (fun piece -> not (String.equal piece "")))))
+    [ "9:Runtime"; "s:resources"; "t:tools" ]
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct
@@ -914,6 +925,70 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   in
   Alcotest.(check bool) "g/G stays on Acting" true (List.mem "g / G" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
+
+let footer_has_key key row =
+  String.split_on_char ' ' row
+  |> List.exists (String.starts_with ~prefix:(key ^ ":"))
+
+let fitted_footer ~cols hints =
+  Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:cols ~port:8935
+    ~hints ()
+  |> String.trim
+
+let test_config_pane_footer_actions () =
+  let panes =
+    [ Config_runtime; Config_models; Config_params; Config_prompts
+    ; Config_presets; Config_themes; Config_voice ]
+  in
+  List.iter (fun pane ->
+    let hints = Masc_tui_keys.footer_hints_config ~pane in
+    let enabled key expected =
+      Alcotest.(check bool) ("pane availability of " ^ key) expected
+        (footer_has_key key hints)
+    in
+    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts ]);
+    enabled "v" (pane = Config_runtime);
+    enabled "E" (pane = Config_params);
+    enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
+    enabled "f" (pane = Config_themes);
+    enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    enabled "e"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
+    List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
+    List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
+    panes;
+  List.iter (fun pane ->
+    List.iter (fun cols ->
+      let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
+      Alcotest.(check bool) "fitted Config row stays within terminal" true
+        (Masc_tui_message_layout.display_width row <= cols);
+      List.iter (fun key ->
+        Alcotest.(check bool) ("Config retains " ^ key) true
+          (footer_has_key key row)) [ "Esc"; "q" ];
+      List.iter (fun key ->
+        Alcotest.(check bool) ("inactive action stays absent: " ^ key) false
+          (footer_has_key key row))
+        (match pane with
+         | Config_runtime -> [ "E"; "Enter"; "x"; "f" ]
+         | Config_themes -> [ "PgUp/PgDn"; "v"; "e"; "E" ]
+         | Config_models | Config_params | Config_prompts | Config_presets
+         | Config_voice -> []))
+      [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
+
+let test_activity_footer_keeps_filter_before_evidence () =
+  let hints = Masc_tui_keys.footer_hints Acting in
+  for cols = 80 to 148 do
+    let row = fitted_footer ~cols hints in
+    Alcotest.(check bool) "Activity stays within terminal" true
+      (Masc_tui_message_layout.display_width row <= cols);
+    Alcotest.(check bool) "evidence never outlives its filter prerequisite" true
+      (not (footer_has_key "Enter" row) || footer_has_key "f" row);
+    if cols >= 120 then
+      Alcotest.(check bool) "filter remains visible at affected widths" true
+        (footer_has_key "f" row)
+  done
 
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
@@ -1850,6 +1925,10 @@ let () =
             test_the_sheet_explains_the_keeper_columns
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
+        ; Alcotest.test_case "Config footer follows active pane and width" `Quick
+            test_config_pane_footer_actions
+        ; Alcotest.test_case "Activity filter survives evidence hint" `Quick
+            test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick

@@ -2528,6 +2528,25 @@ let test_the_board_header_and_rows_share_one_layout () =
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")
 ;;
 
+(* The Board list's frame is the shared contract's, not a count of its own.
+
+   It spent [rows - 11] on posts while it drew nine fixed rows: the constant
+   still named a closing rule and a detail line the surface had stopped
+   drawing. [finish_surface] pads a short frame after its last row, which is
+   the footer, so the footer stood two rows above the composer while posts
+   were listed and one while the board was empty. [surface_chrome] fills
+   between the body and the footer from what the body actually drew, so a
+   row the surface stops drawing cannot leave a gap behind it. *)
+let test_the_board_list_frame_is_the_shared_contract () =
+  let in_board callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_board_list" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (in_board "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (in_board "finish_surface");
+  check int "and no row is filled by hand" 0 (in_board "box_empty")
+;;
+
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
    token carried syntax colour. Pin the shared document renderer at the
@@ -2660,6 +2679,10 @@ let () =
           "the board header and rows share one layout"
           `Quick
           test_the_board_header_and_rows_share_one_layout;
+        test_case
+          "the board list frame is the shared contract"
+          `Quick
+          test_the_board_list_frame_is_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

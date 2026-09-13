@@ -499,6 +499,75 @@ let voice_listing_command_for_endpoint (endpoint : Voice_config.endpoint) =
          (string_of_transport adapter.transport))
 ;;
 
+(* The audio container a file declares in its first bytes. A closed set of the
+   ones a masc voice path meets -- the capture's WAV, a provider's MP3, a
+   browser's WebM -- and [Unrecognized] for everything else, so a reader decides
+   only about containers it names. *)
+type audio_container =
+  | Wave
+  | Flac
+  | Mp3
+  | Webm
+  | Ogg_opus
+  | Aiff
+  | Mp4
+  | Unrecognized
+
+(* The number of leading bytes {!audio_container_of_leading_bytes} needs: the
+   Ogg Opus identification header ends at offset 36. *)
+let audio_container_probe_bytes = 36
+
+let audio_container_of_leading_bytes bytes =
+  let length = String.length bytes in
+  let at offset literal =
+    offset + String.length literal <= length
+    && String.equal (String.sub bytes offset (String.length literal)) literal
+  in
+  (* An MP3 without an ID3 tag starts at its first frame: eleven sync bits, then
+     a version that is not the reserved 01 and a layer of 01 (Layer III). The
+     layer is what keeps an AAC ADTS stream, which shares the sync bits, out. *)
+  let mp3_frame_sync =
+    length >= 2
+    && Char.code bytes.[0] = 0xFF
+    && (let second = Char.code bytes.[1] in
+        second land 0xE0 = 0xE0 && second land 0x18 <> 0x08 && second land 0x06 = 0x02)
+  in
+  if at 0 "RIFF" && at 8 "WAVE" then Wave
+  else if at 0 "fLaC" then Flac
+  else if at 0 "ID3" || mp3_frame_sync then Mp3
+  else if at 0 "\x1A\x45\xDF\xA3" then Webm
+  else if at 0 "OggS" && at 28 "OpusHead" then Ogg_opus
+  else if at 0 "FORM" && (at 8 "AIFF" || at 8 "AIFC") then Aiff
+  else if at 4 "ftyp" then Mp4
+  else Unrecognized
+
+let audio_container_name = function
+  | Wave -> "WAV"
+  | Flac -> "FLAC"
+  | Mp3 -> "MP3"
+  | Webm -> "WebM"
+  | Ogg_opus -> "Ogg Opus"
+  | Aiff -> "AIFF"
+  | Mp4 -> "MP4/M4A"
+  | Unrecognized -> "unrecognized"
+
+(* Whether whisper-cli reads a container, measured with whisper-cpp 1.9.2 on
+   2026-09-13. For one it does not read, whisper-cli prints "failed to read
+   audio file" to stderr and exits 0 with nothing on stdout, which is also what
+   it answers for a recording of silence. A browser's MediaRecorder records
+   WebM, so that is what a dashboard capture sends. [Unrecognized] is left to
+   whisper-cli, which is the only thing that can say what it reads beyond the
+   containers measured here. *)
+type whisper_cli_input =
+  | Reads
+  | Does_not_read
+  | Not_measured
+
+let whisper_cli_input = function
+  | Wave | Flac | Mp3 -> Reads
+  | Webm | Ogg_opus | Aiff | Mp4 -> Does_not_read
+  | Unrecognized -> Not_measured
+
 let stt_command_for_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~model =
   let adapter = adapter_for_endpoint endpoint in
   match adapter.transport with

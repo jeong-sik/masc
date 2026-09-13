@@ -28,7 +28,7 @@ let test_edit_retains_media_and_turn_context () =
     (Result.is_error (Inbox.edited_input ~message:"new" (`Assoc ["input",`Null])))
 let test_exact_event_commands () =
   (match get (Inbox.parse "priority-event ref 42 immediate") with
-   | Inbox.Prioritize_event ("ref",42L,Masc.Keeper_event_queue.Immediate) -> ()
+   | Inbox.Prioritize_event ("ref",42L,Keeper_event_queue.Immediate) -> ()
    | _ -> Alcotest.fail "lost exact event identity");
   Alcotest.(check bool) "unknown urgency rejected" true
     (Result.is_error (Inbox.parse "priority-event ref 42 fastest"));

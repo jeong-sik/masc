@@ -7548,7 +7548,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             ("action", `String "cancel") :: ("reason", `String reason)
             :: ("operator_operation_id", `String operator_operation_id) :: fields
           | Inbox.Prioritize_event (_, _, urgency) ->
-            ("action", `String "reprioritize") :: ("urgency", `String (Masc.Keeper_event_queue.urgency_to_string urgency)) :: fields
+            ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
           | Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ -> assert false in
         let* _ = Masc_tui_http.post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in

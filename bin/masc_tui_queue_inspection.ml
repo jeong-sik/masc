@@ -1,6 +1,6 @@
 type action = Inspect | Pause | Resume | Cancel of string | Move_to_end of string | Edit of string * string
   | Cancel_event of string * int64 * string
-  | Prioritize_event of string * int64 * Masc.Keeper_event_queue.urgency
+  | Prioritize_event of string * int64 * Keeper_event_queue.urgency
 let ( let* ) = Result.bind
 let split text =
   let text = String.trim text in
@@ -13,8 +13,8 @@ let parse text =
   | "pause", "" -> Ok Pause
   | "resume", "" -> Ok Resume
   | ("cancel" | "last" as verb), id when id <> "" ->
-    let* id = Masc.Keeper_chat_operation.Operation_id.of_string id in
-    let id = Masc.Keeper_chat_operation.Operation_id.to_string id in
+    let* id = Keeper_chat_operation.Operation_id.of_string id in
+    let id = Keeper_chat_operation.Operation_id.to_string id in
     Ok (if verb = "cancel" then Cancel id else Move_to_end id)
   | ("cancel-event" | "priority-event" as verb), rest ->
     let source_ref, rest = split rest in
@@ -24,13 +24,13 @@ let parse text =
       | _ -> Error "Event incarnation must be a non-negative integer from /queue" in
     if source_ref = "" || value = "" then Error "Event action requires REF INCARNATION and reason or urgency"
     else if verb = "cancel-event" then Ok (Cancel_event (source_ref, incarnation, value))
-    else let* urgency = Masc.Keeper_event_queue.urgency_of_string value in
+    else let* urgency = Keeper_event_queue.urgency_of_string value in
       Ok (Prioritize_event (source_ref, incarnation, urgency))
   | "edit", rest ->
     let id, message = split rest in
-    let* id = Masc.Keeper_chat_operation.Operation_id.of_string id in
+    let* id = Keeper_chat_operation.Operation_id.of_string id in
     if message = "" then Error "/queue edit requires the new message"
-    else Ok (Edit (Masc.Keeper_chat_operation.Operation_id.to_string id, message))
+    else Ok (Edit (Keeper_chat_operation.Operation_id.to_string id, message))
   | _ -> Error "Use /queue, /queue pause, /queue resume, /queue cancel ID, /queue last ID, /queue edit ID message"
 let field key = function
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> Ok value | None -> Error ("Queue response missing " ^ key))
@@ -78,7 +78,7 @@ let operation_lines json =
     let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
     let* input = field "input" operation in
     let* input = Masc.Keeper_chat_operation_payload.input_of_json input in
-    Ok (Printf.sprintf "  %s [%s / %s]\n    %s" (safe id) (safe (Masc.Keeper_continuation_channel.describe source.continuation_channel))
+    Ok (Printf.sprintf "  %s [%s / %s]\n    %s" (safe id) (safe (Keeper_continuation_channel.describe source.continuation_channel))
       (safe source.submitted_by) (safe input.message))) operations in
   Ok ((Printf.sprintf "Server queued messages: %d" (List.length operations)) :: lines)
 let edited_input ~message operation =

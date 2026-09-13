@@ -6659,11 +6659,15 @@ let render_system_logs (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  (* The scroll indicator is a real row whenever this page has more entries
-     than fit. Reserving it unconditionally keeps the bottom border and footer
-     from becoming the frame's overflow casualty. *)
-  let chrome_rows = system_log_listing_chrome ~error:state.system_logs_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The scroll row is a frame row while the page holds more entries than
+     fit, and only then; the layout the keypress reads says so. *)
+  let content_height =
+    match scrolled_surface state System_logs with
+    | Some s ->
+        Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
+          ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
+    | None -> max 1 (rows - listing_chrome ~error:state.system_logs_error)
+  in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min state.system_logs_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in

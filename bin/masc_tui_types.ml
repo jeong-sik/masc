@@ -2382,7 +2382,6 @@ let runtime_listing_chrome ~error ~action_error ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
-let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -6801,8 +6800,8 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
             (match state.system_logs with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
-        ; sc_overflow_takes_row = false
+        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->

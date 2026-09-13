@@ -1,0 +1,17 @@
+# Collaboration, media inspection and IDE integration
+
+This installation candidate adds the reviewed LSP document continuity feature to media source `7bd85f6bd6924a0619d7113f3347f0d0b19346d3`. The base preserves installed Chat source `4324764e959a5ff8b265b292e5bab9f68e550313` and its Fusion/Gate behavior, plus original PDF/PPTX/MP4 and workspace-bound Board/Fusion verification.
+
+Both LSP commits apply without conflict. At integration source267eb872c0, all 31 changed files match LSP source83f31140db byte for byte (`source-comparison.json`). The final documentation commit only normalizes trailing blank lines in one recorded failed probe's stderr and updates evidence. Independent review found no P1/P2: the 59 media changes and 31 LSP changes do not overlap, only nine LSP production files change the installed Dashboard, the direct Chat index dependency remains, and the duplicate verifier test declaration stays removed.
+
+Five affected frontend suites passed all 111 tests in this combined worktree. Whole Dashboard type checking, changed OCaml parse-only checking and the DET gate passed. Logs are adjacent. No local Dune or Vite production build was performed. The prior media CI failure, declaration audit and repaired-head dispatch receipts are preserved under `media-ci-stanza-repair`; they are not CI success for this candidate.
+
+The final candidate also includes `masc inspect-file --base-path WORKSPACE FILE`, using the same PDF/PPTX/MP4 implementation as verifier Read. It emits original identity and actual rendered content while explicitly leaving the LLM verdict unrun. This enables operator inspection without resubmitting an approved Task. Direct and independent review found no P1/P2; six changed OCaml files passed parse-only checks. The shared inspector functions retain their prior bodies apart from the explicit base-path argument.
+
+Two failed native cases in the media parent are repaired: fixture paths now use the system temporary directory instead of HOME-relative RUNNER_TEMP, and the expected registry includes the existing BrowserGoto output contract. Other parent cases, including PDF/MP4 authority and Board/Fusion, passed. Exact failure scope and original log identities are in `native-fixture-repair`.
+
+The isolated workspace now has a managed python-pptx1.0.2 environment. A portable LibreOffice26.2.6 app was downloaded from the [official download page](https://www.libreoffice.org/download/download-libreoffice/); its published SHA256, code signature and headless version probe passed. It is stored in an owned temporary prefix, with no system Applications installation. Receipts in `host-prerequisites` establish dependency readiness, not actual MASC inspection.
+
+This candidate still requires its own native Test/Release and installed full IDE/CLI acceptance. Prior real Chromium/ocamllsp observations use the source client and a test adapter, and do not prove the installed MASC WebSocket proxy or Keeper LSP usage. Three scenario Goals still await human confirmation; the full 18-item objective remains open.
+
+A later exact-source macOS build stopped at the operator CLI with `Unbound module Tool_result`. The main executable now declares its existing `masc.tool_types` leaf dependency directly, as required by `implicit_transitive_deps=false`. All other CLI module dependencies were independently checked. This is a build declaration repair, not a local native success; the original error and source/job identity are under `cli-direct-dependency`.

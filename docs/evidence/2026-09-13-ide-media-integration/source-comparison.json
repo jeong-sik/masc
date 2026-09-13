@@ -1,0 +1,133 @@
+{
+  "base": "7bd85f6bd6924a0619d7113f3347f0d0b19346d3",
+  "lsp_source": "83f31140dbce4908ce803c65081cd0f4d80a1454",
+  "integration_source": "267eb872c0f46e4717612c7962fc88c998c71ed4",
+  "identical_files": [
+    {
+      "path": "dashboard/scripts/lsp-document-browser-fixture.ts",
+      "sha256": "c9387b16100629d7bc8be1d87c3b450e787b2782ded3208b9d1c60c668039eb1"
+    },
+    {
+      "path": "dashboard/src/components/ide/code-document-store.ts",
+      "sha256": "1df28c0370c693c717651ddb4cf35871fece7a488d1a75a6dcb89992898623c7"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-data-workspace-store.ts",
+      "sha256": "a677e5b6b49161cad6847a8dc982304cf0ac14675c5342a640c2004e2d9980b4"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-editor.ts",
+      "sha256": "e9bfdb8ac533d7ffc2b9dc5c8a930fd87282bac59412eecadbd51f8f66bdf6ac"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-lsp-client.test.ts",
+      "sha256": "f0d0ae8dcceba74a2b1321f655d01b1ab06c4b25cc2b3eebbd3853f16fb69109"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-lsp-client.ts",
+      "sha256": "5d9f1aea74dba9c0437ed548df0b87df31fb97c3699e3ae50e159630f3985554"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-lsp-document-status.ts",
+      "sha256": "437615ef1d65212fd01162d71a59bce58a416f474e81ef199219186f620a6784"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-shell.test.ts",
+      "sha256": "975edbb7c674c5155165168e5b4bb7032a04833c567b9c21622ba7831e5bd1be"
+    },
+    {
+      "path": "dashboard/src/components/ide/ide-shell.ts",
+      "sha256": "8be4f22c9d5ff04196d82ab9ab6ba1b1ea22709baf65b642738410dd94b6f488"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/README.md",
+      "sha256": "3c8ccc15d70ee0c5824873ae5fe67c2ac226078eca94eaa38a2f4d5ec01779c0"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/first-probe-failure.json",
+      "sha256": "0c52c2eed3385bcde9b7bef93283236e4d7805fe0a3092e61f281d5cd9549b5f"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/invalid-document.png",
+      "sha256": "dcbd58a0036dae4900f0c1a802fe58a919d74495330c260c6d51801db6094253"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-baseline/protocol.json",
+      "sha256": "aa1f58e26808db70331ef4e5e2ec2164a94cc6b3cb9363205487551f47a9fbe3"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-baseline/receipt.json",
+      "sha256": "e4be3497e18027d6e7dd7c1a89fe604e4ee76ac3d66b27051454a7990816d049"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-baseline/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-first-failure/protocol.json",
+      "sha256": "828b9e7888b31e77b773c5ea2251a82a51d0a8edc2249347dc2074d88a309707"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-first-failure/receipt.json",
+      "sha256": "cb6803cc0e641b9d09d8fef7abb5733d8d8e5340e962377c6a4de801f8b4544b"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-first-failure/stderr.txt",
+      "sha256": "5016807079de32dd63a099d7945a8d9c27b3ac850904a1d74cafe0e2aaba3ac5"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-version-support/protocol.json",
+      "sha256": "dcf4b6af8c6f1eb12fdb3522559e842431640dbe9e2ac8df25550ea7862c5a3d"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-version-support/receipt.json",
+      "sha256": "ed50931cbe58a1d1d4685a768951d742702543da61f18a315ed59fe25b06792e"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/native-version-support/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/protocol.json",
+      "sha256": "7ed17ea38769c679ed4a0f69880adf83dcd92b4085f287a148ff8b5b8ba096ad"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/receipt.json",
+      "sha256": "0cc26eb85e7a51910282595f2ca9ab8a6c7250f7080b25e36de48b5161e1812e"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/sha256.json",
+      "sha256": "3e91c2034ec5f2a88ee79f6f5bfea76d45bacb88c8ec44af72fa1cbdc266e04e"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/source-sha256.json",
+      "sha256": "c714c4431c550d21bdb977bc68756283e570b59b748bbb342cc25022a7f330ed"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/spacer-probe-failure.json",
+      "sha256": "523946d28dc5592eb35336c968aa3ad547275c681feb1019e6b6eb94043bec0d"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/updated-document.png",
+      "sha256": "1f5097457ded045818713c289a906f295274317c471bd0dfa4db7d70248936aa"
+    },
+    {
+      "path": "docs/evidence/2026-09-13-ide-lsp-document-continuity/vitest.txt",
+      "sha256": "0f92af2f0f2882efcff4d55783e1df172baa64411ece69147a0799789f687b0a"
+    },
+    {
+      "path": "lib/server/server_ide_lsp_proxy.ml",
+      "sha256": "6fa0b567864e8dfa99eeb6d27f0b224060ab7ed567420d245e380aaf4e5ab05e"
+    },
+    {
+      "path": "scripts/lsp-editor-browser-probe.mjs",
+      "sha256": "2d92fadfd380c665eecf023d6ef18d3c5c7cb0d274660efb706bdd8299e3d363"
+    },
+    {
+      "path": "scripts/lsp-native-document-probe.py",
+      "sha256": "98376e05ee9bb3126ec667985a0e17fbeae7511adc003f0fa093b2734aaae709"
+    }
+  ],
+  "local_native_build": false,
+  "installed": false
+}

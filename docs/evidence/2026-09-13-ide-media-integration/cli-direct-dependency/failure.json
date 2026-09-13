@@ -1,0 +1,13 @@
+{
+  "source_commit": "d1d04bef3d391a7398b83c210f6c0fd04f57cbb3",
+  "release_run": 34708738213,
+  "job": 103593494038,
+  "original_log_sha256": "fbb7c1122152b4b19f5135c9e37719c089ecaa71968e62dd0988890e663c092f",
+  "original_lines": [
+    683,
+    687
+  ],
+  "root_cause": "main_eio directly uses Tool_result but did not declare masc.tool_types under implicit_transitive_deps=false",
+  "repair": "Add the existing leaf library as a direct dependency; no wrapper or module copy",
+  "local_native_build": false
+}

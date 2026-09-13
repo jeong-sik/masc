@@ -1,0 +1,36 @@
+{
+  "scope": "source-confirmed Dune subprocess TMPDIR rewrite; no local build or runtime probe performed",
+  "conclusion": "CI preparation and Dune alias consumers cannot infer one shared fixture base independently through the process temp directory",
+  "excerpts": [
+    {
+      "path": "/Users/dancer/.opam/5.5.0/.opam-switch/sources/ordering.3.24.1/src/dune_engine/process.ml",
+      "lines": [
+        939,
+        949
+      ],
+      "text": "  let started_at =\n    (* jeremiedimino: I think we should do this just before the [execve]\n       in the stub for [Spawn.spawn] to be as precise as possible *)\n    Time.now ()\n  in\n  let pid =\n    let env =\n      let env = Dtemp.add_to_env env in\n      Env.to_unix env |> Spawn.Env.of_list\n    in\n    let stdout = Io.fd stdout |> Fd.unsafe_to_unix_file_descr in"
+    },
+    {
+      "path": "/Users/dancer/.opam/5.5.0/.opam-switch/sources/ordering.3.24.1/src/dune_engine/dtemp.ml",
+      "lines": [
+        1,
+        16
+      ],
+      "text": "open Import\n\nlet temp_dir = lazy (Temp.create Dir ~prefix:\"build\" ~suffix:\"dune\")\nlet temp_dir_value = lazy (Path.to_absolute_filename (Lazy.force temp_dir))\n\nlet file ~prefix ~suffix =\n  Temp.temp_in_dir File ~dir:(Lazy.force temp_dir) ~suffix ~prefix\n;;\n\nlet add_to_env env =\n  let value = Lazy.force temp_dir_value in\n  Env.add env ~var:Env.Var.temp_dir ~value\n;;\n\nlet destroy = Temp.destroy\nlet clear () = if Lazy.is_val temp_dir then Temp.clear_dir (Lazy.force temp_dir)"
+    },
+    {
+      "path": "/Users/dancer/.opam/5.5.0/.opam-switch/sources/ordering.3.24.1/otherlibs/stdune/src/env.ml",
+      "lines": [
+        10,
+        19
+      ],
+      "text": "      else String.compare\n    ;;\n\n    let to_dyn = Dyn.string\n  end\n\n  let temp_dir = if Sys.win32 then \"TEMP\" else \"TMPDIR\"\n\n  include Comparable.Make (T)\n  include T"
+    }
+  ],
+  "sources": [
+    "https://github.com/ocaml/dune/blob/3.24.0/src/dune_engine/process.ml",
+    "https://github.com/ocaml/dune/blob/3.24.0/src/dune_engine/dtemp.ml",
+    "https://github.com/ocaml/dune/blob/3.24.0/otherlibs/stdune/src/env.ml",
+    "https://github.com/ocaml/dune/blob/main/CHANGES.md"
+  ]
+}

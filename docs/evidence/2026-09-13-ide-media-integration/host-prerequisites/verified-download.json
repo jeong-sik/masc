@@ -1,0 +1,10 @@
+{
+  "source": {
+    "download_url": "https://download.documentfoundation.org/libreoffice/stable/26.2.6/mac/aarch64/LibreOffice_26.2.6_MacOS_aarch64.dmg",
+    "download_page": "https://www.libreoffice.org/download/download-libreoffice/",
+    "scope": "Portable app for isolated MASC validation; no system Applications installation"
+  },
+  "download_bytes": 297798926,
+  "sha256": "94bb3248df074c225490a8a6d1d9dc87c7d6783dbb7a8e9f0d0c3d94348552af",
+  "published_sha256_matches": true
+}

@@ -1,0 +1,77 @@
+Original lines 2359-2394:
+test suite	Test	2026-09-12T17:08:54.8163334Z ASSERT fixture original hash
+test suite	Test	2026-09-12T17:08:54.8164998Z [2026-09-12 17:08:54] [INFO] [Workspace] MASC base: /home/runner/work/_temp/masc-presentation-verifier (no git root found)
+test suite	Test	2026-09-12T17:08:54.8166138Z [2026-09-12 17:08:54] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/home/runner/work/_temp/masc-presentation-verifier for test executable test_verification_presentation.exe
+test suite	Test	2026-09-12T17:08:54.8169159Z   [FAIL]        Task and Goal          0   parse original slides and notes, r...
+test suite	Test	2026-09-12T17:08:54.8169625Z
+test suite	Test	2026-09-12T17:08:54.8170247Z ┌──────────────────────────────────────────────────────────────────────────────┐
+test suite	Test	2026-09-12T17:08:54.8170647Z │ [FAIL]        Task and Goal          0   parse original slides and notes...  │
+test suite	Test	2026-09-12T17:08:54.8171256Z └──────────────────────────────────────────────────────────────────────────────┘
+test suite	Test	2026-09-12T17:08:54.8172206Z Fs_compat.Test_isolation_breach("#9921 mkdir_p blocked under HOME=\"/home/runner\" (path=\"/home/runner/work/_temp/masc-presentation-verifier/.masc/agents\") in test executable \"test_verification_presentation.exe\". MASC_BASE_PATH override did not apply \226\128\148 fix the test setup or set MASC_TEST_ALLOW_HOME_BASE_PATH=1.")
+test suite	Test	2026-09-12T17:08:54.8173255Z Raised at Fs_compat.test_exec_home_guard in file "lib/fs_compat/fs_compat.ml", lines 110-119, characters 10-73
+test suite	Test	2026-09-12T17:08:54.8173752Z Called from Fs_compat.mkdir_p in file "lib/fs_compat/fs_compat.ml", line 1283, characters 2-41
+test suite	Test	2026-09-12T17:08:54.8174178Z Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+test suite	Test	2026-09-12T17:08:54.8174637Z Called from Workspace_init.init in file "lib/workspace/workspace_init.ml", lines 22-29, characters 2-5
+test suite	Test	2026-09-12T17:08:54.8175139Z Called from Workspace_core.init in file "lib/workspace/workspace_core.ml", line 24, characters 15-53
+test suite	Test	2026-09-12T17:08:54.8175793Z Called from Dune__exe__Test_verification_presentation.test_original_presentation.(fun) in file "test/test_verification_presentation.ml", line 23, characters 9-85
+test suite	Test	2026-09-12T17:08:54.8176431Z Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+test suite	Test	2026-09-12T17:08:54.8176947Z Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+test suite	Test	2026-09-12T17:08:54.8177444Z Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+test suite	Test	2026-09-12T17:08:54.8178014Z Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+test suite	Test	2026-09-12T17:08:54.8178834Z Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+test suite	Test	2026-09-12T17:08:54.8179543Z Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+test suite	Test	2026-09-12T17:08:54.8180028Z Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+test suite	Test	2026-09-12T17:08:54.8180504Z Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+test suite	Test	2026-09-12T17:08:54.8181065Z Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+test suite	Test	2026-09-12T17:08:54.8181664Z Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+test suite	Test	2026-09-12T17:08:54.8182148Z Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+test suite	Test	2026-09-12T17:08:54.8182642Z Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+test suite	Test	2026-09-12T17:08:54.8183141Z Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+test suite	Test	2026-09-12T17:08:54.8183689Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+test suite	Test	2026-09-12T17:08:54.8184295Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+test suite	Test	2026-09-12T17:08:54.8184625Z
+test suite	Test	2026-09-12T17:08:54.8184878Z  ──────────────────────────────────────────────────────────────────────────────
+test suite	Test	2026-09-12T17:08:54.8185072Z
+test suite	Test	2026-09-12T17:08:54.8185167Z 1 failure! in 0.001s. 1 test run.
+test suite	Test	2026-09-12T17:08:54.8185610Z ##[endgroup]
+test suite	Test	2026-09-12T17:08:54.8198877Z [targeted] test/test_verification_presentation: FAIL exit 1 in 0s
+Original lines 3375-3413:
+test suite	Test	2026-09-12T17:08:56.9172831Z ASSERT explicit JSON-producing tools
+test suite	Test	2026-09-12T17:08:56.9188964Z   [FAIL]        plan                         5   closed composable output reg...
+test suite	Test	2026-09-12T17:08:56.9189445Z   [OK]          plan                         6   declared schemas satisfy the...
+test suite	Test	2026-09-12T17:08:56.9204383Z   [OK]          plan                         7   declared schemas admit produ...
+test suite	Test	2026-09-12T17:08:56.9204832Z   [OK]          plan                         8   unsupported output schema ke...
+test suite	Test	2026-09-12T17:08:56.9211546Z   [OK]          plan                         9   Write and Edit output schema...
+test suite	Test	2026-09-12T17:08:56.9213247Z   [OK]          plan                        10   nullable lane output stays s...
+test suite	Test	2026-09-12T17:08:56.9216336Z   [OK]          plan                        11   nullable container reference...
+test suite	Test	2026-09-12T17:08:56.9216791Z   [OK]          plan                        12   terminal dependency boundary.
+test suite	Test	2026-09-12T17:08:56.9217731Z   [OK]          plan                        13   canonical descriptor authority.
+test suite	Test	2026-09-12T17:08:56.9218083Z
+test suite	Test	2026-09-12T17:08:56.9218639Z ┌──────────────────────────────────────────────────────────────────────────────┐
+test suite	Test	2026-09-12T17:08:56.9219043Z │ [FAIL]        plan                         5   closed composable output ...  │
+test suite	Test	2026-09-12T17:08:56.9219451Z └──────────────────────────────────────────────────────────────────────────────┘
+test suite	Test	2026-09-12T17:08:56.9219736Z FAIL explicit JSON-producing tools
+test suite	Test	2026-09-12T17:08:56.9219892Z
+test suite	Test	2026-09-12T17:08:56.9220063Z    Expected: `["BrowserInteract"; "BrowserRead"; "Edit"; "Execute"; "Grep";
+test suite	Test	2026-09-12T17:08:56.9220446Z                "Read"; "Write"; "keeper_artifact_read"; "keeper_lane_status";
+test suite	Test	2026-09-12T17:08:56.9220778Z                "keeper_spawn"; "keeper_tasks_list"; "keeper_time_now";
+test suite	Test	2026-09-12T17:08:56.9221195Z                "masc_agent_fitness"; "masc_board_list"; "masc_board_stats";
+test suite	Test	2026-09-12T17:08:56.9221533Z                "masc_get_metrics"; "masc_goal_list"; "masc_msx_screen";
+test suite	Test	2026-09-12T17:08:56.9221807Z                "masc_run_list"]'
+test suite	Test	2026-09-12T17:08:56.9221943Z
+test suite	Test	2026-09-12T17:08:56.9222093Z    Received: `["BrowserGoto"; "BrowserInteract"; "BrowserRead"; "Edit";
+test suite	Test	2026-09-12T17:08:56.9222437Z                "Execute"; "Grep"; "Read"; "Write"; "keeper_artifact_read";
+test suite	Test	2026-09-12T17:08:56.9222784Z                "keeper_lane_status"; "keeper_spawn"; "keeper_tasks_list";
+test suite	Test	2026-09-12T17:08:56.9223114Z                "keeper_time_now"; "masc_agent_fitness"; "masc_board_list";
+test suite	Test	2026-09-12T17:08:56.9223437Z                "masc_board_stats"; "masc_get_metrics"; "masc_goal_list";
+test suite	Test	2026-09-12T17:08:56.9223787Z                "masc_msx_screen"; "masc_run_list"]'
+test suite	Test	2026-09-12T17:08:56.9223948Z
+test suite	Test	2026-09-12T17:08:56.9224196Z Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+test suite	Test	2026-09-12T17:08:56.9224782Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+test suite	Test	2026-09-12T17:08:56.9225377Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+test suite	Test	2026-09-12T17:08:56.9225704Z
+test suite	Test	2026-09-12T17:08:56.9225928Z  ──────────────────────────────────────────────────────────────────────────────
+test suite	Test	2026-09-12T17:08:56.9226133Z
+test suite	Test	2026-09-12T17:08:56.9226221Z 1 failure! in 0.017s. 56 tests run.
+test suite	Test	2026-09-12T17:08:56.9226650Z ##[endgroup]
+test suite	Test	2026-09-12T17:08:56.9247071Z [targeted] test/test_keeper_tool_plan: FAIL exit 1 in 0s

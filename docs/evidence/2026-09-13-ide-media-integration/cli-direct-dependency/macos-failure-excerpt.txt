@@ -1,0 +1,5 @@
+2026-09-12T17:42:35.3386850Z File "bin/masc_cli_inspect_file.ml", line 13, characters 29-40:
+2026-09-12T17:42:35.3507060Z 13 |   let error class_ message = Tool_result.error ~failure_class:class_ ~tool_name:name ~start_time message in
+2026-09-12T17:42:35.3610130Z                                   ^^^^^^^^^^^
+2026-09-12T17:42:35.3723980Z Error: Unbound module Tool_result
+2026-09-12T17:42:45.8312860Z ##[error]Process completed with exit code 1.

@@ -1,0 +1,44 @@
+4004: 2026-09-12T18:02:37.5961818Z .FFF..
+4005: 2026-09-12T18:02:37.5962040Z ======================================================================
+4006: 2026-09-12T18:02:37.5962673Z FAIL: test_mp4_decodes_all_actual_audio_video_streams (__main__.OperatorInspection.test_mp4_decodes_all_actual_audio_video_streams)
+4007: 2026-09-12T18:02:37.5963320Z ----------------------------------------------------------------------
+4008: 2026-09-12T18:02:37.5963665Z Traceback (most recent call last):
+4009: 2026-09-12T18:02:37.5964300Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 99, in test_mp4_decodes_all_actual_audio_video_streams
+4010: 2026-09-12T18:02:37.5964953Z     payload = self.invoke(path)
+4012: 2026-09-12T18:02:37.5965687Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 59, in invoke
+4013: 2026-09-12T18:02:37.5966392Z     self.assertEqual(result.returncode, expected, result.stderr + '\n' + result.stdout[:2000])
+4014: 2026-09-12T18:02:37.5967294Z AssertionError: 1 != 0 : [2026-09-12 18:02:37] [INFO] [MCP] Tag registry initialized: 165 tools registered
+4015: 2026-09-12T18:02:37.5968756Z [2026-09-12 18:02:37] [ERROR] [Misc] [Process_eio] argv error: 'ffprobe' '-version' — Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, "openat2", ""),
+4016: 2026-09-12T18:02:37.5969777Z   opening directory <cwd:/tmp/build_6f9ecf_dune/tmp0r_97ukc/workspace/.masc/execute_output/video-01a096c9-1b62-7000-8c87-3494e5601afc>
+4017: 2026-09-12T18:02:37.5970289Z
+4018: 2026-09-12T18:02:37.5973852Z {"schema":"masc.operator_file_inspection.v1","base_path":"/tmp/build_6f9ecf_dune/tmp0r_97ukc/workspace","source":{"path":"/tmp/build_6f9ecf_dune/tmp0r_97ukc/original.mp4","bytes":13215,"sha256":"ec70db5cf73581dcf736f75fe65471ce8e199efb9b06247d842b7908ddb81226"},"llm_verdict":"not_run","result":{"effect_disposition":"effect_outcome_unknown","failure_class":"runtime_failure","disposition":"failed","data":"video_inspection_failed: ffprobe exit=127: process_eio_error: Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\"),\n  opening directory <cwd:/tmp/build_6f9ecf_dune/tmp0r_97ukc/workspace/.masc/execute_output/video-01a096c9-1b62-7000-8c87-3494e5601afc>","message":"video_inspection_failed: ffprobe exit=127: process_eio_error: Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\"),\n  opening directory <cwd:/tmp/build_6f9ecf_dune/tmp0r_97ukc/workspace/.masc/execute_output/video-01a096c9-1b62-7000-8c87-3494e5601afc>","tool_name":"inspect-file","duration_ms":2.8591156005859375},"content":[]}
+4019: 2026-09-12T18:02:37.5977658Z
+4020: 2026-09-12T18:02:37.5977662Z
+4021: 2026-09-12T18:02:37.5977783Z ======================================================================
+4022: 2026-09-12T18:02:37.5978633Z FAIL: test_pdf_returns_original_identity_and_every_actual_render (__main__.OperatorInspection.test_pdf_returns_original_identity_and_every_actual_render)
+4023: 2026-09-12T18:02:37.5979369Z ----------------------------------------------------------------------
+4024: 2026-09-12T18:02:37.5979729Z Traceback (most recent call last):
+4025: 2026-09-12T18:02:37.5980402Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 90, in test_pdf_returns_original_identity_and_every_actual_render
+4026: 2026-09-12T18:02:37.5981095Z     payload = self.invoke(path)
+4028: 2026-09-12T18:02:37.5981812Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 59, in invoke
+4029: 2026-09-12T18:02:37.5982509Z     self.assertEqual(result.returncode, expected, result.stderr + '\n' + result.stdout[:2000])
+4030: 2026-09-12T18:02:37.5983161Z AssertionError: 1 != 0 : [2026-09-12 18:02:37] [INFO] [MCP] Tag registry initialized: 165 tools registered
+4031: 2026-09-12T18:02:37.5985292Z [2026-09-12 18:02:37] [ERROR] [Misc] [Process_eio] argv error: 'pdftotext' '-bbox-layout' '-enc' 'UTF-8' '/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace/.masc/execute_output/pdf-01a096c9-1ba1-7000-ae6f-525c6c8b8d99/source.pdf' '/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace/.masc/execute_output/pdf-01a096c9-1ba1-7000-ae6f-525c6c8b8d99/pages.xhtml' — Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, "openat2", ""),
+4032: 2026-09-12T18:02:37.5987187Z   opening directory <cwd:/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace/.masc/execute_output/pdf-01a096c9-1ba1-7000-ae6f-525c6c8b8d99>
+4033: 2026-09-12T18:02:37.5987693Z
+4034: 2026-09-12T18:02:37.5991489Z {"schema":"masc.operator_file_inspection.v1","base_path":"/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace","source":{"path":"/tmp/build_6f9ecf_dune/tmp055yxfvx/original.pdf","bytes":102608,"sha256":"ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb"},"llm_verdict":"not_run","result":{"effect_disposition":"effect_outcome_unknown","failure_class":"runtime_failure","disposition":"failed","data":"pdf_inspection_failed: pdftotext exit=127: process_eio_error: Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\"),\n  opening directory <cwd:/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace/.masc/execute_output/pdf-01a096c9-1ba1-7000-ae6f-525c6c8b8d99>","message":"pdf_inspection_failed: pdftotext exit=127: process_eio_error: Eio.Io Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\"),\n  opening directory <cwd:/tmp/build_6f9ecf_dune/tmp055yxfvx/workspace/.masc/execute_output/pdf-01a096c9-1ba1-7000-ae6f-525c6c8b8d99>","tool_name":"inspect-file","duration_ms":2.7849674224853516},"content":[]}
+4035: 2026-09-12T18:02:37.5995399Z
+4036: 2026-09-12T18:02:37.5995403Z
+4037: 2026-09-12T18:02:37.5995523Z ======================================================================
+4038: 2026-09-12T18:02:37.5996192Z FAIL: test_pptx_uses_managed_parser_and_returns_every_slide (__main__.OperatorInspection.test_pptx_uses_managed_parser_and_returns_every_slide)
+4039: 2026-09-12T18:02:37.5996877Z ----------------------------------------------------------------------
+4040: 2026-09-12T18:02:37.5997227Z Traceback (most recent call last):
+4041: 2026-09-12T18:02:37.5997888Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 113, in test_pptx_uses_managed_parser_and_returns_every_slide
+4042: 2026-09-12T18:02:37.5998735Z     payload = self.invoke(path, base=base)
+4044: 2026-09-12T18:02:37.5999529Z   File "/home/runner/work/masc/masc/_build/default/test/./test_operator_media_inspection.py", line 59, in invoke
+4045: 2026-09-12T18:02:37.6000219Z     self.assertEqual(result.returncode, expected, result.stderr + '\n' + result.stdout[:2000])
+4046: 2026-09-12T18:02:37.6000858Z AssertionError: 1 != 0 : [2026-09-12 18:02:37] [INFO] [MCP] Tag registry initialized: 165 tools registered
+4047: 2026-09-12T18:02:37.6001228Z
+4048: 2026-09-12T18:02:37.6004565Z {"schema":"masc.operator_file_inspection.v1","base_path":"/tmp/masc-presentation-verifier","source":{"path":"/tmp/build_6f9ecf_dune/tmptujnl4cy/original.pptx","bytes":35114,"sha256":"135d58058560c505410bbab0683af4b0901c90058ba6852413f722aa26ddcb98"},"llm_verdict":"not_run","result":{"effect_disposition":"effect_outcome_unknown","failure_class":"runtime_failure","disposition":"failed","data":"presentation_inspection_storage_failed: cwd <cwd:/tmp/masc-presentation-verifier/.masc/execute_output/presentation-01a096c9-1bde-7000-9c12-5ec76152168b> could not be opened: Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\")","message":"presentation_inspection_storage_failed: cwd <cwd:/tmp/masc-presentation-verifier/.masc/execute_output/presentation-01a096c9-1bde-7000-9c12-5ec76152168b> could not be opened: Fs Permission_denied Unix_error (Invalid cross-device link, \"openat2\", \"\")","tool_name":"inspect-file","duration_ms":2.4628639221191406},"content":[]}
+4049: 2026-09-12T18:02:37.6008071Z
+4050: 2026-09-12T18:02:37.6008074Z

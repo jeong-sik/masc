@@ -32,3 +32,5 @@ Protocol references: [document synchronization](https://microsoft.github.io/lang
 The root-owned `scripts/lsp-native-document-probe.py` also exercised the actual ocamllsp executable directly. `native-version-support` and `native-baseline` both pass: invalid source produces two errors and the corrected source produces none. Both configurations omit the optional diagnostic version; pull diagnostics returns -32603, Request not supported yet. `native-first-failure` preserves the initial harness error: shutdown sent null params, which the server rejected; the successful probe omits params for shutdown and exit. These probes own synthetic files and do not establish installed IDE or Keeper behavior.
 
 The MASC proxy now advertises publishDiagnostics.versionSupport=true during initialize. This requests versioned reports; it does not assume every server supplies them. OCaml parse-only verification passed.
+
+In the integration candidate, the first native stderr capture has only trailing blank lines normalized for the repository whitespace check. Its messages are unchanged; the byte-original remains in source commit83f31140db.

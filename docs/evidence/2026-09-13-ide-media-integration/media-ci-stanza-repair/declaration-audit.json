@@ -1,0 +1,22 @@
+{
+  "failure_run": 34705688030,
+  "failed_head": "31bdf7597b63ace0f9a12883b5de3726b6993b09",
+  "repair_head": "7bd85f6bd6924a0619d7113f3347f0d0b19346d3",
+  "repair_author": "jeong-sik",
+  "repair_scope": "remove one duplicate identical test_verifier_official_client stanza",
+  "native_targets_executed": false,
+  "all_expanded_test_directory_executable_duplicates": {},
+  "requested_native_declarations": {
+    "test_verification_presentation": 1,
+    "test_verification_authority_tools": 1,
+    "test_verification_collaboration_evidence": 1,
+    "test_board_persistence_load_contract": 1,
+    "test_board_persistence_schema": 1,
+    "test_keeper_tool_plan": 1,
+    "test_sandbox_prerequisites": 1,
+    "test_fusion_decision": 1,
+    "test_server_dashboard_http_keeper_tool_lookup": 1
+  },
+  "new_native_test_run": "not_requested_yet",
+  "local_build": "not_run"
+}

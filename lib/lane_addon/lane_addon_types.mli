@@ -44,6 +44,8 @@ type package = {
   directory : string;
   action_tool : string option;
   outputs : output_ports;
+  binding_schema : Yojson.Safe.t option;
+  presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
   resources : resources;
 }

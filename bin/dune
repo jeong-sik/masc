@@ -416,10 +416,16 @@
  (libraries yojson))
 
 (library
+ (name masc_tui_lane_subscriptions)
+ (wrapped false)
+ (modules masc_tui_lane_subscriptions)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc_tui_message_layout masc_tui_lane_declaration yojson unix))
+ (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_lane_subscriptions yojson unix))
 
 (library
  (name masc_tui_command)
@@ -1253,7 +1259,6 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
-  masc_tui_planning_proof_mark
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1265,6 +1270,7 @@
   masc_tui_context_bars
   masc.masc_types
   masc_tui_keys
+  masc_tui_planning_proof_mark
   masc_tui_runtime_config_view
   masc_tui_context_inspector
   masc_tui_command
@@ -1350,6 +1356,7 @@
   masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
@@ -1416,6 +1423,9 @@
   ;; Lane_run_gate_advisory payload, but masc_tui_render names its
   ;; Keeper_approval_queue_rules_types constructors directly.
   masc.keeper_contract
+  ;; Same rule for a schedule's actor: masc_tui_loader parses the wire
+  ;; kind through Schedule_contract_values and words its constructors.
+  masc.masc_schedule
   masc_tui_footer
   masc_tui_approval_detail
   masc_tui_roster_pane

@@ -303,7 +303,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config task 
       invalid_input surface name (cursor_args args (`Assoc ["source_sha256", `String "bad"; "byte_offset", `Int 0])))
       ["masc_board_post_get", post_args board, board; "masc_fusion_status", run_args run_id, fusion_post])
     [task; goal];
-  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "Private source" in
+  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "@peer Private source" in
   let private_page = bridge task "masc_board_post_get" (post_args private_post) in
   denied goal "masc_board_post_get"
     (cursor_args (post_args private_post) (member "next_cursor" private_page))

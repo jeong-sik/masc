@@ -120,10 +120,11 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store = Ok 0);
   Alcotest.(check int) "old post is not trusted after empty reload" 0 (Hashtbl.length loaded_store.posts);
   Alcotest.(check int) "old post count is cleared" 0 !(loaded_store.post_count);
-  let comment = `Assoc ["id", `String "comment-fixture";
-    "post_id", `String (Board.Post_id.to_string post.id); "parent_id", `Null;
-    "author", `String "fixture-author"; "content", `String "retained partial comment";
-    "created_at", `Float 1.; "expires_at", `Float 0.; "votes_up", `Int 0; "votes_down", `Int 0] in
+  let comment = match Board_core.add_comment source_store
+      ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
+      ~content:"retained partial comment" ~ttl_hours:0 () with
+    | Ok comment -> Board_core.comment_to_yojson comment
+    | Error error -> Alcotest.failf "create_comment failed: %s" (Board.show_board_error error) in
   let comments_path = Board.comments_path () in
   Out_channel.with_open_bin comments_path (fun out ->
     output_string out (Yojson.Safe.to_string comment ^ "\n{bad-json\n"));

@@ -65,7 +65,7 @@ let column_legend =
   let words word values = String.concat " / " (List.map word values) in
   [ "HEALTH", "heartbeat / readiness"
   ; "LIFECYCLE", "the keeper process"
-  ; "LAST", "time since the last turn"
+  ; "TURN", "time since the last turn"
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ]

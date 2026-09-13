@@ -1648,7 +1648,7 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
   let first = operation_id "observed-stop-http" in
   let queued = operation_id "observed-stop-queued" in
   let operation_executor ~sw ~keeper_name:_ ~claim =
-    let operation = match owner_ok (claim ()) with Some value -> value | None -> fail "no claim" in
+    let operation : Chat_operation.t = match owner_ok (claim ()) with Some value -> value | None -> fail "no claim" in
     if not (Chat_operation.Operation_id.equal operation.operation_id first)
     then fail "paused successor ran";
     (* This HTTP task belongs to the enclosing request, not the inner model

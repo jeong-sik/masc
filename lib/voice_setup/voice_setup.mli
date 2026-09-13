@@ -78,20 +78,38 @@ type error =
           load as a voice configuration and {!observe} refuses it first. It is
           here because the writer underneath can refuse, and swallowing that
           would be the silent failure this module exists to avoid. *)
+  | Standalone_source_active of string
+      (** runtime.toml has no [\[voice\]] section and voice is read from the
+          standalone JSON at this path instead. The first section written into
+          runtime.toml would become the configuration in effect and drop every
+          setting that file carries, so nothing was written. *)
 
 val error_message : error -> string
 
+(** Which file the configuration in effect was read from. The loader prefers
+    runtime.toml's [\[voice\]] section and reads the standalone JSON only
+    when that section is absent ({!Voice_config.load_detailed}). *)
+type source =
+  | Runtime_toml
+  | Standalone_json of string
+
 val observe
   :  runtime_config_path:string
-  -> (string * Voice_config.t option, error) result
-(** The current source revision and the voice configuration that revision
-    carries, from one observation so a caller cannot join a revision to a
-    different read. Hand the revision back as [expected_revision].
+  -> standalone_path:string
+  -> (string * (source * Voice_config.t) option, error) result
+(** The current runtime.toml revision and the voice configuration in effect,
+    from one observation so a caller cannot join a revision to a different
+    read. Hand the revision back as [expected_revision].
 
-    [Ok (revision, None)] means runtime.toml has no [\[voice\]] section yet. *)
+    [standalone_path] is the JSON the loader falls back to. Without it an
+    observation answered "not configured" for a workspace whose voice worked,
+    because only the TOML text was parsed.
+
+    [Ok (revision, None)] means neither source configures voice. *)
 
 val preview
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
   -> (string, error) result
@@ -105,6 +123,7 @@ val preview
 
 val apply
   :  runtime_config_path:string
+  -> standalone_path:string
   -> expected_revision:string
   -> change list
   -> (string, error) result
@@ -120,11 +139,12 @@ val apply
     state the loader rejects. *)
 
 type voice_placement =
-  | On_the_section (** no TTS section yet: the voice becomes the workspace default *)
-  | On_the_endpoint (** a section exists and its voice belongs to another provider *)
+  | On_the_section (** the section's default is say's to set: the voice becomes it *)
+  | On_the_endpoint (** another provider shares the section and owns its default *)
 
-val voice_placement : section_exists:bool -> voice_placement
-(** Where a voice chosen for a local (command-run) endpoint is written.
+val voice_placement : Voice_config.tts_config option -> voice_placement
+(** Where a voice chosen for a local (command-run) endpoint is written, given
+    the TTS section as it is now.
 
     There are two places because a voice name is provider-shaped: [say] takes a
     label like ["Yuna"], ElevenLabs a 20-character id. One workspace default
@@ -132,12 +152,14 @@ val voice_placement : section_exists:bool -> voice_placement
 
     But an endpoint voice outranks [voice.tts.agent_voices]
     ({!Voice_config.voice_for_agent_at_endpoint}), so one written where it is
-    not needed makes every per-keeper voice inert. Measured on a fresh
-    workspace 2026-09-13: with it, a keeper mapped to Eddy spoke in Yuna
-    (85,908 bytes); without it, Eddy (119,044 bytes), while an unmapped keeper
-    still got Yuna.
+    not needed makes every per-keeper voice inert: measured 2026-09-13, a
+    keeper mapped to Eddy spoke in Yuna (85,908 bytes) with it and in Eddy
+    (119,044 bytes) without it.
 
-    So a fresh workspace gets the section default and per-keeper voices layer
-    over it, which is the order a reader expects. Only a workspace that already
-    has a section — whose voice is some other provider's — puts one on the
-    endpoint, and accepts that the mappings do not reach that endpoint. *)
+    So the question is who owns the section's default, not whether a section
+    exists. A section whose endpoints are all [say] -- including one this
+    command wrote on an earlier run -- is say's, and gets the section default;
+    only a section that also holds another provider puts the voice on the
+    endpoint, and accepts that the mappings do not reach it. Asking only
+    whether a section existed sent the second run of the same command to the
+    endpoint. *)

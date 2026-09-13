@@ -59,8 +59,40 @@ let test_cli_probe_is_a_note () =
   Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
     (runtime_probe_status_label Runtime_provider_skipped_native_auth)
 
+let test_search_follows_the_runtime_mode () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture"; rrs_config_path = None;
+      rrs_default_runtime_id = Some "assigned";
+      rrs_runtimes = [runtime "unassigned"; runtime "assigned"];
+      rrs_lanes =
+        [{rrl_id = "lane-only"; rrl_runtime_ids = ["assigned"];
+          rrl_preferred_candidate = None; rrl_preferred_at_ts = None}] } in
+  let snapshot = match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
+  state.runtime_surface <- Some snapshot;
+  let expect_rows expected =
+    Alcotest.(check (option (list string))) "search uses the visible cursor order"
+      (Some expected) (surface_row_texts state Runtime);
+    match scrolled_surface_rows state Runtime with
+    | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
+    | None -> Alcotest.fail "runtime list lost its scroll geometry" in
+  state.runtime_mode <- Runtime_lanes;
+  expect_rows ["lane-only assigned"];
+  state.runtime_mode <- Runtime_all;
+  expect_rows ["unassigned"; "assigned"];
+  Alcotest.(check (option int)) "unassigned runtime is searchable" (Some 1)
+    (surface_search_count state Runtime ~query:"unassigned");
+  Alcotest.(check (option int)) "hidden lane does not contribute" (Some 0)
+    (surface_search_count state Runtime ~query:"lane-only");
+  state.runtime_detail_target <- Some (Runtime_catalog_entry {runtime_id = "assigned"});
+  Alcotest.(check (option (list string))) "runtime detail has no list cursor" None
+    (surface_row_texts state Runtime)
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
       Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
-      Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note]]
+      Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
+      Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode]]

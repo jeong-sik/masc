@@ -605,7 +605,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
        actual originating turn across the server-root-switch fork. Unattributed
        requests keep [None]; no turn is reconstructed at publication time. *)
     let origin : Board.post_origin =
-      { turn_ref = Option.bind source_context Fusion_request_context.turn_ref; source = Some "fusion"; fusion_run_id = Some run_id }
+      { turn_ref = Option.bind source_context Fusion_request_context.turn_ref; source = Some "fusion"; fusion_run_id = Some run_id; fusion_producer = Some keeper }
     in
     let* board_result =
       match

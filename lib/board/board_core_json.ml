@@ -19,9 +19,12 @@ let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
         | Some s -> [ "source", `String s ]
         | None -> [])
      @
-     match o.fusion_run_id with
-     | Some r -> [ "fusion_run_id", `String r ]
-     | None -> [])
+     (match o.fusion_run_id with
+      | Some r -> [ "fusion_run_id", `String r ]
+      | None -> [])
+     @ (match o.fusion_producer with
+        | Some producer -> ["fusion_producer", `String producer]
+        | None -> []))
 ;;
 
 let post_to_yojson (p : post) : Yojson.Safe.t =

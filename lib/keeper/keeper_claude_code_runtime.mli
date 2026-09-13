@@ -2,6 +2,7 @@
 
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 (** One Claude Code candidate result plus the explicit tool-effect observation
@@ -35,6 +36,7 @@ module For_testing : sig
 end
 
 val run :
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

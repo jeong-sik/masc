@@ -451,82 +451,6 @@ let list_voices (endpoint : Voice_config.endpoint) =
          endpoint.Voice_config.id)
 ;;
 
-let probe_tts ?(agent_id = "probe") ~message () =
-  match Voice_config.load_detailed () with
-  | Error error -> Error (Voice_config.load_error_to_string error)
-  | Ok config ->
-    (match config.Voice_config.tts with
-     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
-     | Some tts ->
-       Ok
-         (List.map
-            (fun (endpoint : Voice_config.endpoint) ->
-              let outcome =
-                (* Produce the clip the way the speak path would, so what this
-                   reports is what a turn would get rather than a second
-                   opinion, then drop it: the probe answers whether the
-                   endpoint spoke, not with what. *)
-                let attempt speak =
-                  let output_file =
-                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
-                  in
-                  (* The voice is resolved per endpoint: an id is provider
-                     vocabulary, so the one that suits this endpoint is the one
-                     to ask it for (#24068). *)
-                  let voice =
-                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
-                  in
-                  let result = speak ~voice ~output_file in
-                  remove_quietly output_file;
-                  match result with
-                  (* The voice that was asked for, not only the bytes that came
-                     back. say does not fail on a voice it does not have -- it
-                     speaks in the system voice and exits 0 -- so the byte count
-                     alone cannot tell a keeper's own voice from the fallback.
-                     Measured: a keeper mapped to a voice that exists answered
-                     114,810 bytes and one mapped to a name that does not
-                     answered 73,614, the same as the section default. Naming
-                     the voice is what lets a reader check it against the
-                     catalogue. A blank one is the system voice, said as such
-                     rather than as "". *)
-                  | Ok size -> Answered (spoke_detail ~bytes:size ~voice)
-                  | Error reason -> Refused reason
-                in
-                if not endpoint.Voice_config.enabled
-                then Skipped "disabled in the configuration"
-                else
-                  match Voice_runtime_overlay.speaker_of_endpoint endpoint with
-                  | Voice_runtime_overlay.Does_not_speak ->
-                    Skipped "this endpoint kind does not synthesize"
-                  | Voice_runtime_overlay.By_mcp_tool ->
-                    (* It does speak: agent_speak on its MCP endpoint. This
-                       probe cannot make that call -- voice-verify runs outside
-                       Eio_main.run and call_voice_mcp_endpoint needs a clock
-                       and a net -- so it says so, instead of being filed with
-                       the kind that cannot speak at all. *)
-                    Skipped
-                      "reached by an MCP tool call, which this probe does not make"
-                  | Voice_runtime_overlay.By_command ->
-                    attempt (fun ~voice ~output_file ->
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file)
-                  | Voice_runtime_overlay.Over_http ->
-                    attempt (fun ~voice ~output_file ->
-                      match tts.Voice_config.default_model with
-                      | None ->
-                        Error
-                          "this endpoint is asked for a model by name and [voice.tts] \
-                           names none"
-                      | Some model ->
-                        speak_via_http_tts_to_file
-                          endpoint ~agent_id ~message ~voice ~model ~output_file)
-              in
-              { endpoint_id = endpoint.Voice_config.id
-              ; kind = endpoint.Voice_config.kind
-              ; outcome
-              })
-            tts.Voice_config.endpoints))
-
 let probe_stt ~audio_file () =
   match Voice_config.load_detailed () with
   | Error error -> Error (Voice_config.load_error_to_string error)
@@ -664,7 +588,22 @@ let cleanup_old_audio_files () =
 
 type agent_speak_completion =
   | Spoken
+  | Synthesized
   | Dedup_skipped
+
+(* The [status] a speak result carries, and the reading of it back. One pair so
+   the value written for a local endpoint and the value decoded from a Voice
+   MCP server's answer are the same three words. *)
+let agent_speak_completion_to_string = function
+  | Spoken -> "spoken"
+  | Synthesized -> "synthesized"
+  | Dedup_skipped -> "dedup_skipped"
+
+let agent_speak_completion_of_string = function
+  | "spoken" -> Some Spoken
+  | "synthesized" -> Some Synthesized
+  | "dedup_skipped" -> Some Dedup_skipped
+  | _ -> None
 
 type agent_speak_result =
   { completion : agent_speak_completion
@@ -809,6 +748,118 @@ let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
   operation ()
 ;;
 
+(* What a voice_mcp endpoint answered, said the way the other answers are:
+   the voice that was asked for. The tool plays the sentence where that server
+   plays audio and hands back no file, so there is no byte count to report. *)
+let mcp_spoke_detail ~voice =
+  Printf.sprintf
+    "agent_speak answered in %s"
+    (if String.trim voice = "" then "the system voice" else "\"" ^ voice ^ "\"")
+;;
+
+let probe_tts ?(agent_id = "probe") ~message () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.tts with
+     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
+     | Some tts ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                (* The voice is resolved per endpoint: an id is provider
+                   vocabulary, so the one that suits this endpoint is the one
+                   to ask it for (#24068). *)
+                let voice () =
+                  Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
+                in
+                (* The voice that was asked for, not only the bytes that came
+                   back. say does not fail on a voice it does not have -- it
+                   speaks in the system voice and exits 0 -- so the byte count
+                   alone cannot tell a keeper's own voice from the fallback.
+                   Measured: a keeper mapped to a voice that exists answered
+                   114,810 bytes and one mapped to a name that does not
+                   answered 73,614, the same as the section default. Naming
+                   the voice is what lets a reader check it against the
+                   catalogue. A blank one is the system voice, said as such
+                   rather than as "". *)
+                let answer = function
+                  | Ok detail -> Answered detail
+                  | Error reason -> Refused reason
+                in
+                (* The probe produces the audio the same ways the speak path
+                   does, so that what it reports is what a turn would get
+                   rather than a second opinion. *)
+                let clip speak =
+                  let voice = voice () in
+                  let output_file =
+                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                  in
+                  let spoken = speak ~voice ~output_file in
+                  remove_quietly output_file;
+                  answer (Result.map (fun size -> spoke_detail ~bytes:size ~voice) spoken)
+                in
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else
+                  match Voice_runtime_overlay.speaker_of_endpoint endpoint with
+                  | Voice_runtime_overlay.Does_not_speak ->
+                    Skipped "this endpoint kind does not synthesize"
+                  | Voice_runtime_overlay.By_command ->
+                    clip (fun ~voice ~output_file ->
+                      Voice_bridge_transport.speak_via_command_to_file
+                        endpoint ~message ~voice ~output_file)
+                  | Voice_runtime_overlay.Over_http ->
+                    clip (fun ~voice ~output_file ->
+                      match tts.Voice_config.default_model with
+                      | None ->
+                        Error
+                          "this endpoint is asked for a model by name and [voice.tts] \
+                           names none"
+                      | Some model ->
+                        speak_via_http_tts_to_file
+                          endpoint ~agent_id ~message ~voice ~model ~output_file)
+                  (* Through agent_speak, the tool a turn calls. Skipping it
+                     reported a configuration whose only speaker is an MCP
+                     tool as nothing answering, and voice-verify exited 1 for
+                     a voice that worked. The call is bounded by the event
+                     loop's clock, as the speak path's is. *)
+                  | Voice_runtime_overlay.By_mcp_tool ->
+                    let voice = voice () in
+                    answer
+                      (match Eio_context.get_clock_opt (), Eio_context.get_net_opt () with
+                       | Some clock, Some net ->
+                         with_voice_output_turn ~agent_id (fun () ->
+                           match
+                             call_voice_mcp_endpoint
+                               ~clock
+                               ~net
+                               ~endpoint
+                               ~tool_name:"agent_speak"
+                               ~arguments:
+                                 (`Assoc
+                                   [ "agent_id", `String agent_id
+                                   ; "message", `String message
+                                   ; "voice", `String voice
+                                   ; "priority", `Int 1
+                                   ])
+                           with
+                           | Error error -> Error (mcp_call_error_to_string error)
+                           | Ok json ->
+                             Result.map (fun _ -> mcp_spoke_detail ~voice)
+                               (extract_mcp_result json))
+                       | None, _ | _, None ->
+                         Error
+                           "no event loop is running in this process to bound the MCP \
+                            call with")
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            tts.Voice_config.endpoints))
+
 let attempt_tts_endpoint
       ~sw
       ~clock
@@ -873,7 +924,7 @@ let attempt_tts_endpoint
            | Sys_error _ -> ());
           Ok
             (`Assoc
-                [ "status", `String "dedup_skipped"
+                [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
                 ; "agent_id", `String agent_id
                 ; "reason", `String "identical message was played recently (mutex)"
                 ])
@@ -883,10 +934,13 @@ let attempt_tts_endpoint
             | `Failed _ -> "failed"
             | `Skipped _ -> "skipped"
           in
+          (* The clip exists and nothing on this host played it. A keeper reads
+             [status] to tell the operator what happened, so this is not
+             [Spoken]. *)
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Synthesized)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -900,7 +954,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -916,7 +970,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -1109,7 +1163,7 @@ let agent_speak_json
            playback_dedup_window_sec);
       Ok
         (`Assoc
-            [ "status", `String "dedup_skipped"
+            [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
             ; "agent_id", `String agent_id
             ; "reason", `String "identical message was played recently"
             ]))
@@ -1204,10 +1258,10 @@ let agent_speak_json
 
 let decode_agent_speak_result payload =
   match Json_util.get_string payload "status" with
-  | Some "spoken" -> Ok { completion = Spoken; payload }
-  | Some "dedup_skipped" -> Ok { completion = Dedup_skipped; payload }
   | Some status ->
-    Error (Printf.sprintf "voice speak returned unsupported status=%S" status)
+    (match agent_speak_completion_of_string status with
+     | Some completion -> Ok { completion; payload }
+     | None -> Error (Printf.sprintf "voice speak returned unsupported status=%S" status))
   | None -> Error "voice speak result is missing required status"
 ;;
 
@@ -1688,12 +1742,14 @@ let recorder_refusal_message (refusal : Process_eio.spawn_refusal) =
       "%s is not installed; it comes with sox. `masc prerequisite-actions \
        whisper` names the install."
       program
+  (* The same sentence every other voice command gives for a refusal that is
+     not a missing program -- one wording for "could not start", kept where the
+     transport keeps it. *)
   | (Process_eio.Empty_argv
     | Process_eio.Spawn_failed _
     | Process_eio.Child_setup_failed _
     | Process_eio.Cwd_unavailable _) as refusal ->
-    Printf.sprintf "the recorder could not start: %s"
-      (Process_eio.spawn_refusal_to_string refusal)
+    Voice_bridge_transport.command_refusal_reason ~command:"the recorder" refusal
 ;;
 
 let record_and_transcribe

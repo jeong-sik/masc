@@ -4,6 +4,19 @@ module Layout = Masc_tui_message_layout
 module Frame = Masc_tui_frame
 module Markdown_cache = Masc_tui_markdown_render_cache
 
+(* Does this text carry the renderer's cut mark? A scalar question, not a byte
+   one: [String.contains text '~'] used to answer it, and once the mark became
+   "…" that check could no longer fail -- the byte it looked for had left the
+   renderer, so an assertion meant to catch a regression passed for free. *)
+let carries_cut_mark text =
+  let mark = "\xe2\x80\xa6" in
+  let n = String.length mark in
+  let rec seek i =
+    i + n <= String.length text
+    && (String.sub text i n = mark || seek (i + 1))
+  in
+  seek 0
+
 let entry ?(timestamp = "12:34:56") ?timeline_bucket
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
@@ -19,6 +32,22 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; turn_rail = Layout.Rail_none
   ; action = Layout.Action_none
   }
+
+let notice_room_at_eighty_columns = 55
+
+let test_a_load_failure_keeps_its_address_at_eighty_columns () =
+  let err =
+    "overview load failed: (http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
+  in
+  let drawn = Layout.fit_width err notice_room_at_eighty_columns in
+  check string "the producer target remains before the clipped reason"
+    "overview load failed: (http://127.0.0.1:8935/api/overv…" drawn;
+  check int "the notice fits its cell budget" notice_room_at_eighty_columns
+    (Layout.display_width drawn);
+  let generic = "HTTP 500: database connection pool exhausted: " ^ String.make 240 'x' in
+  let drawn = Layout.fit_width generic notice_room_at_eighty_columns in
+  check bool "generic error keeps its actionable prefix" true
+    (String.starts_with ~prefix:"HTTP 500: database connection pool exhausted:" drawn)
 
 let test_keeps_latest_reply () =
   let entries =
@@ -69,7 +98,7 @@ let test_keeps_newest_metadata_and_bytes () =
              (List.length all_rows - 2) hidden_rows;
            check bool "the marker fits without the generic truncation mark" true
              (Layout.display_width gap.text <= 20
-              && not (String.ends_with ~suffix:"~" gap.text))
+              && not (String.ends_with ~suffix:"…" gap.text))
        | Layout.Metadata _ | Layout.Body ->
            fail "oversized newest entry hid rows without a typed gap");
       check string "the newest body tail remains visible"
@@ -92,7 +121,7 @@ let test_inline_oversized_entry_marks_the_missing_middle () =
       check bool "inline mode keeps the start that names the speaker" true
         (String.starts_with ~prefix:"abc" (String.trim first.text));
       check bool "a partial inline clock has no generic truncation mark" true
-        (not (String.contains first.gutter '~'));
+        (not (carries_cut_mark first.gutter));
       (match gap.kind with
        | Layout.Viewport_gap { hidden_rows } ->
            check int "inline marker reports only rows not drawn"
@@ -225,12 +254,12 @@ let test_terminal_cell_width_and_fit () =
   check int "fitted UTF-8 fills the cell budget" 5
     (Layout.display_width fitted);
   check bool "fitted UTF-8 stays valid" true (String.is_valid_utf_8 fitted);
-  check string "wide scalar is never split" "가~"
+  check string "wide scalar is never split" "가…"
     (Layout.fit_width "가나" 3);
   check string "truncated ANSI style is reset before the marker"
-    "\x1B[31m한\x1B[0m~"
+    "\x1B[31m한\x1B[0m…"
     (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
-  check string "emoji grapheme is never split by fit" " ~"
+  check string "emoji grapheme is never split by fit" " …"
     (Layout.fit_width "👍🏽A" 2);
   (* drop_cells is fit_width's left-edge counterpart: the Code pane's
      horizontal scroll. Styles crossed by the cut still open the remainder,
@@ -424,18 +453,18 @@ let test_input_viewport_keeps_latest_complete_scalars () =
   check string "short input stays complete" "abc" (viewport 8 "abc");
   check string "exact boundary stays complete" "abcdefgh"
     (viewport 8 "abcdefgh");
-  check string "ASCII overflow keeps the newest tail" "~cdefghi"
+  check string "ASCII overflow keeps the newest tail" "…cdefghi"
     (viewport 8 "abcdefghi");
-  check string "mixed-width overflow keeps complete scalars" "~한🙂Z"
+  check string "mixed-width overflow keeps complete scalars" "…한🙂Z"
     (viewport 6 "Aé한🙂Z");
-  check string "one-cell viewport keeps omission marker" "~"
+  check string "one-cell viewport keeps omission marker" "…"
     (viewport 1 "한");
-  check string "detached combining mark is not rendered" "~"
+  check string "detached combining mark is not rendered" "…"
     (viewport 2 "A한\xCC\x81");
   List.iter
     (fun (grapheme, cells) ->
       check string ("overflow keeps complete grapheme " ^ grapheme)
-        ("~" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
+        ("…" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
     [ "👍🏽", 2
     ; "🇰🇷", 2
     ; "❤️", 2
@@ -447,16 +476,16 @@ let test_input_viewport_keeps_latest_complete_scalars () =
   let heart_viewport = viewport 7 repeated_hearts in
   check int "repeated emoji viewport fills its cell budget" 7
     (Layout.display_width heart_viewport);
-  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️"
+  check string "repeated emoji viewport keeps whole clusters" "…❤️❤️❤️"
     heart_viewport;
   let before = "abcdefghi" in
   let after = Layout.drop_last_utf8_scalar before in
-  check string "overflow before backspace" "~cdefghi" (viewport 8 before);
+  check string "overflow before backspace" "…cdefghi" (viewport 8 before);
   check string "backspace immediately reveals the new boundary" "abcdefgh"
     (viewport 8 after);
   let mixed = "abcdef한🙂" in
-  check string "mixed tail before backspace" "~f한🙂" (viewport 6 mixed);
-  check string "mixed tail after scalar backspace" "~def한"
+  check string "mixed tail before backspace" "…f한🙂" (viewport 6 mixed);
+  check string "mixed tail after scalar backspace" "…def한"
     (viewport 6 (Layout.drop_last_utf8_scalar mixed))
 
 let test_input_cursor_uses_visible_terminal_cells () =
@@ -2220,6 +2249,8 @@ let () =
             test_compact_origin_modes_keep_and_reach_the_hour_rail
         ; test_case "DST fallback hours remain visibly distinct" `Quick
             test_repeated_dst_hour_has_distinct_rails
+        ; test_case "a load failure keeps its address at eighty columns"
+            `Quick test_a_load_failure_keeps_its_address_at_eighty_columns
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"

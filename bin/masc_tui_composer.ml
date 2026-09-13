@@ -28,9 +28,10 @@ let focus_key = "i"
 let release_key = "esc"
 
 (* Ctrl-Y. Every printable key in a focused row is draft text, so a voice
-   binding cannot be a letter without taking it from typing. Ctrl-Y is the one
-   control code this TUI does not already spend: A is line-start by convention,
-   L is redraw, and C/D/H/I/J/M/Q/S/Z never reach the application. *)
+   binding cannot be a letter without taking it from typing. A is line-start by
+   convention, L is redraw, and C/D/H/I/J/M/Q/S/Z never reach the application.
+   On BSD terminals the tty takes Ctrl-Y too, as VDSUSP, until
+   [Masc_tui_termios.reclaim] turns that off. *)
 let listen_key = "\025"
 
 (* Ctrl-A. The same reasoning as [listen_key]: a focused row spends every

@@ -25,7 +25,8 @@ let panes_the_help_names () =
   match binding_for "p" with
   | None -> []
   | Some b ->
-    String.split_on_char '/' b.Masc_tui_keys.label
+    (* [p] is labelled "next pane"; the panes it walks are in its help. *)
+    String.split_on_char '/' (Option.value b.Masc_tui_keys.help ~default:"")
     |> List.map String.trim
     |> List.filter (fun part -> not (String.equal part ""))
 

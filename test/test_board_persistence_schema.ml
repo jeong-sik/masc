@@ -36,8 +36,8 @@ let with_eio f () =
   f ()
 ;;
 
-let make_origin ?turn_ref ?source ?fusion_run_id () : Board.post_origin =
-  { turn_ref; source; fusion_run_id }
+let make_origin ?turn_ref ?source ?fusion_run_id ?fusion_producer () : Board.post_origin =
+  { turn_ref; source; fusion_run_id; fusion_producer }
 ;;
 
 let create store ~origin ~content =
@@ -86,7 +86,7 @@ let prepend_field json field =
 let test_codec_round_trip () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:42 in
-  let origin = make_origin ~turn_ref:tr ~source:"fusion" ~fusion_run_id:"fus-7" () in
+  let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~source:"fusion" ~fusion_run_id:"fus-7" () in
   let post = create store ~origin ~content:"round trip" in
   let decoded =
     match decode (Board_core.post_to_yojson post) with
@@ -442,7 +442,7 @@ let test_keeper_authored_origin_without_turn_ref () =
 let test_index_lookup_hit_and_miss () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"idx-trace" ~absolute_turn:9 in
-  let origin = make_origin ~turn_ref:tr ~fusion_run_id:"run-xyz" () in
+  let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"run-xyz" () in
   let post = create store ~origin ~content:"indexed" in
   let pid = Board.Post_id.to_string post.id in
   (match Board_core.find_post_by_turn_ref store ~turn_ref:(Ids.Turn_ref.to_string tr) with
@@ -460,7 +460,7 @@ let test_index_lookup_hit_and_miss () =
 let test_index_rebuilt_on_load () =
   let store1 = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"load-trace" ~absolute_turn:3 in
-  let origin = make_origin ~turn_ref:tr ~fusion_run_id:"load-run" () in
+  let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"load-run" () in
   let _ = create store1 ~origin ~content:"persisted with origin" in
   (* Fresh store loads from the same MASC_BASE_PATH persist file. *)
   let store2 = Board_core.create_store () in
@@ -478,7 +478,7 @@ let test_index_rebuilt_on_load () =
 let test_index_pruned_on_sweep () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"sweep-trace" ~absolute_turn:5 in
-  let origin = make_origin ~turn_ref:tr ~fusion_run_id:"sweep-run" () in
+  let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"sweep-run" () in
   let post = create store ~origin ~content:"to be swept" in
   let key = Ids.Turn_ref.to_string tr in
   Alcotest.(check bool) "indexed before sweep" true

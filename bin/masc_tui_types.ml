@@ -94,6 +94,15 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* Whether the rows kept from this workspace's own directory -- agents, tasks,
+   keepers, their logs -- were read from it. They are read only once the server
+   says it serves this workspace, and cleared again when it serves another, and
+   both leave the lists empty with no error beside them. An empty roster alone
+   therefore cannot say "no keepers"; this says whether it may. *)
+type local_workspace_reading =
+  | Local_workspace_unread
+  | Local_workspace_read
+
 let canonical_path path =
   if String.equal path ""
   then ""
@@ -2382,7 +2391,6 @@ let runtime_listing_chrome ~error ~action_error ~picker_rows =
   listing_chrome ~error + 2
   + (if Option.is_some action_error then 2 else 0)
   + (match picker_rows with None -> 0 | Some count -> 2 + max 1 count)
-let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -2678,6 +2686,28 @@ let runtime_param_edit_clear edit =
    asks the same questions next. What lives here is only what a terminal needs:
    the text being typed, the revision the session was opened against, and the
    last thing the server said. *)
+(* Where the session's last save stands. Every save is numbered, and a reply is
+   applied only while the session is waiting on that number. The replies used
+   to carry nothing but their result and landed on whatever session was open
+   when they arrived: after esc and a reopen, the new draft was marked saved,
+   and a second save showed the first save's probe under it. *)
+type voice_wizard_save =
+  | Save_not_sent
+  | Save_sending of int
+  | Save_probing of int
+      (** Written. The endpoints are being asked, and their answer carries this
+          number. *)
+  | Save_settled
+  | Save_unanswered of { request : int; revision : string }
+      (** Sent against [revision], and nothing came back that says whether it
+          was written: the connection dropped or the deadline passed. The
+          session reads runtime.toml again before it lets the draft be sent
+          twice. *)
+  | Save_needs_reopen of string
+      (** The read after an unanswered save could not rule the write out. A
+          retry would carry a revision this session no longer knows is
+          current, so it waits for esc and a fresh read. The string says why. *)
+
 type voice_wizard_session =
   { vws_draft : Voice_wizard.draft
   ; vws_step : Voice_wizard.step
@@ -2691,7 +2721,7 @@ type voice_wizard_session =
             carries it, so a session left open while something else wrote is
             told rather than overwriting it. *)
   ; vws_status : string option
-  ; vws_saving : bool
+  ; vws_save : voice_wizard_save
   ; vws_probe : string list
         (** What each endpoint answered after the save, one line each. The
             wizard writes a configuration; whether anything on the other end
@@ -2731,28 +2761,153 @@ let voice_wizard_open ~section ~provider ~revision =
   ; vws_replace_on_type = true
   ; vws_revision = revision
   ; vws_status = None
-  ; vws_saving = false
+  ; vws_save = Save_not_sent
   ; vws_probe = []
   }
 
-let voice_wizard_append session text =
+let voice_wizard_is_sending session =
+  match session.vws_save with
+  | Save_sending _ -> true
+  | Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _ | Save_needs_reopen _ ->
+    false
+
+(* Changing the draft. The rows under it answered the save that was sent, and
+   left there they read as answers about the draft now on screen -- a TTS probe
+   stayed under a draft switched to STT. A probe still on its way is about that
+   earlier draft too, so it is let go. A save whose outcome is unknown is not:
+   editing does not tell the session whether runtime.toml was written. *)
+let voice_wizard_edited session =
   { session with
-    vws_input = (if session.vws_replace_on_type then text else session.vws_input ^ text)
-  ; vws_replace_on_type = false
-  ; vws_status = None
+    vws_probe = []
+  ; vws_save =
+      (match session.vws_save with
+       | Save_probing _ | Save_settled -> Save_not_sent
+       | (Save_not_sent | Save_sending _ | Save_unanswered _ | Save_needs_reopen _) as held ->
+         held)
   }
+
+let voice_wizard_append session text =
+  voice_wizard_edited
+    { session with
+      vws_input = (if session.vws_replace_on_type then text else session.vws_input ^ text)
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_backspace session =
-  { session with
-    vws_input =
-      (if session.vws_replace_on_type then ""
-       else Masc_tui_message_layout.drop_last_utf8_scalar session.vws_input)
-  ; vws_replace_on_type = false
-  ; vws_status = None
-  }
+  voice_wizard_edited
+    { session with
+      vws_input =
+        (if session.vws_replace_on_type then ""
+         else Masc_tui_message_layout.drop_last_utf8_scalar session.vws_input)
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_clear session =
-  { session with vws_input = ""; vws_replace_on_type = false; vws_status = None }
+  voice_wizard_edited
+    { session with vws_input = ""; vws_replace_on_type = false; vws_status = None }
+
+(* Whether Enter on Review may send the draft, and what to say when not. *)
+let voice_wizard_save_held session =
+  match session.vws_save with
+  | Save_not_sent | Save_probing _ | Save_settled -> None
+  | Save_sending _ -> Some "saving…"
+  | Save_unanswered _ ->
+    Some "reading runtime.toml again to see whether the last save was written…"
+  | Save_needs_reopen reason -> Some reason
+
+let voice_wizard_sending session ~request =
+  { session with vws_save = Save_sending request; vws_status = Some "saving…"; vws_probe = [] }
+
+(* What came back for a save, already told apart: an answer that carries the
+   revision the write produced, a refusal the server gave in words, and no
+   answer at all. *)
+type voice_wizard_save_reply =
+  | Save_written of string
+  | Save_refused of string
+  | Save_unanswered_reply of string
+
+(* [None] when the reply is not for the save this session is waiting on. *)
+let voice_wizard_after_save session ~request reply =
+  match session.vws_save with
+  | Save_sending sent when sent = request ->
+    Some
+      (match reply with
+       | Save_written revision ->
+         (* The revision this save produced. The wizard stays open, and a second
+            save from it has to carry this one, not the one read before. *)
+         let session = { session with vws_revision = revision; vws_probe = [] } in
+         (match session.vws_draft.Voice_wizard.section with
+          | Voice_setup.Tts ->
+            { session with
+              vws_save = Save_probing request
+            ; vws_status = Some "saved. asking the endpoints to answer…"
+            }
+          | Voice_setup.Stt ->
+            (* Transcription needs audio this pane does not have. The CLI takes
+               a file, and the runbook says how to make one. *)
+            { session with
+              vws_save = Save_settled
+            ; vws_status = Some "saved. run  masc voice-verify --audio FILE  to hear it back"
+            })
+       | Save_refused message ->
+         { session with vws_save = Save_not_sent; vws_status = Some message }
+       | Save_unanswered_reply detail ->
+         { session with
+           vws_save = Save_unanswered { request; revision = session.vws_revision }
+         ; vws_status =
+             Some
+               (Printf.sprintf
+                  "the save got no answer (%s), so it may have been written. reading \
+                   runtime.toml again…"
+                  detail)
+         })
+  | Save_sending _ | Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _
+  | Save_needs_reopen _ ->
+    None
+
+let voice_wizard_after_probe session ~request result =
+  match session.vws_save with
+  | Save_probing sent when sent = request ->
+    Some
+      (match result with
+       | Ok lines -> { session with vws_save = Save_settled; vws_status = Some "saved."; vws_probe = lines }
+       | Error message -> { session with vws_save = Save_settled; vws_status = Some message })
+  | Save_probing _ | Save_not_sent | Save_sending _ | Save_settled | Save_unanswered _
+  | Save_needs_reopen _ ->
+    None
+
+(* The read taken after a save that got no answer. The same revision means
+   nothing was written, so the draft can go again against it. A different one
+   means runtime.toml moved -- by that save or by someone else -- and adopting
+   it would let a retry overwrite a write this session never saw. *)
+let voice_wizard_after_reread session ~request result =
+  match session.vws_save with
+  | Save_unanswered { request = sent; revision } when sent = request ->
+    Some
+      (match result with
+       | Ok current when String.equal current revision ->
+         { session with
+           vws_save = Save_not_sent
+         ; vws_status = Some "nothing was written. enter saves again"
+         }
+       | Ok _ ->
+         let reason =
+           "runtime.toml changed after the save that got no answer. esc, check the \
+            endpoints, and open the wizard again"
+         in
+         { session with vws_save = Save_needs_reopen reason; vws_status = Some reason }
+       | Error message ->
+         let reason =
+           Printf.sprintf
+             "runtime.toml could not be read again (%s). esc and open the wizard again"
+             message
+         in
+         { session with vws_save = Save_needs_reopen reason; vws_status = Some reason })
+  | Save_unanswered _ | Save_not_sent | Save_sending _ | Save_probing _ | Save_settled
+  | Save_needs_reopen _ ->
+    None
 
 (* Typing is kept out of the draft until the step is left, so backing out of a
    step does not carry a half-typed value with it. *)
@@ -2820,12 +2975,13 @@ let voice_wizard_cycle_provider session =
         Voice_wizard.endpoint_id = session.vws_draft.Voice_wizard.endpoint_id
       }
     in
-    { session with
-      vws_draft = draft
-    ; vws_input = voice_wizard_value draft session.vws_step
-    ; vws_replace_on_type = true
-    ; vws_status = None
-    }
+    voice_wizard_edited
+      { session with
+        vws_draft = draft
+      ; vws_input = voice_wizard_value draft session.vws_step
+      ; vws_replace_on_type = true
+      ; vws_status = None
+      }
 
 let runtime_param_edit_toggle_bool edit =
   let next =
@@ -3053,13 +3209,17 @@ module Browser_lane_view = struct
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
+    | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* [clients] is what the last discovery answered, and [None] until one has:
+     a discovery that failed leaves no list rather than an empty one, so the
+     picker cannot tell an operator there is no browser when it could not ask. *)
   type t = {
-    clients : client list; selected_client : client option; client_picker : int option;
+    clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
@@ -3073,14 +3233,20 @@ module Browser_lane_view = struct
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None | Automation, _ -> None
+  (* The browser a read goes to, when there is one. Live with none chosen has
+     no browser to name; this used to answer "choose browser", and every row
+     that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
-    | Automation, _ -> "browser"
-    | Live, Some client -> browser_name client.browser
-    | Live, None -> "choose browser"
+    | Automation, _ -> Some "browser"
+    | Live, Some client -> Some (browser_name client.browser)
+    | Live, None -> None
   let context_label t =
-    Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) (browser_label t)
+    match browser_label t with
+    | Some browser ->
+      Printf.sprintf "Browser Lane · %s · %s page reader" (source_name t.source) browser
+    | None -> Printf.sprintf "Browser Lane · %s · no browser" (source_name t.source)
   let create () =
-    { clients = []; selected_client = None; client_picker = None;
+    { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
@@ -3106,7 +3272,7 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _)), _ -> Reading
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Viewport_cadence _)), _ -> Reading
     | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
@@ -3128,6 +3294,7 @@ module Browser_lane_view = struct
     | Read_failed -> "HTTP failed"
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
+  let listed_clients t = Option.value t.clients ~default:[]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3135,18 +3302,23 @@ module Browser_lane_view = struct
   let selected_client_available t = match t.source, t.selected_client with
     | Automation, _ -> true
     | Live, None -> false
-    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
-  let cadence_operation t =
+    | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
+  let cadence_operation ?(viewport : screenshot option) t =
     if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
-    else match t.selected_tab, t.read_view with
+    else match viewport with
+      | Some shot when shot.source = t.source && shot.client_id = client_id t
+          && t.selected_tab = Some shot.tab_id ->
+          Some (Viewport_cadence shot.tab_id)
+      | Some _ -> None
+      | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
       | Some tab_id, Scene_view {scene_view;scope} ->
           Some (Scene_refresh {tab_id;scene_view;scope})
       | Some _, Text_view -> Some Read_refresh
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _)) -> {t with load = Idle}
+    | Loading (_, (Read_refresh | Scene_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
     | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
@@ -3156,7 +3328,7 @@ module Browser_lane_view = struct
     | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
     | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
-    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_pointer _ -> previous
+    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
@@ -3164,10 +3336,10 @@ module Browser_lane_view = struct
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = []; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
-             let next = { t with clients; load = Idle } in
+             let next = { t with clients = Some clients; load = Idle } in
              match t.selected_client, clients, purpose with
              | None, [client], Read_after_discovery -> choose_client client next, true
              | Some _, _, _ when selected_client_available next ->
@@ -3450,11 +3622,15 @@ module Browser_lane_view = struct
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
-  (* Settle the browser operation even when a later key cancelled opening the
-     image. The caller separately checks image intent before drawing. *)
+  (* A cadence observes the selected tab, including navigation by another
+     actor. Its self-contained PNG and document/URL/viewport are accepted
+     together; the next gesture uses that displayed snapshot. Explicit refresh
+     and scroll retain their expected URL checks. Settle even when a later key
+     cancelled opening the image; the caller separately checks image intent. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_cadence requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -3704,6 +3880,14 @@ type observed_interrupt =
   ; oi_sent_ns : int64
   ; oi_status : observed_interrupt_status }
 
+(* Whether a Board list request has answered. The posts are a plain list, and
+   an empty one is both "nothing asked yet" and "asked, and the board holds
+   nothing" -- the title said "(0)" for either, and for a failed first read
+   too. *)
+type board_list_reading =
+  | Board_list_unread
+  | Board_list_read
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3893,6 +4077,10 @@ type state = {
   mutable voice_setup: Yojson.Safe.t option;
   mutable voice_setup_error: string option;
   mutable voice_wizard: voice_wizard_session option;
+  (* The number the next wizard save is sent under. Never reused, so a reply
+     for a save made by a session that has since closed cannot match the one
+     open now. *)
+  mutable voice_wizard_requests: int;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -4087,7 +4275,7 @@ type state = {
   mutable fleet_safety: fleet_safety option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
-  mutable last_refresh: float;
+  mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
@@ -4230,6 +4418,7 @@ type state = {
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
+  mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
@@ -4466,9 +4655,16 @@ type state = {
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
-  mutable code_entries: Tui_decode.workspace_tree_node list;
-  mutable code_entries_error: string option;
-  mutable code_entries_inflight: bool;
+  mutable code_listing:
+    (code_workspace_scope * string, Tui_decode.workspace_tree_node list)
+    Masc_tui_fetched.t;
+      (** The file pane's directory listing, keyed by scope and directory.
+          It was three cells -- rows, an error, and an in-flight flag -- and
+          the flag was one bit for every directory: a listing asked while
+          another was in flight was dropped, so moving into a directory
+          before the last one answered left it unrequested and drawn as
+          "(loading…)" until [r]. The same two cells also drew a directory
+          that answered with no entries as "(loading…)". *)
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -5370,6 +5566,19 @@ let selected_keeper_run (state : state) =
   let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
   Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
 
+(* What the Keeper Runs tab knows about the retained runs. The tab matched on
+   the snapshot alone and drew "Loading Fusion runs..." for [None], so a read
+   that failed left it there for good: the failure went to [fusion_error],
+   which only the Fusion surface drew. Rows already held stay on a failed
+   refresh, as they do on the Fusion surface, and the failure comes with them
+   so they read as stale. A retry in flight is loading, not the old failure. *)
+let keeper_runs_view (state : state) =
+  match state.fusion_runs, state.fusion_error, state.fusion_runs_inflight with
+  | Some _, stale, _ -> Masc_tui_fetched.Ready (selected_keeper_runs state, stale)
+  | None, _, Some _ -> Masc_tui_fetched.Loading
+  | None, Some detail, None -> Masc_tui_fetched.Failed detail
+  | None, None, None -> Masc_tui_fetched.Absent
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
 let workspace_activity_rows (state : state) =
@@ -5412,8 +5621,7 @@ let enter_keeper_code_file state ~keeper ~path =
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
-  state.code_entries <- [];
-  state.code_entries_error <- None;
+  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
@@ -5615,6 +5823,7 @@ let create_state
   voice_setup = None;
   voice_setup_error = None;
   voice_wizard = None;
+  voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -5698,7 +5907,7 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
-  last_refresh = 0.0;
+  local_workspace = Local_workspace_unread;
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
@@ -5773,6 +5982,7 @@ let create_state
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
+  board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
   msg_find_at = None;
@@ -5929,9 +6139,7 @@ let create_state
   link_previews_mode = `Rich;
   burn_hud_visible = false;
   code_dir = "";
-  code_entries = [];
-  code_entries_error = None;
-  code_entries_inflight = false;
+  code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
@@ -6091,6 +6299,56 @@ let visible_system_log_entries (state : state) =
    stable producer order; each turn is Input -> Progress -> Tool -> Output.
    Pending requests are withheld for the separate NEXT lane. Wall clocks never
    decide conversation order. *)
+(* What a page says when it holds nothing, in one place: the words for
+   {!empty_page}'s [Page_unread] and [Page_failed]. They sit beside the type so
+   a module below the renderer -- Memory's body is one -- draws the same words.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+
+let page_failed_note = "  (load failed; nothing here is a reading)"
+
+(* The row the Browser Lane picker draws when it has no connection to offer,
+   and [None] when it has one. A discovery that failed used to leave an empty
+   list, so the picker answered "No active native browser connections" under
+   the red failure: the operator was told the browser was gone when the list
+   had not been read. Only a discovery that answered can say there are none. *)
+let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
+  let open Browser_lane_view in
+  match view.clients, view.load with
+  | Some (_ :: _), _ -> None
+  | (None | Some []), Loading _ -> Some "  Waiting for active connections\xe2\x80\xa6"
+  | Some [], (Idle | No_browser | Failed _) -> Some "  No active native browser connections"
+  | None, Failed _ -> Some page_failed_note
+  | None, (Idle | No_browser) -> Some page_unread_note
+
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
+(* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
+   count once it has answered, and otherwise which of the two it is. Asked and
+   still waiting reads as not loaded, the way a title before any request does. *)
+let title_count_of_view view ~count =
+  match view with
+  | Masc_tui_fetched.Ready value -> count value
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
+  | Masc_tui_fetched.Failed _ -> title_failed
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -6101,11 +6359,55 @@ type empty_page =
   | Page_failed
   | Page_empty
 
+(* The Code pane's listing for the scope and directory open now. A listing
+   answered for another key, one still loading, and one that failed hold no
+   rows for this key. *)
+let code_listing_key (state : state) = (state.code_scope, state.code_dir)
+
+let code_listing_view (state : state) =
+  Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing
+    ~key:(code_listing_key state)
+
+let code_entries (state : state) =
+  match code_listing_view state with
+  | Masc_tui_fetched.Ready rows -> rows
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Failed _ -> []
+
 let empty_page_of ~snapshot ~error =
   match (snapshot, error) with
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
+
+(* The page for the Board list, whose posts are a plain list: it is empty both
+   before a list request has answered and after one that found nothing. *)
+let board_list_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.board_list_reading with
+       | Board_list_unread -> None
+       | Board_list_read -> Some ())
+
+(* The page for a list kept from this workspace's directory, which carries no
+   snapshot of its own: the list is empty both before the read and after it. *)
+let local_rows_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.local_workspace with
+       | Local_workspace_unread -> None
+       | Local_workspace_read -> Some ())
+
+(* What the Resources pane says under its header when no error is showing and
+   there is no row to draw, and [None] when there is one. The pane flattened
+   the list to [] before asking, so a read that answered with no resources and
+   a read not answered yet were the same empty list, and both said
+   "(loading...)" -- for good, on a server that exposes no resources. *)
+let resources_empty_note (list : Masc_tui_mcp.resource list option) =
+  match list with
+  | None -> Some " (loading\xe2\x80\xa6)"
+  | Some [] -> Some " (no resources)"
+  | Some (_ :: _) -> None
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =
@@ -6345,6 +6647,12 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  (* The voice pane and its wizard lay out lines out of two HTTP reads and the
+     probe's answers, so their count exists only once the frame is drawn. Both
+     drew every line into a fixed budget with no offset, and whatever fell past
+     it -- later endpoints, the probe's last rows, the footer -- could not be
+     reached. *)
+  | Voice_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -6399,12 +6707,21 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Voice_scroll value -> state.config_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
    here because both the drawing and the keypress need it; Masc_tui_scroll
    works the split out from it. *)
 let changes_preview_keep_rows = 5
+
+(* The renderer and navigation must agree when a valid diff replaces the list.
+   A stale index after refresh falls back to the current list. *)
+let opened_file_change (state : state) =
+  match state.changes_diff_row, state.changes with
+  | Some row, Some snapshot -> List.nth_opt snapshot.Tui_decode.fcs_changes row
+  | Some _, None | None, (Some _ | None) -> None
+
 
 (* The over-budget note and its divider, which the Changes drawing puts above
    the list. Chrome the drawing adds conditionally has to be counted here too
@@ -6426,32 +6743,43 @@ let changes_budget_note_rows (state : state) =
    time for. *)
 let agenda (state : state) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules with
-    | None -> []
-    | Some snapshot ->
-      List.filter_map
-        (fun (row : schedule_row) ->
-           match row.sch_due_at_iso with
-           | None -> None
-           | Some at_iso ->
-             Some
-               { Masc_tui_agenda.at_iso
-               ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-               ; who = Option.value row.sch_payload_target ~default:""
-               ; what = Option.value row.sch_payload_summary ~default:""
-               ; recurrence = row.sch_recurrence_summary
-               })
-        snapshot.scs_rows
+    match state.schedules, state.schedules_error with
+    (* A store the server could not read answers with a status other than
+       "ok" and no rows; that is a failed read, not an empty schedule. *)
+    | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
+      Masc_tui_agenda.Read_failed
+    | None, Some _ -> Masc_tui_agenda.Read_failed
+    | None, None -> Masc_tui_agenda.Not_read
+    | Some snapshot, _ ->
+      Masc_tui_agenda.Read
+        (List.filter_map
+           (fun (row : schedule_row) ->
+              match row.sch_due_at_iso with
+              | None -> None
+              | Some at_iso ->
+                Some
+                  { Masc_tui_agenda.at_iso
+                  ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
+                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; what = Option.value row.sch_payload_summary ~default:""
+                  ; recurrence = row.sch_recurrence_summary
+                  })
+           snapshot.scs_rows)
   in
   let awaiting =
-    List.map
-      (fun (held : Tui_decode.keeper_tool_approval) ->
-         { Masc_tui_agenda.asked_by = held.kta_keeper
-         ; question = held.kta_tool
-         ; asked_at = held.kta_asked_at
-         ; timeout_sec = held.kta_timeout_sec
-         })
-      state.keeper_tool_approvals
+    match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
+    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, None -> Masc_tui_agenda.Not_read
+    | true, _ ->
+      Masc_tui_agenda.Read
+        (List.map
+           (fun (held : Tui_decode.keeper_tool_approval) ->
+              { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; question = held.kta_tool
+              ; asked_at = held.kta_asked_at
+              ; timeout_sec = held.kta_timeout_sec
+              })
+           state.keeper_tool_approvals)
   in
   Masc_tui_agenda.project ~scheduled ~awaiting
 ;;
@@ -6568,14 +6896,60 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+(* Memory already trims its filter; count and cursor search must use that
+   same query. Other surfaces keep their literal-space search semantics. *)
+let surface_search_query surface query =
+  match surface with Memory -> String.trim query | _ -> query
+
+let memory_fact_search_text = function
+  | Memory_row_fact f ->
+      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+      ^ f.Tui_decode.mf_origin
+  | Memory_row_source_fact f ->
+      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+  | Memory_row_invalidation f ->
+      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+
 let memory_overview_query (state : state) =
     match state.search with
-    | Some q -> String.lowercase_ascii (String.trim q)
-    | None ->
-        if String.length (String.trim state.search_last) > 0 then
-          String.lowercase_ascii (String.trim state.search_last)
-        else ""
+    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
+    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
+
+(* What Esc does on Memory, nearest layer first: a filter, then the fact
+   browser, then the surface. The keeper table drew "[Esc to clear]" beside its
+   filter, but only the fact browser cleared one: on the table Esc left for
+   Overview and kept the filter, which narrowed the list again the next time
+   Memory opened. *)
+type memory_back = Memory_stays | Memory_leaves
+
+let memory_back (state : state) =
+  if Option.is_some state.search || state.search_last <> "" then begin
+    state.search <- None;
+    state.search_last <- "";
+    (match state.memory_facts_keeper with
+     | Some _ ->
+         state.memory_facts_cursor <- 0;
+         state.memory_facts_scroll <- 0
+     | None ->
+         state.memory_health_cursor <- 0;
+         state.memory_health_scroll <- 0);
+    Memory_stays
+  end
+  else
+    match state.memory_facts_keeper with
+    | Some _ ->
+        (* Close the fact browser back to the health table. The listing is
+           dropped with it: facts are cheap to re-ask and a kept copy would
+           redraw stale rows on reopen. *)
+        state.memory_facts_keeper <- None;
+        state.memory_facts <- None;
+        state.memory_facts_error <- None;
+        state.memory_facts_cursor <- 0;
+        state.memory_facts_scroll <- 0;
+        state.memory_facts_category <- Category_all;
+        Memory_stays
+    | None -> Memory_leaves
 
 let visible_memory_keepers (state : state) =
   let open Tui_decode in
@@ -6719,25 +7093,15 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.trim q
-        | None -> String.trim state.search_last
+        | Some q -> surface_search_query Memory q
+        | None -> surface_search_query Memory state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
         else
           List.filter
             (fun row ->
-              let text =
-                match row with
-                | Memory_row_fact f ->
-                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-                    ^ f.Tui_decode.mf_origin
-                | Memory_row_source_fact f ->
-                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
-                | Memory_row_invalidation f ->
-                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
-              in
-              palette_contains ~needle:query text)
+              palette_contains ~needle:query (memory_fact_search_text row))
             all_rows
       in
       (match state.memory_facts_sort with
@@ -6960,17 +7324,29 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
             (match state.system_logs with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
-        ; sc_overflow_takes_row = false
+        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
       if Option.is_some state.verification_detail_request_id then None
       else
-        listing ~error:state.verification_error
-          (match state.verification with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.vs_requests)
+        (* Under the list sit the armed approval and the server's last
+           refusal, one row each while they stand, and the scroll row while the
+           queue overflows. They are frame rows too; a count without them puts
+           the footer past the frame's last row. *)
+        Some
+          { sc_count =
+              (match state.verification with
+               | None -> 0
+               | Some s -> List.length s.Tui_decode.vs_requests)
+          ; sc_chrome =
+              listing_chrome ~error:state.verification_error
+              + (if Option.is_some state.verification_verdict_armed then 1 else 0)
+              + (if Option.is_some state.verification_verdict_error then 1 else 0)
+          ; sc_overflow_takes_row = true
+          ; sc_preview_keep = None
+          }
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ -> None
@@ -7000,6 +7376,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (List.length (memory_fact_rows state))
       else
         Some (memory_overview_scrolled state)
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some
         { sc_count =
@@ -7009,7 +7386,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = false
+        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()
@@ -7059,20 +7436,24 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          lengths: the source pane draws every line, the models pane draws one
          row per binding plus a header. One count for both let the keys run
          off the end of the shorter one. *)
-      listing ~error:state.runtime_config_view_error
-        (match state.config_pane with
-         | Config_models ->
+      let file_rows () =
+        match state.runtime_config_view with
+        | None -> 0
+        | Some reading -> List.length reading.rcv_rows
+      in
+      (match state.config_pane with
+       | Config_models ->
+         listing ~error:state.runtime_config_view_error
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
-         (* The voice pane draws its own short block rather than the config
-            file, so it scrolls with the same rule as the rest: whatever the
-            renderer laid out. *)
-         | Config_runtime | Config_params | Config_prompts | Config_presets
-         | Config_themes | Config_voice ->
-           (match state.runtime_config_view with
-            | None -> 0
-            | Some reading -> List.length reading.rcv_rows))
+       (* The voice pane draws neither the file nor a list the state holds.
+          It was counted as the file's rows, a bound that has nothing to do
+          with what it draws; the frame reports [Voice_scroll] instead. *)
+       | Config_voice -> None
+       | Config_runtime | Config_params | Config_prompts | Config_presets
+       | Config_themes ->
+         listing ~error:state.runtime_config_view_error (file_rows ()))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
@@ -7197,7 +7578,32 @@ let conversation_urls (state : state) : string list =
 
 
 
-let surface_row_texts (state : state) : surface -> string list option = function
+let code_file_search_focused (state : state) =
+  not state.repository_changes_open
+  && state.code_focus_file = Right_pane
+  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+
+(* The Git changes overlay before the surface it is drawn over. It draws over
+   three surfaces -- [scrolled_surface_rows] names them -- and an arm per
+   surface answered for two of them: over the Keepers roster the rows here
+   were keeper names, so a settled query counted the hidden roster and [n]
+   stepped the keeper cursor instead of landing on a matching path.
+   [goto_surface] closes the overlay on any move to another surface, which is
+   what makes the flag alone enough to say it is on screen. Its diff replaces
+   the list with text, and text has no row for a cursor to name. *)
+let surface_row_texts (state : state) : surface -> string list option =
+ fun surface ->
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         Option.map
+           (fun s ->
+             List.map (fun row -> row.Tui_decode.rc_path)
+               s.Tui_decode.rcs_changes)
+           state.repository_changes)
+  else
+  match surface with
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Keepers Keeper_detail when state.context_inspector_open ->
@@ -7254,18 +7660,19 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.vs_requests)
           state.verification
   | Harness ->
-      Option.map
+      if Option.is_some state.harness_detail then None
+      else Option.map
         (fun s ->
           List.map
             (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
             s.Tui_decode.hs_verdicts)
         state.harness
   | Repositories ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
+      (* Workspace Activity replaces the repository list with one repository's
+         own rows and its own cursor, and its handler takes every key the
+         surface has, "/" and n and N among them. The rows here are the list
+         behind it, which a settled query would then count and report. *)
+      if Option.is_some state.workspace_activity_repo then None
       else
         Option.map
           (fun s ->
@@ -7276,26 +7683,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
           state.repositories
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        (match memory_fact_rows state with
-         | [] -> None
-         | rows ->
-             Some
-               (List.map
-                  (function
-                    | Memory_row_fact fact ->
-                        fact.Tui_decode.mf_category ^ " "
-                        ^ fact.Tui_decode.mf_claim
-                    | Memory_row_source_fact fact ->
-                        fact.Tui_decode.msf_path ^ " "
-                        ^ fact.Tui_decode.msf_claim
-                    | Memory_row_invalidation row ->
-                        row.Tui_decode.mi_source_path ^ " "
-                        ^ row.Tui_decode.mi_reason)
-                  rows))
-      else
         Option.map
           (fun _ ->
-            List.map (fun k -> k.Tui_decode.mkh_keeper_id)
+             let rows = memory_fact_rows state in
+             (* The exact filter projection, including field order: a phrase
+                crossing a field boundary must remain countable and reachable. *)
+             List.map memory_fact_search_text rows)
+          state.memory_facts
+      else
+        Option.map
+          (* Keeper id and the state label, which is the pair
+             [visible_memory_keepers] keeps a row for. Leaving the label out
+             kept rows on screen that the search could neither count nor
+             reach. *)
+          (fun _ ->
+            List.map
+              (fun k ->
+                k.Tui_decode.mkh_keeper_id ^ " "
+                ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
@@ -7307,16 +7712,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.cs_connectors)
         state.connectors
   | Runtime ->
+      if Option.is_some state.runtime_detail_target then None
+      else
       Option.map
         (fun s ->
-          List.map
-            (fun c ->
-              c.Tui_decode.rcr_lane_id ^ " "
-              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
-            s.Tui_decode.rss_candidates)
+          match state.runtime_mode with
+          | Runtime_lanes ->
+              List.map
+                (fun c ->
+                  c.Tui_decode.rcr_lane_id ^ " "
+                  ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_candidates
+          | Runtime_all ->
+              List.map (fun runtime -> runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      Option.map
+      if Option.is_some state.system_logs_detail_seq then None
+      else Option.map
         (fun _ ->
           visible_system_log_entries state
           |> List.map
@@ -7326,19 +7739,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
               ^ " " ^ e.Tui_decode.sl_message))
         state.system_logs
   | Code ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
-      else
-      (* The Git changes overlay is a row list of its own. Otherwise, with a
-         file focused (and no file overlay over it), "/" searches the file's
-         lines; the tree remains the default search list. *)
-      if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then
+      (* With a file focused (and no file overlay over it), "/" searches the
+         file's lines; the tree remains the default search list. The Git
+         changes overlay is answered above, before any surface. *)
+      if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
@@ -7355,7 +7759,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
         Some
           (List.map
              (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-             state.code_entries)
+             (code_entries state))
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   (* The list, and only while the list is the pane: reading a post or
      writing one draws something else, and "/" there would move a cursor
@@ -7427,6 +7831,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
                          evidence.Tui_decode.fhe_post_id ^ " "
                          ^ evidence.Tui_decode.fhe_title)
                    entries)))
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (
       match state.changes with
       | None -> None
@@ -7450,6 +7855,48 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None
+
+(* The fetched file's rows are replaced when content changes, like the lists
+   behind [chat_rows_memo]. Keep one derived reading keyed by that identity
+   and the query, not by the pane or path: a repaint reuses it, while a refresh
+   of the same file must recount. Other surfaces retain their live projection. *)
+type code_search_count_memo =
+  { csc_rows : (string * string) list array
+  ; csc_query : string
+  ; csc_count : int
+  }
+
+let code_search_count_memo : code_search_count_memo option ref = ref None
+
+let code_file_search_count ~query rows =
+  match !code_search_count_memo with
+  | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->
+      memo.csc_count
+  | Some _ | None ->
+      let count =
+        Array.fold_left (fun count segments ->
+          let text = String.concat "" (List.map fst segments) in
+          if palette_contains ~needle:query text then count + 1 else count) 0 rows
+      in
+      code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
+      count
+
+let surface_search_count (state : state) surface ~query =
+  let query = surface_search_query surface query in
+  match surface with
+  | Code when code_file_search_focused state ->
+      (match Masc_tui_fetched.current state.code_file with
+       | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | None -> None)
+  | _ ->
+      Option.map
+        (fun rows ->
+          if String.equal query "" then 0
+          else List.fold_left (fun count text ->
+            if palette_contains ~needle:query text then count + 1 else count) 0 rows)
+        (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
 
@@ -7865,10 +8312,6 @@ let palette_entries (state : state) =
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
-  @ [ "metrics", Palette_goto Metrics ]
-  @ [ "telemetry", Palette_goto Metrics ]
-  @ [ "charts", Palette_goto Metrics ]
-  @ [ "stats", Palette_goto Metrics ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
@@ -7914,6 +8357,24 @@ let palette_subsequence ~needle haystack =
   in
   walk 0 0
 
+(* Other words an entry answers to, kept off its row. Metrics used to be five
+   rows -- "go Metrics", "metrics", "telemetry", "charts", "stats" -- each the
+   same jump, so an empty query listed one destination five times. The slash
+   commands fold their aliases into one entry the same way
+   (Masc_tui_command.spelled_catalog). *)
+let palette_action_words = function
+  | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+  | Palette_goto
+      ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+      | Approvals | Planning | Schedules | Verification | Harness | Fusion
+      | Repositories | Code | Changes | Connectors | Runtime | Config
+      | Resources | Tools | System_logs )
+  | Palette_browser_lane | Palette_hide_browser_lane | Palette_msx
+  | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
+  | Palette_chat _ | Palette_task _ | Palette_board_hearth _
+  | Palette_board_post _ | Palette_lsp _ ->
+      []
+
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
@@ -7928,10 +8389,11 @@ let palette_matches (state : state) =
      query, then one that contains it, then one that only has its characters
      in order. A K/D pre-fill of "def " therefore lists the cursor line's
      names before a post that merely mentions "deferred". *)
-  let rank (label, _) =
-    if palette_starts_with ~needle label then Some 0
-    else if palette_contains ~needle label then Some 1
-    else if palette_subsequence ~needle label then Some 2
+  let rank (label, action) =
+    let texts = label :: palette_action_words action in
+    if List.exists (palette_starts_with ~needle) texts then Some 0
+    else if List.exists (palette_contains ~needle) texts then Some 1
+    else if List.exists (palette_subsequence ~needle) texts then Some 2
     else None
   in
   entries
@@ -7949,9 +8411,10 @@ let voice_wizard_cycle_section session =
     | Voice_setup.Stt -> Voice_setup.Tts
   in
   let draft = Voice_wizard.with_section session.vws_draft other in
-  { session with
-    vws_draft = draft
-  ; vws_input = voice_wizard_value draft session.vws_step
-  ; vws_replace_on_type = true
-  ; vws_status = None
-  }
+  voice_wizard_edited
+    { session with
+      vws_draft = draft
+    ; vws_input = voice_wizard_value draft session.vws_step
+    ; vws_replace_on_type = true
+    ; vws_status = None
+    }

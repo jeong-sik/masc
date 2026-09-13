@@ -1,0 +1,18 @@
+{
+  "status": "passed",
+  "scope": "source component in Chromium; synthetic HTTP data",
+  "source_sha256": "7a0d0a1e9aba429bbbd783e61c1bb646dfd4320c4a686c090d01784f9d507eaf",
+  "curator_first": true,
+  "exact_key_binding": true,
+  "original_opened": true,
+  "missing_librarian_not_substituted": true,
+  "mobile_overflow": false,
+  "mutations": [],
+  "errors": [],
+  "requests": [
+    "/api/v1/prompts",
+    "/api/v1/prompts"
+  ],
+  "installed_runtime": "not_exercised",
+  "model_execution": "not_exercised"
+}

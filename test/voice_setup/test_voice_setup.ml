@@ -73,8 +73,12 @@ let with_config contents f =
 
 let read path = In_channel.with_open_bin path In_channel.input_all
 
+(* The standalone JSON beside the temporary runtime.toml. Absent unless a test
+   writes it, which is the state every other case runs in. *)
+let standalone path = Filename.concat (Filename.dirname path) "voice_config.json"
+
 let revision path =
-  match Voice_setup.observe ~runtime_config_path:path with
+  match Voice_setup.observe ~runtime_config_path:path ~standalone_path:(standalone path) with
   | Ok (revision, _) -> revision
   | Error error -> Alcotest.fail (Voice_setup.error_message error)
 
@@ -98,14 +102,17 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   }
 
 let apply path changes =
-  Voice_setup.apply ~runtime_config_path:path ~expected_revision:(revision path) changes
+  Voice_setup.apply ~runtime_config_path:path ~standalone_path:(standalone path)
+    ~expected_revision:(revision path) changes
 
 let test_observe_reads_the_section () =
   with_config fixture (fun path ->
-    match Voice_setup.observe ~runtime_config_path:path with
+    match Voice_setup.observe ~runtime_config_path:path ~standalone_path:(standalone path) with
     | Error error -> Alcotest.fail (Voice_setup.error_message error)
     | Ok (_, None) -> Alcotest.fail "the fixture has a [voice] section"
-    | Ok (revision, Some config) ->
+    | Ok (_, Some (Voice_setup.Standalone_json _, _)) ->
+      Alcotest.fail "no standalone file was written"
+    | Ok (revision, Some (Voice_setup.Runtime_toml, config)) ->
       Alcotest.(check bool) "a revision is reported" true (String.length revision > 0);
       (match config.Voice_config.tts with
        | None -> Alcotest.fail "the fixture configures tts"
@@ -117,7 +124,7 @@ let test_observe_reads_the_section () =
 
 let test_a_file_without_a_voice_section_observes_as_none () =
   with_config runtime_base (fun path ->
-    match Voice_setup.observe ~runtime_config_path:path with
+    match Voice_setup.observe ~runtime_config_path:path ~standalone_path:(standalone path) with
     | Ok (_, None) -> ()
     | Ok (_, Some _) -> Alcotest.fail "there is no [voice] section to find"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
@@ -185,6 +192,7 @@ let test_a_stale_revision_writes_nothing () =
     match
       Voice_setup.apply
         ~runtime_config_path:path
+        ~standalone_path:(standalone path)
         ~expected_revision:stale
         [ Voice_setup.Set_tts_default_voice "Sarah" ]
     with
@@ -317,6 +325,7 @@ let test_preview_does_not_write () =
     match
       Voice_setup.preview
         ~runtime_config_path:path
+        ~standalone_path:(standalone path)
         ~expected_revision:(revision path)
         [ Voice_setup.Set_tts_default_voice "Sarah" ]
     with
@@ -372,25 +381,131 @@ let test_removing_the_last_endpoint_is_refused () =
     | Ok _revision -> Alcotest.fail "an stt section with no endpoints must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
-(* A voice chosen for a command-run endpoint goes on the section when there is
-   no section yet, and on the endpoint only when one already exists to collide
-   with.
+(* Where a voice chosen for say is written depends on who owns the section's
+   default, not on whether a section exists.
 
-   The distinction is load-bearing rather than tidy: an endpoint voice outranks
-   [voice.tts.agent_voices], so writing one where it is not needed retires
-   every per-keeper voice at that endpoint without saying so. Measured on a
-   fresh workspace 2026-09-13 -- a keeper mapped to Eddy was spoken in Yuna
-   with the endpoint line present, in Eddy without it. *)
-let test_a_local_voice_goes_on_the_section_until_one_exists () =
+   The distinction is load-bearing: an endpoint voice outranks
+   [voice.tts.agent_voices], so one written where it is not needed retires
+   every per-keeper voice at that endpoint without saying so. Measured
+   2026-09-13 -- running the same `voice-local-setup --voice Yuna` twice on a
+   fresh workspace put the voice on the endpoint the second time, because a
+   section existed by then (the first run's), and a keeper mapped to Eddy then
+   spoke in Yuna. *)
+let tts_section_of toml =
+  match Voice_config.parse_runtime_toml_text toml with
+  | Ok (Some { Voice_config.tts = Some tts; _ }) -> tts
+  | Ok _ -> Alcotest.fail "the fixture must carry a [voice.tts] section"
+  | Error message -> Alcotest.failf "the fixture must parse: %s" message
+
+let say_only_section =
+  {|[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+|}
+
+let say_beside_another_provider =
+  {|[[voice.tts.endpoints]]
+id = "eleven"
+kind = "elevenlabs_direct"
+api_key_env = "ELEVENLABS_API_KEY"
+enabled = true
+
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_model = "eleven_multilingual_v2"
+default_voice = "SAz9YHcvj6GT2YYXdXww"
+|}
+
+let test_a_local_voice_goes_where_its_default_is_not_someone_elses () =
+  let placed section =
+    Voice_setup.voice_placement section = Voice_setup.On_the_section
+  in
+  Alcotest.(check bool) "no section yet: the section default" true (placed None);
   Alcotest.(check bool)
-    "a fresh workspace: the voice is the workspace default"
+    "a section only say is in -- including one an earlier run wrote: the section default"
     true
-    (Voice_setup.voice_placement ~section_exists:false = Voice_setup.On_the_section);
+    (placed (Some (tts_section_of say_only_section)));
   Alcotest.(check bool)
-    "a workspace whose section names another provider's voice: on the endpoint"
-    true
-    (Voice_setup.voice_placement ~section_exists:true = Voice_setup.On_the_endpoint)
+    "a section another provider shares: on the endpoint"
+    false
+    (placed (Some (tts_section_of say_beside_another_provider)))
 ;;
+
+(* The loader reads the standalone JSON when runtime.toml has no [voice]
+   section. The observation parsed only the TOML, so a workspace whose voice
+   worked from that file observed as not configured, and a client listed no
+   endpoints for it. *)
+let standalone_json =
+  {|{"tts": {"default_model": "eleven_multilingual_v2", "default_voice": "Yuna",
+     "endpoints": [{"id": "from-json", "kind": "elevenlabs_direct",
+                    "api_key_env": "ELEVENLABS_API_KEY"}]}}|}
+
+let test_observe_reports_the_standalone_source_in_effect () =
+  with_config runtime_base (fun path ->
+    Out_channel.with_open_bin (standalone path) (fun out -> output_string out standalone_json);
+    match Voice_setup.observe ~runtime_config_path:path ~standalone_path:(standalone path) with
+    | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    | Ok (_, None) -> Alcotest.fail "the standalone file configures voice"
+    | Ok (_, Some (Voice_setup.Runtime_toml, _)) ->
+      Alcotest.fail "runtime.toml has no [voice] section"
+    | Ok (_, Some (Voice_setup.Standalone_json source, config)) ->
+      Alcotest.(check string) "named by the path it was read from" (standalone path) source;
+      Alcotest.(check (list string)) "with the endpoints that file declares" [ "from-json" ]
+        (match config.Voice_config.tts with
+         | None -> []
+         | Some tts ->
+           List.map (fun (e : Voice_config.endpoint) -> e.Voice_config.id)
+             tts.Voice_config.endpoints))
+
+(* runtime.toml's section wins when both exist, so the file beside it is not
+   what is in effect and is not reported. *)
+let test_a_toml_section_is_in_effect_over_the_standalone_file () =
+  with_config fixture (fun path ->
+    Out_channel.with_open_bin (standalone path) (fun out -> output_string out standalone_json);
+    match Voice_setup.observe ~runtime_config_path:path ~standalone_path:(standalone path) with
+    | Ok (_, Some (Voice_setup.Runtime_toml, _)) -> ()
+    | Ok (_, Some (Voice_setup.Standalone_json _, _)) ->
+      Alcotest.fail "the [voice] section is what the loader reads"
+    | Ok (_, None) -> Alcotest.fail "voice is configured"
+    | Error error -> Alcotest.fail (Voice_setup.error_message error))
+
+(* The first [voice] section written into runtime.toml becomes what the loader
+   reads, and every setting the standalone file carried stops applying. Refused
+   by the writer itself, so the route and the local command agree. *)
+let test_a_write_over_the_standalone_source_is_refused () =
+  with_config runtime_base (fun path ->
+    Out_channel.with_open_bin (standalone path) (fun out -> output_string out standalone_json);
+    let added =
+      endpoint ~id:"mlx-audio" ~kind:Voice_config.Openai_compat
+        ~base_url:"http://127.0.0.1:8000/v1" ()
+    in
+    let changes =
+      [ Voice_setup.Put_endpoint (Voice_setup.Tts, added)
+      ; Voice_setup.Set_default_model (Voice_setup.Tts, "model")
+      ; Voice_setup.Set_tts_default_voice "voice"
+      ]
+    in
+    let refused what = function
+      | Error (Voice_setup.Standalone_source_active source) ->
+        Alcotest.(check string) (what ^ " names the file in effect") (standalone path) source
+      | Ok _ -> Alcotest.failf "%s must not accept a section over the standalone file" what
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    refused "preview"
+      (Voice_setup.preview ~runtime_config_path:path ~standalone_path:(standalone path)
+         ~expected_revision:(revision path) changes);
+    refused "apply" (apply path changes);
+    Alcotest.(check string) "runtime.toml is untouched" runtime_base (read path);
+    Alcotest.(check string) "and so is the standalone file" standalone_json
+      (read (standalone path)))
 
 let () =
   Alcotest.run
@@ -399,6 +514,12 @@ let () =
       , [ Alcotest.test_case "reads the section" `Quick test_observe_reads_the_section
         ; Alcotest.test_case "a file without a voice section is None" `Quick
             test_a_file_without_a_voice_section_observes_as_none
+        ; Alcotest.test_case "the standalone source in effect is reported" `Quick
+            test_observe_reports_the_standalone_source_in_effect
+        ; Alcotest.test_case "a toml section is in effect over the standalone file" `Quick
+            test_a_toml_section_is_in_effect_over_the_standalone_file
+        ; Alcotest.test_case "a write over the standalone source is refused" `Quick
+            test_a_write_over_the_standalone_source_is_refused
         ] )
     ; ( "refusals write nothing"
       , [ Alcotest.test_case "an edit the loader refuses is not written" `Quick
@@ -416,8 +537,8 @@ let () =
             test_changes_that_depend_on_each_other_land_together
         ; Alcotest.test_case "an agent voice is set and cleared" `Quick
             test_an_agent_voice_is_set_and_cleared
-        ; Alcotest.test_case "a local voice goes on the section until one exists"
-            `Quick test_a_local_voice_goes_on_the_section_until_one_exists
+        ; Alcotest.test_case "a local voice goes where its default is not someone else's"
+            `Quick test_a_local_voice_goes_where_its_default_is_not_someone_elses
         ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
             test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick

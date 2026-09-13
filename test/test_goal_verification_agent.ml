@@ -1070,11 +1070,90 @@ let test_new_request_rejects_old_answer_for_same_criterion () =
     (Yojson.Safe.to_string (Goal_verification.record_to_yojson (ledger_record config goal_id)))
 ;;
 
+let test_pending_proof_binds_submitted_evidence () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Immutable submitted discussion" in
+  let goal = match Goal_store.get_goal config ~goal_id with Some goal -> goal | None -> fail "missing goal" in
+  let criterion = Goal_store.criterion_of_goal goal in
+  let item content = Workspace_verification_store.Evidence_collaboration {
+    reference="board:submitted-source"; content;
+    sha256=Digestif.SHA256.(to_hex (digest_string content)) } in
+  let original = item {|{"post":{"content":"original secret source"}}|} in
+  let mark ?submitted_evidence () =
+    match Goal_verification.mark_proof_pending ?submitted_evidence config ~goal_id ~criterion with
+    | Ok record -> record | Error detail -> fail detail in
+  let first = mark ~submitted_evidence:[original] () in
+  let pending record = match record.Goal_verification.completion with
+    | Goal_verification.Proof_pending pending -> pending.request_id, record.Goal_verification.submitted_evidence
+    | _ -> fail "not pending" in
+  let first_id, _ = pending first in
+  let replay_id, replay_items = pending (mark ()) in
+  check string "ordinary retry preserves original request" first_id replay_id;
+  check bool "ordinary retry preserves original source" true (replay_items = [original]);
+  let loaded_id, loaded_items = pending (ledger_record config goal_id) in
+  check string "disk reload preserves request" first_id loaded_id;
+  check bool "disk reload preserves exact source" true (loaded_items = [original]);
+  let public = Yojson.Safe.to_string (Goal_verification.record_to_yojson_for_goal ~goal first) in
+  check bool "routine Goal projection omits source body" false
+    (String_util.contains_substring public "original secret source");
+  let changed = item {|{"post":{"content":"replacement source"}}|} in
+  let changed_id, changed_items = pending (mark ~submitted_evidence:[changed] ()) in
+  check bool "changed submitted source creates a new request" false (changed_id = first_id);
+  check bool "new request names new source" true (changed_items = [changed]);
+  let same_id, _ = pending (mark ~submitted_evidence:[changed] ()) in
+  check string "same criterion and exact source are idempotent" changed_id same_id;
+  ignore (must_succeed "start submitted proof" (transition ctx goal_id "request_complete"));
+  let verdict : Goal_verification.verdict = {
+    outcome=Goal_verification.Refuted {reason="needs more work"}; request_id=changed_id; criterion;
+    verification_run_id="submitted-source-review";
+    authority=Masc_domain.System_llm_agent {agent_run_id="verifier_exact"};
+    evidence="reviewed original snapshot"; recorded_at=Masc_domain.now_iso () } in
+  (match Goal_verification.record_proof_verdict config ~goal_id verdict with
+   | Ok record -> check bool "committed verdict retains submitted bytes" true
+       (record.submitted_evidence = [changed])
+   | Error detail -> fail detail);
+  let replacement = dispatch ctx ~name:"masc_goal_transition"
+    ["goal_id", `String goal_id; "action", `String "request_complete"; "evidence_refs", `List []] in
+  check bool "committed proof does not silently accept replacement refs" false (Tool_result.is_success replacement);
+  ignore (must_succeed "reconcile prior result" (transition ctx goal_id "request_complete"));
+  let retry_id, retry_items = pending (mark ()) in
+  check bool "refuted retry receives new identity" false (retry_id = changed_id);
+  check bool "omitted refuted retry retains submitted bytes" true (retry_items = [changed]);
+  let _, cleared = pending (mark ~submitted_evidence:[] ()) in
+  check bool "explicit empty submission clears previous evidence" true (cleared = []);
+  ignore (must_succeed "start cleared proof" (transition ctx goal_id "request_complete"));
+  let request_id, _ = pending_identity config goal_id in
+  (match Goal_verification.record_proof_verdict config ~goal_id
+      {verdict with outcome=Goal_verification.Proven; request_id; verification_run_id="cleared-source-review"} with
+   | Ok _ -> () | Error detail -> fail detail);
+  ignore (must_succeed "reconcile completed proof" (transition ctx goal_id "request_complete"));
+  let late = dispatch ctx ~name:"masc_goal_transition"
+    ["goal_id", `String goal_id; "action", `String "request_complete"; "evidence_refs", `List []] in
+  check bool "confirmation phase does not silently accept evidence refs" false (Tool_result.is_success late)
+;;
+
+let test_invalid_goal_evidence_does_not_request_proof () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Evidence capture failure" in
+  List.iter (fun evidence_refs ->
+    let result = dispatch ctx ~name:"masc_goal_transition"
+      ["goal_id", `String goal_id; "action", `String "request_complete"; "evidence_refs", evidence_refs] in
+    check bool "invalid evidence request fails" false (Tool_result.is_success result);
+    check string "failed capture does not move Goal into verification" "executing" (stored_phase config goal_id))
+    [`Null; `String "board:missing"; `List [`Int 1]; `List [`String "not-a-reference"];
+     `List [`String "fusion:missing-goal-submission-source"]]
+;;
+
 let () =
   configure_prompt_registry ();
   run
     "goal_verification_agent"
-    [ ( "historical review evidence"
+    [ ( "submitted evidence"
+      , [ test_case "pending proof binds exact submitted source" `Quick test_pending_proof_binds_submitted_evidence
+        ; test_case "invalid evidence leaves goal unchanged" `Quick test_invalid_goal_evidence_does_not_request_proof ] )
+    ; ( "historical review evidence"
       , [ test_case "superseded review keeps evaluated original criterion" `Quick
             test_superseded_review_keeps_the_evaluated_original_criterion ] )
     ; ( "drain"

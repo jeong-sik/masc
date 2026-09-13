@@ -375,11 +375,17 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
     (match error with
      | Subscription_required _ | Spawn_failed _
      | Timeout { turn_accepted = false; _ }
+     (* A client that died during initialize, account/read or thread/start
+        submitted no turn, so it owes the walk nothing and the declared media
+        fallback may still be tried. An exit after acceptance is the opposite:
+        the turn may have committed effects upstream. *)
+     | Process_exited { turn_accepted = false; _ }
      | Context_window_exceeded { tool_effect_attempted = false; _ } -> true
      | Invalid_config _ | Turn_input_write_failed _ | Protocol_error _
      | Rpc_error _ | Unsupported_server_request _
      | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
-     | Turn_interrupted | Runtime_shutting_down | Process_exited _
+     | Turn_interrupted | Runtime_shutting_down
+     | Process_exited { turn_accepted = true; _ }
      | Timeout { turn_accepted = true; _ } -> false)
   | Claude_failure error ->
     (match error with
@@ -387,10 +393,13 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
      | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ } -> true
+     (* Same rule on this wire: before admission the client submitted no turn,
+        after it the turn may have committed effects upstream. *)
+     | Process_exited { turn_admitted = false; _ } -> true
      | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
      | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
      | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
-     | Process_exited _ | Timeout _ -> false)
+     | Process_exited { turn_admitted = true; _ } | Timeout _ -> false)
 ;;
 
 let outcome_of_official_failure ~runtime_id failure =

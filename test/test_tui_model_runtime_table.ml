@@ -158,7 +158,17 @@ let test_a_clipped_wide_name_keeps_its_scalars_whole () =
           && whole (i + Uchar.utf_decode_length decoded)
       in
       check bool "no scalar was cut in half" true (whole 0);
-      check bool "the clip marker is there" true (String.contains row '~')
+      (* The marker is a scalar now, not a byte, so look for the scalar. This
+         also stops a "~" inside a model's own name from standing in for it. *)
+      let clip_marker = Uchar.of_int 0x2026 (* HORIZONTAL ELLIPSIS *) in
+      let rec marked i =
+        if i >= String.length row then false
+        else
+          let decoded = String.get_utf_8_uchar row i in
+          Uchar.equal (Uchar.utf_decode_uchar decoded) clip_marker
+          || marked (i + Uchar.utf_decode_length decoded)
+      in
+      check bool "the clip marker is there" true (marked 0)
   | _ -> Alcotest.fail "expected a header and one row"
 
 let test_empty_input () =

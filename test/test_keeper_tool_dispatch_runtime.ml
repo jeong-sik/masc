@@ -279,6 +279,7 @@ let with_exec_fixture
                  }
                in
                let run () =
+                 if process && bind_eio_context then Eio_context.set_env env;
                  fn
                    ~config
                    ~meta
@@ -4449,6 +4450,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
   with_exec_fixture ~bind_eio_context:true "cooperative_boundary_result"
     (fun ~config:_ ~meta:_ ~publication_recovery:_ ~ctx_work:_ ->
       let tool_calls = ref 0 in
+      let attempt_agent_ref = ref None in
       let observed_boundary = ref None in
       let sink_stages = ref [] in
       let tool = Agent_core.Tool.create ~name:"boundary_probe"
@@ -4470,7 +4472,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
               else Ok () in
             let config = {config with Runtime_agent.checkpoint_sink =
                 (if with_sink then Some sink else None)} in
-            Runtime_agent.run_blocks ~sw ~net ~config
+            Runtime_agent.run_blocks ~sw ~net ~config ~agent_ref:attempt_agent_ref
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
                 Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
@@ -4482,7 +4484,23 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
         check bool "failed sink never reaches cooperative boundary" true
           (Option.is_none !observed_boundary);
         match result with
-        | Error _ -> ()
+        | Error _ ->
+          let agent = match !attempt_agent_ref with Some agent -> agent | None -> fail "failed producer lost its actual agent" in
+          let sidecar = `Assoc ["original_task",`String "failed-boundary-task"] in
+          let checkpoint = Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt
+            ~session_id:"failed-boundary-session" ~working_context:sidecar (Some agent) |> Option.get in
+          check string "failed producer retains admitted session identity" "failed-boundary-session" checkpoint.session_id;
+          check bool "failed producer retains original working context" true (checkpoint.working_context=Some sidecar);
+          check bool "completed tool result survives failed checkpoint persistence" true
+            (List.exists (fun (message : Agent_core.Types.message) ->
+              List.exists (function Agent_core.Types.ToolResult _ -> true | _ -> false) message.content) checkpoint.messages);
+          check bool "failed spawn cannot reuse a prior attempt's installed agent" true
+            (Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt ~agent_before_attempt:agent
+              ~session_id:"wrong-next-session" (Some agent) = None);
+          let fresh = Agent_core.Agent.clone agent in
+          check bool "newly installed attempt owns its own checkpoint" true
+            (Option.is_some (Masc.Keeper_turn_driver.For_testing.checkpoint_after_attempt
+              ~agent_before_attempt:agent ~session_id:"next-owned-session" (Some fresh)))
         | Ok _ -> fail "failed checkpoint sink produced a resumable runtime result")
       else match result with
       | Error error -> fail (Agent_core.Error.to_string error)
@@ -7911,8 +7929,87 @@ let test_workspace_memory_read_dispatch () =
       check string "corrupt store is failure" "failure" (outcome_label corrupt.disposition))
 ;;
 
-let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
-  with_exec_fixture "direct_gate_current_history"
+(* Model responses are a real app-server process fixture. Gate authority and
+   replay below use the existing Keeper dispatcher and durable stores. *)
+let native_gate_fixture ~config ~meta ~deferred () =
+  let write path text = Out_channel.with_open_bin path (fun out -> output_string out text) in
+  let capture = Filename.concat config.Workspace.base_path "native-gate-requests.jsonl" in
+  let command = Filename.concat config.base_path "native-gate-codex" in
+  write command (Printf.sprintf {|#!/usr/bin/env python3
+import json, sys
+if '--masc-warmup' in sys.argv:
+    sys.exit(0)
+capture = %S
+resumed = False
+turn = 'original-turn'
+def emit(x): print(json.dumps(x), flush=True)
+def finish():
+    item = {'type':'agentMessage','id':'final','text':'native Gate fixture finished','phase':'final_answer'}
+    emit({'method':'item/completed','params':{'threadId':'gate-thread','turnId':turn,'completedAtMs':1,'item':item}})
+    emit({'method':'turn/completed','params':{'threadId':'gate-thread','turn':{'id':turn,'items':[item],'status':'completed'}}})
+for line in sys.stdin:
+    r = json.loads(line)
+    with open(capture,'a') as out: out.write(json.dumps(r)+'\n')
+    method, ident = r.get('method'), r.get('id')
+    if method == 'initialize':
+        emit({'id':ident,'result':{'userAgent':'fixture/0.147.0','codexHome':'/tmp/codex','platformFamily':'unix','platformOs':'linux'}})
+    elif method == 'account/read':
+        emit({'id':ident,'result':{'account':{'type':'chatgpt','email':'fixture@example.test','planType':'pro'},'requiresOpenaiAuth':True}})
+    elif method in ('thread/start','thread/resume'):
+        resumed = method == 'thread/resume'
+        turn = 'resumed-turn' if resumed else 'original-turn'
+        emit({'id':ident,'result':{'thread':{'id':'gate-thread'},'model':'gate-fixture'}})
+    elif method == 'thread/inject_items':
+        emit({'id':ident,'result':{}})
+    elif method == 'turn/start':
+        emit({'id':ident,'result':{'turn':{'id':turn}}})
+        if resumed: finish()
+        else: emit({'id':'gate-call','method':'item/tool/call','params':{'threadId':'gate-thread','turnId':turn,'callId':'gate-call','tool':'WebSearch','namespace':None,'arguments':{}}})
+    elif method is None and ident == 'gate-call': finish()
+|} capture);
+  Unix.chmod command 0o700;
+  let config_path = Filename.concat config.base_path "native-gate-runtime.toml" in
+  write config_path (Printf.sprintf {|
+[providers.official]
+protocol = "codex-app-server"
+command = %S
+is-non-interactive = true
+[models.gate]
+api-name = "gate-fixture"
+max-context = 400000
+tools-support = true
+[models.primary]
+api-name = "unused-primary-fixture"
+max-context = 400000
+[official.gate]
+[official.primary]
+[runtime]
+default = "official.primary"
+|} command);
+  let executions = ref 0 in
+  let tool = Agent_core.Tool.create ~name:"WebSearch" ~description:"Actual deferred Gate receipt" ~parameters:[]
+    (fun _ -> incr executions;
+      Ok {Agent_core.Types.content=deferred.Masc.Keeper_tool_execution.raw_output; content_blocks=None; _meta=None}) in
+  let run ?continuation ?(goal_blocks=None) ?(on_runtime_ready=(fun () -> ())) ~goal ~on_transmitted () =
+    let saved = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
+      (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+      on_runtime_ready ();
+      let native_config = match Runtime.get_runtime_by_id "official.gate" with
+        | Some {Runtime.execution=Runtime_execution.Codex_app_server config; _} -> config
+        | _ -> fail "native Gate fixture runtime missing" in
+      Masc.Keeper_codex_runtime.run ?official_client_continuation:continuation
+        ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
+        ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
+        ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."
+        ~tools:[tool] ~initial_messages:[] ~model_input_projection:None
+        ~on_transmitted_model_input:on_transmitted ~hooks:None ~context_injector:None
+        ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None ~on_event:None
+        ~config:native_config ()) in
+  run, capture, executions
+
+let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+  with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
       let module Registry = Masc.Keeper_owner_registry in
@@ -7931,13 +8028,37 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
       let claimed = Masc.Keeper_owner.claim_next_operation owner |> require "claim original" in
       check bool "original claim" true (Option.is_some claimed);
       Masc.Keeper_gate_mode.set config ~actor:"test" Masc.Keeper_gate_mode.Manual |> require "manual mode" |> ignore;
-      let deferred = KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery ~ctx_work
-        ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; snapshot=`Assoc []})
-        ~name:"WebSearch" ~input:(`Assoc ["query", `String "original research evidence"; "limit", `Int 1]) () in
+      check bool "non-Gate errors do not require a fabricated producer receipt" false
+        (Gate.suspend ~source:(Error "no checkpoint was produced") ~config ~keeper_name ~operation_id
+          ~session_dir:"unused-with-no-gate" ~session_id:"unused-with-no-gate" ~approval_ids:[] () |> require "no Gate transition");
+      let one_shot_request : Masc.Keeper_gate.request =
+        {keeper_name; operation="unreplayed_operation"; call_summary=None;
+         input=`Assoc ["message", `String "Exact one-shot input"];
+         base_path; sandbox_profile=None; causal_context=None; task_id=None;
+         continuation_channel=None} in
+      let deferred = if one_shot then (
+        let decision = Masc.Keeper_gate.decide ~keeper_always_allow:false one_shot_request in
+        match decision with
+        | Masc.Keeper_gate.Deferred {approval_id; _} ->
+          Masc.Keeper_tool_execution.deferred_external_effect_data ~approval_id
+            (Masc.Keeper_gate.decision_to_yojson decision)
+        | _ -> fail "one-shot fixture did not defer")
+        else KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery ~ctx_work
+          ~gate_context:(fun () -> {Masc.Keeper_gate.turn_id=Some 18; snapshot=`Assoc []})
+          ~name:"WebSearch" ~input:(`Assoc ["query", `String "original research evidence"; "limit", `Int 1]) () in
       let approval_id = match deferred.deferred_kind with
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
         | None | Some Masc.Keeper_tool_execution.Generic_deferred
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
+      let native_settlement = ref None in
+      let native_fixture = if native then Some (native_gate_fixture ~config ~meta ~deferred ()) else None in
+      let () = match native_fixture with
+        | None -> ()
+        | Some (run, _, executions) ->
+          let actual = run ~goal:"Finish the original research" ~on_transmitted:(fun _ -> ()) () in
+          native_settlement := actual.Masc.Keeper_codex_runtime.settled_session;
+          (match actual.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+          check int "native tool receives the actual deferred Gate receipt once" 1 !executions in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let root = Masc.Keeper_fs.session_base_dir config in
       ignore (Masc.Keeper_fs.ensure_dir root);
@@ -7949,7 +8070,17 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
         (Keeper_repetition_snapshot.Fresh scope) |> require "original scope" in
-      Masc.Keeper_repetition_scope.save context frame;
+      let frame = if native then
+        let observation = Keeper_repetition_snapshot.observation ~tool_name:"Write"
+          ~input_fingerprint:(Some (String.make 64 'a')) ~output_fingerprint:(Some (String.make 64 'b'))
+          |> require "prior applied effect" in
+        Keeper_repetition_snapshot.record frame ~scope observation |> require "prior effect ownership"
+        else frame in
+      let saved_frame = if native then
+        let other = Keeper_chat_operation.Operation_id.of_string "old-agent-core-operation" |> require "old operation" in
+        Keeper_repetition_snapshot.admit frame (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation other))
+          |> require "old canonical scope" else frame in
+      Masc.Keeper_repetition_scope.save context saved_frame;
       let original = Masc.Keeper_context_runtime.checkpoint_of_context ctx_work in
       let original = {original with Agent_core.Checkpoint.session_id; context;
         messages=[Agent_core.Types.user_msg "Finish the original research";
@@ -7964,16 +8095,28 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           ~failed_runtime_id:"primary.fixture" ~next_runtime_id:"alternate.fixture"
           ~later_runtime_ids:["final.fixture"]
           ~failure:(Agent_core.Error.Internal "fixture typed runtime failure")) else None in
-      let suspend () = Gate.suspend ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
+      let source = if native then
+        Gate.Returned_official_client {settled_session=(match !native_settlement with Some value -> value | None -> fail "native producer dropped settlement");frame}
+        else if failed_producer || runtime_failure then
+          Gate.Captured_agent_core (Checkpoint.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id original |> require "failed producer immutable capture")
+        else Gate.Returned_agent_core original in
+      let unavailable_path = if not source_unavailable then None else
+        Some (if native then Masc.Keeper_official_client_session_store.path ~base_path ~keeper_name |> require "native source path"
+          else Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id) in
+      Option.iter (fun path -> Unix.rename path (path ^ ".held")) unavailable_path;
+      let suspend () = Gate.suspend ~source:(Ok source) ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids:[approval_id] () in
       check bool "actual yield parks the same operation" true
         ((if binding_failure then Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path suspend
           else suspend ()) |> require "suspend");
+      Option.iter (fun path -> Unix.rename (path ^ ".held") path) unavailable_path;
       check bool "unresolved request is not claimable" true
         ((Masc.Keeper_owner.claim_next_operation owner |> require "pending claim") = None);
       if checkpoint_failure || binding_failure then (
         let binding = match Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable binding" with
           | Some value -> value | None -> fail "missing unresolved Gate binding" in
         check bool "producer approval identity retained before lookup" true (binding.approval_ids = [approval_id]);
+        check bool "only an observed exact source becomes a recovery candidate" (not binding_failure)
+          (Option.is_some binding.unconfirmed_wait);
         (match runtime_lane, binding.runtime_suffix with
          | None, None -> ()
          | Some expected, Some actual ->
@@ -7981,27 +8124,112 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
            check bool "runtime suffix retained without checkpoint authority" true
              (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
          | None, Some _ | Some _, None -> fail "lost frozen suffix during Gate binding failure");
-        let original = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
+        let original_operation = Registry.exact_operation ~base_path ~keeper_name operation_id |> require "retained original" in
         check bool "retention failure preserves original input" true
-          (match original with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
+          (match original_operation with Some (operation : Keeper_chat_operation.t) -> operation.input=Some canonical | None -> false);
         check bool "unconfirmed checkpoint is explicit nonterminal state" true
           ((Gate.pending ~base_path ~keeper_name ~operation_id |> require "pending reconciliation")
            = Some Gate.Checkpoint_reconciliation);
         Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
           ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "resolved despite retention failure" |> ignore;
-        Gate.reconcile ~config ~meta |> require "do not invent checkpoint";
+        (if binding_failure then
+           Masc.Keeper_approval_queue.For_testing.with_unavailable_workspace ~base_path
+             (fun () -> Gate.reconcile ~config ~meta)
+         else Gate.reconcile ~config ~meta) |> require "do not invent checkpoint";
         check bool "approval cannot authorize missing checkpoint replay" true
-          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None))
-      else (
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None);
+        if retention_rollover then (
+          let independent = Keeper_chat_operation.Operation_id.of_string "independent-history-rollover" |> require "rollover operation" in
+          let independent_frame = Keeper_repetition_snapshot.admit frame
+            (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation independent)) |> require "rollover scope" in
+          for index = 1 to 20 do
+            let context = Agent_core.Context.create_sync () in
+            Masc.Keeper_repetition_scope.save context independent_frame;
+            let later = {original with Agent_core.Checkpoint.context;
+              turn_count=original.turn_count + index;
+              messages=original.messages @ List.init index (fun offset ->
+                Agent_core.Types.user_msg ("Independent history " ^ string_of_int (offset + 1)));
+              created_at=original.created_at +. float_of_int index} in
+            (match Checkpoint.save_agent_core_classified ~session_dir later |> require "rolling history during accepted-store outage" with
+             | Checkpoint.Saved _ -> ()
+             | _ -> fail "rolling history was not installed")
+          done);
+        if recover_retention then (
+          Unix.unlink (Filename.concat session_dir "accepted-checkpoints");
+          if retention_rollover then (
+            let binding = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable original payload" |> Option.get in
+            let reference = match Keeper_semantic_execution.preparation_checkpoint binding.preparation with
+              | Keeper_semantic_execution.Agent_core reference -> reference
+              | Keeper_semantic_execution.Official_client _ -> fail "rollover changed source owner" in
+            check bool "original source was actually pruned from rolling history" true
+              (match Checkpoint.find_exact_snapshot_for_retention ~session_dir ~reference with Error _ -> true | Ok _ -> false))));
+      if advance_native then (
+        let module Native = Masc.Keeper_official_client_session_store in
+        let binding = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "original exact binding" |> Option.get in
+        let original_source = Keeper_semantic_execution.preparation_checkpoint binding.preparation in
+        let expected = Native.load ~base_path ~keeper_name |> require "original native owner" |> Option.get in
+        let claimed = Native.claim ~base_path ~keeper_name ~expected:(Some expected)
+          ~client_kind:expected.client_kind ~runtime_id:expected.runtime_id
+          ~owner_epoch:(Native.process_epoch ()) ~tool_surface_sha256:expected.tool_surface_sha256
+          ~updated_at:100. |> require "independent native claim" in
+        let active = Native.mark_active ~base_path ~keeper_name ~expected:claimed
+          ~session_id:"independent-native-session" ~updated_at:101. |> require "independent native session" in
+        let starting = Native.mark_turn_starting ~base_path ~keeper_name ~expected:active
+          ~session_id:"independent-native-session" ~updated_at:101.5 |> require "independent native admission" in
+        let started = Native.mark_turn_started ~base_path ~keeper_name ~expected:starting
+          ~session_id:"independent-native-session" ~turn_id:"independent-native-turn"
+          ~turn_count:(expected.turn_count + 1) ~updated_at:102. |> require "independent native turn" in
+        Native.settle ~base_path ~keeper_name ~expected:started ~session_id:"independent-native-session"
+          ~turn_id:"independent-native-turn" ~updated_at:103. |> require "independent native settlement" |> ignore;
+        Gate.reconcile ~config ~meta |> require "reject substituted native source";
+        check bool "later native turn cannot make original request claimable" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no substituted retry") = None);
+        let retained = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "retained original source" |> Option.get in
+        check bool "failed reconciliation preserves exact original native session and turn" true
+          (Keeper_semantic_execution.preparation_checkpoint retained.preparation = original_source));
+      if recover_binding then (
+        Gate.reconcile ~config ~meta |> require "recover original preparation after authority repair";
+        check bool "repaired preparation leaves unresolved binding state" true
+          ((Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "repaired binding") = None));
+      if (not checkpoint_failure && not binding_failure) || recover_retention || recover_binding then (
       (* A different completed turn appends history while the original waits. *)
-      let newer = {original with Agent_core.Checkpoint.messages=original.messages @
-        [Agent_core.Types.user_msg "Independent newer user context"]} in
-      Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" |> ignore;
+      let newer_context = if recover_retention then (
+        let independent = Keeper_chat_operation.Operation_id.of_string "independent-during-retention-failure" |> require "independent operation" in
+        let context = Agent_core.Context.create_sync () in
+        let independent_frame = Keeper_repetition_snapshot.admit frame
+          (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation independent)) |> require "independent scope" in
+        Masc.Keeper_repetition_scope.save context independent_frame; context) else original.context in
+      let intermediate = if retention_rollover then List.init 20 (fun offset ->
+        Agent_core.Types.user_msg ("Independent history " ^ string_of_int (offset + 1))) else [] in
+      let newer = {original with Agent_core.Checkpoint.messages=original.messages @ intermediate @
+        [Agent_core.Types.user_msg "Independent newer user context"];
+        turn_count=original.turn_count + (if retention_rollover then 21 else 1);
+        context=newer_context; created_at=original.created_at +. 21.} in
+      (match Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" with
+       | Checkpoint.Saved _ -> ()
+       | _ -> fail "newer history was not installed");
+      let before_reconcile = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+        |> require "current checkpoint before reconciliation" in
       Gate.reconcile ~config ~meta |> require "pending reconciliation";
-      check bool "no resolution invented" true
-        ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
-      Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
-        ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
+      let after_reconcile = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+        |> require "current checkpoint after reconciliation" in
+      check string "source retention leaves newer canonical bytes unchanged"
+        (Checkpoint.exact_snapshot_canonical_bytes before_reconcile)
+        (Checkpoint.exact_snapshot_canonical_bytes after_reconcile);
+      if not recover_retention && not recover_binding then (
+        check bool "no resolution invented" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
+        Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+          ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore)
+      else if recover_retention then (
+        check bool "confirmed recovery leaves unresolved binding state" true
+          ((Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "reconciled binding") = None);
+        let state = Registry.direct_gate_state ~base_path ~keeper_name ~operation_id |> require "confirmed exact wait" |> Option.get in
+        let reference = match state.waiting.checkpoint with Keeper_semantic_execution.Agent_core value -> value
+          | Keeper_semantic_execution.Official_client _ -> fail "Agent Core source changed owner" in
+        let retained = Checkpoint.load_retained_exact_snapshot ~session_dir ~reference |> require "history bytes became durable continuation" in
+        check bool "exact original history was restored, not the newer canonical" true
+          ((Checkpoint.exact_snapshot_checkpoint retained).messages = original.messages));
       (match decision with
        | Keeper_approval_queue_rules_types.Decision.Approve -> ()
        | Keeper_approval_queue_rules_types.Decision.Reject _ ->
@@ -8022,9 +8250,10 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
          check bool "frozen candidate suffix survives approval" true
            (expected.next_runtime_id :: expected.later_runtime_ids = actual.next_runtime_id :: actual.later_runtime_ids)
        | None, Some _ | Some _, None -> fail "simultaneous Gate/runtime obligation lost");
-      let checkpoint = Gate.checkpoint admission in
-      check bool "newer history survives" true
+      let checkpoint = match Gate.checkpoint admission with Some value -> value | None -> original in
+      if not native then check bool "newer history survives" true
         (List.mem (Agent_core.Types.user_msg "Independent newer user context") checkpoint.messages);
+      let native_replay_delivery = ref None in
       let checkpoint = match decision with
         | Keeper_approval_queue_rules_types.Decision.Reject _ -> checkpoint
         | Keeper_approval_queue_rules_types.Decision.Approve ->
@@ -8037,8 +8266,11 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           let outcome = Masc.Tool_misc.with_web_search_simulation_for_test
             ~outcomes:["searxng", `Hits ["Research evidence", "https://example.com/evidence", "actual source evidence"]]
             replay in
-          (match outcome with Masc.Keeper_gate_replay.Applied _ -> ()
-           | Masc.Keeper_gate_replay.Not_applicable | Masc.Keeper_gate_replay.Applied_with_warning _
+          native_replay_delivery := Some (approval_id, outcome);
+          (match outcome with
+           | Masc.Keeper_gate_replay.Not_applicable when one_shot -> ()
+           | Masc.Keeper_gate_replay.Applied _ when not one_shot -> ()
+           | Masc.Keeper_gate_replay.Applied _ | Masc.Keeper_gate_replay.Not_applicable | Masc.Keeper_gate_replay.Applied_with_warning _
            | Masc.Keeper_gate_replay.Failed _ | Masc.Keeper_gate_replay.Indeterminate _
            | Masc.Keeper_gate_replay.Repair_required _ | Masc.Keeper_gate_replay.Resolution_absent _ ->
              fail (Masc.Keeper_gate_replay.outcome_to_string outcome));
@@ -8046,13 +8278,113 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
           ignore (replay ());
           let model = Masc.Keeper_gate_replay.user_message_with_hitl_resolution ~base_path
             ~user_message:"Finish the original research" (Some resolution) in
-          let evidence = match model.replay_evidence with Some value -> value | None -> fail "missing replay evidence" in
-          let identity, message = Masc.Keeper_gate_replay.approval_input evidence |> require "evidence identity" in
-          Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
+          if one_shot then (
+            check bool "one-shot instruction has no invented replay evidence" true
+              (model.replay_evidence = None);
+            check bool "one-shot instruction retains typed approval" true
+              (model.instruction_resolution = Some resolution);
+            checkpoint)
+          else
+            let evidence = match model.replay_evidence with Some value -> value | None -> fail "missing replay evidence" in
+            let identity, message = Masc.Keeper_gate_replay.approval_input evidence |> require "evidence identity" in
+            if native then checkpoint else
+            Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
+      (match native_fixture with
+       | Some (run, capture, executions) ->
+         let check_runtime_selection () =
+           check string "fixture primary differs from the runtime that actually yielded" "official.primary"
+             (Masc.Keeper_meta_contract.runtime_id_of_meta meta);
+           check string "production direct-turn selection resumes actual fallback runtime" "official.gate"
+             (Masc.Keeper_turn.For_testing.resolve_direct_turn_runtime_id ~meta ~resume_lane:None
+                ~gate_resume:(Some admission) |> require "native resume runtime selection") in
+         let continuation = Gate.official_client admission |> Option.get in
+         let execution = Masc.Keeper_repetition_scope.Execution.direct_operation operation_id in
+         Masc.Keeper_repetition_scope.Execution.resume execution continuation.frame |> require "restore original native scope";
+         let prior = Masc.Keeper_repetition_scope.Execution.prepare execution ~source:original.context
+           ~target:(Agent_core.Context.create ()) |> require "original observations survive stale canonical scope" in
+         check bool "prior applied effect remains in original scope" true
+           (List.map (fun (call : Masc.Keeper_agent_result.tool_call_detail) -> call.tool_name) prior = ["Write"]);
+         let prepared_prompt = "Finish the original research\n\n[Retained paste correction]\nExact pasted context remains in this turn." in
+         let model = Masc.Keeper_gate_replay.compose_model_message ~base_path
+           ~user_message:prepared_prompt ~hitl_resolution:(Some (Gate.resolution admission))
+           ~replay_delivery:!native_replay_delivery in
+         (match !native_replay_delivery with
+          | None | Some (_, Masc.Keeper_gate_replay.Not_applicable) ->
+            let require_instruction_rejected label hitl_resolution =
+              let wrong = Masc.Keeper_gate_replay.compose_model_message ~base_path
+                ~user_message:prepared_prompt ~hitl_resolution ~replay_delivery:None in
+              match Gate.observe_native_input ~prepared:wrong ~config
+                ~user_message:"Finish the original research" admission ~transmitted:wrong.text with
+              | Error _ -> () | Ok () -> fail label in
+            require_instruction_rejected "plain input without resolution was admitted" None;
+            let wrong_resolution = {(Gate.resolution admission) with approval_id="another-approval"} in
+            require_instruction_rejected "unrelated resolution identity was admitted" (Some wrong_resolution)
+          | Some (_, outcome) ->
+            let reread = Masc.Keeper_gate_replay.user_message_with_hitl_resolution ~base_path
+              ~user_message:prepared_prompt (Some (Gate.resolution admission)) in
+            check bool "fresh delivery and reread have distinct journal wording" true (model.text <> reread.text);
+            let wrong = Masc.Keeper_gate_replay.append_model_evidence ~approval_id:"another-approval"
+              ~user_message:prepared_prompt outcome in
+            (match Gate.observe_native_input ~prepared:wrong ~config
+               ~user_message:"Finish the original research" admission ~transmitted:wrong.text with
+             | Error _ -> () | Ok () -> fail "unrelated replay identity was admitted"));
+         let before = Fs_compat.load_file capture in
+         let changed = {continuation with tool_surface_sha256=String.make 64 'f'} in
+         let refused = run ~continuation:changed ~on_runtime_ready:check_runtime_selection ~goal:model.text ~on_transmitted:(fun _ -> fail "changed contract transmitted") () in
+         (match refused.Masc.Keeper_codex_runtime.result with
+          | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="official_client_session.gate_continuation"; _})) -> ()
+          | Error e -> fail (Agent_core.Error.to_string e) | Ok _ -> fail "changed native Gate contract was admitted");
+         check string "changed surface is rejected before process dispatch" before (Fs_compat.load_file capture);
+         (match Gate.complete_native ~config ~keeper_name ~operation_id admission with
+          | Error _ -> () | Ok () -> fail "unsent replay was discharged");
+         let rejected_before_send = Error (Agent_core.Error.Internal "fixture output rejected before transmission") in
+         check bool "untransmitted failure preserves original error" true
+           (Gate.finish_run ~config ~keeper_name ~operation_id admission rejected_before_send = rejected_before_send);
+         check bool "untransmitted failure preserves Gate obligation" true
+           ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id
+             |> require "untransmitted obligations") <> []);
+         let waiting = Masc.Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
+           |> require "wake before transmission" in
+         List.iter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+           match selection.source.payload with
+           | Keeper_event_queue.Hitl_resolved resolution when resolution.approval_id = approval_id ->
+             check bool "untransmitted input wake remains actionable" true
+               ((Masc.Keeper_heartbeat_stimulus_intake.reconcile_spent_selection ~config ~keeper_name selection
+                 |> require "untransmitted wake reconciliation")
+                = Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable)
+           | _ -> ()) waiting;
+         let goal_blocks = if native_blocks then Some [Agent_core.Types.Text "Additional structured user instruction";
+           Agent_core.Types.Text model.text] else None in
+         let resumed = run ~continuation ~goal_blocks ~goal:model.text ~on_transmitted:(fun _ ->
+           Gate.observe_native_input ?blocks:goal_blocks ~prepared:model ~config ~user_message:"Finish the original research" admission ~transmitted:model.text
+             |> require "actual native input transmission") () in
+         (match resumed.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
+         if native_output_rejected then (
+           let rejected = Error (Agent_core.Error.Internal "fixture output rejected after native settlement") in
+           check bool "output error survives durable Gate input settlement" true
+             (Gate.finish_run ~config ~keeper_name ~operation_id admission rejected = rejected))
+         else Gate.finish_run ~config ~keeper_name ~operation_id admission (Ok ())
+           |> require "settled native replay evidence";
+         check int "original deferred effect call is never rerun" 1 !executions;
+         let requests = In_channel.with_open_bin capture In_channel.input_lines |> List.map Yojson.Safe.from_string in
+         let request name = List.filter (fun row -> Yojson.Safe.Util.member "method" row = `String name) requests in
+         let gate_result = List.find (fun row -> Yojson.Safe.Util.member "id" row = `String "gate-call") requests in
+         check bool "exact durable Gate receipt reaches the native model" true
+           (Yojson.Safe.Util.(gate_result |> member "result" |> member "contentItems")
+            = `List [`Assoc ["type", `String "inputText"; "text", `String deferred.raw_output]]);
+         check int "one original native thread" 1 (List.length (request "thread/start"));
+         let resume = List.hd (request "thread/resume") in
+         check string "original native thread resumed" continuation.session_id Yojson.Safe.Util.(resume |> member "params" |> member "threadId" |> to_string);
+         let turn = List.hd (List.rev (request "turn/start")) in
+         let inputs = Yojson.Safe.Util.(turn |> member "params" |> member "input" |> to_list) in
+         let expected_input_text = if native_blocks then "Additional structured user instruction\n" ^ model.text else model.text in
+         check bool "decoded native request contains the complete prepared replay input" true
+           (List.exists (fun row -> Yojson.Safe.Util.member "text" row = `String expected_input_text) inputs)
+       | None ->
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
-        ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry";
+        ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry");
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
       (match Gate.record_completed ~config ~keeper_name admission |> require "completed direct continuation receipt" with
@@ -8071,6 +8403,20 @@ let test_direct_gate_current_history_resume ?(checkpoint_failure=false) ?(channe
          | Masc.Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
          | Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable
          | Masc.Keeper_heartbeat_stimulus_intake.Absent_grant_retired _ -> fail "completed Gate requested another model turn");
+      if one_shot then (
+        (match Masc.Keeper_approval_queue.approved_resolution_delivery ~base_path ~id:approval_id
+           |> require "one-shot grant after delivery" with
+         | {state=Masc.Keeper_approval_queue.Resolution_unconsumed; replay_outcome=None; _} -> ()
+         | _ -> fail "delivered input consumed the grant or invented an effect");
+        let cycle_grant = Masc.Keeper_gate.cycle_grant_of_resolution (Gate.resolution admission)
+          |> Option.get in
+        (match Masc.Keeper_gate.decide ~cycle_grant ~keeper_always_allow:false one_shot_request with
+         | Masc.Keeper_gate.Allow _ -> ()
+         | _ -> fail "actual exact call could not consume its one-shot grant after input delivery");
+        (match Masc.Keeper_approval_queue.approved_resolution_delivery ~base_path ~id:approval_id
+           |> require "one-shot grant after exact call" with
+         | {state=Masc.Keeper_approval_queue.Resolution_consumed; replay_outcome=None; _} -> ()
+         | _ -> fail "exact call did not consume only its one-shot authorization"));
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
         |> require "same operation completion" |> ignore))
 
@@ -8346,14 +8692,42 @@ let () =
     ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);
     ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
+      test_case "retention IO repair recovers exact original channel history before replay" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "native one-shot approval delivers input and preserves exact grant" `Quick
+        (test_direct_gate_current_history_resume ~native:true ~one_shot:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "native Gate input settles despite rejected output" `Quick
+        (test_direct_gate_current_history_resume ~native:true ~native_output_rejected:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "official-client structured Gate input retains the complete prepared message" `Quick
+        (test_direct_gate_current_history_resume ~native:true ~native_blocks:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "official-client Gate resumes original native session and exact replay" `Quick
+        (test_direct_gate_current_history_resume ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "official-client Gate preserves authoritative denial" `Quick
+        (test_direct_gate_current_history_resume ~native:true (Keeper_approval_queue_rules_types.Decision.Reject "declined by authority"));
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
         (test_direct_gate_current_history_resume ~binding_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared channel Gate recovers original input after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared Gate recovers frozen runtime suffix after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "failed producer captured checkpoint survives unavailable source and original runtime suffix" `Quick
+        (test_direct_gate_current_history_resume ~failed_producer:true ~source_unavailable:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "returned Agent Core checkpoint survives unavailable source store at Gate yield" `Quick
+        (test_direct_gate_current_history_resume ~source_unavailable:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "returned native settlement survives unavailable source store at Gate yield" `Quick
+        (test_direct_gate_current_history_resume ~source_unavailable:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared native Gate rejects a later independent native session" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~advance_native:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "unprepared native Gate recovers original runtime and session after authority repair" `Quick
+        (test_direct_gate_current_history_resume ~binding_failure:true ~recover_binding:true ~native:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "unretained checkpoint keeps frozen runtime suffix without replay" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "channel-scoped Gate resumes original input with current channel history" `Quick
         (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "new Gate and runtime failure retain both obligations" `Quick
         (test_direct_gate_current_history_resume ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "pending original bytes survive rolling checkpoint pruning during retention outage" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~retention_rollover:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "checkpoint retention failure preserves nonterminal original input" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "approved Gate resumes same input with newer history and exact replay" `Quick

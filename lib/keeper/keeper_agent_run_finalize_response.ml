@@ -28,6 +28,7 @@ let finalize
     ~runtime_id_string
     ~max_context
     ~checkpoint_owner
+    ~official_client_settlement
     ~history_messages
     ~prompt_metrics
     ~ctx_composition
@@ -316,6 +317,7 @@ let finalize
       ; tool_calls = List.rev acc.tool_calls
       ; completion_contract_result
       ; operator_disposition = None
+      ; official_client_settlement
       ; checkpoint = saved_checkpoint
       ; trace_ref = result.trace_ref
       ; run_validation = result.run_validation

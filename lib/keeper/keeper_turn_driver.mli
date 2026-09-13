@@ -64,6 +64,7 @@ type lane_terminal_error =
   { origin_runtime_id : string
   ; origin_attempt : int
   ; lane_error : Agent_core.Error.t
+  ; checkpoint_after : Agent_core.Checkpoint.t option
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
@@ -89,6 +90,7 @@ val restore_deferred_runtime_lane :
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
@@ -180,6 +182,7 @@ val run_named :
      tools:Agent_core.Tool.t list ->
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -263,7 +266,10 @@ module For_testing : sig
 
   type provider_attempt_outcomes
 
+  val produced_checkpoint : provider_attempt_outcomes -> Agent_core.Checkpoint.t option
+
   val project_provider_attempt_result :
+    ?checkpoint_after:Agent_core.Checkpoint.t ->
     replay_prefix_projection:Keeper_replay_prefix.projection ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     provider_attempt_outcomes
@@ -281,6 +287,8 @@ module For_testing : sig
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
   val checkpoint_after_attempt :
+    ?agent_before_attempt:Agent_core.Agent.t ->
+    ?session_id:string -> ?working_context:Yojson.Safe.t ->
     ?agent_ref:Agent_core.Agent.t option ref ->
     Agent_core.Agent.t option ->
     Agent_core.Checkpoint.t option
@@ -346,6 +354,7 @@ module For_testing : sig
     (Runtime.t, Agent_core.Error.t) result
 
   val selected_runtime_result :
+    ?official_client_settlement:Keeper_official_client_session_store.t ->
     Runtime.t ->
     lane_attempt_index:int ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->

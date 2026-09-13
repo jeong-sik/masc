@@ -967,6 +967,7 @@ let () =
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
+    ; official_client_settlement = None
     ; checkpoint = None
     ; trace_ref = None
     ; run_validation = None

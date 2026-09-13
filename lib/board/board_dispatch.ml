@@ -536,6 +536,13 @@ let get_comments ~post_id =
   match backend () with
   | Jsonl store -> Board.get_comments store ~post_id
 
+let require_persisted_sources_readable () =
+  match backend () with
+  | Jsonl store ->
+      (match store.Board.posts_load_result, store.Board.comments_load_result with
+       | Ok (), Ok () -> Ok ()
+       | Error detail, _ | _, Error detail -> Error (Board.Io_error detail))
+
 let get_post_and_comments ~post_id ?comment_offset ?comment_limit () =
   match backend () with
   | Jsonl store -> Board.get_post_and_comments store ~post_id ?comment_offset ?comment_limit ()

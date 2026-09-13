@@ -35,6 +35,7 @@ type completion_state =
 type record = {
   goal_id : string;
   completion : completion_state;
+  submitted_evidence : Workspace_verification_store.submitted_evidence_item list;
   updated_at : string;
 }
 
@@ -110,13 +111,16 @@ val reopen_goal :
     is serialized across the two stores, not a cross-file atomic filesystem write. *)
 
 val mark_proof_pending :
+  ?submitted_evidence:Workspace_verification_store.submitted_evidence_item list ->
   Workspace_utils.config ->
   goal_id:string ->
   criterion:Goal_store.criterion ->
   (record, string) result
-(** Persist before invoking a reviewer. The same pending criterion returns the
-    identical request without writing. A different criterion or refutation
-    creates a new random request identity. A proven current criterion refuses
+(** Persist before invoking a reviewer. The same pending criterion and exact
+    submitted evidence return the identical request. Omitted evidence preserves
+    the same criterion's prior snapshot, including after refutation; explicit
+    evidence replaces it. A changed criterion does not inherit omitted evidence.
+    Changed evidence, criterion, or refutation creates a new request identity. A proven current criterion refuses
     replacement; a historical proof for another criterion may be superseded. *)
 
 val record_proof_verdict :

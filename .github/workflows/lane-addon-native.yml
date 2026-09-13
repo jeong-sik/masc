@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           mkdir -p proof dist
           git rev-parse HEAD > proof/SOURCE_COMMIT
+          # Direct .exe runs need the composition test's Python resources staged too.
           opam exec -- dune build --profile release \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe test/test_lane_addon.exe \
@@ -56,6 +57,7 @@ jobs:
             addons/msx-observer/skills/msx-observe/scripts/summarize.py \
             addons/msx-observer/skills/msx-observe/references/observations.md \
             addons/protocol.py addons/output-statistics/server.py \
+            addons/msx-observer/server.py addons/tests/test_packages.py \
             test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe 2>&1 | tee proof/build.log
           failed_tests=()
           run_proof_test() {

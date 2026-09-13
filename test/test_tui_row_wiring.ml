@@ -73,7 +73,7 @@ let test_the_detail_pane_says_where_the_command_would_run () =
 (* A blocked Gate row exposes a short reason under the list, where the frame
    has to fit it to one line. Enter promises the whole ask, so that pane must
    carry the producer's exact reason and whether this attempt can be retried;
-   otherwise the operator still decides from the prefix before [~]. *)
+   otherwise the operator still decides from the prefix before […]. *)
 let test_the_detail_pane_keeps_the_blocked_gate_reason () =
   Alcotest.(check bool) "the whole-ask pane reads the exact reason" true
     (reads ~binding_name:"approval_detail_pane"

@@ -18,6 +18,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
+| `J` / `K` | Scroll the observed browser page by one viewport, then refresh the same scene |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
@@ -105,6 +106,11 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`J`/`K` send a guarded top-level page scroll using the observed viewport height,
+then read the same scene again. The result must retain the observed URL and
+document identity; a viewport resize is reported by the fresh scene rather than
+treated as a pre-action lock. Nested panes still require screenshot pointer
+scroll because their scroll container is selected by the observed hit point.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
 destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.

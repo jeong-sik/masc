@@ -14038,7 +14038,8 @@ def run_browser_scene_regression(executable: str) -> None:
     client = "11111111-1111-4111-8111-111111111111"
     target = {"lane": "live", "clientId": client, "tabId": 2}
     url = "https://example.org/scene"
-    scenes, actions = [], []
+    scenes, actions, scrolls, scene_viewports = [], [], [], []
+    scroll_y = [0]
 
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
@@ -14062,6 +14063,8 @@ def run_browser_scene_regression(executable: str) -> None:
         view = request.get("view")
         scope = request.get("scope")
         assert view in ("content","regions")
+        if "expectedUrl" in request:
+            assert request["expectedUrl"] == url
         region = dict(node("channel-region","region","Channel messages"),role="main")
         if view == "regions":
             nodes = [region]
@@ -14073,11 +14076,13 @@ def run_browser_scene_regression(executable: str) -> None:
                 node("first-control", "control", "First action"),
                 node("second-control", "control", "Second action"),
                 node("image", "raster", "Scene illustration")]
+        viewport = {"width": 800, "height": 600, "scrollX": 0, "scrollY": scroll_y[0]}
+        scene_viewports.append(viewport)
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1", "view":view, "scope":scope,
             "documentId": "document-after" if changed else "document-before",
             "url": url, "title": "scene", "truncated": False,
-            "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
+            "viewport": viewport,
             "nodes": nodes}}
 
     def click(body):
@@ -14091,7 +14096,17 @@ def run_browser_scene_regression(executable: str) -> None:
         "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = RequestHttpResponse(scene)
-    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(click)
+    def interact_request(body):
+        request = json.loads(body)
+        if request.get("action") == "scroll":
+            assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=request["y"])
+            assert request["y"] in (600, -600)
+            scrolls.append(request)
+            scroll_y[0] = max(0, scroll_y[0] + request["y"])
+            return 200, {"ok": True, "data": {"scrollY": scroll_y[0]}}
+        return click(body)
+
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(interact_request)
 
     def interact(process, master, _slave, output, _base):
         palette_go(process, master, output, b"go Browser Lane", b"scene reader ready")
@@ -14119,6 +14134,10 @@ def run_browser_scene_regression(executable: str) -> None:
         focused = scenes[-1]
         send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
+        send_and_wait(process, master, output, b"J", b"SCOPED CHANNEL CONTENT")
+        assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
+        send_and_wait(process, master, output, b"K", b"SCOPED CHANNEL CONTENT")
+        assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
 

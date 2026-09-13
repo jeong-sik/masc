@@ -113,7 +113,7 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.runtime_id)
          (Terminal_text.single_line action.tool_name)
          (Terminal_text.single_line identity)
-         (Terminal_text.single_line action.observed_at))
+         (Terminal_text.short_timestamp action.observed_at))
     actions
 
 let async_request_observation_lines (state : state) =

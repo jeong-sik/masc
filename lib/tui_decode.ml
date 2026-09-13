@@ -889,11 +889,24 @@ let preview_line text =
   sanitize_terminal_text (Buffer.contents output)
 ;;
 
-let short_timestamp_for_terminal text =
+(* The date and time beside a record, in the zone the operator's terminal is
+   in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
+   kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
+   under a header clock in local time read as the local hour it was not. A
+   timestamp the codec cannot read keeps the slice, for the same reason
+   [clock_timestamp_for_terminal] does. *)
+let short_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
-    (if String.length text > 19 then String.sub text 0 19
-     else if String.length text = 0 then "(never)"
-     else text)
+    (match Time_codec.parse_rfc3339_opt text with
+     | Some unix_seconds ->
+         let tm = localtime unix_seconds in
+         Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+           (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+           tm.Unix.tm_sec
+     | None ->
+         if String.length text > 19 then String.sub text 0 19
+         else if String.length text = 0 then "(never)"
+         else text)
 ;;
 
 (* The clock beside a row, in the zone the operator's terminal is in. The

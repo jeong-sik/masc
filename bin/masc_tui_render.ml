@@ -814,7 +814,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     note_lines;
   box_line buf cols
     (Ansi.dim ^ Printf.sprintf "  created  %s by %s  priority %d  cycles %d"
-       (Terminal_text.single_line task.created_at)
+       (Terminal_text.short_timestamp task.created_at)
        (match task.created_by with
         | Some by -> Terminal_text.single_line by
         | None -> "-")
@@ -1597,7 +1597,7 @@ let render_approvals (state : state) =
         in
         ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
             (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
-            (Terminal_text.single_line approval.ap_created_at)
+            (Terminal_text.short_timestamp approval.ap_created_at)
             expires Ansi.reset
         , Printf.sprintf "  %spayload=%s%s" Ansi.dim
             (fit_width payload (max 8 (cols - 12)))
@@ -2180,7 +2180,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     (Printf.sprintf "  %s  %s\xc2\xb7%s  %s  %s\xc2\xb7%s  %s%s%s"
        author_chip
        Ansi.dim Ansi.reset
-       (Terminal_text.single_line post.bp_created_at)
+       (Terminal_text.short_timestamp post.bp_created_at)
        Ansi.dim Ansi.reset
        Ansi.dim
        (Link.reference Board_post (Terminal_text.single_line post.bp_id))
@@ -2296,7 +2296,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                      indent ^ bar
                  in
                  let author = Terminal_text.single_line c.bc_author in
-                 let created_at = Terminal_text.single_line c.bc_created_at in
+                 let created_at = Terminal_text.short_timestamp c.bc_created_at in
                  let author_role =
                    if String.equal author (Terminal_text.single_line post.bp_author) then
                      " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
@@ -3279,7 +3279,7 @@ let render_schedule_list (state : state) =
            match snapshot.scs_next_due_iso with
            | Some iso ->
                Printf.sprintf "  Next due: %s"
-                 (Tui_decode.short_timestamp_for_terminal iso)
+                 (Terminal_text.short_timestamp iso)
            | None -> ""
          in
          c.push (Ansi.bold ^ count_text ^ Ansi.reset);
@@ -3323,7 +3323,7 @@ let render_schedule_list (state : state) =
                let is_selected = idx = state.schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
-                 | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+                 | Some iso -> Terminal_text.short_timestamp iso
                  | None -> "-"
                in
                (* The payload target names who the wake reaches (a keeper for
@@ -3459,7 +3459,7 @@ let schedule_turn_rows
           let at =
             match value, recorded_at with
             | true, Some timestamp ->
-              " \xc2\xb7 " ^ Tui_decode.short_timestamp_for_terminal timestamp
+              " \xc2\xb7 " ^ Terminal_text.short_timestamp timestamp
             | _, _ -> ""
           in
           field ~style:tone label ((if value then "yes" else "no") ^ at)
@@ -3583,7 +3583,7 @@ let schedule_detail_lines ~width (row : schedule_row)
   let timestamp value =
     match value with
     | None -> "\xe2\x80\x94"
-    | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+    | Some iso -> Terminal_text.short_timestamp iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -3596,10 +3596,10 @@ let schedule_detail_lines ~width (row : schedule_row)
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
     | None, None -> "\xe2\x80\x94"
     | Some status, None -> status
-    | None, Some at -> Tui_decode.short_timestamp_for_terminal at
+    | None, Some at -> Terminal_text.short_timestamp at
     | Some status, Some at ->
         Printf.sprintf "%s  %s" status
-          (Tui_decode.short_timestamp_for_terminal at)
+          (Terminal_text.short_timestamp at)
   in
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
@@ -3628,7 +3628,7 @@ let schedule_detail_lines ~width (row : schedule_row)
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
   ; field "Requested"
-      (Tui_decode.short_timestamp_for_terminal row.sch_requested_at_iso)
+      (Terminal_text.short_timestamp row.sch_requested_at_iso)
   ; field "Due" (timestamp row.sch_due_at_iso)
   ; field "Next due" (timestamp row.sch_next_due_at_iso)
   ; field "Expires" (timestamp row.sch_expires_at_iso)

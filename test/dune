@@ -4885,6 +4885,7 @@
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
+(include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
@@ -5172,8 +5173,6 @@
 (include stanzas/test_tui_memory_back.inc)
 
 (include stanzas/test_tui_resources_empty_note.inc)
-
-(include stanzas/test_tui_data_unreliable_row.inc)
 
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 

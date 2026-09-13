@@ -182,9 +182,23 @@ type audio_clip = {
     [/api/v1/voice/audio/:token] capability, [message_text] doubles as
     the caption. [audio_url] and [device_id] carry transport routing hints
     so the dashboard can fetch and route the clip. [expired] is true when
-    the underlying MP3 has been reaped; the history endpoint stamps it by
+    the clip has been reaped; the history endpoint stamps it by
     checking the audio directory. Same shape as
     {!Keeper_chat_broadcast}'s SSE payload so the two never drift. *)
+
+val audio_clip_of_synthesized_file :
+  audio_file:string ->
+  message_text:string ->
+  device_id:string option ->
+  audio_clip option
+(** The clip record announcing a file the synthesis side has just written.
+    [None], with a line in the log, when the path is not one masc serves --
+    the reply is still recorded, without audio.
+
+    Both [token] and [mime] are read off the same path, which is the point:
+    taking them separately is how every [say] reply came to be announced as
+    MP3 while being WAVE. [expired] is [false] by construction; a clip is
+    only reaped later. *)
 
 type speaker = {
   speaker_id : string option;

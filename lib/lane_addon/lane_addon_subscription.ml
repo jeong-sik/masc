@@ -67,7 +67,15 @@ let cursor config s =
   match bytes with
   | None -> Ok None
   | Some bytes -> let value=Yojson.Safe.from_string bytes in
+      let* () = exact ["subscription";"instance_id";"sequence";"output_sha256"] value in
+      let* owner = get "subscription" decode value in
+      let* () = if owner=s then Ok () else Error "cursor belongs to another subscription" in
       let* instance = get "instance_id" text value in let* sequence = get "sequence" integer value in
+      let* () = if sequence>0 then Ok () else Error "cursor requires an acknowledged positive sequence" in
+      let* digest = get "output_sha256" text value in
+      let* () = if String.length digest=64 && String.for_all
+        (function '0'..'9' | 'a'..'f' -> true | _ -> false) digest
+        then Ok () else Error "cursor output SHA-256 is invalid" in
       Ok (Some (instance,sequence))
 let select_subscription ~caller args subscriptions =
   let* run_id = get "run_id" text args in
@@ -76,8 +84,7 @@ let select_subscription ~caller args subscriptions =
   match List.find_opt (fun s -> s.keeper_name=caller && s.run_id=run_id
     && s.installation_id=installation_id && s.output_id=output_id) subscriptions with
   | Some s -> Ok s | None -> Error "caller has no matching subscription"
-let producer store s =
-  let* bindings = Store.bindings store in
+let producer bindings s =
   let matches value = match get "run_id" text value,field "configuration" value,field "phase" value with
     | Ok run,Ok owner,Ok phase when run=s.run_id ->
         get "id" text owner=Ok s.installation_id
@@ -100,8 +107,8 @@ let producer store s =
       Ok (instance,sequence,lanes,max_bytes)
   | [] -> Error "subscribed installation unavailable"
   | _ -> Error "subscribed installation has multiple owners"
-let notice config store s =
-  match producer store s,cursor config s with
+let notice config bindings s =
+  match producer bindings s,cursor config s with
   | Ok (instance,latest,_,_),Ok prior ->
       let after,replaced = match prior with
         | None -> 0,false | Some (previous,sequence) when previous=instance -> sequence,false
@@ -113,10 +120,13 @@ let notice config store s =
   | Error error,_ | _,Error error -> Ok (`Assoc ["subscription",json s;"unavailable",`String error])
 let observe ~config ~keeper_name = protect (fun () ->
   let* subscriptions,_ = load config in
-  let store = Store.create ~root:(root config) in
+  let subscriptions = List.filter (fun s -> s.keeper_name=keeper_name) subscriptions in
+  let* bindings = match subscriptions with
+    | [] -> Ok []
+    | _ -> Store.bindings (Store.create ~root:(root config)) in
   let rec loop = function [] -> Ok [] | s::rest ->
-    let* value=notice config store s in let* rest=loop rest in Ok(value::rest) in
-  let* notices=loop (List.filter (fun s -> s.keeper_name=keeper_name) subscriptions) in
+    let* value=notice config bindings s in let* rest=loop rest in Ok(value::rest) in
+  let* notices=loop subscriptions in
   Ok (`List (List.filter (fun json -> match json with
     | `Assoc fields -> List.mem_assoc "unavailable" fields || List.assoc_opt "new_observations" fields=Some (`Bool true)
     | _ -> false) notices)))
@@ -153,7 +163,8 @@ let dispatch ~config ~caller ~operation args = protect (fun () -> Mutex.protect 
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in
       let* s=select_subscription ~caller args subscriptions in
       let store=Store.create ~root:(root config) in
-      let* instance,latest,lanes,max_bytes=producer store s in
+      let* bindings=Store.bindings store in
+      let* instance,latest,lanes,max_bytes=producer bindings s in
       let* prior=cursor config s in
       let after=match prior with Some (id,seq) when id=instance -> seq | _ -> 0 in
       if after>=latest then Error "no unread completed observation" else

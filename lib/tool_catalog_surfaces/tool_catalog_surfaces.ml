@@ -105,6 +105,7 @@ let public_mcp_surface_tools =
     "masc_lane_attach"
   ; "masc_lane_declaration_read"
   ; "masc_lane_declaration_save"
+  ; "masc_lane_updates"
   ; "masc_lane_inspect"
   ; "masc_lane_observe"
   ; "masc_lane_slice"

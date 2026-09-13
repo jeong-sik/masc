@@ -27,12 +27,12 @@ let producer store id seq = Store.save_binding store ~instance_id:id
     "phase",`Assoc ["kind",`String "attached"];"observation_seq",`Int seq;
     "package",`Assoc ["outputs",`Assoc ["changes",`Assoc ["lanes",`List [`String "changes"]]];
       "resources",`Assoc ["max_reply_bytes",`Int 8192]]]) |> ok
-let append store id seq =
+let append ?(coverage=[]) store id seq =
   let row lane : T.row = {id=Printf.sprintf "%s/%d/%s" id seq lane;lane_id=id ^ "/" ^ lane;
     kind=T.Event;title="Source changed";observed_at=float_of_int seq;subject_id="document";
     clock=None;actor=None;fields=["raw",`String "private source body"];evidence=[];related_ids=[]} in
   Store.append_observation store ~instance_id:id ~seq ~sources:(`List [])
-    {rows=[row "changes";row "other-output"];coverage=[]} |> ok
+    {rows=[row "changes";row "other-output"];coverage} |> ok
 let receipt result = member "receipt" result
 let ack config receipt = call config "researcher"
   (`Assoc (("operation",`String "acknowledge")::("receipt",receipt)::selection))
@@ -67,6 +67,46 @@ let failures_preserve_position () = with_workspace (fun config ->
   let revision=member "source_revision" saved in
   ignore(call config "operator" (`Assoc ["operation",`String "save";"expected_source_revision",revision;"subscriptions",`List []]) |> ok);
   check bool "removal stops next-turn discovery" true (S.observe ~config ~keeper_name:"researcher"=Ok (`List [])))
+let cursor_identity_and_incomplete_source () = with_workspace (fun config ->
+  ignore(save config);
+  let retained=store config in producer retained "instance-1" 2;
+  let coverage : T.coverage = {source_id="documents";incarnation="source-1";
+    cursor=None;complete=false;detail=Some "upstream acquisition unavailable"} in
+  append ~coverage:[coverage] retained "instance-1" 1;
+  append retained "instance-1" 2;
+  let first=call config "researcher" (args "read") |> ok in
+  check bool "readable retained output does not imply complete source input" false
+    (member "complete" first |> Yojson.Safe.Util.to_bool);
+  ignore(ack config (receipt first) |> ok);
+  let cursor_path=Filename.concat (Filename.concat (Store.root retained) "subscriptions")
+    (Store.digest (Yojson.Safe.to_string subscription) ^ ".json") in
+  let saved=Fs_compat.load_file cursor_path in
+  let replace key value json = match json with
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "expected receipt object" in
+  let foreign=replace "subscription" (replace "output_id" (`String "other-output") subscription)
+    (receipt first) in
+  let malformed=replace "output_sha256" (`String "not-a-sha256") (receipt first) in
+  let incomplete=`Assoc ["instance_id",`String "instance-1";"sequence",`Int 1] in
+  List.iter (fun corrupt ->
+    Fs_compat.save_file_atomic_strict cursor_path (Yojson.Safe.to_string corrupt) |> ok;
+    check bool "untrusted cursor cannot skip unread output" true
+      (Result.is_error (call config "researcher" (args "read")));
+    check bool "untrusted cursor cannot acknowledge the next record" true
+      (Result.is_error (ack config (receipt first)));
+    let notice=S.observe ~config ~keeper_name:"researcher" |> ok in
+    check bool "cursor corruption remains visible to the Keeper" true
+      (match notice with
+       | `List [entry] -> (match member "unavailable" entry with `String _ -> true | _ -> false)
+       | _ -> false)) [foreign;malformed;incomplete];
+  Fs_compat.save_file_atomic_strict cursor_path saved |> ok;
+  let second=call config "researcher" (args "read") |> ok in
+  check int "repair resumes after only the acknowledged receipt" 2
+    (receipt second |> member "sequence" |> Yojson.Safe.Util.to_int);
+  check bool "incomplete-source acknowledgment remains durable" true
+    (Result.is_error (ack config (receipt first))))
+
 let () = run "Lane subscription use" ["operator scenarios",[
+  test_case "cursor identity and incomplete source remain distinct" `Quick cursor_identity_and_incomplete_source;
   test_case "reference discovery, explicit reading and durable acknowledgement" `Quick read_ack_and_restart;
   test_case "missing records and configuration conflicts preserve position" `Quick failures_preserve_position]]

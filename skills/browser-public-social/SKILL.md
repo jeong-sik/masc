@@ -37,6 +37,9 @@ to scroll the top-level page by the observed viewport
 height, then verify the refreshed document and post identities. Use `Ctrl-O`
 when the painted layout or a nested scroll container is needed; `j`/`k` in
 the text scene only move the terminal reader.
+The scene status composition (`articles`, `links`, `controls`, and `images`)
+is a typed observation hint for choosing a route; it does not prove that a
+feed is complete or that every reply is loaded.
 
 After an article is scoped, keep the displayed role and label with the body
 when reporting it. The copied context must retain that observed scope label

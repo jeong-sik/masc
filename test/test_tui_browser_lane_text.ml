@@ -139,6 +139,10 @@ let () =
    | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;client_id=None;_} ->
        assert (target.document_id=content.document_id && target.node_id=link.node_id && url=content.url)
    | _ -> failwith "copied link action does not satisfy the actual follow contract");
+  let raster = {node with node_id="image";kind=Raster;tag="img";text="Preview"} in
+  let typed_scene = {scene with content={content with nodes=[region;control;link;raster]}} in
+  assert (Lane.scene_summary typed_scene = Some "1 region · 1 link · 1 control · 1 image");
+  assert (Lane.scene_summary scene = None);
   List.iter (fun kind ->
     let selected={node with kind} in
     assert (Lane.scene_target_action selected=None);
@@ -285,6 +289,7 @@ let () =
   assert (Masc.Browser_scene.region_role_of_string "region" = Masc.Browser_scene.Named_region);
   assert (Masc.Browser_scene.region_role_of_string " CustomRole " = Masc.Browser_scene.Unknown "CustomRole");
   let article_node = List.nth (Lane.scene_targets view) 2 in
+  assert (Lane.scene_summary scene = Some "1 article · 2 regions");
   let article_context = Lane.scene_scope_context_for_node view article_node in
   (match article_context with
    | Some context ->

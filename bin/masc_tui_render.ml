@@ -9368,8 +9368,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
-             | Some scene -> Printf.sprintf "Scene %.1f ms • %d nodes%s" scene.elapsed_ms
-                 (List.length scene.content.nodes) (if scene.content.truncated then " • truncated" else ""), Theme.ok ()
+             | Some scene ->
+                 let summary = match Browser_lane_view.scene_summary scene with
+                   | None -> ""
+                   | Some text -> " • " ^ text in
+                 let truncation = if scene.content.truncated then " • truncated" else "" in
+                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s" scene.elapsed_ms
+                   (List.length scene.content.nodes)
+                   truncation summary, Theme.ok ()
              | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()

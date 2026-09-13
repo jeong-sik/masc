@@ -787,10 +787,15 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | Timeout reason ->
       (* A stream liveness timeout ends this attempt, not the turn: the turn
          driver may move to the next lane candidate. The turn's Completion
-         path is the only publisher of a terminal event. *)
-      { bridge_state
-      ; chat_events = [ protocol_error ~reason:(redact_text reason) Sse_timeout ]
-      }
+         path is the only publisher of a terminal event. The scope is
+         poisoned like every other attempt failure below, so an open tool
+         block is quarantined under this kind and a later [fail_stream] finds
+         the failure already recorded instead of adding a second diagnostic
+         under another kind. *)
+      let reason = redact_text reason in
+      poison_scope_with bridge_state ~kind:Sse_timeout ~reason
+        ~diagnostic:(protocol_error ~reason Sse_timeout)
+        []
   | ContentBlockDelta { index; delta = TextSnapshot _ } ->
       poison_scope bridge_state ~kind:Sse_parse_failed
         ~reason:

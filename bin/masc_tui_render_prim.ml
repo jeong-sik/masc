@@ -2049,6 +2049,9 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
    refused; without this the two are the same row. Idle is a blank rather than
    a glyph — most goals have never been asked, and a mark on all of them would
    carry no information. *)
+(* Colour here, the glyph in {!Masc_tui_planning_proof_mark}, which the legend
+   under the column reads from the same function. The two used to be separate
+   literals and the legend was a state short. *)
 let planning_proof_mark proof =
   let mark = Masc_tui_planning_proof_mark.glyph proof in
   match proof with

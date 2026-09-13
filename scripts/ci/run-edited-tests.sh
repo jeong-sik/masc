@@ -73,7 +73,7 @@ select_sources() {
         then
           runnable=$(printf '%s\n%s\n' "${runnable}" "${candidate}")
         else
-          echo "-- ${candidate}: no dune rule declares runtest-${stem}"
+          echo "-- ${candidate}: no dune rule declares runtest-$(basename "${candidate}" .py)"
         fi
         ;;
       *) runnable=$(printf '%s\n%s\n' "${runnable}" "${candidate}") ;;
@@ -315,6 +315,15 @@ DECLARED
 # here rather than by going quiet on a later pull request.
 self_test() {
   local failures=0
+  # A fresh PR invocation has no [stem] left by earlier source-mapping cases.
+  # Exercise the real no-alias path first under nounset; a prior self-test
+  # accidentally supplied the out-of-scope helper local through a global.
+  (
+    unset stem
+    changed="test/test_release_evidence_report.py"
+    select_sources && exit 1
+    [ -z "${sources}" ]
+  ) || { echo "FAIL fresh Python helper selection"; return 1; }
   check() {
     local label="$1" want="$2"
     shift 2

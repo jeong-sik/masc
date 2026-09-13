@@ -98,7 +98,7 @@ let () =
   assert (region_input |> member "expectedUrl" = `String content.url);
   assert (Masc.Browser_scene.scope_of_json (region_input |> member "scope") =
     Ok {Browser_lane.document_id=content.document_id;node_id=region.node_id});
-  let control = {node with kind=Control {clickable=true;editable=false;disabled=false};tag="button"} in
+  let control = {node with kind=Control {clickable=true;editable=false;disabled=false;href=None};tag="button"} in
   let control_context = copied_target Automation None control in
   let control_action = control_context |> member "defaultAction" in
   assert (Lane.scene_target_action control = Some Click_control);
@@ -107,12 +107,25 @@ let () =
    | Ok {action=Browser_lane.Click_node target;expected_url=Some url;client_id=None;_} ->
        assert (target.document_id=content.document_id && target.node_id=control.node_id && url=content.url)
    | _ -> failwith "copied control action does not satisfy the actual interaction contract");
+  let link = {node with node_id="link"; kind=Control {
+      clickable=true;editable=false;disabled=false;
+      href=Some "https://example.org/observed"}; tag="a"; text="Observed thread"} in
+  let link_context = copied_target Automation None link in
+  let link_action = link_context |> member "defaultAction" in
+  assert (Lane.scene_target_action link = Some Follow_link);
+  assert (link_context |> member "targetKind" = `String "link");
+  assert (link_context |> member "href" = `String "https://example.org/observed");
+  assert (link_action |> member "kind" = `String "follow_link");
+  (match Masc.Browser_interaction.parse (link_action |> member "input") with
+   | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;client_id=None;_} ->
+       assert (target.document_id=content.document_id && target.node_id=link.node_id && url=content.url)
+   | _ -> failwith "copied link action does not satisfy the actual follow contract");
   List.iter (fun kind ->
     let selected={node with kind} in
     assert (Lane.scene_target_action selected=None);
     assert (copied_target Automation None selected |> member "defaultAction" = `Null))
-    [Text;Raster;Control {clickable=true;editable=false;disabled=true};
-     Control {clickable=false;editable=true;disabled=false}];
+    [Text;Raster;Control {clickable=true;editable=false;disabled=true;href=None};
+     Control {clickable=false;editable=true;disabled=false;href=None}];
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
@@ -133,6 +146,24 @@ let () =
     document_id=content.document_id;node_id=node.node_id;expected_url=content.url;scope=Some target})} in
   assert ((Lane.accept_scene ~generation:42 (Ok scoped_scene) clicked).scene=Some scoped_scene);
   assert ((Lane.accept_scene ~generation:42 (Ok scene) clicked).scene=None);
+  let followed = {focused with load=Loading (42,Scene_follow {tab_id=1;
+    document_id=content.document_id;node_id=link.node_id;expected_url=content.url})} in
+  let followed_scene = {scene with content={content with scope=None}} in
+  let guard : Lane.navigation_guard = {
+    expected_url="https://example.org/observed";
+    navigation_source={url=content.url;document_id=content.document_id} } in
+  assert ((Lane.accept_follow ~generation:42 ~guard (Ok followed_scene) followed).scene=Some followed_scene);
+  let guarded_failure = Lane.accept_follow ~generation:42 ~guard (Error "destination not ready") followed in
+  assert (guarded_failure.scene=None && guarded_failure.scene_guard=Some guard);
+  let retry = {guarded_failure with load=Loading (43,Scene_follow_refresh {
+      tab_id=1;guard;scene_view=Browser_lane.Content})} in
+  let retry_failed = Lane.accept_scene ~generation:43 (Error "still loading") retry in
+  assert (retry_failed.scene=None && retry_failed.scene_guard=Some guard);
+  let regions_retry = {retry_failed with load=Loading (44,Scene_follow_refresh {
+      tab_id=1;guard;scene_view=Browser_lane.Regions})} in
+  let regions_scene = {followed_scene with content={followed_scene.content with
+      view=Browser_lane.Regions}} in
+  assert ((Lane.accept_scene ~generation:44 (Ok regions_scene) regions_retry).scene=Some regions_scene);
   let invalidated = Lane.accept_scene ~generation:42 (Error "scene_document_changed") clicked in
   assert (invalidated.scene=None && invalidated.load=Failed "scene_document_changed");
   assert (List.length (Lane.scene_targets {view with scene=Some {scene with content={content with nodes=[node;node]}}})=1);
@@ -192,3 +223,42 @@ let () =
   if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
     failwith "repeated selected text must retain its identity and first row";
   print_endline "PASS repeated scene node ids keep one number each"
+
+let () =
+  let region node_id role text : Masc.Browser_scene.node =
+    { node_id; kind = Region role; tag = role; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Regions; scope = None;
+    nodes = [region "nav" "navigation" "Navigation";
+             region "main" "main" "Timeline";
+             region "article" "article" "One post"] }
+  in
+  let scene : Lane.scene = {source = Live; client_id = None; tab_id = 3;
+    content; elapsed_ms = 1.} in
+  let view = {(Lane.create ()) with selected_tab = Some 3; scene = Some scene} in
+  (match Lane.primary_region_target view with
+   | Ok (index, target) ->
+       assert (index = 1 && target.Browser_lane.node_id = "main")
+   | Error _ -> failwith "unique main landmark was not selected");
+  let article_only = {view with scene = Some {scene with content =
+    {content with nodes = [region "article" "article" "One post"]}}} in
+  (match Lane.primary_region_target article_only with
+   | Ok (_, target) -> assert (target.Browser_lane.node_id = "article")
+   | Error _ -> failwith "article fallback was not selected");
+  let ambiguous = {view with scene = Some {scene with content =
+    {content with nodes = [region "main-a" "main" "A"; region "main-b" "main" "B"]}}} in
+  assert (Lane.primary_region_target ambiguous = Error Lane.Ambiguous_primary_region);
+  let guard : Lane.navigation_guard = {
+    expected_url = "https://example.org/feed#post";
+    navigation_source = {url = content.url; document_id = content.document_id} } in
+  (match Lane.primary_region_action {view with scene = None; scene_guard = Some guard} with
+   | Lane.Primary_guarded_regions {tab_id; guard = actual} ->
+       assert (tab_id = 3 && actual = guard)
+   | _ -> failwith "primary shortcut dropped the follow navigation guard");
+  print_endline "PASS primary landmark shortcut stays exact and ambiguity-safe"

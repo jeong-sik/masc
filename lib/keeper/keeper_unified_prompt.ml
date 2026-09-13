@@ -1290,7 +1290,8 @@ let active_goal_summaries_for_task
              ; summary_review_note = goal.last_review_note
              }
          else None)
-      ) (Goal_store.list_goals_result config ())
+      ) (Result.map_error Goal_store.unavailable_to_string
+           (Goal_store.list_goals_result config ()))
 ;;
 
 let constitution_unreadable_reported : (string, unit) Hashtbl.t =

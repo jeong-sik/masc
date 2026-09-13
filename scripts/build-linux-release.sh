@@ -327,8 +327,10 @@ echo "== collect into $out_dir"
 mkdir -p "$out_dir"
 for binary in "${release_binaries[@]}"; do
   name="$(basename "$binary")"
+  echo "== export $binary -> $out_dir/$name"
   docker cp "$container:/src/_build/default/$binary" "$out_dir/$name"
   chmod +x "$out_dir/$name"
+  echo "== exported $name ($(wc -c < "$out_dir/$name" | tr -d ' ') bytes)"
 done
 
 # The checked release binaries have already been exported. Dune lifecycle
@@ -338,6 +340,7 @@ done
 # matrix where its native dependencies live, then verify its exported logs
 # against the checked-out commit before the host installation smoke uses them.
 if [ -n "$lifecycle_out" ]; then
+  echo "== lifecycle evidence begin"
   lifecycle_status=0
   docker exec -e MASC_BUILD_COMMIT="$build_commit" \
     -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" "$container" bash -lc '
@@ -347,6 +350,7 @@ if [ -n "$lifecycle_out" ]; then
     python3 scripts/keeper-full-lifecycle-evidence.py \
       --build-source-sha "$MASC_BUILD_COMMIT" --output-dir /tmp/masc-release-lifecycle
   ' || lifecycle_status=$?
+  echo "== lifecycle evidence finished with exit $lifecycle_status; exporting logs"
   mkdir -p "$lifecycle_out"
   docker cp "$container:/tmp/masc-release-lifecycle/." "$lifecycle_out/"
   if [ "$lifecycle_status" -ne 0 ]; then

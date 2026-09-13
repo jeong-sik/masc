@@ -20,6 +20,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
+| `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
@@ -104,6 +105,15 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`Enter` follows an observed same-tab HTTP(S) link directly and reads the
+destination with its follow receipt; the old region scope is never reused for
+the destination. Other enabled controls use the ordinary observed click.
+`m` is the short semantic path for a page's primary reading surface: the first
+press observes `main`/`article` landmarks, and the second focuses the unique
+exact-role match. Multiple matches stay in the region picker instead of being
+chosen by text, URL, or CSS heuristics.
+If the destination read is still pending or fails, the footer exposes `r`/`s`/`v`
+as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,
 and truncation flag, so a Keeper can preserve the same reading scope.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.

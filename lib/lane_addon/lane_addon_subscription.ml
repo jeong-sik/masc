@@ -137,12 +137,22 @@ let render = function
       "Use masc_lane_updates with operation=read for the next retained observation; " ^
       "acknowledge its receipt only after reading. No source bodies are included here.\n" ^ Yojson.Safe.to_string json)
   | Ok _ -> Some "Lane subscription discovery returned an invalid envelope."
+let configuration_snapshot config subscriptions revision =
+  let bindings = match subscriptions with [] -> Ok []
+    | _ -> Store.bindings (Store.create ~root:(root config)) in
+  let reader_states = List.map (fun s ->
+    match protect (fun () -> let* bindings=bindings in notice config bindings s) with
+    | Ok value -> value
+    | Error detail -> `Assoc ["subscription",json s;"unavailable",`String detail]) subscriptions in
+  `Assoc ["source_path",`String (config_path config);
+    "source_revision",(match revision with None->`Null|Some value->`String value);
+    "subscriptions",`List (List.map json subscriptions);"reader_states",`List reader_states]
+
 let dispatch ~config ~caller ~operation args = protect (fun () -> Mutex.protect mutex (fun () ->
   let* subscriptions,revision = load config in
   match operation with
   | Inspect -> let* ()=exact [] args in
-      Ok (`Assoc ["source_path",`String (config_path config);"source_revision",(match revision with None->`Null|Some s->`String s);
-        "subscriptions",`List (List.map json subscriptions)])
+      Ok (configuration_snapshot config subscriptions revision)
   | Save ->
       let* ()=exact ["expected_source_revision";"subscriptions"] args in
       let* fields=object_ args in
@@ -157,7 +167,7 @@ let dispatch ~config ~caller ~operation args = protect (fun () -> Mutex.protect 
           "run_id = " ^ string s.run_id;"installation_id = " ^ string s.installation_id;
           "output_id = " ^ string s.output_id;""]) rows) in
       let* ()=write (config_path config) bytes in
-      Ok (`Assoc ["source_revision",`String (Store.digest bytes);"subscriptions",`List (List.map json rows)])
+      Ok (configuration_snapshot config rows (Some (Store.digest bytes)))
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
         | _->["run_id";"installation_id";"output_id";"receipt"]) args in

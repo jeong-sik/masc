@@ -1292,7 +1292,20 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
         200,
         {
             "goals": goals,
-            "goal_history": {"unlisted": []},
+            # Include retained history so resize tests account for its two
+            # non-selectable rows above the active goal list.
+            "goal_history": {
+                "unlisted": [
+                    {
+                        "goal_id": "goal-history-29424",
+                        "title": "earlier-plan-29424",
+                        "opened_at": "2026-08-20T00:00:00Z",
+                        "closed_at": "2026-08-21T00:00:00Z",
+                        "final_phase": "completed",
+                        "lifetime_hours": 24.0,
+                    }
+                ]
+            },
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
@@ -3670,11 +3683,13 @@ def keeper_ask_answer_interaction(
 
         # Open an approval's detail. The answer flow is drawn by the list, so
         # this is where [a] used to set the mode and change nothing on screen.
-        detail = send_and_wait(
-            process, master_fd, output, b"\r", b"Esc: back to the list"
-        )
+        # The detail opens on its own title, "MASC Approval"; the way out is
+        # the footer's to say (#35985). The list's title is "MASC Approvals",
+        # so the wait rules out the trailing s.
+        detail_title = re.compile(rb"MASC Approval(?!s)")
+        detail = send_and_wait(process, master_fd, output, b"\r", detail_title)
         if b"Questions waiting on you" in CSI_RE.sub(
-            b"", frame_containing(detail, b"Esc: back to the list")
+            b"", frame_containing(detail, detail_title)
         ):
             raise AssertionError(
                 "the detail draws the questions; this scenario no longer tests "
@@ -4087,28 +4102,48 @@ def planning_resize_budget_interaction(
     open_loaded_planning(process, master_fd, output)
     # The surface strip and composer consume two rows. Exercise the old
     # zero-goal case (19 surface rows) and the minimum supported surface (14).
-    for terminal_rows in (21, 16, 17, 20, 24, 16):
+    for terminal_rows, columns in (
+        (21, 120),
+        (16, 120),
+        (16, 80),
+        (17, 120),
+        (20, 120),
+        (24, 120),
+        (16, 120),
+    ):
         frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=terminal_rows,
-            columns=120,
+            columns=columns,
             needle=b"MASC Planning",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         assert_planning_goal_selected(frame, b"plan-alpha-29424")
+        if b"earlier-plan-29424" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning lost retained goal history: {frame!r}")
+        if b"metric-goal-a-29424" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning lost the selected goal detail: {frame!r}")
+        for label in (b"Goals:", b"No longer listed:", b"sort:", b"filter:active"):
+            if label not in CSI_RE.sub(b"", frame):
+                raise AssertionError(f"Planning lost {label!r}: {frame!r}")
+        if terminal_rows == 24 and b"Backlog:" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning did not restore its full summary: {frame!r}")
         footer_row = frame_row_of(frame, b"j/k:move")
         goal_row = frame_row_of(frame, b"plan-alpha-29424")
+        detail_row = frame_row_of(frame, b"metric-goal-a-29424")
         # Row addresses include the prepended surface strip; the footer sits
         # immediately above the composer on the terminal's last row.
-        if not goal_row < footer_row < terminal_rows:
+        if not goal_row < detail_row < footer_row < terminal_rows:
             raise AssertionError(f"Planning overflowed its surface: {frame!r}")
         selected = send_and_wait(
             process, master_fd, output, b"j", b"plan-beta-29424"
         )
         assert_planning_goal_selected(selected, b"plan-beta-29424")
+        if b"metric-goal-b-29424" not in CSI_RE.sub(b"", selected):
+            raise AssertionError(f"Planning navigation lost selected detail: {selected!r}")
         restored = send_and_wait(
             process, master_fd, output, b"k", b"plan-alpha-29424"
         )
@@ -11444,8 +11479,12 @@ def runtime_surface_interaction(
                 b"Lane position: 1 of 2",
                 b"Probe status: reachable",
                 b"Probe transport: http",
-                b"Checked at: 2026-08-24T10:20:00Z",
-                b"Reachable: yes",
+                # The terminal's clock, not the wire's: the scenario runs
+                # under TZ=UTC so the expected reading is the same on every
+                # machine.
+                b"Checked at: 2026-08-24 10:20:00",
+                # No "Reachable: yes" row: the decoder keeps reachable and
+                # status in agreement, so the row said the status twice.
                 b"HTTP status: 200",
                 b"Latency: 18ms",
             ):
@@ -11735,7 +11774,8 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://schedules/schedule-proof-701",
             b"masc://keepers/alpha",
             b"Dispatch",
-            b"Operator Proof (human_operator)",
+            # The kind is a word beside the name, not the wire token.
+            b"Operator Proof (human)",
             b"keeper_wake",
             b"digest-proof-701",
             b"PgUp/PgDn:page",
@@ -12107,7 +12147,7 @@ def fusion_list_detail_interaction(
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
         # The heading precedes asynchronous task/goal enrichment. Inspect one
         # completed screen after both the linked goal and footer are present.
-        observed = (b"masc://planning/goal-ssim-501", b"Left/Esc:list")
+        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:list")
         for needle in observed:
             wait_for_output(process, master_fd, output, needle,
                             start=verdict_start, timeout=10.0)
@@ -12128,8 +12168,10 @@ def fusion_list_detail_interaction(
             b"glm-coding",
             b"Fallback",
             b"masc://planning/goal-ssim-501",
-            # #35734 spells hint keys the way the key table does: "Left", not "left".
-            b"Left/Esc:list",
+            # #35734 spells hint keys the way the key table does: "Left", not
+            # "left"; and with the table's spaces, which is the spelling the
+            # footer's pin reads.
+            b"Left / Esc:list",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(
@@ -12268,8 +12310,10 @@ def fusion_list_detail_interaction(
                 f"Fusion refresh moved selection off its run id: {refreshed!r}"
             )
 
+        # The detail no longer repeats the list's Flow row: its pipeline row
+        # names the same four stops with the run's state on them.
         detail = send_and_wait(
-            process, master_fd, output, b"\r", b"Flow: Question"
+            process, master_fd, output, b"\r", b"Pipeline:"
         )
         detail_plain = CSI_RE.sub(b"", detail)
         question_index = detail_plain.find(b"1  QUESTION")
@@ -12303,13 +12347,18 @@ def fusion_list_detail_interaction(
         # hold the rest. Wait for the frames to stop and read the screen.
         drain_until_quiet(process, master_fd, output)
         panel_plain = screen_text(bytes(output))
+        # Which page a row lands on follows the RUN block's height above it,
+        # and that block is not this scenario's subject: the panel summary
+        # sits at the foot of the first page when the block is short and at
+        # the head of the second when it is tall. Read both.
+        two_pages = detail_plain + panel_plain
         for needle in (
             b"panel-answer-first-501",
             b"panel-failure-second-501",
             b"1 answered / 1 failed",
             b"10 input / 20 output tokens",
         ):
-            if needle not in panel_plain:
+            if needle not in two_pages:
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )
@@ -13371,6 +13420,9 @@ def run_keyboard_regression(executable: str) -> None:
         ),
         refresh=0.05,
         http_fixtures=runtime_fixtures,
+        # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
+        # expected "2026-08-24 10:20:00" the same on every machine.
+        extra_env={"TZ": "UTC"},
     )
     run_terminal_scenario(
         executable,
@@ -14036,9 +14088,12 @@ def run_browser_scene_regression(executable: str) -> None:
         assert len(scenes) == 1 and not actions, "selection triggered a browser effect"
         send_and_wait(process, master, output, b"\r", b"SCENE CLICK VERIFIED")
         assert len(actions) == 1 and len(scenes) == 2, "click was not followed by one fresh scene"
-        send_and_wait(process, master, output, b"v", b"Channel messages")
+        # The semantic main shortcut first observes the landmark map, then
+        # focuses the unique main region without a guessed selector.
+        send_and_wait(process, master, output, b"m", b"Channel messages")
         assert scenes[-1]["view"] == "regions" and len(actions)==1
-        send_and_wait(process, master, output, b"\r", b"SCOPED CHANNEL CONTENT")
+        send_and_wait(process, master, output, b"m", b"SCOPED CHANNEL CONTENT")
+        assert scenes[-1]["scope"] == {"documentId":"document-after","nodeId":"channel-region"}
         focused = scenes[-1]
         send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"

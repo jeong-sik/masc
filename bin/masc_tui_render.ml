@@ -981,8 +981,10 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   in
   let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
-  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
-    ^ "Esc: back to the list" ^ Ansi.reset);
+  (* Opens on MASC and its name, like every other surface; the way out is the
+     footer's to say, and saying it here too spelled the same key twice in two
+     notations. *)
+  box_line buf cols (screen_title " MASC Approval");
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =
@@ -1042,7 +1044,7 @@ let render_approval_detail (state : state) (row : approval_row) =
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  y:confirm  n:deny  R:retry if offered  Esc:back");
+       ~hints:Masc_tui_keys.footer_hints_approval_detail);
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 

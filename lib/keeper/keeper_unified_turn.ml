@@ -767,6 +767,12 @@ let run_keeper_cycle
                    ~config
                    ~current_task
                in
+               let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Workspace_memory_publication.observe ~base_path:config.base_path) in
+               (match workspace_memory with
+                | Workspace_memory_publication.Unavailable detail ->
+                  Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
+                | Missing | Available _ -> ());
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the
@@ -816,6 +822,7 @@ let run_keeper_cycle
                      ~current_task
                      ~task_skill_surfaces
                      ~active_goal_summaries
+                     ~workspace_memory
                      ~repository_freshness
                      ?context_budget_bytes
                      ~observation

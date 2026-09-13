@@ -87,6 +87,13 @@ type probe_attempt =
   }
 
 val probe_outcome_to_string : probe_outcome -> string
+
+val spoke_detail : bytes:int -> voice:string -> string
+(** What an answered TTS probe reports: the byte count and the voice it asked
+    for. The voice is there because [say] does not fail on one it does not
+    have -- it speaks in the system voice and exits 0 -- so the bytes alone
+    cannot tell a keeper's own voice from the fallback. A blank voice reads as
+    the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
 
 val probe_tts
@@ -217,6 +224,12 @@ val amplitude_of_db : float -> float
 (** The inverse, with [neg_infinity] mapping back to zero. *)
 
 (** {1 Microphone record + transcribe} *)
+
+val recorder_refusal_message : Process_eio.spawn_refusal -> string
+(** What {!record_and_transcribe} answers when its recorder never started.
+    A missing executable is named with the command that installs it -- a fresh
+    mac has no sox, which carries [rec] -- and every other refusal keeps the
+    runner's own sentence rather than a guessed cause. *)
 
 val measure_noise_floor : agent_id:string -> unit -> float option
 (** One short capture, as long as the configured

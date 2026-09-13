@@ -1,0 +1,1191 @@
+{
+  "mode": "installed_acceptance",
+  "probe_passed": true,
+  "scope": "Installed MASC full IDE, real HTTP and WebSocket, probe-owned worktree source. Same-file reselection refreshes the real file API; this is not an autonomous Keeper or automatic file-watch proof. Unrelated dashboard WebSockets and mutation requests are blocked, so overall dashboard connectivity is outside this probe.",
+  "diagnostics_reference": {
+    "schema": "masc.lsp_diagnostics_reference.v1",
+    "scope": "Direct native ocamllsp buffer-only change on existing registered fixture; no installed acceptance",
+    "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+    "initial": {
+      "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+      "diagnostics": [
+        {
+          "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 1
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        },
+        {
+          "code": "hole",
+          "message": "This typed hole should be replaced with an expression of type 'a",
+          "range": {
+            "end": {
+              "character": 11,
+              "line": 0
+            },
+            "start": {
+              "character": 11,
+              "line": 0
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        },
+        {
+          "message": "Syntax error, expecting fun_expr",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 1
+            },
+            "start": {
+              "character": 0,
+              "line": 1
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        }
+      ]
+    },
+    "updated": {
+      "source_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3",
+      "diagnostics": [
+        {
+          "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+          "range": {
+            "end": {
+              "character": 0,
+              "line": 1
+            },
+            "start": {
+              "character": 0,
+              "line": 0
+            }
+          },
+          "severity": 1,
+          "source": "ocamllsp"
+        }
+      ]
+    },
+    "versioned_reports": false,
+    "observed_pid": 97202,
+    "process_exit_code": 0
+  },
+  "runtime_build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "commit_source": "embedded",
+    "binary_commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "41a75acff6d190e767cebee3b53c371ed643293a41e1f1b5d93a6c5ab88c180d",
+    "binary_commit_unix_ts": 1789237013,
+    "binary_commit_age_seconds": 1798,
+    "executable_path": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d/masc",
+    "executable_dir": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d",
+    "runtime_instance_id": "01a096ee-b1f5-7000-aec2-4f7ea7d434e7",
+    "started_at": "2026-09-12T18:43:40Z",
+    "uptime_seconds": 190
+  },
+  "fixture": {
+    "repository_id": "lsp-acceptance-probe-20260913",
+    "root": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "source_relative": "lsp-acceptance-sample.ml",
+    "worktree_head": "83f31140dbce4908ce803c65081cd0f4d80a1454",
+    "initial_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "updated_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3"
+  },
+  "repository": {
+    "id": "lsp-acceptance-probe-20260913",
+    "name": "Installed IDE LSP acceptance fixture",
+    "url": "https://github.com/jeong-sik/masc.git",
+    "codebase": "github.com_jeong-sik_masc",
+    "local_path": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "resolved_local_path": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "aliases": [],
+    "default_branch": "main",
+    "keepers": [],
+    "status": "active",
+    "auto_sync": false,
+    "sync_interval": 300,
+    "created_at": 1789233118,
+    "updated_at": 1789233118
+  },
+  "baseline_status": "●\n실험 · 미검증\nInstalled IDE LSP acceptance fixture\nSOURCE\nlsp-acceptance-sample.ml\nLSP ocaml checking\nrails hidden\ndashboard · reconnecting",
+  "baseline_source": {
+    "shown_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "diagnostic_markers": 0,
+    "document_status_present": true
+  },
+  "baseline_observed": true,
+  "initial": {
+    "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "status": "LSP ocaml 3 diagnostics",
+    "detail": "lsp-acceptance-sample.ml · document version 1\nocamllsp\nBrowser editor analysis; Keeper tool usage is recorded separately.",
+    "diagnostic_markers": 2,
+    "diagnostics": [
+      {
+        "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      },
+      {
+        "code": "hole",
+        "message": "This typed hole should be replaced with an expression of type 'a",
+        "range": {
+          "end": {
+            "character": 11,
+            "line": 0
+          },
+          "start": {
+            "character": 11,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      },
+      {
+        "message": "Syntax error, expecting fun_expr",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 1
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      }
+    ],
+    "marker_titles": [
+      "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+      "Syntax error, expecting fun_expr"
+    ]
+  },
+  "updated": {
+    "source_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3",
+    "status": "LSP ocaml 1 reported · version unconfirmed",
+    "detail": "lsp-acceptance-sample.ml · document version 2\nocamllsp\nBrowser editor analysis; Keeper tool usage is recorded separately.\nThe server did not identify the document version; this result cannot confirm the updated source.",
+    "diagnostic_markers": 1,
+    "version": 2,
+    "diagnostics": [
+      {
+        "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      }
+    ],
+    "marker_titles": [
+      "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'."
+    ]
+  },
+  "fixture_restored": true,
+  "installed_assets_verified": true,
+  "assets": [
+    {
+      "name": "index.html",
+      "sha256": "66d28822c23124cbff4ffb4a50390191645308cc17f2126e3a90bcbab3a9e366",
+      "bytes": 621
+    },
+    {
+      "name": "assets/vendor-DoibHDuM.js",
+      "sha256": "c48c1e4f60608ec27faf09ab584d8aaf596a9a0f9acf8cbf9d6fc7932c8db1ff",
+      "bytes": 30250
+    },
+    {
+      "name": "assets/index-Dt0fLdQb.css",
+      "sha256": "dd457a4b6da7bdd71bbc7b9a21dc5e6fe59d460bd8822875ef7de4848894a48a",
+      "bytes": 1324101
+    },
+    {
+      "name": "assets/index-IEJ0FQqa.js",
+      "sha256": "f7cc467d4bceb9bb82f4f13e68812c2825bf0ff02c1fc780413d19a2c4caca1d",
+      "bytes": 766874
+    },
+    {
+      "name": "assets/preload-helper-cC-D59TZ.js",
+      "sha256": "a0fe96b42dde4d53a567a44fbb1a4be77056bcf2fe4826166d0809bb1cefe465",
+      "bytes": 1264
+    },
+    {
+      "name": "assets/cost-types-C7iUt7Ax.js",
+      "sha256": "0fb2c48757ea911615f780afb99bc53fc2cbf6792f664402dd2cf9e16ae5bb4b",
+      "bytes": 396
+    },
+    {
+      "name": "assets/repositories-CLTTCPJo.js",
+      "sha256": "0f1c6d48d1a8a3f7b61e6ada936ec7d8a0dca66c0352f54afb40b3b193d17465",
+      "bytes": 2561
+    },
+    {
+      "name": "assets/ide-context-lens-DQfXxh-j.js",
+      "sha256": "86abc49f025f2790c20cd955f6e848c2db65b5feb80750b72a8a6a0b9c118c07",
+      "bytes": 16888
+    },
+    {
+      "name": "assets/ide-shell-CDk6dO0a.js",
+      "sha256": "2414bfe7d0c7d62c21a96693eb17b94f6123f4ffeb5fd2e13cc689bdce1793f8",
+      "bytes": 491972
+    },
+    {
+      "name": "assets/search-B1Kx0wp-.js",
+      "sha256": "15c14a3bddfa9c9c84bf2e539d4cd5c0bb806f38f6d8eac2b0c6f06f1c94a2a3",
+      "bytes": 171
+    },
+    {
+      "name": "assets/folder-CW70_0F-.js",
+      "sha256": "d437d52ac1f3287106e48ad0f5684cb0f76b9074c144da1016a5849f3fc99f8b",
+      "bytes": 225
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-117.woff2",
+      "sha256": "e89faf36222bbb664dd5c28e8969d6817faaf100d1ca532f294084591cc9c9b7",
+      "bytes": 14420
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-118.woff2",
+      "sha256": "0136b09150b3ef19b74dd55e2fc73a9e267a4da4ed3615542a191485da5afbf4",
+      "bytes": 14668
+    },
+    {
+      "name": "assets/fonts/JetBrainsMono-400-latin.woff2",
+      "sha256": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4",
+      "bytes": 31340
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-119.woff2",
+      "sha256": "994289a67b5f65801130b59217ecc8ce98e963cd1c34bbe56c984e829db71a1f",
+      "bytes": 16668
+    },
+    {
+      "name": "assets/file-text-DJ44pXw2.js",
+      "sha256": "6efc2a31424b1f78f949565ee2776bc33b4ddd9076c055cec1677a9fa205a084",
+      "bytes": 382
+    },
+    {
+      "name": "assets/fonts/Cinzel-Regular.ttf",
+      "sha256": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34",
+      "bytes": 125468
+    },
+    {
+      "name": "assets/keeper-composite-lookup-BkEMofyR.js",
+      "sha256": "8bf75d8d6e135fb0365f5ac73d16ae43d30bc153c7ee3ec21f60955a3a1fdb03",
+      "bytes": 126
+    },
+    {
+      "name": "assets/goal-helpers-B9VJQQ3L.js",
+      "sha256": "20aae856ed515d99c8052d72befa812042501ada480897807c27c013510db9c6",
+      "bytes": 3004
+    },
+    {
+      "name": "assets/dashboard-keeper-cost-CzxKWUYp.js",
+      "sha256": "15467658e9b784fe341cc4be2ac702f52e25038b364b6dc9c2b7b5de880b0b07",
+      "bytes": 2863
+    },
+    {
+      "name": "assets/gate-refresh-Dsy3elbq.js",
+      "sha256": "ad59c3ea70adf656a1b319f69344fdd8743dcd637835b7ce316cde376b09b65f",
+      "bytes": 374
+    },
+    {
+      "name": "assets/tab-refresh-BXUzmKMS.js",
+      "sha256": "31147d41815f063b56976137b500699c5dc2f85ad8de24ebcd1db7e69f31a765",
+      "bytes": 4530
+    },
+    {
+      "name": "assets/mission-actions-Cvg6tD1Z.js",
+      "sha256": "e3a3bfcbeb392dbc7e342ef97d8c51b3a3c41f9a9535d9242b632ba75b0487f6",
+      "bytes": 5730
+    },
+    {
+      "name": "assets/operator-actions-DeRRFJeO.js",
+      "sha256": "af823abe0c79e3d296eee7b7dbdb9d05bf02f5111a1e27cab1e2bb4d7b9f5533",
+      "bytes": 1772
+    },
+    {
+      "name": "assets/mission-signals-_SGhAZRW.js",
+      "sha256": "10b24af50626cc5729a8c5c21d25a8cce6787de5aa04895fa35629c804b7bc92",
+      "bytes": 247
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-110.woff2",
+      "sha256": "bcd2f60fc886a27757d803cdaaf2cd6c68c357127dcda6979f6737c9ebd0e72d",
+      "bytes": 17604
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-116.woff2",
+      "sha256": "afc33bf7e12515219591d71d3adbb65f167652833878dc0e8da579884c7d6c39",
+      "bytes": 16172
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-105.woff2",
+      "sha256": "120423813669c4943e90b31a1f4051ea954bbf5e17ea82c452c6e1a6bee2d69b",
+      "bytes": 25208
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-98.woff2",
+      "sha256": "1398f9e025188301142d3ee01db91185db0091a26d9c56ce5decbf120e2dd9e8",
+      "bytes": 12232
+    },
+    {
+      "name": "assets/dashboard-config-SQ5qy8AU.js",
+      "sha256": "2b16a44a9f073308790582730150d7ff14017181b120adb72f61e90150957fb5",
+      "bytes": 2948
+    },
+    {
+      "name": "assets/effect-http-BbVIx8zZ.js",
+      "sha256": "9e69cd1b1e0c216496ec5be6b0390e641f9b3a0af461bb3372cf7b671d601799",
+      "bytes": 567
+    },
+    {
+      "name": "assets/effect-runtime-DW5GioGO.js",
+      "sha256": "5f8243ba795d5c106bb744481436e35bf6e3f00d43f03c0eb7f666ac9efbc1d8",
+      "bytes": 175131
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-106.woff2",
+      "sha256": "9a00cb77a5426fb62a97e72af34550d76d3c6f9deed12c814a76b31d42196b01",
+      "bytes": 24688
+    },
+    {
+      "name": "assets/dashboard-mission-gWvvThn1.js",
+      "sha256": "8ef04ef6d6ba7c727da381bb89eee808f9c6c397dd9f93daae3fd3b4a26362a6",
+      "bytes": 533
+    },
+    {
+      "name": "assets/runtime-probe-DontOQN5.js",
+      "sha256": "20b88d8a235bdabef8c7bcf1b9922f3b01bf8afff523fb0572664038cdb13b6b",
+      "bytes": 2298
+    }
+  ],
+  "events": [
+    {
+      "method": "GET",
+      "path": "/dashboard/",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/vendor-DoibHDuM.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-Dt0fLdQb.css",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-IEJ0FQqa.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/preload-helper-cC-D59TZ.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/cost-types-C7iUt7Ax.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/repositories-CLTTCPJo.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/ide-context-lens-DQfXxh-j.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/ide-shell-CDk6dO0a.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/search-B1Kx0wp-.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/folder-CW70_0F-.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-117.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-118.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/JetBrainsMono-400-latin.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-119.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/file-text-DJ44pXw2.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/Cinzel-Regular.ttf",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-composite-lookup-BkEMofyR.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/goal-helpers-B9VJQQ3L.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-keeper-cost-CzxKWUYp.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/gate-refresh-Dsy3elbq.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/tab-refresh-BXUzmKMS.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-actions-Cvg6tD1Z.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/operator-actions-DeRRFJeO.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-signals-_SGhAZRW.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ide/presence",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-110.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-116.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-105.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-98.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/status",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/gate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/project-snapshot",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/shell",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/mcp",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-config-SQ5qy8AU.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-http-BbVIx8zZ.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-runtime-DW5GioGO.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-106.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/tree",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-mission-gWvvThn1.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/config",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/runtime-probe-DontOQN5.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/briefing",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/tree",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/file",
+      "status": 200
+    },
+    {
+      "kind": "fixture_source_response",
+      "sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+      "bytes": 12
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/execution",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/tree",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/file",
+      "status": 200
+    },
+    {
+      "kind": "fixture_source_response",
+      "sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3",
+      "bytes": 14
+    }
+  ],
+  "protocol": [
+    {
+      "socket": 1,
+      "event": "browser_connection_requested",
+      "path": "/api/v1/ide/lsp",
+      "repository_id": "lsp-acceptance-probe-20260913",
+      "codebase": "github.com_jeong-sik_masc"
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "processId": null,
+          "clientInfo": {
+            "name": "masc-ide",
+            "version": "1.0.0"
+          },
+          "locale": "ko",
+          "rootUri": "",
+          "capabilities": {
+            "textDocument": {
+              "codeLens": {},
+              "inlayHint": {},
+              "diagnostic": {},
+              "publishDiagnostics": {
+                "versionSupport": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "capabilities": {
+            "textDocumentSync": 2,
+            "completionProvider": {
+              "resolveProvider": true
+            },
+            "hoverProvider": true,
+            "definitionProvider": true,
+            "referencesProvider": true,
+            "documentHighlightProvider": true,
+            "documentSymbolProvider": true,
+            "foldingRangeProvider": true,
+            "selectionRangeProvider": true,
+            "documentLinkProvider": true,
+            "codeLensProvider": {
+              "resolveProvider": false
+            },
+            "codeActionProvider": true,
+            "inlayHintProvider": true,
+            "diagnosticProvider": {
+              "interFileDependencies": false,
+              "workspaceDiagnostics": false
+            }
+          },
+          "masc": {
+            "workspaceRoot": "/private/tmp/masc-installed-ide-lsp-fixture-20260913"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "initialized",
+        "params": {}
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+            "languageId": "ocaml",
+            "version": 1,
+            "text": "let value =\n"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "masc/lspStatus",
+        "params": {
+          "langs": [
+            {
+              "lang": "ocaml",
+              "connected": true,
+              "command": "ocamllsp",
+              "last_error": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "textDocument/codeLens",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "textDocument/inlayHint",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          },
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 2,
+              "character": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "textDocument/diagnostic",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": []
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32603,
+          "message": "LSP error for request 4: Request not supported yet!"
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": []
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "textDocument/publishDiagnostics",
+        "params": {
+          "diagnostics": [
+            {
+              "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+              "range": {
+                "end": {
+                  "character": 0,
+                  "line": 1
+                },
+                "start": {
+                  "character": 0,
+                  "line": 0
+                }
+              },
+              "severity": 1,
+              "source": "ocamllsp"
+            },
+            {
+              "code": "hole",
+              "message": "This typed hole should be replaced with an expression of type 'a",
+              "range": {
+                "end": {
+                  "character": 11,
+                  "line": 0
+                },
+                "start": {
+                  "character": 11,
+                  "line": 0
+                }
+              },
+              "severity": 1,
+              "source": "ocamllsp"
+            },
+            {
+              "message": "Syntax error, expecting fun_expr",
+              "range": {
+                "end": {
+                  "character": 0,
+                  "line": 1
+                },
+                "start": {
+                  "character": 0,
+                  "line": 1
+                }
+              },
+              "severity": 1,
+              "source": "ocamllsp"
+            }
+          ],
+          "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+            "version": 2
+          },
+          "contentChanges": [
+            {
+              "text": "let value = 1\n"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "textDocument/publishDiagnostics",
+        "params": {
+          "diagnostics": [
+            {
+              "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+              "range": {
+                "end": {
+                  "character": 0,
+                  "line": 1
+                },
+                "start": {
+                  "character": 0,
+                  "line": 0
+                }
+              },
+              "severity": 1,
+              "source": "ocamllsp"
+            }
+          ],
+          "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "textDocument/codeLens",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "textDocument/inlayHint",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          },
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 2,
+              "character": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "textDocument/diagnostic",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": []
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "error": {
+          "code": -32603,
+          "message": "LSP error for request 6: Request not supported yet!"
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "result": []
+      }
+    }
+  ],
+  "navigation": [
+    {
+      "action": "write_probe_owned_source",
+      "sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3"
+    },
+    {
+      "action": "reselect_same_file_to_refresh_real_api"
+    }
+  ],
+  "blocked": [
+    {
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "kind": "websocket",
+      "path": "/ws"
+    }
+  ],
+  "errors": [],
+  "failures": []
+}

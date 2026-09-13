@@ -88,7 +88,7 @@ class NativeDiscovery(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_missing_explicit_or_registry_credential_makes_no_request(self):
-        for fields in [dict(api_key_env='MASC_DISCOVERY_MISSING_KEY'), dict(provider_id='openai')]:
+        for fields in [dict(api_key_env='MASC_DISCOVERY_MISSING_KEY'), dict(provider_id='openai-responses')]:
             with self.subTest(fields=fields):
                 result = self.invoke(**fields)
                 self.assertNotEqual(result.returncode, 0)

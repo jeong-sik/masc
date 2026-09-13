@@ -926,6 +926,7 @@ export async function fetchBoard(
     excludeAutomation?: boolean
     author?: string
     hearth?: string
+    signal?: AbortSignal
   },
 ): Promise<{ posts: BoardPost[] }> {
   return timeBoardRequest('list', () => runRequest('fetchBoard', async () => {
@@ -938,10 +939,9 @@ export async function fetchBoard(
     params.set('voter', currentDashboardActor())
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
-    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
-    const posts = Array.isArray(raw.posts)
-      ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
-      : []
+    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`, { signal: options?.signal })
+    if (!isRecord(raw) || !Array.isArray(raw.posts)) throw new Error('Invalid Board posts response')
+    const posts = raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
     return { posts }
   }))
 }

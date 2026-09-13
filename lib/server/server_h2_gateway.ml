@@ -152,7 +152,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
   in
 
-  let h2_request_handler _client_addr h2_reqd =
+  let h2_request_handler client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
@@ -276,10 +276,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~protocol:Transport_metrics.H2
         ~scope:Transport_metrics.Agent
     in
-    let h2_check_agent_rate_limit h2_reqd =
-      match agent_rl_key_of_request httpun_request with
-      | None -> Ok ()
-      | Some rl_key ->
+    let h2_check_agent_rate_limit ?(quota = Metered_operation) h2_reqd =
+      match quota, agent_rl_key_of_request httpun_request with
+      | Exempt_observation, _ -> Ok ()
+      | Metered_operation, None -> Ok ()
+      | Metered_operation, Some rl_key ->
           if Rate_limit.check_agent_global ~key:rl_key then Ok ()
           else (
             h2_respond_agent_rate_limited h2_reqd ~rl_key;
@@ -303,7 +304,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               httpun_request
           with
           | Ok () ->
-              (match h2_check_agent_rate_limit h2_reqd with
+              (match h2_check_agent_rate_limit
+                       ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                       h2_reqd with
                | Ok () -> f state
                | Error () -> ())
           | Error err -> h2_respond_auth_error h2_reqd err)
@@ -337,7 +340,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             httpun_request
         with
         | Ok () ->
-            (match h2_check_agent_rate_limit h2_reqd with
+            (match h2_check_agent_rate_limit
+                     ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                     h2_reqd with
              | Ok () -> f state
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
@@ -382,6 +387,31 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~tool_name ~request_authority httpun_request
     in
 
+    (* The H1 ingress charges every request against the per-client-IP bucket
+       before it reaches a route. This handler took the address and threw it
+       away, so nothing on H2 had that limit -- and the observation routes this
+       lane exempts from the per-agent bucket were then unlimited on the
+       transport a client gets by default. Probe exemptions come from the same
+       SSOT the H1 ingress reads, so a renamed probe stays exempt in both. *)
+    let client_ip_rate_limited () =
+      if String.equal path "/health" || Server_health_paths.is_public path
+      then false
+      else
+        let rl_key = Rate_limit.key_of_sockaddr client_addr in
+        if Rate_limit.check_global ~key:rl_key then false
+        else begin
+          h2_respond_json
+            h2_reqd
+            (Rate_limit.too_many_requests_body ())
+            ~status:`Too_many_requests
+            ~extra_headers:(Rate_limit.headers_global ~key:rl_key @ cors);
+          Transport_metrics.record_http_rate_limit_response
+            ~acceptance:Transport_metrics.Accepted_by_writer
+            ~protocol:Transport_metrics.H2
+            ~scope:Transport_metrics.Client_ip;
+          true
+        end
+    in
     let dispatch_h2_route () =
       match httpun_meth, path with
       (* ─────────────────────────────────────────────────────────────────────
@@ -1520,6 +1550,48 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
          ═══════════════════════════════════════════════════════════════════════ *)
+      (* Probing an endpoint spends a credit on a metered provider, the same
+         reason /voice/transcribe is admin-gated rather than carrying a public
+         capability. The HTTP/1 router registers the same two paths in
+         server_routes_http_routes_voice.ml; both tables read the request and
+         shape the report through Server_voice_probe, so a client that selects
+         h2c is answered by the same code as one that does not. *)
+      | `POST, "/api/v1/voice/probe/tts" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match Server_voice_probe.tts_report ~body with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
+      (* The audio arrives in the raw body, not as a multipart part. *)
+      | `POST, "/api/v1/voice/probe/stt" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match
+                   Server_voice_probe.stt_report
+                     ~content_type:
+                       (Httpun.Headers.get httpun_request.headers "content-type")
+                     ~body
+                 with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
       | _
         when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
                ~cors ~path
@@ -1542,7 +1614,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
 
     in
-    if
+    (* The per-IP bucket is charged before the origin check, not after it. A
+       cross-origin MCP request is refused here without ever reaching
+       [dispatch_h2_route], so charging inside that function left this branch
+       unmetered: one client could hold it open with rejected requests and
+       never meet a limit. *)
+    if client_ip_rate_limited () then ()
+    else if
       is_mcp_transport_request httpun_request
       && not (validate_origin ~request_authority httpun_request)
     then

@@ -141,10 +141,43 @@ let test_the_runtime_loop_can_reach_the_command_transport () =
     (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
        ~binding_name:"transcribe_audio" ~callee:"transcribe_via_command")
 
+(* An answered TTS probe names the voice it asked for.
+
+   This is the only thing in the report that can catch a keeper mapped to a
+   voice its endpoint does not have. say answers such a mapping with the
+   system voice and exit 0, so the state is [answered] and the byte count is
+   whatever the fallback produced -- measured 2026-09-13: 79,758 bytes for a
+   name that does not exist and 79,758 for the section default, against
+   124,690 for a keeper whose voice does. The name is the difference. *)
+let test_an_answer_names_the_voice_it_asked_for () =
+  Alcotest.(check string) "the voice as configured"
+    "124690 bytes of audio in \"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))\""
+    (Masc.Voice_bridge.spoke_detail ~bytes:124690
+       ~voice:"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))");
+  (* Readable, not escaped into byte numbers: a Korean voice name through %S
+     is unreadable, and the name is the whole point of reporting it. *)
+  Alcotest.(check bool) "the name survives as itself" true
+    (Astring.String.is_infix
+       ~affix:"\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"
+       (Masc.Voice_bridge.spoke_detail ~bytes:1
+          ~voice:"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))"))
+
+(* A reader who never picked one has been listening to the system voice all
+   along. Saying so beats reporting a voice named "". *)
+let test_no_voice_reads_as_the_system_voice () =
+  Alcotest.(check string) "blank" "512 bytes of audio in the system voice"
+    (Masc.Voice_bridge.spoke_detail ~bytes:512 ~voice:"   ")
+
 let () =
   Alcotest.run
     "voice_probe"
-    [ ( "report contract"
+    [ ( "what an answer says"
+      , [ Alcotest.test_case "an answer names the voice it asked for" `Quick
+            test_an_answer_names_the_voice_it_asked_for
+        ; Alcotest.test_case "no voice reads as the system voice" `Quick
+            test_no_voice_reads_as_the_system_voice
+        ] )
+    ; ( "report contract"
       , [ Alcotest.test_case "each state has its own word" `Quick
             test_each_state_has_its_own_word
         ; Alcotest.test_case "the report names the endpoint and its kind" `Quick

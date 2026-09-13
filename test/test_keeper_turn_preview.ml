@@ -30,20 +30,20 @@ let test_blank_text_does_not_erase_the_last_words () =
 let test_tool_note_keeps_text_and_text_keeps_tool () =
   Keeper_turn_preview.note_text ~keeper_name:"mix-keeper" ~now:1. "drafting";
   Keeper_turn_preview.note_tool ~keeper_name:"mix-keeper" ~now:2.
-    (Some "Execute");
+    "Execute";
   (match Keeper_turn_preview.current ~keeper_name:"mix-keeper" with
-   | Some { Keeper_turn_preview.text_tail; current_tool; _ } ->
+   | Some { Keeper_turn_preview.text_tail; last_tool; _ } ->
      Alcotest.(check string) "tool note kept the text" "drafting" text_tail;
      Alcotest.(check (option string)) "and recorded the tool"
-       (Some "Execute") current_tool
+       (Some "Execute") last_tool
    | None -> Alcotest.fail "entry vanished");
   Keeper_turn_preview.note_text ~keeper_name:"mix-keeper" ~now:3. "still going";
   match Keeper_turn_preview.current ~keeper_name:"mix-keeper" with
-  | Some { Keeper_turn_preview.text_tail; current_tool; _ } ->
+  | Some { Keeper_turn_preview.text_tail; last_tool; _ } ->
     Alcotest.(check string) "text note replaced the tail" "still going"
       text_tail;
     Alcotest.(check (option string)) "and kept the tool" (Some "Execute")
-      current_tool
+      last_tool
   | None -> Alcotest.fail "entry vanished"
 ;;
 
@@ -52,10 +52,73 @@ let test_unknown_keeper_has_no_preview () =
     (Keeper_turn_preview.current ~keeper_name:"never-noted" = None)
 ;;
 
+let test_live_attempt_failover_and_new_turn () =
+  let keeper_name = "live-lifecycle" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  Keeper_turn_preview.reset ~keeper_name ~now:1.;
+  Keeper_turn_preview.note_attempt ~keeper_name ~now:2. ~runtime_id:"claude";
+  Alcotest.(check bool) "silent provider wait is visible" true
+    (Astring.String.is_infix ~affix:"waiting for provider response"
+      (Keeper_turn_preview.status_text (current ())));
+  Keeper_turn_preview.note_failure ~keeper_name ~now:3. ~runtime_id:"claude" "401 invalid key";
+  Keeper_turn_preview.note_attempt ~keeper_name ~now:4. ~runtime_id:"glm";
+  let switched = Keeper_turn_preview.status_text (current ()) in
+  Alcotest.(check bool) "new provider and failure both visible" true
+    (Astring.String.is_infix ~affix:"glm" switched && Astring.String.is_infix ~affix:"401" switched);
+  Keeper_turn_preview.note_stream ~keeper_name ~now:5.
+    (Agent_core.Types.ContentBlockDelta { index = 0; delta = TextDelta "working" });
+  Alcotest.(check string) "text appears before a turn completes" "working" (current ()).text_tail;
+  Keeper_turn_preview.note_tool ~keeper_name ~now:6. "Execute";
+  Alcotest.(check bool) "last observed tool visible" true
+    (Astring.String.is_infix ~affix:"last observed tool: Execute" (Keeper_turn_preview.status_text (current ())));
+  Keeper_turn_preview.note_tool ~keeper_name ~now:7. "Execute";
+  Alcotest.(check bool) "a returned tool is never labelled running" false
+    (Astring.String.is_infix ~affix:"tool running" (Keeper_turn_preview.status_text (current ())));
+  Keeper_turn_preview.reset ~keeper_name ~now:8.;
+  Alcotest.(check string) "new turn cannot inherit old output" "" (current ()).text_tail;
+  Alcotest.(check (option string)) "new turn cannot inherit old failure" None (current ()).last_failure
+;;
+
+let test_overlapping_and_rejected_tools_remain_observations () =
+  let keeper_name = "overlapping-tools" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  Keeper_turn_preview.reset ~keeper_name ~now:1.;
+  Keeper_turn_preview.note_stream ~keeper_name ~now:1.5
+    (Agent_core.Types.ContentBlockStart { index=1; content_type="tool_use"; tool_id=Some "dynamic"; tool_name=Some "MCP" });
+  Alcotest.(check (option string)) "official-client dynamic tool is visible" (Some "MCP") (current ()).last_tool;
+  Keeper_turn_preview.note_failure ~keeper_name ~now:1.6 ~runtime_id:"claude" (String.make 10000 'x');
+  Alcotest.(check bool) "diagnostic cannot flood the light poll" true
+    (String.length (Option.get (current ()).last_failure) < 300);
+  Keeper_turn_preview.reset ~keeper_name ~now:1.7;
+  (* The same hook can run before validation rejects Skill. *)
+  Keeper_turn_preview.note_tool ~keeper_name ~now:2. "Skill";
+  Alcotest.(check string) "a request does not claim execution"
+    "tool activity observed · last observed tool: Skill"
+    (Keeper_turn_preview.status_text (current ()));
+  (* A starts, B starts, A returns. A is the latest observation, not a claim
+     that A is running or that B stopped. No shared in-flight slot is cleared. *)
+  List.iteri (fun index tool ->
+    Keeper_turn_preview.note_tool ~keeper_name ~now:(3. +. float_of_int index) tool)
+    ["A"; "B"; "A"];
+  Alcotest.(check string) "interleaved returns keep their historical meaning"
+    "tool activity observed · last observed tool: A"
+    (Keeper_turn_preview.status_text (current ()));
+  Keeper_turn_preview.note_failure ~keeper_name ~now:6. ~runtime_id:"claude" "rejected";
+  Alcotest.(check (option string)) "failed attempt drops tool observation" None
+    (current ()).last_tool;
+  Keeper_turn_preview.note_attempt ~keeper_name ~now:7. ~runtime_id:"glm";
+  Alcotest.(check (option string)) "next attempt has no prior tool" None
+    (current ()).last_tool
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
-      , [ Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
+      , [ Alcotest.test_case "overlapping and rejected tools are observations" `Quick
+            test_overlapping_and_rejected_tools_remain_observations
+        ; Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick
+            test_live_attempt_failover_and_new_turn
+        ; Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
             test_tail_cuts_on_utf8_boundary
         ; Alcotest.test_case "blank text does not erase the last words" `Quick
             test_blank_text_does_not_erase_the_last_words

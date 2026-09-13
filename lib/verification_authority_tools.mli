@@ -52,7 +52,7 @@ val schemas : t -> Types_core.tool_schema list
 
 val image_delivery_note : string
 (** The sentence [schemas] appends to the read_file descriptor: this surface
-    reads images and inspected PDF pages as visual input. Exposed so the schema-parity test asserts
+    reads images and inspected PDF/PPTX pages as visual input. Exposed so the schema-parity test asserts
     against the same spelling the surface publishes. *)
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
@@ -60,4 +60,7 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
     model content, with path, media type, size and SHA-256 in the text receipt.
     PDFs are inspected from complete captured source bytes using Poppler: source
     identity, parsed page metadata/text and all rendered PNG pages are returned.
+    PPTX files additionally expose ordered source slide text and speaker notes,
+    with every slide rendered from the captured presentation. Animations and
+    embedded audio/video playback remain explicitly uninspected.
     Other binary output is a stated lookup failure, never text or visual proof. *)

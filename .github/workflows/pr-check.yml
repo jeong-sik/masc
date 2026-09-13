@@ -191,7 +191,10 @@ jobs:
         uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
-          os-packages: jq ripgrep poppler-utils ffmpeg
+          os-packages: jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv
+
+      - name: Prepare managed presentation verification inputs
+        run: python3 scripts/ci/prepare-presentation-verifier.py
 
       - name: Verify standalone namespace fixtures
         run: python3 test/test_run_standalone_suites.py --compile-fixtures -v

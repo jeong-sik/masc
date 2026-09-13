@@ -312,10 +312,13 @@ let image_delivery_note =
   "Image files are delivered as visual input with byte count and SHA-256; \
    read them without line offset/limit. PDF files are inspected whole with Poppler; \
    the result contains the source SHA-256/bytes, parsed page count and text, \
-   and every rendered page as visual input. MP4 files are inspected whole with \
-   FFprobe and FFmpeg: original source SHA-256/bytes, stream metadata and direct \
-   complete audio/video decode results are returned. That decode is not a visual \
-   frame inspection or an accessibility verdict."
+   and every rendered page as visual input. PPTX files are inspected whole with \
+   python-pptx and LibreOffice: ordered slide text, speaker notes, and every \
+   rendered slide are returned with the original source identity. Animations \
+   and embedded audio/video playback are not inspected. MP4 files are inspected \
+   whole with FFprobe and FFmpeg: original source SHA-256/bytes, stream metadata \
+   and direct complete audio/video decode results are returned. That decode is \
+   not a visual frame inspection or an accessibility verdict."
 
 let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
   { Types_core.name = tool_name tool
@@ -524,6 +527,56 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
          Llm_provider.Types.image_block ~media_type:"image/png" ~data:(Base64.encode_exn page.png) ()]) inspection.pages in
     Tool_result.make_ok ~tool_name:name ~start_time ~data ~content_blocks ()
 
+let is_presentation path =
+  String.equal (String.lowercase_ascii (Filename.extension path)) ".pptx"
+
+let presentation_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
+  match Verification_presentation_inspection.inspect
+    ~base_path:t.config.base_path ~max_image_bytes ~bytes with
+  | Error error ->
+    let failure_class = match error with
+      | Verification_presentation_inspection.Policy_rejected _
+      | Pdf_inspection_failed (Verification_pdf_inspection.Image_policy_rejected _
+          | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _) ->
+        Tool_result.Policy_rejection
+      | Dependency_unavailable _
+      | Pdf_inspection_failed (Verification_pdf_inspection.Dependency_unavailable _) ->
+        Tool_result.Dependency_unavailable
+      | Invalid_document _ -> Tool_result.Workflow_rejection
+      | Command_failed _ | Invalid_output _
+      | Storage_failed _ | Pdf_inspection_failed _ -> Tool_result.Runtime_failure in
+    Tool_result.error ~failure_class ~tool_name:name ~start_time
+      (Verification_presentation_inspection.error_to_string error)
+  | Ok inspection ->
+    let slides = List.map (fun (slide : Verification_presentation_inspection.slide) ->
+      `Assoc ["slide",`Int slide.number; "text",`String slide.text;
+        "speaker_notes",(match slide.speaker_notes with None -> `Null | Some notes -> `String notes);
+        "visible",`Bool slide.visible; "hyperlinks",`List (List.map (fun target -> `String target) slide.hyperlinks)])
+      inspection.slides in
+    let pages = List.map (fun (page : Verification_pdf_inspection.page) ->
+      `Assoc ["slide",`Int page.number;"width_points",`Float page.width_points;
+        "height_points",`Float page.height_points;"rendered_text",`String page.text;
+        "rendered_bytes",`Int (String.length page.png);
+        "rendered_sha256",`String Digestif.SHA256.(digest_string page.png |> to_hex)])
+      inspection.rendered_pdf.pages in
+    let data = `Assoc ["path",`String path;
+      "media_type",`String "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+      "bytes",`Int inspection.source_bytes;"sha256",`String inspection.source_sha256;
+      "slide_count",`Int (List.length inspection.slides);"slides",`List slides;
+      "rendered_pdf_sha256",`String inspection.rendered_pdf.source_sha256;
+      "rendered_pdf_bytes",`Int inspection.rendered_pdf.source_bytes;
+      "rendered_slides",`List pages;"visual_input",`Bool true;
+      "inspection",`String "python-pptx source parsing and LibreOffice PDF rendering of the same complete captured PPTX; every PDF page inspected with Poppler";
+      "not_inspected",`List [ `String "animations";`String "embedded audio/video playback";`String "chart data";`String "accessibility verdict" ];
+      "diagnostics",`List (List.map (fun text -> `String text) inspection.diagnostics)] in
+    let content_blocks = Llm_provider.Types.Text (Yojson.Safe.to_string data) ::
+      List.concat_map (fun (page : Verification_pdf_inspection.page) ->
+        [ Llm_provider.Types.Text (Printf.sprintf "PPTX slide %d of %d; original sha256=%s"
+            page.number (List.length inspection.slides) inspection.source_sha256);
+          Llm_provider.Types.image_block ~media_type:"image/png"
+            ~data:(Base64.encode_exn page.png) () ]) inspection.rendered_pdf.pages in
+    Tool_result.make_ok ~tool_name:name ~start_time ~data ~content_blocks ()
+
 let media_result t tool ~name ~args ~start_time =
   match tool, args with
   | Read_file, `Assoc fields ->
@@ -543,7 +596,7 @@ let media_result t tool ~name ~args ~start_time =
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
-              (match (is_pdf path probe || is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
+              (match (is_pdf path probe || is_presentation path || is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
                | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                    ~config:t.config ~meta ~path ?cwd
@@ -553,25 +606,32 @@ let media_result t tool ~name ~args ~start_time =
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
-            | Ok probe when is_pdf path probe || is_mp4 path probe ->
+            | Ok probe when is_pdf path probe || is_presentation path || is_mp4 path probe ->
               Keeper_tool_filesystem_runtime.read_owned_bytes
                 ~ownership_root:t.ownership_root ~path ?cwd
                 ~max_bytes:(max_media_source_bytes + 1) ()
             | result -> result)
        in
        (match bytes with
-        | Error detail when is_pdf path "" || is_mp4 path "" ->
+        | Error detail when is_pdf path "" || is_presentation path || is_mp4 path "" ->
           Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
         (* Only an escalated whole-file read can reach this length: every other
-           path here is already capped at the image byte limit or below. *)
+           path here is already capped at the image byte limit or below. PPTX,
+           MP4 and PDF all escalate to the same ceiling, so the check sits ahead
+           of every one of them. *)
         | Ok bytes when String.length bytes > max_media_source_bytes ->
           Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
             ~tool_name:name ~start_time
             (Printf.sprintf
                "media_source_too_large: this verifier inspects at most %d bytes whole"
                max_media_source_bytes))
+        | Ok bytes when is_presentation path ->
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+            Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+              ~tool_name:name ~start_time "PPTX files are inspected whole; omit line offset and limit")
+          else Some (presentation_result t ~name ~path ~bytes ~start_time ~max_image_bytes:limit)
         | Ok bytes when is_mp4 path bytes ->
           if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection

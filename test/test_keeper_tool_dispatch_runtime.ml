@@ -7991,7 +7991,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -8083,6 +8083,8 @@ let test_direct_gate_current_history_resume ?(one_shot=false) ?(native_output_re
         let binding = match Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable binding" with
           | Some value -> value | None -> fail "missing unresolved Gate binding" in
         check bool "producer approval identity retained before lookup" true (binding.approval_ids = [approval_id]);
+        check bool "only an observed exact source becomes a recovery candidate" (not binding_failure)
+          (Option.is_some binding.unconfirmed_wait);
         (match runtime_lane, binding.runtime_suffix with
          | None, None -> ()
          | Some expected, Some actual ->
@@ -8100,17 +8102,35 @@ let test_direct_gate_current_history_resume ?(one_shot=false) ?(native_output_re
           ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "resolved despite retention failure" |> ignore;
         Gate.reconcile ~config ~meta |> require "do not invent checkpoint";
         check bool "approval cannot authorize missing checkpoint replay" true
-          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None))
-      else (
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None);
+        if recover_retention then Unix.unlink (Filename.concat session_dir "accepted-checkpoints"));
+      if (not checkpoint_failure && not binding_failure) || recover_retention then (
       (* A different completed turn appends history while the original waits. *)
+      let newer_context = if recover_retention then (
+        let independent = Keeper_chat_operation.Operation_id.of_string "independent-during-retention-failure" |> require "independent operation" in
+        let context = Agent_core.Context.create_sync () in
+        let independent_frame = Keeper_repetition_snapshot.admit frame
+          (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation independent)) |> require "independent scope" in
+        Masc.Keeper_repetition_scope.save context independent_frame; context) else original.context in
       let newer = {original with Agent_core.Checkpoint.messages=original.messages @
-        [Agent_core.Types.user_msg "Independent newer user context"]} in
+        [Agent_core.Types.user_msg "Independent newer user context"];
+        context=newer_context; created_at=original.created_at +. 1.} in
       Checkpoint.save_agent_core_classified ~session_dir newer |> require "newer history" |> ignore;
       Gate.reconcile ~config ~meta |> require "pending reconciliation";
-      check bool "no resolution invented" true
-        ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
-      Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
-        ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore;
+      if not recover_retention then (
+        check bool "no resolution invented" true
+          ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);
+        Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id:approval_id ~decision
+          ~source:Keeper_approval_queue_rules_types.Auto_judge () |> require "authoritative resolution" |> ignore)
+      else (
+        check bool "confirmed recovery leaves unresolved binding state" true
+          ((Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "reconciled binding") = None);
+        let state = Registry.direct_gate_state ~base_path ~keeper_name ~operation_id |> require "confirmed exact wait" |> Option.get in
+        let reference = match state.waiting.checkpoint with Keeper_semantic_execution.Agent_core value -> value
+          | Keeper_semantic_execution.Official_client _ -> fail "Agent Core source changed owner" in
+        let retained = Checkpoint.load_retained_exact_snapshot ~session_dir ~reference |> require "history bytes became durable continuation" in
+        check bool "exact original history was restored, not the newer canonical" true
+          ((Checkpoint.exact_snapshot_checkpoint retained).messages = original.messages));
       (match decision with
        | Keeper_approval_queue_rules_types.Decision.Approve -> ()
        | Keeper_approval_queue_rules_types.Decision.Reject _ ->
@@ -8573,6 +8593,8 @@ let () =
     ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);
     ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
+      test_case "retention IO repair recovers exact original channel history before replay" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native one-shot approval delivers input and preserves exact grant" `Quick
         (test_direct_gate_current_history_resume ~native:true ~one_shot:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native Gate input settles despite rejected output" `Quick

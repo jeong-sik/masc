@@ -5380,9 +5380,6 @@ let render_clients (state : state) =
             box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d attached, scroll %d]" shown scroll);
   box_bottom buf cols;
   (* [listing_chrome] already counts this row. Without it the keys the table
      declares for Clients went unshown, and so did an armed search's query,

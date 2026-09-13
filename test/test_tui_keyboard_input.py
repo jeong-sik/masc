@@ -3929,7 +3929,7 @@ def clients_row(
     }
 
 
-def clients_http_fixtures() -> HttpFixtures:
+def clients_http_fixtures(*, extra_clients: int = 0) -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/dashboard/clients"] = (
         200,
@@ -3940,6 +3940,9 @@ def clients_http_fixtures() -> HttpFixtures:
             "clients": [
                 clients_row("codex-mcp-client", "codex", "active", None, None),
                 clients_row("analyst-agent", "keeper", "busy", "analyst", "task-845"),
+            ] + [
+                clients_row(f"client-{index:02d}", "codex", "active", None, None)
+                for index in range(extra_clients)
             ],
         },
     )
@@ -3964,6 +3967,14 @@ def clients_footer_interaction(
     palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
     send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
     send_and_wait(process, master_fd, output, b"analyst", b"/analyst  ")
+    # Resizing keeps the armed query on screen even when the roster scrolls.
+    for rows, columns in ((16, 80), (30, 100)):
+        frame = resize_and_wait(
+            process, master_fd, output, rows=rows, columns=columns,
+            needle=b"/analyst  ", controls=(FULL_REDRAW,),
+        )
+        if b"j/k:move" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Clients resize lost its key hints: {frame!r}")
     # Esc drops the query and stays on Clients; the row goes back to the keys.
     send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
     os.write(master_fd, b"q")
@@ -13722,6 +13733,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="Clients draws its footer and an armed search",
         interact=clients_footer_interaction,
         http_fixtures=clients_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Clients keeps its footer while a crowded roster resizes",
+        interact=clients_footer_interaction,
+        http_fixtures=clients_http_fixtures(extra_clients=40),
     )
     board_reference_fixtures = board_reference_http_fixtures()
     keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()

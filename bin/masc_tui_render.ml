@@ -11956,11 +11956,18 @@ let render_prompt_registry (state : state) =
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
+  (* A count only once the registry has answered. "0/0개" stood for a
+     registry not asked yet and for one whose read failed, the same as for a
+     registry with no prompts. *)
+  let count_text =
+    title_count_of_view prompts ~count:(fun _ ->
+        Printf.sprintf "%d/%d개" total all_prompt_count)
+  in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d/%d개 · %s%s%s  %s  %s"
+    (Printf.sprintf "%s  %s%s · %s%s%s  %s  %s"
        (screen_title " MASC 프롬프트")
-       Ansi.dim total all_prompt_count
+       Ansi.dim count_text
        (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
        Ansi.reset
        (match held_back with
@@ -12154,11 +12161,14 @@ let render_runtime_prompt_assets (state : state) =
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt assets cursor in
+  let count_text =
+    title_count_of_view prompts ~count:(fun _ -> Printf.sprintf "%d개" total)
+  in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d개 · 읽기 전용%s  %s  %s"
+    (Printf.sprintf "%s  %s%s · 읽기 전용%s  %s  %s"
        (screen_title " MASC 런타임 프롬프트 자산")
-       Ansi.dim total Ansi.reset
+       Ansi.dim count_text Ansi.reset
        (config_pane_strip state)
        (connection_badge state));
   box_line_styled buf cols ~style:(Theme.recede ())
@@ -12285,11 +12295,18 @@ let render_presets (state : state) =
   let total = List.length presets in
   let cursor = max 0 (min state.presets_cursor (total - 1)) in
   let selected = List.nth_opt presets cursor in
+  (* The same rule as the prompt registry's title: no count before a
+     snapshot has arrived, and none after a first read that failed. *)
+  let count_text =
+    match state.presets_snapshot with
+    | Some _ -> Printf.sprintf "%d개" total
+    | None -> title_missing_reading ~error:state.presets_error
+  in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d개%s  %s  %s"
+    (Printf.sprintf "%s  %s%s%s  %s  %s"
        (screen_title " MASC 프리셋")
-       Ansi.dim total Ansi.reset
+       Ansi.dim count_text Ansi.reset
        (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;

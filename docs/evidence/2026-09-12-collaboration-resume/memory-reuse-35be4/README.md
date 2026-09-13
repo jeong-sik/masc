@@ -1,0 +1,9 @@
+# Real local-curator proposal reuse
+
+The editor actually read the full real 24-source local27B proposal through keeper_workspace_memory_read, compared selected source/script/current Goal evidence, wrote an exhibition handoff brief, posted it on the existing team Board and persisted a memory record. The full raw-trace lookup payload exactly equals the previously stored proposal. The shorter tool_calls output is a truncated observation and was not used to claim full payload equality.
+
+The first review missed distinctions listed in receipt.json. Root read the actual saved artifact and requested corrections and artifact-backed designer peer review. initial-handoff.md preserves the successful original Write content, including its mistakes; it is evidence of behavior, not certified knowledge. Designer consumption and spontaneous adoption are not yet established.
+
+The corrected 6,586-byte handoff was subsequently exported and materialized in the designer workspace with exact matching SHA256. The designer actually Read it, queried the same shared proposal and current Goal, and independently delegated a source-byte confirmation back to the editor. This establishes cross-Keeper consumption and a source-check response in an operator-requested workflow. Final peer review, its saved editorial plan, and spontaneous reuse remain unverified. See peer-review-progress.json.
+
+The designer then published an actual Board review and next-session editorial plan, saved verbatim in designer-board-review.json. It confirms the criteria/files correction, distinguishes current absence from historical falsity, and reuses attributed palette, fonts, tone and multimedia direction. It explicitly leaves the editor source-byte check pending. Thus a saved peer review and plan exist, but not every underlying claim is independently verified.

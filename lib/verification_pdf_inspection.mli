@@ -30,9 +30,14 @@ type error =
       (** Raised from the page count, before any page is rendered. *)
   | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
       (** Raised part way through rendering; [bytes] is what had accumulated. *)
+  | Payload_budget_exceeded of { bytes : int; limit : int }
   | Storage_failed of string
 
 val error_to_string : error -> string
+
+val max_source_bytes : int
+val max_extracted_bytes : int
+val max_page_pixels : int
 
 val max_pages : int
 (** Pages one inspection renders. A document with more is refused before any
@@ -46,6 +51,7 @@ val max_total_image_bytes : int
 val inspect :
   ?max_pages:int ->
   ?max_total_image_bytes:int ->
+  ?max_extracted_bytes:int ->
   base_path:string ->
   max_image_bytes:int ->
   bytes:string ->

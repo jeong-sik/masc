@@ -10,6 +10,17 @@ open Tool_args
 
 let default_timeout_sec = 20.
 
+(* These failures come from caller-input parsing, before browser dispatch.
+   Waiting for a different page cannot repair the same malformed arguments. *)
+let make_input_err ~tool_name ~start_time detail =
+  Tool_result.make_err ~tool_name ~start_time
+    ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~data:(Tool_error.to_json (Tool_error.Invalid_input {detail}))
+    ("Invalid browser arguments: " ^ detail
+     ^ ". Correct the arguments using the tool schema and exact observed identities; no browser command was dispatched.")
+;;
+
 let make_workflow_err ~tool_name ~start_time message =
   Tool_result.make_err
     ~tool_name
@@ -26,8 +37,8 @@ let lane_of ~tool_name ~start_time args =
     (match List.assoc_opt "lane" fields with
      | None -> Ok "live"
      | Some (`String ("live" | "automation" as lane)) -> Ok lane
-     | _ -> Error (make_workflow_err ~tool_name ~start_time "lane must be live or automation"))
-  | _ -> Error (make_workflow_err ~tool_name ~start_time "browser arguments must be an object")
+     | _ -> Error (make_input_err ~tool_name ~start_time "lane must be live or automation"))
+  | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
 let answer_to_result ~tool_name ~start_time = function
@@ -81,7 +92,7 @@ let selection_error ~tool_name ~start_time request error =
 
 let handle_tabs ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
-  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
     match Browser_surface.resolved_target request with
     | Error error -> selection_error ~tool_name ~start_time request error
@@ -113,7 +124,7 @@ let handle_session ~tool_name ~start_time args : Tool_result.result =
     answer_to_result ~tool_name ~start_time
       (Browser_lane.issue ~lane_name:"automation" ~verb:Browser_lane.Session_status ~timeout_sec:10.0)
   | _ ->
-    make_workflow_err ~tool_name ~start_time
+    make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
 ;;
 
@@ -121,7 +132,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
   let url = get_string args "url" "" in
   if not (String.length url > 7 && (String.starts_with ~prefix:"http://" url || String.starts_with ~prefix:"https://" url))
   then
-    make_workflow_err ~tool_name ~start_time
+    make_input_err ~tool_name ~start_time
       "url must be a valid http or https URL"
   else
     answer_to_result ~tool_name ~start_time
@@ -135,27 +146,27 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
     | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope";"expectedUrl";"navigationSource"])) fields
     | _ -> false in
-  if unknown_argument then make_workflow_err ~tool_name ~start_time "unknown browser read argument"
+  if unknown_argument then make_input_err ~tool_name ~start_time "unknown browser read argument"
   else
   match tool_request args with
-  | Error error -> make_workflow_err ~tool_name ~start_time error
+  | Error error -> make_input_err ~tool_name ~start_time error
   | Ok request ->
     let lane = if request.source = Browser_surface.Automation then "automation" else "live" in
     match Browser_lane.Action.parse_frame_path args with
-    | Error detail -> make_workflow_err ~tool_name ~start_time detail
+    | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok frame_path ->
     let mode = get_string args "mode" "text" in
     let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
     let destination_guard_present = match args with `Assoc fields -> (List.mem_assoc "expectedUrl" fields || List.mem_assoc "navigationSource" fields) | _ -> false in
     if destination_guard_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
-      make_workflow_err ~tool_name ~start_time "expectedUrl supports top-document scene or regions only"
+      make_input_err ~tool_name ~start_time "expectedUrl and navigationSource support top-document scene or regions only"
     else if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
-      make_workflow_err ~tool_name ~start_time "scope supports top-document scene or regions only"
+      make_input_err ~tool_name ~start_time "scope supports top-document scene or regions only"
     else if frame_path <> [] || mode = "frames" || mode = "dialog" then
-      if lane <> "automation" then make_workflow_err ~tool_name ~start_time "frame and dialog reads require automation"
+      if lane <> "automation" then make_input_err ~tool_name ~start_time "frame and dialog reads require automation"
       else (match get_int_opt args "tabId" with
-        | None -> make_workflow_err ~tool_name ~start_time "contextual read requires an observed tabId"
-        | Some tab_id when tab_id < 0 -> make_workflow_err ~tool_name ~start_time "tabId must be nonnegative"
+        | None -> make_input_err ~tool_name ~start_time "contextual read requires an observed tabId"
+        | Some tab_id when tab_id < 0 -> make_input_err ~tool_name ~start_time "tabId must be nonnegative"
         | Some tab_id ->
           let mode = match mode with
             | "text" -> Ok (`Text (get_int args "maxChars" 50_000))
@@ -163,7 +174,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
             | "dialog" when frame_path = [] -> Ok `Dialog
             | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
           match mode with
-          | Error detail -> make_workflow_err ~tool_name ~start_time detail
+          | Error detail -> make_input_err ~tool_name ~start_time detail
           | Ok mode -> answer_to_result ~tool_name ~start_time
               (Browser_lane.issue ~lane_name:lane
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
@@ -188,24 +199,28 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
                   | None -> Ok None
                   | Some value -> Result.map Option.some (Browser_scene.navigation_source_of_json value))
               | _ -> Error "browser arguments must be an object" in
-            let result = Result.bind navigation_source (fun navigation_source -> Result.bind expected_url (fun expected_url -> Result.bind scope (fun scope -> Browser_scene.read
-              ?navigation_source ?expected_url
-              ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
-              ?scope {request with tab_id=Some tab_id} ~max_chars))) in
-            match result with
-            | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
-            | Error detail -> make_workflow_err ~tool_name ~start_time detail)
-       | _ -> make_workflow_err ~tool_name ~start_time "scene requires an observed tabId")
+            let parsed = Result.bind navigation_source (fun navigation_source ->
+              Result.bind expected_url (fun expected_url ->
+                Result.map (fun scope -> navigation_source, expected_url, scope) scope)) in
+            match parsed with
+            | Error detail -> make_input_err ~tool_name ~start_time detail
+            | Ok (navigation_source, expected_url, scope) ->
+              match Browser_scene.read ?navigation_source ?expected_url
+                ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
+                ?scope {request with tab_id=Some tab_id} ~max_chars with
+              | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+              | Error detail -> make_workflow_err ~tool_name ~start_time detail)
+       | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
     | "downloads" ->
-      if lane <> "automation" then make_workflow_err ~tool_name ~start_time "downloads require automation"
+      if lane <> "automation" then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
         | Some tab_id when tab_id >= 0 -> answer_to_result ~tool_name ~start_time
             (Browser_lane.issue ~lane_name:lane ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
-        | _ -> make_workflow_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
+        | _ -> make_input_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
     | "screenshot" ->
       (match keeper_name, get_int_opt args "tabId" with
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
-       | _, None -> make_workflow_err ~tool_name ~start_time "screenshot requires an observed tabId"
+       | _, None -> make_input_err ~tool_name ~start_time "screenshot requires an observed tabId"
        | Some keeper_name, Some tab_id ->
          let result = Result.bind
              (Ok {request with tab_id=Some tab_id})
@@ -220,7 +235,7 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
         | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
         | _ -> Error "mode must be text, elements, scene, regions, screenshot, frames, dialog or downloads" in
       match verb with
-      | Error detail -> make_workflow_err ~tool_name ~start_time detail
+      | Error detail -> make_input_err ~tool_name ~start_time detail
       | Ok verb ->
         (match Browser_surface.resolved_target request with
          | Error error -> selection_error ~tool_name ~start_time request error
@@ -263,7 +278,7 @@ let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
     | _ -> args in
   match lane_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
   | Error error, _ -> error, Tool_result.Proven_pre_effect
-  | _, Error detail -> pre_error detail
+  | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
     pre_error "upload requires an authoritative Keeper file context"
   | Ok lane, Ok action ->
@@ -283,7 +298,7 @@ let handle_act ~tool_name ~start_time args = fst (handle_act_with_phase ~tool_na
 let handle_interact_with_phase ~tool_name ~start_time args =
   let pre_error error = make_workflow_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect in
   match Browser_interaction.parse args with
-  | Error error -> pre_error error
+  | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
   | Ok request ->
     let lane_name = match request.source with Browser_surface.Live -> "live" | Automation -> "automation" in
     (match Browser_lane.resolve_target ~lane_name ~client_id:request.client_id with

@@ -1,0 +1,17 @@
+{
+  "scope": "Synthetic browser locator and IntersectionObserver checks; not installed Dashboard acceptance",
+  "results": [
+    {
+      "case": "offscreen execution precedes lazy snapshot",
+      "passed": true
+    },
+    {
+      "case": "duplicate identity stays rejected even with only one snapshot",
+      "passed": true
+    },
+    {
+      "case": "unrelated execution snapshot cannot satisfy target",
+      "passed": true
+    }
+  ]
+}

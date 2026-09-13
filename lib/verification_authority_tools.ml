@@ -380,12 +380,12 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
     ~base_path:t.config.base_path ~max_image_bytes ~bytes () with
   | Error error ->
     let failure_class = match error with
-      (* These are the lane's own limits answering, not the run failing: a
-         document over a size or Poppler budget is the submitter's to fix. *)
+      (* A document refused for its size is the submitter's to fix, same as a
+         page over the image limit -- not a fault of this runtime. *)
       | Verification_pdf_inspection.Image_policy_rejected _
-      | Verification_pdf_inspection.Poppler_budget_spent _
-      | Too_many_pages _ | Rendered_bytes_exceeded _ -> Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+      | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
+      | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
+      | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_pdf_inspection.error_to_string error)
@@ -419,67 +419,30 @@ let media_result t tool ~name ~args ~start_time =
          match List.assoc_opt "cwd" fields with Some (`String cwd) -> Some cwd | _ -> None
        in
        let limit = Env_config_keeper.KeeperVision.max_image_bytes () in
-       let pdf_limit = Env_config_keeper.KeeperVision.max_pdf_source_bytes () in
-       (* Nothing stood between a producer's document and this process's memory.
-          The complete reads below run in the server, and the only size check
-          was further down on a rendered PNG -- the PDF path does not reach it
-          at all, so one evidence file could take the memory every Keeper is
-          sharing.
-
-          [sized_source] asks for one byte more than the ceiling first. A source
-          that answers with more than the ceiling is refused before the complete
-          read runs. The complete read is still what becomes evidence, because
-          this lane does not hash the bounded body, and it is measured again on
-          the way out: a producer can grow the file between the two reads, and
-          that second measurement is what notices. Refusing before the bytes
-          arrive in that case would need a bounded exact read the sandbox runner
-          does not expose. *)
-       let sized_source ~ceiling ~probe ~complete =
-         match probe ~max_bytes:(ceiling + 1) with
-         | Error _ as error -> error
-         | Ok sample when String.length sample > ceiling -> Ok sample
-         | Ok _ ->
-           (match complete () with
-            | Error _ as error -> error
-            | Ok bytes -> Ok bytes)
-       in
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
-           let probe ~max_bytes =
-             Keeper_tool_filesystem_runtime.read_sandbox_bytes
-               ~config:t.config ~meta ~path ?cwd ~max_bytes ()
-           in
            (* The bounded probe identifies the format only. Its potentially
               text-projected body never becomes image input or hash evidence. *)
-           (match probe
-                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) with
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                    ~config:t.config ~meta ~path ?cwd
+                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
-            | Ok format_probe ->
-              (match is_pdf path format_probe,
-                     Keeper_vision_tool.sniff_image_media_type format_probe with
-               | false, Error _ -> Ok format_probe
-               | true, _ ->
-                 sized_source ~ceiling:pdf_limit ~probe
-                   ~complete:(fun () ->
-                     Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                       ~config:t.config ~meta ~path ?cwd ())
-               | false, Ok _ ->
-                 sized_source ~ceiling:limit ~probe
-                   ~complete:(fun () ->
-                     Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                       ~config:t.config ~meta ~path ?cwd ())))
+            | Ok probe ->
+              (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
+               | false, Error _ -> Ok probe
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd
+                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
-           let probe ~max_bytes =
-             Keeper_tool_filesystem_runtime.read_owned_bytes
-               ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes ()
-           in
-           (match probe ~max_bytes:(limit + 1) with
-            | Ok format_probe when is_pdf path format_probe ->
-              sized_source ~ceiling:pdf_limit ~probe
-                ~complete:(fun () ->
-                  Keeper_tool_filesystem_runtime.read_complete_owned_bytes
-                    ~ownership_root:t.ownership_root ~path ?cwd ())
+           (match Keeper_tool_filesystem_runtime.read_owned_bytes
+             ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
+            | Ok probe when is_pdf path probe ->
+              Keeper_tool_filesystem_runtime.read_owned_bytes
+                ~ownership_root:t.ownership_root ~path ?cwd
+                ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
             | result -> result)
        in
        (match bytes with
@@ -488,13 +451,7 @@ let media_result t tool ~name ~args ~start_time =
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
         | Ok bytes when is_pdf path bytes ->
-          if String.length bytes > pdf_limit then
-            Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
-              ~tool_name:name ~start_time
-              (Printf.sprintf
-                 "PDF source has more than the configured %d source bytes; nothing was inspected"
-                 pdf_limit))
-          else if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
               ~tool_name:name ~start_time "PDFs are inspected whole; omit line offset and limit")
           else Some (pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes:limit)

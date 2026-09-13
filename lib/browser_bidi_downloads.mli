@@ -4,3 +4,6 @@
     [root] is the resolved runtime's staging parent. Files survive close. *)
 val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> root:string -> publish:(string -> (Yojson.Safe.t, string) result) -> Browser_downloads.start
 val verify_file : root:string -> string -> (string * int, string) result
+
+(** Validate a loopback WebSocket endpoint without connecting. *)
+val endpoint : string -> (string * int * string, string) result

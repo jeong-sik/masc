@@ -344,13 +344,62 @@ let run env config =
    | _ -> ());
   outcome
 
+(* BiDi owns the attached contexts; the operator owns Firefox. This path never
+   sends browser.close, context.close, or session.end on the operator's session. *)
+let run_bidi env config url =
+  let clock=Eio.Stdenv.clock env in
+  let client=Cohttp_eio.Client.make ~https:None (Eio.Stdenv.net env) in
+  Masc.Browser_bidi_peer.with_connection ~env ~timeout:extension_timeout_sec ~url (fun peer ->
+    let* version=Eio.Time.with_timeout_exn clock extension_timeout_sec
+      (fun ()->Masc.Browser_bidi_peer.metadata peer) in
+    let info={browser="firefox";version;engine_version=version} in
+    Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun ()->
+        match read_token config.token_file with
+        | Error _->()
+        | Ok token->Eio.Fiber.first
+            (fun ()->ignore (post ~clock ~client ~config ~info ~token "disconnect" (`Assoc [])))
+            (fun ()->Eio.Time.sleep clock 0.25));
+      let rec poll () =
+        let* token=read_token config.token_file in
+        let* response=post ~clock ~client ~config ~info ~token "poll" (`Assoc [])
+          |> Result.map_error http_error_message in
+        let* next=decode_poll response in
+        let answer id result = match result with
+          | Ok data->`Assoc ["id",`String id;"ok",`Bool true;"data",data]
+          | Error (Masc.Browser_bidi_peer.Before_effect message)->
+            `Assoc ["id",`String id;"ok",`Bool false;"error",`String message;"effectPhase",`String "not_started"]
+          | Error (Masc.Browser_bidi_peer.Outcome_unknown message)->failure id message in
+        let* continue = match next with
+          | Empty->Ok true
+          | Reject id->let* _=post ~clock ~client ~config ~info ~token "result" (failure id "unsupported BiDi verb")
+              |> Result.map_error http_error_message in Ok true
+          | Forward command->
+            let verb=match command.verb with Tabs_list->"tabs.list"|Page_read->"page.read"
+              | Page_scene->"page.scene"|Page_capture->"page.capture"|Page_interact->"page.interact"
+              | Page_elements->"page.elements"|Browser_info->"browser.info" in
+            let timed_out=ref false in
+            let result=try Eio.Time.with_timeout_exn clock extension_timeout_sec
+                (fun ()->Masc.Browser_bidi_peer.dispatch peer ~verb command.args)
+              with Eio.Time.Timeout->timed_out:=true;
+                Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded") in
+            let* _=post ~clock ~client ~config ~info ~token "result" (answer command.id result)
+              |> Result.map_error http_error_message in
+            (* Any unknown outcome ends this client, preventing pointer replay or
+               a next gesture while a previous button may remain pressed. *)
+            Ok (not !timed_out && match result with
+              | Error (Masc.Browser_bidi_peer.Outcome_unknown _)->false|_->true) in
+        if continue then poll () else Error "BiDi client stopped after an unknown command outcome" in
+      poll ()))
+
 let () =
   Log.init_from_env ();
-  let base_path = ref None and server = ref None and token_file = ref None in
+  let base_path = ref None and server = ref None and token_file = ref None and bidi_url = ref None in
   let positional = ref [] in
   let set target value = target := Some value in
   let options =
-    [ "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
+    [ "--bidi-url", Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
+    ; "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
     ; "--server", Arg.String (set server), "URL MASC HTTP server (or existing MASC HTTP configuration)"
     ; "--token-file", Arg.String (set token_file), "PATH Lane token (default: <base-path>/.masc/browser-lane/token)"
     ]
@@ -375,7 +424,7 @@ let () =
       let* () = match Unix.set_nonblock Unix.stdout with
         | () -> Ok ()
         | exception Unix.Unix_error _ -> Error "native stdout setup failed" in
-      try Eio_main.run (fun env -> run env config)
+      try Eio_main.run (fun env -> match !bidi_url with None->run env config|Some url->run_bidi env config url)
       with Eio.Io _ -> Error "native messaging connection failed"
   in
   match result with

@@ -541,9 +541,12 @@ let test_lanes_run_list_footer_names_the_drill_down () =
    one scroll walks, so the two panes move together and the key's name says
    which of the two it does. *)
 let test_lanes_run_detail_footer_appends_the_scroll_position () =
-  check str "the run detail footer carries its live scroll position"
-    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~scroll:3 ~max_scroll:40)
+  check str "the stacked run detail footer carries the window it drew"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  4-23/60"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:(Some "4-23/60"));
+  check str "the split panes name their own windows, so the footer does not"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:None)
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh

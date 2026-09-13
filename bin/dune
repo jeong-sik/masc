@@ -1187,6 +1187,7 @@
   masc_tui_chart
   masc_tui_context_inspector
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1254,6 +1255,7 @@
   masc_tui_composer_projection
   masc_tui_roster_pane
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_code_lexer
   masc.masc_goal
   masc_tui_pr_ref

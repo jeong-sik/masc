@@ -61,7 +61,7 @@ let decode_poll json =
       | "page.interact" -> Ok (Forward { id; verb = Page_interact; args })
       | _ -> Ok (Reject id)
 
-let command_json command =
+let command_json ~deadline_ms command =
   `Assoc
     [ "id", `String command.id
     ; "verb", `String
@@ -73,6 +73,7 @@ let command_json command =
          | Page_elements -> "page.elements"
          | Page_capture -> "page.capture"
          | Page_interact -> "page.interact")
+    ; "deadlineMs", `Float deadline_ms
     ; "args", command.args
     ]
 
@@ -261,10 +262,11 @@ let run env config =
     let promise, resolver = Eio.Promise.create () in
     pending := Some (command.id, resolver);
     let phase = ref Writing_frame in
+    let deadline_ms = ceil ((Unix.gettimeofday () +. extension_timeout_sec) *. 1000.) in
     let answer =
       Eio.Fiber.first
         (fun () ->
-          match write_frame (Eio.Stdenv.stdout env) (command_json command) with
+          match write_frame (Eio.Stdenv.stdout env) (command_json ~deadline_ms command) with
           | Error detail -> Replied (failure command.id detail)
           | Ok () ->
               phase := Awaiting_reply;

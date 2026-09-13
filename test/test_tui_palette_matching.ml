@@ -371,6 +371,25 @@ let test_msx_is_reached_by_its_name () =
    | _ -> Alcotest.fail "the label spelled out must lead its own matches")
 ;;
 
+(* One row per destination. Metrics was five rows that all jumped to it; its
+   other names still find it, from the one row. *)
+let test_metrics_is_one_row_that_answers_its_other_names () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  Alcotest.(check (list string)) "one row goes to Metrics" [ "go Metrics" ]
+    (List.filter_map
+       (function label, Palette_goto Metrics -> Some label | _ -> None)
+       (palette_entries state));
+  List.iter
+    (fun word ->
+      state.palette_query <- word;
+      match palette_matches state with
+      | ("go Metrics", Palette_goto Metrics) :: _ -> ()
+      | _ -> Alcotest.fail (Printf.sprintf "%S does not lead with go Metrics" word))
+    [ "metrics"; "telemetry"; "charts"; "stats"; "tele" ]
+;;
+
 let test_addons_do_not_require_a_keeper () =
   let state =
     create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
@@ -413,6 +432,8 @@ let () =
             test_the_palette_goes_to_both_halves_of_task_review
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
+        ; Alcotest.test_case "Metrics is one row that answers its other names"
+            `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
             test_addons_do_not_require_a_keeper
         ] )

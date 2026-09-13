@@ -208,7 +208,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
       ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "GET failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
@@ -243,7 +243,7 @@ let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
       ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "POST failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
 
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (int * string, string) result =
@@ -290,6 +290,29 @@ let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
   with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+(* A POST whose effect matters, told apart by what is known about that effect.
+   [post_json] folds a dropped connection and a server's refusal into one
+   string, and a caller that cannot tell them apart treats a write that may have
+   landed as one that did not. A 4xx is the server declining in its own words.
+   Everything else -- no response, a deadline, a 5xx, a success whose body does
+   not read -- leaves the effect unknown. *)
+type post_outcome =
+  | Post_answered of Yojson.Safe.t
+  | Post_refused of string
+  | Post_unanswered of string
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
+    (match decode_json ~allow_empty:true ~status_code ~body:response with
+     | Error message -> Post_refused message
+     | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
+  | Ok (status_code, response) ->
+    (match decode_json ~allow_empty:false ~status_code ~body:response with
+     | Ok json -> Post_answered json
+     | Error message -> Post_unanswered message)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -2690,7 +2713,7 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

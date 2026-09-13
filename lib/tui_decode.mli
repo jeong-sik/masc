@@ -2353,6 +2353,8 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
+(** Transport owns the target URL; keep it before the verbose failure reason. *)
+val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :
   allow_empty:bool -> status_code:int -> body:string -> (Yojson.Safe.t, string) result
 
@@ -2729,6 +2731,7 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
     decode rather than rendering as an empty row; [Evidence_access_unavailable]
     is the store-level failure the server states explicitly. *)
 type verification_evidence_item =
+  | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
   | Ev_artifact of {
       ev_reference : string;

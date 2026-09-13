@@ -59,7 +59,8 @@ let contains ~needle haystack =
 let test_rows_taken_agrees_with_what_is_drawn () =
   List.iter
     (fun (name, scheduled, awaiting) ->
-       let t = Agenda.project ~scheduled ~awaiting in
+       let t = Agenda.project ~scheduled:(Agenda.Read scheduled)
+         ~awaiting:(Agenda.Read awaiting) in
        let drawn = strip_of t <> None in
        check
          bool
@@ -75,7 +76,8 @@ let test_rows_taken_agrees_with_what_is_drawn () =
 ;;
 
 let test_an_empty_agenda_gives_the_row_back () =
-  let t = Agenda.project ~scheduled:[ done_earlier ] ~awaiting:[] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ done_earlier ])
+            ~awaiting:(Agenda.Read []) in
   check int "a store of finished rows takes no row" 0 (Agenda.rows_taken t);
   check bool "and draws nothing" true (strip_of t = None)
 ;;
@@ -101,7 +103,8 @@ let test_unrecognised_status_stays_off_the_strip () =
   let odd = row ~standing:(Agenda.Unrecognised "quantum") "2026-08-26T02:00:00Z"
               "keeper:ghost" "무엇인지 모를 것"
   in
-  let t = Agenda.project ~scheduled:[ odd; edgar ] ~awaiting:[] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ odd; edgar ])
+            ~awaiting:(Agenda.Read []) in
   match strip_of t with
   | None -> fail "the recognised wake should still be drawn"
   | Some s ->
@@ -112,7 +115,8 @@ let test_unrecognised_status_stays_off_the_strip () =
 (* Earliest wins among the rows still coming, and a settled row that sorts
    before them all does not. *)
 let test_the_earliest_coming_row_wins () =
-  let t = Agenda.project ~scheduled:[ sweep; done_earlier; edgar ] ~awaiting:[] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ sweep; done_earlier; edgar ])
+            ~awaiting:(Agenda.Read []) in
   match strip_of t with
   | None -> fail "there is a wake to draw"
   | Some s ->
@@ -121,7 +125,7 @@ let test_the_earliest_coming_row_wins () =
 ;;
 
 let test_the_clock_is_local () =
-  let t = Agenda.project ~scheduled:[ edgar ] ~awaiting:[] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ edgar ]) ~awaiting:(Agenda.Read []) in
   match strip_of t with
   | None -> fail "there is a wake to draw"
   | Some s ->
@@ -133,7 +137,8 @@ let test_the_clock_is_local () =
 (* At 23:50 a bare "08:00" reads as ten minutes away. *)
 let test_a_later_day_says_so () =
   let tomorrow = row "2026-08-26T23:00:00Z" "keeper:edgar.a.poe" "아침 일정 정리" in
-  let t = Agenda.project ~scheduled:[ tomorrow ] ~awaiting:[] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ tomorrow ])
+            ~awaiting:(Agenda.Read []) in
   match strip_of t with
   | None -> fail "there is a wake to draw"
   | Some s ->
@@ -142,7 +147,8 @@ let test_a_later_day_says_so () =
 ;;
 
 let test_waiting_uses_the_badge_shape () =
-  let t = Agenda.project ~scheduled:[] ~awaiting:[ ask "lane-smith" "Execute" ] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [])
+            ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]) in
   match strip_of t with
   | None -> fail "someone is blocked on the operator"
   | Some s ->
@@ -153,7 +159,8 @@ let test_waiting_uses_the_badge_shape () =
 (* The two halves share one line, so the clock has to leave room for the
    badge rather than run under it. *)
 let test_the_halves_fit_together () =
-  let t = Agenda.project ~scheduled:[ edgar ] ~awaiting:[ ask "lane-smith" "Execute" ] in
+  let t = Agenda.project ~scheduled:(Agenda.Read [ edgar ])
+            ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]) in
   List.iter
     (fun cols ->
        match strip_of ~cols t with
@@ -348,7 +355,8 @@ let tones_of lines tone =
 (* The strip names one wake because it has one line. The panel was opened on
    purpose, so it answers with all of them. *)
 let test_the_panel_lists_every_coming_wake () =
-  let lines = overlay_of (Agenda.project ~scheduled:[ sweep; edgar ] ~awaiting:[]) in
+  let lines = overlay_of (Agenda.project ~scheduled:(Agenda.Read [ sweep; edgar ])
+                            ~awaiting:(Agenda.Read [])) in
   check int "both wakes are rows" 2 (List.length (tones_of lines Agenda.Wake));
   let text = joined lines in
   check bool "the 11:45 check" true (contains ~needle:"11:45" text);
@@ -357,7 +365,8 @@ let test_the_panel_lists_every_coming_wake () =
 
 let test_settled_rows_do_not_reach_the_panel () =
   let lines =
-    overlay_of (Agenda.project ~scheduled:[ done_earlier; edgar ] ~awaiting:[])
+    overlay_of (Agenda.project ~scheduled:(Agenda.Read [ done_earlier; edgar ])
+                  ~awaiting:(Agenda.Read []))
   in
   check int "one wake, not two" 1 (List.length (tones_of lines Agenda.Wake));
   check
@@ -369,7 +378,8 @@ let test_settled_rows_do_not_reach_the_panel () =
 
 let test_wakes_are_earliest_first () =
   let lines =
-    overlay_of (Agenda.project ~scheduled:[ sweep; edgar ] ~awaiting:[])
+    overlay_of (Agenda.project ~scheduled:(Agenda.Read [ sweep; edgar ])
+                  ~awaiting:(Agenda.Read []))
   in
   match texts (tones_of lines Agenda.Wake) with
   | first :: _ -> check bool "the earliest leads" true (contains ~needle:"11:45" first)
@@ -380,16 +390,68 @@ let test_wakes_are_earliest_first () =
    key to ask, and a blank panel reads as a failure to load rather than as an
    answer. *)
 let test_empty_sections_answer_in_words () =
-  let lines = overlay_of (Agenda.project ~scheduled:[] ~awaiting:[]) in
+  let lines = overlay_of (Agenda.project ~scheduled:(Agenda.Read [])
+                            ~awaiting:(Agenda.Read [])) in
   let text = joined lines in
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
   check bool "so does the other" true (contains ~needle:"nobody is waiting" text);
   check int "both headings are still drawn" 2 (List.length (tones_of lines Agenda.Heading))
 ;;
 
+(* An empty section is an answer only once its list was read. With the server
+   down the panel said "nothing is scheduled" and "nobody is waiting on you"
+   about two lists no request had brought back. *)
+let test_an_unread_section_does_not_say_it_is_empty () =
+  let text reading_s reading_a =
+    joined (overlay_of (Agenda.project ~scheduled:reading_s ~awaiting:reading_a))
+  in
+  let unread = text Agenda.Not_read Agenda.Not_read in
+  check bool "a list not read yet says so" true
+    (contains ~needle:"not loaded yet" unread);
+  check bool "and does not say nothing is scheduled" false
+    (contains ~needle:"nothing is scheduled" unread);
+  check bool "or that nobody is waiting" false
+    (contains ~needle:"nobody is waiting" unread);
+  let failed = text Agenda.Read_failed Agenda.Read_failed in
+  check bool "a failed read says so" true (contains ~needle:"load failed" failed);
+  check bool "and does not say nothing is scheduled" false
+    (contains ~needle:"nothing is scheduled" failed)
+;;
+
+(* The strip names no row it does not have, so an unread list keeps it down
+   the same as an empty one; the frame and the bound still read one number. *)
+let test_an_unread_agenda_keeps_the_strip_down () =
+  let t = Agenda.project ~scheduled:Agenda.Not_read ~awaiting:Agenda.Read_failed in
+  check bool "no strip" true (strip_of t = None);
+  check int "and no row taken" 0 (Agenda.rows_taken t)
+;;
+
+(* What the state hands the panel: a list is read only once its request has
+   answered. *)
+let test_the_state_says_which_lists_were_read () =
+  let state () =
+    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let panel state = joined (overlay_of (Masc_tui_types.agenda state)) in
+  let fresh = panel (state ()) in
+  check bool "a fresh state has read neither list" false
+    (contains ~needle:"nothing is scheduled" fresh
+     || contains ~needle:"nobody is waiting" fresh);
+  let failed = state () in
+  failed.Masc_tui_types.schedules_error <- Some "connect failed";
+  failed.Masc_tui_types.keeper_tool_approvals_error <- Some "connect failed";
+  check bool "two failed reads say load failed" true
+    (contains ~needle:"load failed" (panel failed));
+  let answered = state () in
+  answered.Masc_tui_types.keeper_tool_approvals_observed <- true;
+  check bool "an answered empty held-call list is nobody waiting" true
+    (contains ~needle:"nobody is waiting on you" (panel answered))
+;;
+
 let test_a_held_call_says_how_long_is_left () =
   let lines =
-    overlay_of (Agenda.project ~scheduled:[] ~awaiting:[ ask "lane-smith" "Execute" ])
+    overlay_of (Agenda.project ~scheduled:(Agenda.Read [])
+                  ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]))
   in
   let text = joined lines in
   check bool "who is holding it" true (contains ~needle:"lane-smith" text);
@@ -403,8 +465,8 @@ let test_an_expired_call_says_so () =
   let lines =
     overlay_of
       (Agenda.project
-         ~scheduled:[]
-         ~awaiting:[ ask ~timeout_sec:10.0 "lane-smith" "Execute" ])
+         ~scheduled:(Agenda.Read [])
+         ~awaiting:(Agenda.Read [ ask ~timeout_sec:10.0 "lane-smith" "Execute" ]))
   in
   check bool "expired" true (contains ~needle:"expired" (joined lines))
 ;;
@@ -416,12 +478,13 @@ let test_rows_fit_the_width_they_were_given () =
   let t =
     Agenda.project
       ~scheduled:
-        [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
-            "keeper:edgar.a.poe" "진행 상황 체크"
-        ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
-            "keeper:orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
-        ]
-      ~awaiting:[ ask "lane-smith" "Execute" ]
+        (Agenda.Read
+           [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
+               "keeper:edgar.a.poe" "진행 상황 체크"
+           ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
+               "keeper:orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
+           ])
+      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
   in
   List.iter
     (fun cols ->
@@ -497,6 +560,12 @@ let () =
         ; test_case "wakes are earliest first" `Quick test_wakes_are_earliest_first
         ; test_case "empty sections answer in words" `Quick
             test_empty_sections_answer_in_words
+        ; test_case "an unread section does not say it is empty" `Quick
+            test_an_unread_section_does_not_say_it_is_empty
+        ; test_case "an unread agenda keeps the strip down" `Quick
+            test_an_unread_agenda_keeps_the_strip_down
+        ; test_case "the state says which lists were read" `Quick
+            test_the_state_says_which_lists_were_read
         ; test_case "a held call says how long is left" `Quick
             test_a_held_call_says_how_long_is_left
         ; test_case "an expired call says so" `Quick test_an_expired_call_says_so

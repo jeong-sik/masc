@@ -1,17 +1,19 @@
 /**
  * Voice input for the keeper-chat composer (RFC-0236 P1).
  *
- * The dashboard captures speech with {@link MediaRecorder} and uploads the raw
- * audio bytes to `POST /api/v1/voice/transcribe`. The server runs ElevenLabs
- * Scribe v2 (already provisioned in voice_config.json) and returns `{text}`;
- * the composer fills its draft with that text. Nothing about the audio is
- * persisted — only the resulting text, sent later through the existing path.
+ * The dashboard captures speech with {@link MediaRecorder}, re-encodes it as
+ * 16 kHz mono WAV ({@link recordingToWav}), and uploads the bytes to
+ * `POST /api/v1/voice/transcribe`. The server transcribes with the workspace's
+ * `[voice.stt]` endpoints and returns `{text}`; the composer fills its draft
+ * with that text. Nothing about the audio is persisted — only the resulting
+ * text, sent later through the existing path.
  *
  * This module owns the MediaRecorder lifecycle so the composer component stays
  * a thin shell: a mic button bound to {@link useVoiceInput} plus a status hint.
  */
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { authHeaders, fetchWithTimeout } from '../../api/core'
+import { recordingToWav } from './voice-wav'
 
 export type VoiceInputState = 'idle' | 'recording' | 'transcribing'
 
@@ -154,19 +156,28 @@ export function useVoiceInput({ onTranscribed, onError }: UseVoiceInputOptions):
         return
       }
       setState('transcribing')
-      transcribeAudio(blob)
-        .then((result) => {
+      void (async () => {
+        let wav: Blob
+        try {
+          wav = await recordingToWav(blob)
+        } catch (err: unknown) {
+          const e = err as Error
+          fail(`녹음을 WAV 로 바꾸지 못했습니다: ${e?.message ?? '알 수 없는 오류'}`)
+          return
+        }
+        try {
+          const result = await transcribeAudio(wav)
           setState('idle')
           if (result.text === '') {
             onErrorRef.current?.('음성을 인식하지 못했습니다. 다시 말해주세요.')
             return
           }
           onTranscribedRef.current(result.text)
-        })
-        .catch((err: unknown) => {
+        } catch (err: unknown) {
           const e = err as Error
           fail(`전사 실패: ${e?.message ?? '알 수 없는 오류'}`)
-        })
+        }
+      })()
     }
     recorder.onerror = () => {
       fail('녹음 중 오류가 발생했습니다.')

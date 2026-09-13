@@ -29,10 +29,19 @@ type awaiting =
   ; timeout_sec : float
   }
 
+type 'row reading =
+  | Not_read
+  | Read_failed
+  | Read of 'row list
+
 type t =
-  { coming : scheduled list  (** earliest first *)
-  ; blocked : awaiting list
+  { coming : scheduled reading  (** earliest first *)
+  ; blocked : awaiting reading
   }
+
+let rows_of = function
+  | Read rows -> rows
+  | Not_read | Read_failed -> []
 
 (* [payload_target] arrives as ["keeper:edgar.a.poe"]. The kind is the same on
    every row the strip can draw, so it is a prefix that says nothing and costs
@@ -59,16 +68,21 @@ let is_coming row = match row.standing with
 let by_time left right = String.compare left.at_iso right.at_iso
 
 let project ~scheduled ~awaiting =
-  { coming = scheduled |> List.filter is_coming |> List.sort by_time
+  { coming =
+      (match scheduled with
+       | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
+       | (Not_read | Read_failed) as unread -> unread)
   ; blocked = awaiting
   }
 ;;
 
-let next t = match t.coming with row :: _ -> Some row | [] -> None
+let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
 
 (* One predicate, two readers: the row the frame draws and the row the
-   keypress bound subtracts are the same row or neither exists. *)
-let is_silent t = t.coming = [] && t.blocked = []
+   keypress bound subtracts are the same row or neither exists. A section
+   that was never read has no row to name, so the strip stays down for it
+   the same way; the overlay is where the difference is said. *)
+let is_silent t = rows_of t.coming = [] && rows_of t.blocked = []
 let rows_taken t = if is_silent t then 0 else 1
 
 type strip =
@@ -127,7 +141,7 @@ let strip ~now ~localtime ~cols t =
   if is_silent t
   then None
   else begin
-    let waiting = waiting_half (List.length t.blocked) in
+    let waiting = waiting_half (List.length (rows_of t.blocked)) in
     let reserved =
       if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
     in
@@ -202,10 +216,15 @@ let time_left ~now (held : awaiting) =
 
 let overlay ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text } in
+  (* An empty section is an answer only once its list was read. Before that,
+     or when the read failed, "nothing is scheduled" and "nobody is waiting on
+     you" were said about lists no one had seen. *)
   let wakes =
     match t.coming with
-    | [] -> [ quiet "nothing is scheduled" ]
-    | rows ->
+    | Not_read -> [ quiet "not loaded yet" ]
+    | Read_failed -> [ quiet "load failed" ]
+    | Read [] -> [ quiet "nothing is scheduled" ]
+    | Read rows ->
       List.map
         (fun row ->
            { tone = Wake
@@ -222,8 +241,10 @@ let overlay ~now ~localtime ~cols t =
   in
   let questions =
     match t.blocked with
-    | [] -> [ quiet "nobody is waiting on you" ]
-    | rows ->
+    | Not_read -> [ quiet "not loaded yet" ]
+    | Read_failed -> [ quiet "load failed" ]
+    | Read [] -> [ quiet "nobody is waiting on you" ]
+    | Read rows ->
       List.map
         (fun (held : awaiting) ->
            { tone = Question

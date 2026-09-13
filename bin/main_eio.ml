@@ -1788,19 +1788,49 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio agent as_json =
+let voice_verify_cmd_exit requested_base_path message audio agent as_json =
+  (* The workspace whose configuration is probed, when one is named. The voice
+     loader finds runtime.toml through the environment, so a workspace set up
+     with `voice-local-setup --base-path` and never recorded as the default had
+     no way to be checked from this command: measured 2026-09-13 with only
+     HOME and PATH set, run inside that workspace, it answered "voice config
+     missing" while the section was there. Exported the way the server boot
+     exports it, and the resolver's cache is cleared because the tool registry
+     has already resolved once by the time a subcommand runs. *)
+  Option.iter
+    (fun raw ->
+      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
+      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Config_dir_resolver.reset ())
+    requested_base_path;
   (* The keeper whose voice is being checked, when one is named. A voice is
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
      -- and for say only the second one can catch a wrong name, because say
      speaks in the system voice rather than failing on one it does not have. *)
-  let tts =
-    match agent with
-    | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
-    | None -> Masc.Voice_bridge.probe_tts ~message ()
-  in
-  let stt =
-    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+  (* Under an event loop, because a voice_mcp endpoint is asked over the same
+     MCP HTTP client a turn uses, and that client needs a switch, a clock and
+     a connection pool. The HTTP and command kinds run a process and do not
+     depend on it. *)
+  let tts, stt =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.set_switch sw;
+        Eio_context.set_net (Eio.Stdenv.net env);
+        Eio_context.set_clock (Eio.Stdenv.clock env);
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+          let tts =
+            match agent with
+            | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+            | None -> Masc.Voice_bridge.probe_tts ~message ()
+          in
+          let stt =
+            Option.map
+              (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ())
+              audio
+          in
+          tts, stt)))
   in
   let section name = function
     | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)
@@ -1894,7 +1924,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
+    Term.(const voice_verify_cmd_exit $ run_base_path $ message $ audio $ agent $ as_json)
 (* Turning voice on without a server running.
 
    The setup journey runs before there is anything to talk to over HTTP, and
@@ -1936,19 +1966,34 @@ let voice_local_setup_exit base_path speak_voice hear_model =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   let refuse message = prerr_endline message; 1 in
-  match Voice_setup.observe ~runtime_config_path with
+  (* Voice is a section of the configuration [masc init] writes, so a directory
+     that was never initialized has nowhere to put one. Checked here, by the
+     file's existence, rather than read out of the writer's error: that error
+     carries the exception as text, and telling "absent" from "unreadable" in it
+     would mean matching a string. A file that exists and cannot be read still
+     falls through to the writer's own sentence.
+
+     Measured 2026-09-13 on an empty directory before this: exit 1 and
+     [Sys_error("<path>: No such file or directory")], with nothing created. *)
+  if not (Sys.file_exists runtime_config_path) then
+    refuse
+      (Printf.sprintf
+         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
+          first, then this again."
+         base_path runtime_config_path (Filename.quote base_path))
+  else
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
   | Error error -> refuse (Voice_setup.error_message error)
-  | Ok (revision, existing) ->
-    let standalone_path = Voice_config.voice_config_file_in base_path in
+  (* The writer refuses this too, under its lock; said here first so nothing
+     below is decided against a configuration this command cannot write. *)
+  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
+    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
+  | Ok (revision, active) ->
+    let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
     let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
-    if Option.is_none existing && Sys.file_exists standalone_path then
-      refuse
-        (Printf.sprintf
-           "Voice settings are read from %s. Configure voice in that active file; \
-            local setup will not create a TOML section that overrides it."
-           standalone_path)
-    else if Option.is_some hear_model
+    if Option.is_some hear_model
       && Option.exists
            (fun (config : Voice_config.stt_config) -> List.exists
              (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
@@ -1974,7 +2019,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
           let endpoint_voice, section =
-            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            match Voice_setup.voice_placement tts with
             | Voice_setup.On_the_endpoint -> Some voice, []
             | Voice_setup.On_the_section ->
               None, [ Voice_setup.Set_tts_default_voice voice ]
@@ -2001,7 +2046,10 @@ let voice_local_setup_exit base_path speak_voice hear_model =
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
           2
       | changes ->
-          match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
+          match
+            Voice_setup.apply ~runtime_config_path ~standalone_path
+              ~expected_revision:revision changes
+          with
           | Error error -> refuse (Voice_setup.error_message error)
           | Ok _revision ->
               print_endline "voice is configured";
@@ -3402,8 +3450,16 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, or pdf-tools.")
-    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, or presentation-tools.")
+    (* Resolved on demand: only presentation-tools is scoped to a workspace, and
+       an operator installing Codex or Docker has not made one yet. Taking the
+       resolving [base_path] term here refused every dependency with "MASC_BASE_PATH
+       is not set" -- advice that does not install anything. *)
+    Term.(const (fun base_path dependency action ->
+      Masc_cli_prerequisites.run
+        ~base_path:(fun () -> match base_path with Some raw -> raw | None -> default_base_path ())
+        ~dependency ~action)
+      $ run_base_path $ dependency $ action)
 
 let cmd =
   let doc =

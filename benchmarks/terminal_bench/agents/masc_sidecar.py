@@ -228,6 +228,7 @@ async def merge_keeper_usage(
     cost = 0.0
     rows = 0
     unreported = 0
+    cost_unreported = 0
     unparseable = 0
     raw_observations = 0
     without_projection = 0
@@ -263,7 +264,15 @@ async def merge_keeper_usage(
         totals["cache"] += int(row.get("cache_read_tokens") or 0) + int(
             row.get("cache_creation_tokens") or 0
         )
-        cost += float(row.get("cost_usd") or 0.0)
+        # A row the ledger could not price serializes cost_usd as null
+        # (cost_ledger.ml). Adding it as zero publishes a number that reads as
+        # measured, and cost is the one axis this arm is compared on, so the
+        # count of unpriced rows travels with the total instead.
+        row_cost = row.get("cost_usd")
+        if row_cost is None:
+            cost_unreported += 1
+        else:
+            cost += float(row_cost)
     parent_unreported = sorted(
         name
         for name, value in (
@@ -287,6 +296,10 @@ async def merge_keeper_usage(
         "cache_tokens": totals["cache"],
         "cost_usd": cost,
         "rows_without_reported_usage": unreported,
+        # Read by aggregate.py into its own CSV column. Named here only, the
+        # diagnostic never reached the table the arms are compared in, so an
+        # unpriced keeper turn read as free.
+        "cost_rows_unreported": cost_unreported,
         "unparseable_rows": unparseable,
         "raw_observation_rows": raw_observations,
         "rows_without_projection": without_projection,

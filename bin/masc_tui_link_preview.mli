@@ -70,11 +70,15 @@ val load_mosaic : compute:(unit -> mosaic_entry) -> string -> unit
     and propagate. Keep blocking work and this call in the same worker. *)
 
 val retry_mosaic : retry:(unit -> mosaic_entry) -> string -> unit
-(** Atomically reserve a refused URL for one explicit retry. Ready, absent,
-    and pending URLs are left alone. The synchronous callback refreshes input
-    and returns its outcome; exceptions restore the refusal and propagate.
-    Clearing the cache during either callback discards its eventual outcome
-    but retains the reservation until it exits, preventing overlapping work. *)
+(** Atomically reserve a refused or undecided URL for one explicit retry. A
+    rendered mosaic and pending work are left alone: the first has nothing to
+    retry, the second would get two writers. Undecided is claimed because a
+    direct image link never has a mosaic -- no page is fetched for one -- and
+    the retry is what drops the body its first view cached. The synchronous
+    callback refreshes input and returns its outcome; exceptions restore what
+    was there and propagate. Clearing the cache during either callback discards
+    its eventual outcome but retains the reservation until it exits, preventing
+    overlapping work. *)
 
 val parse_og_html : url:string -> body:string -> og_preview
 (** Merge a fetched page's <title> and og:* meta tags onto the URL-synthesized

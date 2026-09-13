@@ -8,9 +8,22 @@ let rec remove path =
   else Unix.unlink path
 let panel_answer = String.concat "\n" (List.init 40 (fun n ->
   Printf.sprintf "Independent evidence %d: C is primary; B must support silent choices." n))
-let original_evidence =
+(* The captured request context as the sink writes it. [?task] is the Task the
+   request was captured for; without one the run is unscoped. The fixture used
+   to carry a task-less context and still record a decision for a Task -- the
+   exact binding the recorder now refuses. *)
+let request_context ?task () =
   `Assoc
-    [ "source_context", `Assoc ["question", `String "Choose a mode"; "task", `Null; "goals", `List []]
+    [ "keeper", `String "fusion-keeper"; "turn_ref", `Null
+    ; "task", (match task with
+        | None -> `Null
+        | Some id -> `Assoc ["id", `String id; "title", `String "Evaluate alternatives";
+            "description", `String "Choose and explain"; "status", `String "claimed";
+            "contract", `Null])
+    ; "goals", `List []; "question", `String "Choose a mode"; "decision_context", `Null ]
+let original_evidence ?task () =
+  `Assoc
+    [ "source_context", request_context ?task ()
     ; "panel", `List
         [ `Assoc ["model", `String "panel-api"; "status", `String "answered"; "answer", `String panel_answer]
         ; `Assoc ["model", `String "panel-native"; "status", `String "answered"; "answer", `String "Keep separate choices; do not declare a winner."] ]
@@ -37,9 +50,9 @@ let with_fixture f = Eio_main.run @@ fun env ->
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
         ~title:"Evaluate alternatives" ~priority:2 ~description:"Choose and explain" |> require "task" in
       Workspace.claim_task_r config ~agent_name:"fusion-keeper" ~task_id:task.task_id () |> require "claim" |> ignore;
-      let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"} in
+      let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"; fusion_producer=Some "fusion-keeper"} in
       Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-advice" ~author:"fusion-keeper"
-        ~content:"Judge recommends A" ~meta_json:original_evidence ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
+        ~content:"Judge recommends A" ~meta_json:(original_evidence ~task:task.task_id ()) ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
         |> require "real Fusion post" |> ignore;
       f config task.task_id goal.id)
 
@@ -90,7 +103,7 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     (evidence |> member "state" |> to_string);
   let post = evidence |> member "post" in
   check bool "full source context and both panel answers are preserved" true
-    (post |> member "meta" = original_evidence);
+    (post |> member "meta" = original_evidence ~task:task_id ());
   check string "source origin carries the canonical run identity" "run-advice"
     (post |> member "origin" |> member "fusion_run_id" |> to_string);
   check bool "decision joins the original source post" true
@@ -124,6 +137,17 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
 let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _ ->
+  let rejection run_id =
+    match Fusion_decision.source ~keeper:"foreign" ~run_id with
+    | Error (Fusion_decision.Rejected detail) -> detail
+    | Error (Fusion_decision.Storage_failure _) | Ok _ -> fail "expected hidden source"
+  in
+  check string "foreign and absent sources are indistinguishable"
+    (rejection "unknown-run") (rejection "run-advice");
+  let workspace_source = Fusion_decision.source_in_workspace ~run_id:"run-advice"
+    |> require "workspace verifier can still inspect the original source" in
+  check string "workspace lookup preserves the original author" "fusion-keeper"
+    (Board.Agent_id.to_string workspace_source.author);
   let meta name = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) |> require "meta" in
   let invoke keeper run_id =
     Keeper_tool_in_process_runtime.handle_masc_fusion_status ~config ~meta:(meta keeper)
@@ -215,9 +239,42 @@ let test_current_work_context () = with_fixture (fun config task_id goal_id ->
   check bool "another keeper's task is not inferred" true
     (Yojson.Safe.Util.member "task" (Fusion_request_context.to_yojson empty) = `Null))
 
+let args_for ~run_id task_id = `Assoc ["run_id", `String run_id; "task_id", `String task_id;
+  "decision", `String "adopted"; "choice", `String "Choose B"; "reason", `String "Measured evidence supports it"]
+let fusion_evidence ~run_id meta_json =
+  let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some run_id; fusion_producer=Some "fusion-keeper"} in
+  Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id ~author:"fusion-keeper"
+    ~content:"Judge recommends A" ~meta_json ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
+  |> require "Fusion post" |> ignore
+
+(* A decision is a Task history record, and the Task it may name is the one the
+   run was requested for. An unscoped run, a Goal-only run, and a run requested
+   for another Task all used to accept any Task the Keeper held, binding the
+   evidence hash to work the deliberation was never about. *)
+let test_a_decision_names_the_task_its_run_was_requested_for () = with_fixture (fun config task_id _ ->
+  let record run_id = Fusion_decision.parse (args_for ~run_id task_id) |> require "parse"
+    |> Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref in
+  let refused label = function
+    | Error (Fusion_decision.Rejected _) -> ()
+    | Error (Fusion_decision.Storage_failure detail) -> fail (label ^ " misclassified: " ^ detail)
+    | Ok _ -> fail (label ^ " recorded a decision") in
+  fusion_evidence ~run_id:"run-unscoped" (original_evidence ());
+  refused "an unscoped run" (record "run-unscoped");
+  fusion_evidence ~run_id:"run-unattributed" (`Assoc ["source_context", `Null]);
+  refused "a run with no captured context" (record "run-unattributed");
+  fusion_evidence ~run_id:"run-other-task" (original_evidence ~task:"some-other-task" ());
+  refused "a run requested for another Task" (record "run-other-task");
+  check int "none of them wrote an event" 0
+    (List.length (Fusion_decision.read ~config ~run_id:"run-unscoped" |> require "read")
+     + List.length (Fusion_decision.read ~config ~run_id:"run-other-task" |> require "read"));
+  (match record "run-advice" with
+   | Ok _ -> ()
+   | Error error -> fail ("the run's own Task was refused: " ^ Fusion_decision.error_to_string error)))
+
 let () = run "Fusion decision attribution" ["behavior", [
   test_case "omitted task selection captures current owned work without hiding read failures" `Quick test_current_work_context;
   test_case "captured request context survives criterion changes and validates scope" `Quick test_request_context_snapshot;
   test_case "model dispatch persists distinct choice and task/goal/turn readback" `Quick test_runtime_record_and_read;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
-  test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage]]
+  test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
+  test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]

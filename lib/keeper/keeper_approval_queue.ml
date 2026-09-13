@@ -3788,6 +3788,26 @@ let ensure_settled_continuation_chat_projection
   |> publish_settled_continuation ~keeper_name
 ;;
 
+let record_native_continuation_delivery ~base_path ~keeper_name
+    ~(resolution : Keeper_event_queue.hitl_resolution) =
+  let tool_name = match resolution.decision with
+    | Keeper_event_queue.Hitl_rejected _ -> Ok None
+    | Keeper_event_queue.Hitl_approved ->
+      (match approved_resolution_delivery ~base_path ~id:resolution.approval_id with
+       | Ok {request; _} when request.keeper_name = keeper_name -> Ok (Some request.tool_name)
+       | Ok _ -> Error "native continuation belongs to another Keeper"
+       | Error error -> Error (grant_error_to_string error)) in
+  match tool_name with
+  | Error detail -> Error detail
+  | Ok tool_name ->
+    Keeper_chat_store.append_approval_lifecycle_once ~base_dir:base_path ~keeper_name
+      ~lifecycle:{ Keeper_chat_store.approval_id=resolution.approval_id; tool_name;
+        phase=Keeper_chat_store.Approval_continuation_recorded; artifact_ref=None;
+        call_summary=requested_call_summary ~base_path ~keeper_name ~approval_id:resolution.approval_id }
+    |> Result.map (fun appended -> Continuation_appended appended)
+    |> publish_settled_continuation ~keeper_name
+;;
+
 (* #32956: the turn that received the replay failed after the provider
    answered, so the model has already seen the evidence. The receipt settles
    the continuation slot as failed; the intake then retires the queued wake

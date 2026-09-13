@@ -35,6 +35,8 @@ for line in sys.stdin:
         account = None if mode == 'no-account' else {'type':'chatgpt','email':'fixture@example.test','planType':'pro'}
         emit({'id':ident,'result':{'account':account,'requiresOpenaiAuth':True}})
     elif method == 'thread/start':
+        if mode == 'exit-before-turn':
+            sys.exit(9)
         emit({'id':ident,'result':{'thread':{'id':'vision-thread'},'model':'vision-response-model'}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':'vision-turn'}}})
@@ -173,6 +175,17 @@ let test_transport_failure mode = with_fixture mode @@ fun ~root:_ ~load ~run ~e
        (List.exists (fun row -> member "method" row = `String "thread/start") rows);
      check bool "fallback submitted its image" true
        (List.exists (fun row -> member "method" row = `String "turn/start") (records fallback_capture))
+   | "exit-before-turn", V.Vo_ok reading ->
+     (* The client died answering thread/start, so it submitted no turn and owes
+        the walk nothing. Before the exit carried that fact it was classified
+        like an exit mid-turn, and one crashed client ended the walk. *)
+     check string "pre-admission exit advances" "fallback.vision" reading.runtime_id;
+     let rows = records capture in
+     check bool "the dead client never started a turn" false
+       (List.exists (fun row -> member "method" row = `String "turn/start") rows);
+     check bool "the fallback submitted its image" true
+       (List.exists (fun row -> member "method" row = `String "turn/start")
+          (records fallback_capture))
    | "interrupted", V.Vo_official_failure _ ->
      check bool "intentional stop does not rotate" false (Sys.file_exists fallback_capture);
      let execution = execute () in
@@ -222,6 +235,6 @@ let () = run "Keeper standalone official-client vision"
       ["valid"; "malformed"; "empty"; "wrong-type"]
   ; "selection", [test_case "explicit media membership and fallback" `Quick test_selection]
   ; "transport failure", List.map (fun mode -> test_case mode `Quick (fun () -> test_transport_failure mode))
-      ["no-account"; "interrupted"]
+      ["no-account"; "interrupted"; "exit-before-turn"]
   ; "admission", [test_case "Claude preflight failure advances" `Quick test_claude_admission_failure]
   ]

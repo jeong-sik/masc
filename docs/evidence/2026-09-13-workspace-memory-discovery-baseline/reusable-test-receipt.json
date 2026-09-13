@@ -1,0 +1,12 @@
+{
+  "scope": "reusable local HTTP fixtures, not installed runtime",
+  "executor": "review_curator_semantics",
+  "command": "python3 scripts/tests/test_installed_workspace_memory_discovery.py -v",
+  "exit_code": 0,
+  "tests": 12,
+  "elapsed_seconds": 7.321,
+  "result": "OK",
+  "test_file": "scripts/tests/test_installed_workspace_memory_discovery.py",
+  "test_sha256": "cc1236c807a16a84fc1ee11c9173fa1fb10dc59a2f2b1082c6adf36e5a94c09e",
+  "evidence_kind": "agent execution report; full raw stdout not archived"
+}

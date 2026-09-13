@@ -47,7 +47,9 @@ let test_every_variant_lands_in_its_class () =
        { message = "full"; tool_effect_attempted = true })
     "provider:reported:context_window_exceeded_after_tool_effect";
   check "spawn_failed" (Codex.Spawn_failed "no exe") "provider:unavailable";
-  check "process_exited" (Codex.Process_exited "killed") "provider:unavailable";
+  check "process_exited"
+    (Codex.Process_exited { detail = "killed"; turn_accepted = false })
+    "provider:unavailable";
   check "protocol_error"
     (Codex.Protocol_error { stage = "turn"; detail = "bad frame" })
     "provider:parse_error";

@@ -177,7 +177,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   if remote then write_runtime_toml ~base_path:config.base_path;
   ensure_producer config producer;
   let run () =
-    match VAT.create ~config ~producer with
+    match VAT.create ~submitted_evidence:[] ~config ~producer with
     | Error reason -> Alcotest.failf "surface creation failed: %s" reason
     | Ok surface -> f config surface
   in
@@ -248,7 +248,7 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -262,16 +262,40 @@ let test_schemas_are_the_descriptor_schemas () =
              | "tool_read_file" ->
                  descriptor.Descriptor.description
                  ^ " " ^ VAT.image_delivery_note
+             | "masc_board_post_get" | "masc_fusion_status" ->
+                 (* These descriptors supply input validation; standalone
+                    reviewer descriptions state their narrower authority. *)
+                 schema.description
              | _ -> descriptor.Descriptor.description
            in
            Alcotest.(check string)
              (schema.name ^ " description is the descriptor's")
              expected
              schema.description;
-           Alcotest.(check bool)
-             (schema.name ^ " input schema is the descriptor's")
-             true
-             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+           (match schema.name with
+            | "masc_fusion_status" ->
+              (* The Keeper schema leaves run_id optional because an empty call
+                 lists runs; the verifier reads one exact run and has no
+                 listing. It requires that id and names no other parameter. *)
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string))
+                "masc_fusion_status requires the exact run_id"
+                [ "run_id" ]
+                (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+              Alcotest.(check (list string))
+                "masc_fusion_status adds source continuation to exact lookup"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | "masc_board_post_get" ->
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string)) "Board adds source continuation"
+                ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
+                (schema.input_schema |> member "properties" |> keys)
+            | _ ->
+              Alcotest.(check bool)
+                (schema.name ^ " input schema is the descriptor's")
+                true
+                (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema))
          | found ->
            Alcotest.failf
              "%s resolves to %d descriptors; the surface needs exactly one"
@@ -417,12 +441,12 @@ let test_workspace_producer_gets_owned_read_surface () =
   let path = Filename.concat playground "evidence.txt" in
   Out_channel.with_open_text path (fun channel ->
     output_string channel "first line\nsecond line\n");
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file"; "masc_web_fetch" ]
+      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match
@@ -471,7 +495,7 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   let bundle =
     Filename.concat Playground_paths.all_playgrounds_prefix producer_name
   in
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     let layout = VAT.root_layout surface |> require_layout in
@@ -503,7 +527,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
   let producer_name = "binary-evidence-producer" in
   let playground = workspace_producer_playground config producer_name in
   let surface =
-    match VAT.create ~config ~producer:producer_name with
+    match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
     | Ok surface -> surface
     | Error detail -> Alcotest.fail detail
   in
@@ -848,8 +872,8 @@ let test_goal_and_task_read_deliver_full_png () =
   Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
   let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let encoded = Base64.encode_exn bytes in
-  let task_surface = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal_surface = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task_surface = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal_surface = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   List.iter (fun (surface, path) ->
     let args = `Assoc [ "file_path", `String path ] in
     let result = VAT.dispatch surface ~name:"tool_read_file" ~args in
@@ -930,8 +954,8 @@ let test_goal_and_task_inspect_real_pdf () =
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.pdf")
     (fun out -> output_string out "%PDF-1.7\nnot a PDF document\n");
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   let read surface path = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String path]) in
   List.iter (fun (surface,prefix) ->
@@ -1008,8 +1032,8 @@ let test_goal_and_task_inspect_real_mp4 () =
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.mp4")
     (fun out -> output_string out (String.sub bytes 0 (String.length bytes / 2)));
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   let read surface path = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String path]) in
   List.iter (fun (surface,prefix) ->
@@ -1110,7 +1134,7 @@ let test_a_capture_without_the_mp4_extension_is_still_inspected () =
   List.iter (fun filename ->
   Out_channel.with_open_bin (Filename.concat root filename)
     (fun out -> output_string out bytes);
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
   let result = VAT.dispatch task ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String filename]) in
   (match result with

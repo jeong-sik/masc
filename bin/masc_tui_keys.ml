@@ -17,6 +17,69 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* [None] is shared by all Config panes; [Some panes] belongs only to those
+   input handlers. Keep availability beside the binding, not in a second key
+   list inferred from the rendered label. *)
+let config_bindings =
+  [ b Navigate "j/k" "select / scroll", Some
+      [ Config_runtime; Config_models; Config_params; Config_prompts
+      ; Config_presets; Config_themes ]
+  ; b Navigate "p" "next pane"
+      ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b Navigate "PgUp/PgDn" "page"
+      ~help:"pages the runtime.toml and prompts panes; the other five \
+             panes take the key and do nothing with it",
+      Some [ Config_runtime; Config_prompts ]
+  ; b Navigate "v" "read status"
+      ~help:"runtime.toml: source revision, validation issues, and application/restart details",
+      Some [ Config_runtime ]
+  ; b Navigate "9" "Runtime"
+      ~help:"runtime status, lane routing, probes and connected clients", None
+  ; b Navigate "s" "resources"
+      ~help:"the MCP resource catalog, off the ring under Config", None
+  ; b Navigate "t" "tools"
+      ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
+  ; b Act "e" "edit"
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
+  ; b Act "E" "advanced JSON"
+      ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
+  ; b Act "Enter" "edit / use"
+      ~help:"edit the selected param; on themes, use that colour scheme",
+      Some [ Config_params; Config_themes ]
+  ; b Act "x" "default / clear"
+      ~help:"params return to default; prompts clear override; themes follow terminal colours",
+      Some [ Config_params; Config_prompts; Config_themes ]
+  ; b Act "f" "filter"
+      ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b Act "n" "new"
+      ~help:"on presets, name a preset holding the configuration as it stands",
+      Some [ Config_presets ]
+  ; b Act "u" "restore"
+      ~help:"on presets, put the selected one back; press twice to confirm",
+      Some [ Config_presets ]
+  ; b Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b Act "a" "fragments"
+      ~help:"on prompts, show or hide the internal pieces the main prompts \
+             are built from; not on the runtime assets reading",
+      Some [ Config_prompts ]
+  ; b Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
+  ; b Act "Esc" "overview", None
+  ; b Meta "r" "reload", None
+  ; b Meta "Tab" "next", None
+  ; b Meta "q" "quit", None
+  ]
+
 (* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
    The terminal used to take this byte for flow control -- raw mode clears
    IXON now, which is what makes it bindable at all. A letter would not do:
@@ -107,7 +170,8 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "select / scroll"
+      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
+      ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
@@ -121,7 +185,6 @@ let for_surface = function
                  top is now"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
-      ; b Act "f" "filter" ~help:"cycle the filter"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -378,7 +441,10 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Act "Esc" "clear / back"
+          ~help:"clear the filter, or return to Overview"
+      ; b Search "/" "filter"
+          ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
@@ -446,58 +512,7 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Config ->
-      [ b Navigate "j/k" "select / scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-          ~help:"pages the runtime.toml and prompts panes; the other five \
-                 panes take the key and do nothing with it"
-        (* Config combines persisted files, typed live params, and the local
-           theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / models / params / prompts / presets / themes / voice"
-      ; b Navigate "v" "runtime.toml read status"
-          ~help:"source revision, validation issues, and application/restart details"
-      ; b Navigate "9" "Runtime"
-          ~help:"runtime status, lane routing, probes and connected clients"
-      ; b Navigate "s" "resources"
-          ~help:"the MCP resource catalog, off the ring under Config"
-      ; b Navigate "t" "tools"
-          ~help:"the tool catalog, receipts, and usage, off the ring under \
-                 Config"
-      ; b Act "e" "edit"
-          ~help:"params use a type-aware field; runtime.toml previews; prompts \
-                 save an override; voice opens the setup wizard; models jumps \
-                 to that model's line in the source"
-      ; b Act "E" "advanced JSON"
-          ~help:"on params only: edit the exact JSON value"
-      ; b Act "Enter" "edit / use"
-          ~help:"edit the selected param; on themes, use that colour scheme"
-      ; b Act "x" "default / clear"
-          ~help:"params return to default; prompts clear override; themes follow terminal colours"
-      ; b Act "f" "filter"
-          ~help:"on themes, cycle All / Dark / Light schemes"
-        (* Pane-scoped writes. Each of these is the only key that does what it
-           does, and none of them were listed: presets could be made and put
-           back, and the prompt list could be switched between three readings,
-           with nothing on screen saying so. *)
-        (* Short labels: this row is one line and was already truncated at a
-           hundred columns before these five arrived. The pane each belongs to
-           and what it does are in the help, which the ? overlay draws in
-           full. *)
-      ; b Act "n" "new"
-          ~help:"on presets, name a preset holding the configuration as it stands"
-      ; b Act "u" "restore"
-          ~help:"on presets, put the selected one back; press twice to confirm"
-      ; b Act "i" "input"
-          ~help:"on prompts, the input this prompt was last given"
-      ; b Act "a" "fragments"
-          ~help:"on prompts, show or hide the internal pieces the main prompts \
-                 are built from; not on the runtime assets reading"
-      ; b Act "o" "assets"
-          ~help:"on prompts, switch between the read-only runtime assets and \
-                 the registry you can override"
-      ; b Act "Esc" "overview"
-      ; b Meta "r" "reload"
-      ; b Meta "Tab" "next"
-      ]
+      List.map fst config_bindings
   | Resources ->
       (* Two panes with two meanings, and the keys below say so once rather
          than per row: with the list focused the cursor moves and [/] lands
@@ -628,6 +643,14 @@ let hints_of_bindings bindings =
   |> String.concat "  "
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
+
+let footer_hints_config ~pane =
+  config_bindings
+  |> List.filter_map (fun (binding, panes) ->
+       match panes with
+       | None -> Some binding
+       | Some panes -> if List.mem pane panes then Some binding else None)
+  |> hints_of_bindings
 
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the
@@ -895,6 +918,17 @@ let keeper_detail_tab_hint tab =
           (fun binding -> binding.key ^ ":" ^ binding.label)
           (keeper_detail_tab_bindings tab))
 
+(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
+   [listing_meta] spells them -- is said once, under Global. Repeated under
+   every surface it took three of the dozen rows an 80x24 sheet shows of the
+   reader's own section. A surface that names one of those keys its own way
+   ([r] reload on Config) keeps that row: it says something Global does not.
+   Footers keep the tail, since a footer is all a surface shows. *)
+let sheet_bindings surface =
+  List.filter
+    (fun binding -> not (List.mem binding listing_meta))
+    (for_surface surface)
+
 let help_sections ?current () =
   let sections =
     List.map
@@ -918,7 +952,7 @@ let help_sections ?current () =
                  Masc_tui_types.keeper_detail_tabs
            | _ -> []
          in
-         (surface, (title, entries (for_surface surface) @ tab_entries)))
+         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -945,6 +979,11 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Keepers header words and the Mode S letters. They were two
+             rows above every roster: an empty roster spent them on columns
+             it had nothing in, a narrow one on columns it did not draw, and
+             beside the Activity pane both rows were cut. *)
+          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)

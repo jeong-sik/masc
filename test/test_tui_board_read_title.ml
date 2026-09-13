@@ -22,6 +22,16 @@ let test_a_long_id_is_folded_to_the_column () =
 let test_replies_have_one_spelling () =
   Alcotest.(check string) "a count" "Board  [p]   0  💬3" (title ~votes:0 ~replies:3 "p")
 
+(* The shared bracket: the value sits tight, and only an overrun is folded. *)
+let test_a_bracketed_value_is_never_padded_inside () =
+  Alcotest.(check string) "short" "[executing]"
+    (Masc_tui_render_prim.bracketed ~max_cells:10 "executing");
+  Alcotest.(check string) "exact" "[confirming]"
+    (Masc_tui_render_prim.bracketed ~max_cells:10 "confirming");
+  let folded = Masc_tui_render_prim.bracketed ~max_cells:6 "awaiting_confirmation" in
+  Alcotest.(check int) "an overrun folds to the width, brackets aside" 8
+    (Masc_tui_message_layout.display_width folded)
+
 let () =
   Alcotest.run "tui_board_read_title"
     [ ( "board read title"
@@ -29,5 +39,7 @@ let () =
         ; Alcotest.test_case "a long id is folded to the column" `Quick
             test_a_long_id_is_folded_to_the_column
         ; Alcotest.test_case "replies have one spelling" `Quick test_replies_have_one_spelling
+        ; Alcotest.test_case "a bracketed value is never padded inside" `Quick
+            test_a_bracketed_value_is_never_padded_inside
         ] )
     ]

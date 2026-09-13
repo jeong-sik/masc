@@ -729,9 +729,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
+  let header = Printf.sprintf "%s  %s%s%s  %s  %s"
     (screen_title " MASC Task")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (fit_width task.id 20) Ansi.reset timestamp
+    (Masc_tui_theme.tone Masc_tui_theme.Accent)
+    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset timestamp
     (connection_badge state) in
 
   box_top buf cols;
@@ -2901,9 +2902,9 @@ let planning_detail_pane (state : state)
 
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s"
+  let header = Printf.sprintf "%s  %s%s%s  %s"
     (planning_workspace_title state ~tab:Planning_goals ~window:"")
-    status_color (fit_width status_label planning_phase_column) Ansi.reset
+    status_color (bracketed ~max_cells:planning_phase_column status_label) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
 
@@ -3353,9 +3354,11 @@ let render_schedule_list (state : state) =
                  Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
                in
                let line =
-                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
+                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s\xc2\xb7%s  %s"
                    status_color
-                   (fit_width row.sch_status 10)
+                   (* The column still lines up: the padding goes after the
+                      bracket, not inside it. *)
+                   (fit_width (bracketed ~max_cells:10 row.sch_status) 12)
                    Ansi.reset
                    due
                    (* Measured from the rows rather than given the rest of the

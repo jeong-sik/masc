@@ -256,6 +256,10 @@ val ask_question_viewport : Masc_tui_types.state -> string list * int
 
 val board_score_style : int -> string
 
+val bracketed : max_cells:int -> string -> string
+(** [\[text\]], with [text] folded in the middle only when it runs past
+    [max_cells]. Never padded inside the brackets. *)
+
 val board_read_title :
   screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
   string

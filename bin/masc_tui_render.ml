@@ -13188,24 +13188,18 @@ let render_palette (state : state) =
             total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
 
+(* The patch review overlay. It drew its own frame with a block shadow down
+   the right edge, a lightning glyph in its title, and a key row inside the box
+   that the footer under it repeated, and it counted its rows by hand
+   ([fixed_chrome = 9]). [surface_chrome] owns the frame, the fill and the
+   footer's row now, so the keys on screen are the footer's alone. *)
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let path_label =
     match state.patch_modal_path with
     | Some p -> p
     | None -> (match state.repository_changes_diff_path with Some p -> p | None -> "Active Working Tree")
   in
-  framed_shadow_top buf cols;
-  framed_shadow_line buf cols
-    (screen_title " Patch & Diff Review" ^ "  "
-     ^ (Theme.info ()) ^ "\xe2\x9a\xa1 " ^ Ansi.reset
-     ^ Ansi.bold ^ Terminal_text.single_line path_label ^ Ansi.reset);
-  framed_shadow_divider buf cols;
-  framed_shadow_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     diff preview (syntax colored)";
-  framed_shadow_divider buf cols;
   let diff_opt =
     match state.patch_modal_diff with
     | Some (_, d) -> Some d
@@ -13217,56 +13211,52 @@ let render_patch_modal (state : state) =
     | None -> []
   in
   let total = List.length diff_rows in
-  let fixed_chrome = 9 in
-  let content_height = max 1 (rows - fixed_chrome) in
+  (* The column heading and the divider under it open the body. *)
+  let heading_rows = 2 in
+  let content_height =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - surface_chrome_rows - heading_rows)
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
-  if total = 0 then begin
-    let msg =
-      match state.patch_modal_error with
-      | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
-      | None ->
-          (match state.repository_changes_diff_error with
-           | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
-           | None -> "(no pending patch diff loaded — Esc to close)")
-    in
-    framed_shadow_line buf cols (Ansi.dim ^ "   " ^ msg ^ Ansi.reset);
-    for _ = 1 to content_height - 1 do
-      framed_shadow_empty buf cols
-    done
-  end else begin
-    let diff_array = Array.of_list diff_rows in
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      if idx >= total then
-        framed_shadow_empty buf cols
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
+    ~clamped:(fun () -> Some (Patch_modal_scroll scroll))
+    ~title:
+      (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
+       ^ Terminal_text.single_line path_label ^ Ansi.reset)
+    ~hints:
+      (Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+         total scroll)
+    ~body:(fun ~budget:_ c ->
+      c.push_styled ~style:(Theme.recede ())
+        "  old   new     diff preview (syntax colored)";
+      c.push_divider ();
+      if total = 0 then
+        c.push
+          (Ansi.dim
+           ^ (match state.patch_modal_error, state.repository_changes_diff_error with
+              | Some e, _ | None, Some e ->
+                  Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
+              | None, None -> "   (no pending patch diff loaded)")
+           ^ Ansi.reset)
       else
-        let row = diff_array.(idx) in
-        let inner = framed_inner_width (cols - 1) in
-        let span = tree_diff_row_span ~width:inner row in
-        let rendered_line = Masc_tui_span.render span in
-        framed_shadow_line buf cols (fit_width rendered_line inner)
-    done
-  end;
-  framed_shadow_divider buf cols;
-  framed_shadow_line buf cols
-    (Printf.sprintf "  %s[e]%s Edit ($EDITOR)   %s[j/k]%s Scroll   %s[g/G]%s Top/Bottom   %s[Esc/q]%s Close"
-       (Theme.info ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.recede ()) Ansi.reset);
-  framed_shadow_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close" total scroll));
-  finish_surface state ~clamped:(Patch_modal_scroll scroll)
-    ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
-;;
+        let width = framed_inner_width cols in
+        List.iteri
+          (fun index row ->
+            if index >= scroll && index < scroll + content_height then
+              c.push
+                (fit_width
+                   (Masc_tui_span.render (tree_diff_row_span ~width row))
+                   width))
+          diff_rows)
 
+(* The link preview overlay, through the same contract and for the same
+   reasons: its frame carried a block shadow, its title a globe glyph, and a
+   key row inside the box repeated the footer. The footer no longer repeats
+   the site label either -- the title already names it. *)
 let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let url_opt =
     match state.link_modal_url with
     | Some u -> Some u
@@ -13277,78 +13267,49 @@ let render_link_preview_modal (state : state) =
   in
   match url_opt with
   | None ->
-      framed_shadow_top buf cols;
-      framed_shadow_line buf cols
-        (screen_title " Web Link Preview & Embed" ^ "  "
-         ^ (Theme.info ()) ^ "\xf0\x9f\x8c\x90 " ^ Ansi.reset
-         ^ Ansi.dim ^ "(no links)" ^ Ansi.reset);
-      framed_shadow_divider buf cols;
-      let fixed_chrome = 7 in
-      let content_height = max 1 (rows - fixed_chrome) in
-      framed_shadow_line buf cols "  (no web links found in this conversation to preview — Esc to close)";
-      for _ = 2 to content_height do
-        framed_shadow_empty buf cols
-      done;
-      framed_shadow_divider buf cols;
-      framed_shadow_line buf cols
-        (Printf.sprintf "  %s[Esc/q]%s Close" (Theme.recede ()) Ansi.reset);
-      framed_shadow_bottom buf cols;
-      Buffer.add_string buf
-        (footer_line state ~max_cells:cols ~hints:"Esc:close");
-      finish_surface state ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+           ^ Ansi.reset)
+        ~hints:"Esc:close"
+        ~body:(fun ~budget:_ c ->
+          c.push "  (no web links found in this conversation to preview)")
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
-      framed_shadow_top buf cols;
-      framed_shadow_line buf cols
-        (screen_title " Web Link Preview & Embed" ^ "  "
-         ^ (Theme.info ()) ^ "\xf0\x9f\x8c\x90 " ^ Ansi.reset
-         ^ Ansi.bold ^ Terminal_text.single_line (Masc_tui_link_preview.site_label preview) ^ Ansi.reset);
-      framed_shadow_divider buf cols;
+      let site = Masc_tui_link_preview.site_label preview in
       let total_links = List.length state.link_modal_links in
-      let nav_line_count =
-        if total_links > 1 then begin
-          let nav =
-            Printf.sprintf "  %s[Link %d of %d]%s  [n] Next link   [p] Previous link   [o] Open in browser"
-              (Theme.warn ()) (state.link_modal_cursor + 1) total_links Ansi.reset
-          in
-          framed_shadow_line buf cols nav;
-          framed_shadow_divider buf cols;
-          2
-        end else 0
+      (* Which link of several, and the divider under it. *)
+      let nav_rows = if total_links > 1 then 2 else 0 in
+      let content_height =
+        max 1
+          (Masc_tui_types.surface_body_rows state ~terminal_rows
+           - surface_chrome_rows - nav_rows)
       in
-      let fixed_chrome = 7 + nav_line_count in
-      let content_height = max 1 (rows - fixed_chrome) in
       let content_lines =
         Masc_tui_link_preview.render_modal_card
-          ~width:(framed_inner_width (cols - 1)) ~height:content_height preview
+          ~width:(framed_inner_width cols) ~height:content_height preview
       in
       let total = List.length content_lines in
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
-      let lines_array = Array.of_list content_lines in
-      for i = 0 to content_height - 1 do
-        let idx = i + scroll in
-        if idx >= total then
-          framed_shadow_empty buf cols
-        else
-          let line = lines_array.(idx) in
-          framed_shadow_line buf cols line
-      done;
-      framed_shadow_divider buf cols;
-      framed_shadow_line buf cols
-        (Printf.sprintf "  %s[o]%s Browser   %s[y]%s Copy URL   %s[v]%s View Image   %s[j/k]%s Scroll   %s[Esc/q]%s Close"
-           (Theme.ok ()) Ansi.reset
-           (Theme.info ()) Ansi.reset
-           (Theme.info ()) Ansi.reset
-           (Theme.recede ()) Ansi.reset
-           (Theme.recede ()) Ansi.reset);
-      framed_shadow_bottom buf cols;
-      Buffer.add_string buf
-        (footer_line state ~max_cells:cols
-           ~hints:(Printf.sprintf "[%s] o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
-                     (Masc_tui_link_preview.site_label preview)));
-      finish_surface state ~clamped:(Link_modal_scroll scroll)
-        ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~clamped:(fun () -> Some (Link_modal_scroll scroll))
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
+           ^ Terminal_text.single_line site ^ Ansi.reset)
+        ~hints:"o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
+        ~body:(fun ~budget:_ c ->
+          if total_links > 1 then begin
+            c.push_styled ~style:(Theme.warn ())
+              (Printf.sprintf "  link %d of %d" (state.link_modal_cursor + 1)
+                 total_links);
+            c.push_divider ()
+          end;
+          List.iteri
+            (fun index line ->
+              if index >= scroll && index < scroll + content_height then
+                c.push line)
+            content_lines)
 
 let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in

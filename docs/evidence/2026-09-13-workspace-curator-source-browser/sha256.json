@@ -1,0 +1,13 @@
+{
+  "ocaml-parse.txt": "8444584f125f64cae497d5a917274b48a7cd6eae768d004b9b77dda73bb7a811",
+  "receipt.json": "3a3885d809234122c3d0844b11d25ad44742170761aa9e80150f5a6379b82046",
+  "superseded-fixture-interceptor-failure.json": "6db2e320c17726cd8961e92cd6edfcbee82222b24bae02e42913f0e269192d30",
+  "superseded-fusion-fixture-receipt.json": "3a3885d809234122c3d0844b11d25ad44742170761aa9e80150f5a6379b82046",
+  "superseded-fusion-fixture-workspace-curator-owner.png": "0460f1ff8dd391bee81d59a42d77d5f953715ddc00b495e41ffc145d007fbc36",
+  "superseded-vite-cache-receipt.json": "3a3885d809234122c3d0844b11d25ad44742170761aa9e80150f5a6379b82046",
+  "superseded-vite-cache-workspace-curator-owner.png": "6d508f4f5c801091bbffce1980eafe7179eb1e272719407b3746148fd7ac1c09",
+  "tsc-eslint-tool-receipt.json": "94fbb52189498a7047f49dfb20980211ebd96caf9681e6958df36b4e2e8e9f80",
+  "validation.json": "2ef2bb9990a428d0b3a7a52c5e58548e2987b1e58617a4cc2f06e928a016718e",
+  "vitest-tool-receipt.json": "1f5dee1b09163d700aaecb42b8d5d36e315f39508e95fa25f8f767250cec73db",
+  "workspace-curator-owner.png": "8096d4c9f8ef553b7197b7d5d567e38a4131de1646f9d88671d05e310d319a36"
+}

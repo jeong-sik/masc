@@ -1031,14 +1031,20 @@ base_url = "https://voice.fixture.invalid/v1"
             self.assertEqual(after['endpoints'][1]['default_voice'], 'Yuna')
             self.assertEqual(after['endpoints'][1]['kind'], 'macos_say')
 
-    def test_a_new_tts_section_gets_both_defaults(self):
+    def test_a_new_tts_section_keeps_per_keeper_voice_overrides_effective(self):
         import tomllib
         with self.workspace() as (base, runtime):
             result = self.configure(base, '--voice', 'Yuna')
             self.assertEqual(result.returncode, 0, result.stderr)
             tts = tomllib.loads(runtime.read_text())['voice']['tts']
             self.assertEqual(tts['default_voice'], 'Yuna')
-            self.assertEqual(tts['endpoints'][0]['default_voice'], 'Yuna')
+            self.assertEqual(len(tts['endpoints']), 1)
+            endpoint = tts['endpoints'][0]
+            self.assertEqual(endpoint['id'], 'macos-say')
+            self.assertEqual(endpoint['kind'], 'macos_say')
+            # An endpoint voice outranks per-Keeper mappings. The fresh
+            # section owns this default so those mappings remain effective.
+            self.assertNotIn('default_voice', endpoint)
 
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):

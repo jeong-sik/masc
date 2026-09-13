@@ -1131,7 +1131,13 @@ and with_permission_auth ~permission handler request reqd =
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
-          (match check_agent_rate_limit request reqd with
+          (* A permission-gated GET is still an observation. The dashboard reads
+             /api/v1/dashboard/runtime-probe the way it reads anything else, and
+             metering it as an operation made watching the runtime cost an agent
+             the same tokens as changing it. Same rule [with_read_auth] applies. *)
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
@@ -1181,7 +1187,15 @@ and with_token_permission_auth ~permission handler request reqd =
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with
       | Ok agent_name ->
-          (match check_agent_rate_limit request reqd with
+          (* The third wrapper that serves both halves, and the one the other
+             two hid: /api/v1/dashboard/standalone-lanes is a GET on it.
+             Classified in the other two alone, a dashboard poll of this route
+             kept spending the operation bucket. The tool wrappers above stay
+             metered whatever the method -- a tool invocation is an operation
+             because of what it does, not because of how it was addressed. *)
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
           | Ok () -> handler state agent_name request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)

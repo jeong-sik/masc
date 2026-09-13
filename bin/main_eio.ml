@@ -122,6 +122,26 @@ let safe_reqd_respond reqd response body =
        Authenticated API operation wrappers own that charge for their routes;
        charging them here too would double-debit one request. Dashboard assets
        and read observations remain under the same per-IP resource boundary. *)
+(* Which requests this ingress charges to the per-agent bucket. The exemption
+   this lane introduces is for observation reads, and "not MCP transport" was a
+   wider net than that:
+
+   - A WebSocket upgrade is a GET, but it opens a persistent session rather than
+     answering a read, and no route wrapper charges it. Left exempt, one token
+     could hold open as many sessions as it liked while the per-IP bucket
+     refilled -- the session count is what is unbounded, not the message rate.
+   - Any other method is not a read. [with_public_read] reaches
+     [with_read_auth] only under MASC_HTTP_AUTH_STRICT, so outside strict mode a
+     bearer-authenticated POST through that wrapper -- nav-event is one -- had no
+     charge here and none there either.
+
+   GET and HEAD on everything else stay exempt, which is the read boundary this
+   lane set out to draw. *)
+let charges_agent_bucket (request : Httpun.Request.t) =
+  is_mcp_transport_request request
+  || String.equal (Http.Request.path request) "/ws"
+  || match request.Httpun.Request.meth with `GET | `HEAD -> false | _ -> true
+
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
@@ -143,7 +163,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ~protocol:Transport_metrics.H1
         ~scope:Transport_metrics.Client_ip;
       true
-    end else if not (is_mcp_transport_request request) then false
+    end else if not (charges_agent_bucket request) then false
     else
       match auth_token_from_request request with
       | None -> false
@@ -1768,8 +1788,17 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio as_json =
-  let tts = Masc.Voice_bridge.probe_tts ~message () in
+let voice_verify_cmd_exit message audio agent as_json =
+  (* The keeper whose voice is being checked, when one is named. A voice is
+     resolved per keeper and per endpoint, so "does this configuration work"
+     and "does this keeper have the voice I gave it" are different questions
+     -- and for say only the second one can catch a wrong name, because say
+     speaks in the system voice rather than failing on one it does not have. *)
+  let tts =
+    match agent with
+    | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+    | None -> Masc.Voice_bridge.probe_tts ~message ()
+  in
   let stt =
     Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
   in
@@ -1832,6 +1861,18 @@ let voice_verify_cmd =
             "Audio file each STT endpoint is asked to transcribe. Without it, only TTS \
              is probed.")
   in
+  let agent =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "agent" ]
+          ~docv:"KEEPER"
+          ~doc:
+            "Probe with the voice this keeper is mapped to, rather than the section \
+             default. A voice is resolved per keeper and per endpoint, so a mapping \
+             that names a voice an endpoint does not have is only visible this way.")
+  in
   let as_json =
     Arg.(
       value
@@ -1853,7 +1894,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ as_json)
+    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
 (* Turning voice on without a server running.
 
    The setup journey runs before there is anything to talk to over HTTP, and
@@ -1929,14 +1970,20 @@ let voice_local_setup_exit base_path speak_voice hear_model =
         match speak_voice with
         | None -> []
         | Some voice ->
+          (* Where the choice is written decides whether per-keeper voices
+             still reach this endpoint. {!Voice_setup.voice_placement} carries
+             the reason and the measurement. *)
+          let endpoint_voice, section =
+            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            | Voice_setup.On_the_endpoint -> Some voice, []
+            | Voice_setup.On_the_section ->
+              None, [ Voice_setup.Set_tts_default_voice voice ]
+          in
           let endpoint =
             { (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
-              with default_voice = Some voice }
+              with default_voice = endpoint_voice }
           in
-          [ Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) ]
-          @ (match tts with
-             | Some _ -> []
-             | None -> [ Voice_setup.Set_tts_default_voice voice ])
+          (Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) :: section)
       in
       let hearing =
         match hear_model with

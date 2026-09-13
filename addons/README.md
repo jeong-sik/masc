@@ -58,7 +58,7 @@ image build commands for CI, using the repository root and `addons` build contex
 
 ```sh
 docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 addons
-docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.1.0 addons
+docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.2.0 addons
 ```
 
 Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
@@ -215,7 +215,15 @@ across explicitly recorded histories. Optional `incarnation: "load-2"` pins one
 history; absent or null means any observed incarnation, not an invented ID.
 Each `capture`
 observation adds `machine_id`, `incarnation`, nonnegative integer `frame`,
-`screen: {uri, sha256}`, and nullable `input_cursor`. Incarnation must change when
+`screen: {uri, sha256}`, nullable `input_cursor`, and `input_ledger`. The ledger
+is either explicit null (input history was not observed) or
+`{format: "msx-input-jsonl", entry_count, evidence: {uri, sha256}}`. Its count
+matches the input cursor. The native source captures the same frame, incarnation
+and immutable input records atomically, then stores oldest-first snapshot JSONL
+outside the machine lock. Each record preserves native `frame`, `who`, `key`
+and `edge`; the observer retains that evidence with the frame. A zero count and
+an empty ledger blob mean an observed empty history. Null does not mean zero.
+Incarnation must change when
 loading/restoring a machine history so a reset frame is not mistaken for an
 earlier point in the same clock. The package preserves every supplied capture
 and indicates whether it matches the binding. It never derives game-state facts

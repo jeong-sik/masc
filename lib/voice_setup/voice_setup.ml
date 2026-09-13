@@ -183,3 +183,10 @@ let apply ~runtime_config_path ~expected_revision changes =
   | exception Entry_refused error ->
     Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error))
 ;;
+
+type voice_placement =
+  | On_the_section
+  | On_the_endpoint
+
+let voice_placement ~section_exists =
+  if section_exists then On_the_endpoint else On_the_section

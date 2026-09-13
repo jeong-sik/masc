@@ -616,35 +616,34 @@ let render_memory_facts_body ~cols ~budget (state : state)
             ~dropped:dropped_count ~sort_label
         in
         let all_categories = memory_fact_categories state in
-        let pill_of_filter filt count is_active =
-          let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
-          let style = if is_active then Ansi.bold ^ Theme.info () else Theme.recede () in
-          let label = memory_category_filter_label filt in
-          Printf.sprintf "%s[%s %s: %d]%s" style marker label count Ansi.reset
+        (* Through [tab_strip], the one drawing every in-screen strip shares,
+           the way the Themes filter draws its chips: the key that walks the
+           entries first, then the entries with the one being read marked.
+           This row drew its own "[● All: 4] [○ blocker: 1]" -- a third
+           shape for a strip, with the key in brackets the footer spells as
+           "c / C:category". *)
+        let count_of = function
+          | Category_all -> grand_total
+          | Category_source -> store_source
+          | Category_dropped -> store_dropped
+          | Category_ordinary cat ->
+              List.length
+                (List.filter
+                   (fun (f : memory_fact) -> f.mf_category = cat)
+                   store_ordinary_facts)
         in
-        let all_pill =
-          pill_of_filter Category_all grand_total
-            (state.memory_facts_category = Category_all)
+        let keys = "  c/C:category  " in
+        let pills =
+          Ansi.dim ^ keys ^ Ansi.reset
+          ^ tab_strip
+              ~width:(tab_strip_width ~cols ~before:keys)
+              (List.map
+                 (fun filt ->
+                   ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
+                       (count_of filt)
+                   , state.memory_facts_category = filt ))
+                 (Category_all :: all_categories))
         in
-        let cat_pills =
-          List.map
-            (fun filt ->
-              let count =
-                match filt with
-                | Category_all -> grand_total
-                | Category_source -> store_source
-                | Category_dropped -> store_dropped
-                | Category_ordinary cat ->
-                    List.length
-                      (List.filter
-                         (fun (f : memory_fact) -> f.mf_category = cat)
-                         store_ordinary_facts)
-              in
-              let is_active = state.memory_facts_category = filt in
-              pill_of_filter filt count is_active)
-            all_categories
-        in
-        let pills = "  Categories [c/C]: " ^ String.concat " " (all_pill :: cat_pills) in
         (stats, pills)
   in
   push stats_line;

@@ -448,6 +448,56 @@ check_rule "R18-tui-pane-focus-key-marker" 0 \
   '' \
   bin
 
+# Key spelling in a hint row. masc_tui_keys.mli states the convention the
+# projections enforce -- keys spell as typed, the way Enter, Esc and Tab are
+# pressed -- and the 28-surface table spells every direction key that way. Six
+# hint rows spelled them in lower case instead, and three of those broke the
+# convention inside one token: [left/Esc] lower-cases the first half and
+# capitalises the second, so the same key reached the screen two ways on
+# surfaces whose footer draws the table's spelling beside it.
+#
+# The pattern reads inside a string literal, the way R13 does: a hint is drawn
+# from a literal, while a labelled argument of the same name is code. Without
+# the opening quote the rule caught three signatures in .mli files
+# (left:Buffer.t, tab:planning_tab) that have nothing to do with a screen.
+# The label also follows its colon with no space, which separates a hint from
+# prose that happens to end a clause with "an end: %d".
+r19_pattern='"([^"\n]* )?(esc|left|right|up|down|enter|tab|pgup|pgdn|home|end)(/[A-Za-z]+)?:[^ ]'
+r19_self_test_failed=0
+for fixture in \
+  '"  d:discard  esc:keep writing"' \
+  '"  Y:copy link  left/Esc:back"' \
+  '"  j/k:move  right/Enter:diff"' \
+  '"esc:menu"'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r19_pattern"; then
+    echo "ERROR[R19-pattern-self-test]: did not match $fixture" >&2
+    r19_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  '"  Y:copy link  Left/Esc:back"' \
+  '"  Esc:keep writing"' \
+  '"  Right / Enter:diff"' \
+  'Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit' \
+  '  tab:planning_tab ->' \
+  'write_two_panes buf ~left_cols ~left:left_buf' \
+  '"   No longer listed: %d reached an end: %d"' \
+  '"on the %s tab: %s"' \
+  | rg -q "$r19_pattern"; then
+  echo "ERROR[R19-pattern-self-test]: matched a corrected hint, a signature, or prose" >&2
+  r19_self_test_failed=1
+fi
+if [ "$r19_self_test_failed" -eq 0 ]; then
+  echo "OK[R19-pattern-self-test]: lower-case hint keys match; corrected hints, signatures and prose do not."
+else
+  fail=1
+fi
+check_rule "R19-tui-lowercase-hint-key" 0 \
+  "the spelling masc_tui_keys declares" \
+  "$r19_pattern" \
+  '' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

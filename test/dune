@@ -3534,7 +3534,12 @@
 (test
  (name test_tui_render_tools)
  (modules test_tui_render_tools)
- (libraries alcotest masc_tui_keys masc_tui_render_tools masc_tui_types))
+ (libraries
+  alcotest
+  masc_tui_keys
+  masc_tui_render_tools
+  masc_tui_theme
+  masc_tui_types))
 
 (test
  (name test_tui_keeper_legend)

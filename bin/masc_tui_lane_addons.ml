@@ -750,6 +750,41 @@ let rec action_fields prefix = function
       action_fields (if prefix="" then key else prefix ^ "." ^ key) value) fields
   | value -> [prefix ^ ": " ^ Yojson.Safe.to_string value]
 
+let flow_lines view =
+  (match selected_instance view with
+   | None -> ["No selected Add-on action target"]
+   | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
+  @ ["Project context flow (architecture; not an execution receipt)";
+     "Project request -> Keeper turn -> tools / code / tests -> retained evidence";
+     "Keeper history -> Librarian -> committed memory; tools may commit source-bound memory";
+     "Committed memories -> Workspace Curator -> attributed shared proposal";
+     "Next Keeper turn sees proposal reference -> keeper_workspace_memory_read -> sources";
+     "Shared proposal is model-proposed; tests and review establish project correctness.";
+     ""; "Installed Add-on connections (last received snapshot)"]
+  @ Option.to_list (Option.map (fun error -> "Refresh failed; graph may be stale: " ^ error) view.error)
+  @ (match view.snapshot with
+     | None -> ["Connections unavailable: no snapshot read yet"]
+     | Some snapshot ->
+         let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
+         let name instance = match List.find_opt (fun (d : declaration) -> d.instance_id=Some instance.id) declarations with
+           | Some {installation_id=Some id;_} -> id | _ -> instance.id in
+         let complete = Option.fold ~none:false ~some:(fun (c : configuration) -> c.complete) snapshot.configuration in
+         let notices = (if complete then [] else ["Installation inventory incomplete; dependency identities may be unresolved"])
+           @ List.concat_map (fun (d : declaration) -> List.map (fun issue -> d.source_path ^ ": " ^ issue) d.issues) declarations in
+         notices @ List.concat_map (fun instance ->
+           let target = name instance in
+           [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
+           @ (match Masc.Lane_addon_sources.dependencies instance.binding with
+              | Error detail -> ["  Invalid source binding: " ^ detail]
+              | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
+              | Ok upstream -> List.map (fun id ->
+                  let available = List.exists (fun candidate -> String.equal (name candidate) id && String.equal candidate.run_id instance.run_id) snapshot.instances in
+                  "  " ^ id ^ " -> " ^ target ^ (if available then "" else if complete then " · producer absent in this run" else " · producer unresolved; inventory incomplete")) upstream)
+           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) snapshot.instances)
+  @ [""; "Add-on observation -> retained rows/evidence -> explicit selection and use";
+     "An installed observer does not automatically fix code or complete a task.";
+     "f:back to observations  D:technical details  J/K:scroll"]
+
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.action_menu with
   | Some menu ->
@@ -764,7 +799,9 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
   | None ->
-      if view.presentation <> Summary || Option.is_some view.document_key || Option.is_some view.draft
+      if view.presentation = Flow then flow_lines view |> List.concat_map
+        (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
+      else if view.presentation <> Summary || view.focus = Rows || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~height ~failed_note ~width view
       else if view.focus = Timeline || view.focus = Connections then visual_text_lines ~height ~failed_note ~width view
       else compact_lines ~width view |>  List.concat_map (fun line ->

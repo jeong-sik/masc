@@ -250,6 +250,8 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_browser_interact);
   check string "listing tabs moves nothing" "tool"
     (activity Tool_schemas_misc.Misc_browser_tabs);
+  check string "subscription reading and acknowledgement do not move an MSX or browser source" "tool"
+    (activity Tool_schemas_misc.Misc_lane_updates);
   check string "a web search is a plain completion" "tool"
     (activity Tool_schemas_misc.Misc_web_search)
 

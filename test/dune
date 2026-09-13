@@ -6051,6 +6051,11 @@
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
 
 (test
+ (name test_lane_addon_subscription)
+ (modules test_lane_addon_subscription)
+ (libraries alcotest yojson unix masc masc.fs_compat))
+
+(test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
  (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_lane_declaration masc_tui_message_layout))

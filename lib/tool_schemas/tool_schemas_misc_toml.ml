@@ -56,3 +56,5 @@ let lane_evidence = schema_of_name "masc_lane_evidence"
 
 let lane_act = schema_of_name "masc_lane_act"
 let lane_action_status = schema_of_name "masc_lane_action_status"
+
+let lane_updates = schema_of_name "masc_lane_updates"

@@ -138,6 +138,7 @@ val build_prompt :
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, string) result ->
   ?workspace_memory:Workspace_memory_publication.observation ->
+  ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
@@ -175,6 +176,7 @@ val build_prompt_preview :
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, string) result ->
   ?workspace_memory:Workspace_memory_publication.observation ->
+  ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

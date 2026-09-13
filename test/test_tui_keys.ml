@@ -1026,7 +1026,7 @@ let test_config_pane_footer_actions () =
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
-    List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
+    List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
      with a notice there, so the row does not offer them, and [o] goes back. *)

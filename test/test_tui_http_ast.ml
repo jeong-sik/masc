@@ -2655,6 +2655,7 @@ let test_the_config_frame_is_the_shared_contract () =
     ; "render_presets", "Masc_tui_keys.footer_hints_config"
     ; "render_themes", "Masc_tui_keys.footer_hints_config"
     ; "render_config_models", "Masc_tui_keys.footer_hints_config"
+    ; "render_voice", "Masc_tui_keys.footer_hints_config"
     ]
 ;;
 

@@ -717,9 +717,12 @@ let log_settlement_failure ~path cleanup_failure =
    failure shapes stay apart: a missing journal is the normal state of a
    queued operation, an unreadable one is an operator problem, a corrupt one
    is a codec problem. *)
-let read_journal_path_result path =
+let read_journal_path ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows_end; end_offset; _ }
+      when rows_end < end_offset && not allow_torn_tail ->
+      Error (Journal_corrupt "cannot resume a journal with an incomplete final row")
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
       if rows_end < end_offset
       then
@@ -743,7 +746,18 @@ let read_journal_path_result path =
     Error (Journal_unreadable (Printexc.to_string exn))
 ;;
 
+let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
+
+let next_sequence ?(require_existing = false) journal =
+  match read_journal_path ~allow_torn_tail:false journal.path with
+  | Error Journal_missing when not require_existing -> Ok 0
+  | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
+  | Ok entries ->
+    let highest = List.fold_left (fun highest entry -> max highest entry.seq) (-1) entries in
+    if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
+    else Ok (highest + 1)
+;;
 
 (** {1 Replay position} *)
 

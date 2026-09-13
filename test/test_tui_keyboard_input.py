@@ -10660,6 +10660,19 @@ def keeper_gate_mode_footer_interaction(
                 "the footer offers Auto and YOLO on the same row: "
                 f"{drawn_rows[footer_row]!r}"
             )
+        # The Info row names the stance with the word the footer offers and
+        # the chat header wears: alpha is in yolo, so the row says so, with
+        # what that does beside it. It used to say "skipped" under a header
+        # saying YOLO.
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        stance_row = rows.get(screen_row_of(rows, b"Tool calls:"), b"")
+        if b"yolo \xc2\xb7 unasked" not in stance_row:
+            raise AssertionError(
+                f"the Info row does not name the stance as the footer does: {stance_row!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact

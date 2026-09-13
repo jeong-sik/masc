@@ -1409,7 +1409,7 @@ let test_owner_coalesces_compatible_messages_and_preserves_other_conversations (
   let submit index actor thread text blocks = ignore (owner_ok (Owner.submit_operation owner
     ~operation_id:(List.nth ids index) ~source:(source actor thread) ~input:(payload text blocks))) in
   let image = Keeper_multimodal_input.User_image (Url_ref {value="https://example.com/image.png"; mime_type=None}) in
-  submit 0 "alice" "keeper:batch" "one" [User_text "one"; image];
+  submit 0 "alice" "keeper:batch" "one" [image];
   Eio.Promise.await started;
   submit 1 "alice" "keeper:batch" "two" [];
   submit 2 "bob" "keeper:batch" "other actor" [];

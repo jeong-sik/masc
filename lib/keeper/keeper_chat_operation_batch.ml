@@ -27,7 +27,10 @@ let merge_attachments existing incoming =
 let blocks (input : Payload.decoded_input) =
   match input.user_blocks with
   | [] -> [Keeper_multimodal_input.User_text input.message]
-  | blocks -> blocks
+  | blocks ->
+    if List.exists (function Keeper_multimodal_input.User_text _ -> true | User_image _ | User_document _ | User_audio _ -> false) blocks
+    then blocks
+    else Keeper_multimodal_input.User_text input.message :: blocks
 
 let select head candidates =
   match decode head with

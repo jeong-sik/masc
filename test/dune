@@ -4868,6 +4868,7 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
+(include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)

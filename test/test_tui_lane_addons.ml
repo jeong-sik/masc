@@ -390,7 +390,23 @@ let guided_installation () =
   let preview image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
     "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
       "image",`String "worker:revision-1";"binding_schema",schema]] in
-  let form = Install.accept_preview (preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"])) |> ok in
+  let response = preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"]) in
+  let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
+  let reopened = Install.create () |> ok in
+  check bool "canceled preview cannot replace a freshly opened wizard" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" (Ok response) reopened));
+  check bool "different request identity cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:9 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending));
+  check bool "different manifest cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/other/lane.toml" (Ok response) pending));
+  let failed,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Error "preview failed") pending |> Option.get in
+  check (option string) "failed preview retains error" (Some "preview failed") error;
+  check bool "failed preview restores editable request for retry" true
+    (Result.is_ok (Install.begin_preview ~request_id:11 ~path:"/packages/arbitrary/lane.toml" failed));
+  let form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok response) pending |> Option.get in
+  check (option string) "matching preview advances without error" None error;
   check bool "failed image inspection remains explicit" true
     (List.mem "Image unverified: engine offline" (Install.lines form));
   let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"

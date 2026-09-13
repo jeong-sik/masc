@@ -10,7 +10,7 @@ let string_schema = `Assoc ["type",`String "string";"minLength",`Int 1]
 let object_schema properties = `Assoc ["type",`String "object";"properties",`Assoc properties;
   "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false]
 type preview = {path:string;title:string;revision:string;image:string;image_state:string}
-type t = Path of Form.t | Binding of preview * Form.t
+type t = Path of Form.t | Pending of int * string * Form.t | Binding of preview * Form.t
 type event = Updated of t | Preview of string | Draft of Document.session | Cancel
 let create () =
   Result.map (fun form -> Path form)
@@ -31,6 +31,17 @@ let accept_preview json =
   let* form = Form.create ~schema:(object_schema ["installation_id",string_schema;"run_id",string_schema;"binding",binding_schema])
       ~initial:(`Assoc []) in
   Ok (Binding ({path;title;revision;image;image_state},form))
+let begin_preview ~request_id ~path = function
+  | Path form ->
+      let* json = Form.value form in let* selected = text "manifest_path" json in
+      if selected<>path then Error "preview path does not match the current input"
+      else Ok (Pending (request_id,path,form))
+  | Pending _ | Binding _ -> Error "manifest input is not ready for preview"
+let receive_preview ~request_id ~path response = function
+  | Pending (expected_id,expected_path,form) when expected_id=request_id && expected_path=path ->
+      Some (match Result.bind response accept_preview with
+        | Ok next -> next,None | Error detail -> Path form,Some detail)
+  | Path _ | Pending _ | Binding _ -> None
 let rec toml = function
   | `String value -> Ok (Otoml.TomlString value)
   | `Int value -> Ok (Otoml.TomlInteger value)
@@ -53,18 +64,21 @@ let draft preview json =
   Ok {session with text=Otoml.Printer.to_string source;
       message=Some "Local draft only. Review TOML, then s saves and requests application; inspect actual state afterwards."}
 let handle ~key state =
-  let form = match state with Path form | Binding (_,form) -> form in
+  let form = match state with Path form | Pending (_,_,form) | Binding (_,form) -> form in
   let* event = Form.handle ~key form in
   match event,state with
   | Form.Cancel,_ -> Ok Cancel
+  | _,Pending _ -> Ok (Updated state)
   | Form.Updated form,Path _ -> Ok (Updated (Path form))
   | Form.Updated form,Binding (preview,_) -> Ok (Updated (Binding (preview,form)))
   | Form.Submit json,Path _ -> Result.map (fun path -> Preview path) (text "manifest_path" json)
   | Form.Submit json,Binding (preview,_) -> Result.map (fun session -> Draft session) (draft preview json)
 let paste ~text = function
+  | Pending _ as state -> state
   | Path form -> Path (Form.insert_text ~text form)
   | Binding (preview,form) -> Binding (preview,Form.insert_text ~text form)
 let lines = function
+  | Pending (_,path,_) -> ["Reading package and image state · Esc:cancel";"Manifest: " ^ path]
   | Path form -> "Install Add-on: manifest path on the connected server" :: Form.lines form
   | Binding (preview,form) ->
       ["Install " ^ preview.title ^ " · revision " ^ preview.revision;

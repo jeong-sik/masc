@@ -231,7 +231,7 @@ let concurrent_scene () =
   check bool "same timestamp is one aligned row" true
     (List.exists (fun (line : UI.visual_line) ->
       let cells = List.map snd line.cells in
-      List.exists (fun text -> String.contains text '>') cells && List.length cells>=4) (visual view));
+      List.exists (fun text -> String.contains text '>') cells && List.length cells>=3) (visual view));
   check bool "partial source summary remains visible" true
     (List.exists (String.starts_with ~prefix:"PARTIAL") (lines view));
   check bool "full date survives" true

@@ -370,6 +370,7 @@ let visual_lines ~height ~width view =
                 List.exists (fun (source : Row.coverage) -> not source.complete) snapshot.output.coverage in
               let coverage = if partial then "PARTIAL" else match snapshot.complete,snapshot.output.coverage with
                 | Some true, _ -> "slice complete"
+                | Some false, _ -> "slice partial"
                 | None, _ :: _ -> "reported sources complete"
                 | None, [] -> "coverage unknown" in
               [line ~tone:(if partial then Attention else Dim)

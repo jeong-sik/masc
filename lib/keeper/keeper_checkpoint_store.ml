@@ -797,6 +797,14 @@ let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoin
   | Ok reference -> Ok { checkpoint; reference; canonical_bytes }
 ;;
 
+let exact_snapshot_of_value ~expected_session_id checkpoint =
+  offload_checkpoint_cpu (fun () ->
+    match Agent_core.Checkpoint.to_json_result checkpoint with
+    | Error error -> Error (Ref_read_failed (classify_core_error error))
+    | Ok json -> exact_snapshot_of_checkpoint ~expected_session_id
+        ~canonical_bytes:(Yojson.Safe.to_string json) checkpoint)
+;;
+
 let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
   match decode_checkpoint_off_scheduler canonical_bytes with
   | Error error -> Error (Ref_read_failed (classify_core_error error))

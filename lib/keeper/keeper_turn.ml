@@ -489,6 +489,7 @@ let run_keeper_invocation_turn_admitted_inner
        | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
        | Ok direct_resume ->
       let deferred_lane = ref None in
+      let produced_checkpoint = ref None in
       let gate_ids = ref [] in
       let runtime_resume = match direct_resume with
         | Some (Keeper_agent_run.Runtime_continuation admission) -> Some admission
@@ -835,6 +836,12 @@ let run_keeper_invocation_turn_admitted_inner
                                           Option.map (fun _ -> admission) (Keeper_direct_gate_continuation.checkpoint admission))))
                                       ?deferred_runtime_lane:resume_lane
                                       ~on_runtime_retry_deferred:(fun lane -> deferred_lane := Some lane)
+                                      ~on_produced_checkpoint:(fun ~runtime_id ~attempt checkpoint ->
+                                        let captured =
+                                          Keeper_checkpoint_store.exact_snapshot_of_value
+                                            ~expected_session_id:meta.runtime.trace_id checkpoint
+                                          |> Result.map_error (fun _ -> "producer checkpoint capture failed") in
+                                        produced_checkpoint := Some (runtime_id,attempt,captured))
 			                                ~config:ctx.config
 			                                ~meta
 			                                ~publication_recovery
@@ -870,16 +877,22 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some admission ->
                     Keeper_direct_gate_continuation.finish_run ~config:ctx.config
                       ~keeper_name:meta.name ~operation_id admission run_result in
-                let official_client = match run_result with
-                  | Ok ({Keeper_agent_run.checkpoint=None; runtime_id; _}, _) ->
+                let source = match run_result with
+                  | Ok ({Keeper_agent_run.checkpoint=Some checkpoint; _}, _) ->
+                    Ok (Keeper_direct_gate_continuation.Returned_agent_core checkpoint)
+                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=Some settled_session; _}, _) ->
                     (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
-                     | Ok frame -> Ok (Some (runtime_id, frame))
+                     | Ok frame -> Ok (Keeper_direct_gate_continuation.Returned_official_client {settled_session;frame})
                      | Error error -> Error (Keeper_repetition_snapshot.error_to_string error))
-                  | Ok ({Keeper_agent_run.checkpoint=Some _; _}, _) | Error _ -> Ok None in
-                let gate_wait = match official_client with
-                  | Error detail -> Error detail
-                  | Ok official_client -> Keeper_direct_gate_continuation.suspend
-                      ?official_client
+                  | Ok ({Keeper_agent_run.checkpoint=None; official_client_settlement=None; _}, _) ->
+                    Error "official-client producer omitted its settled continuation receipt"
+                  | Error _ ->
+                    (match !produced_checkpoint with
+                     | Some (_runtime_id,_attempt,Ok snapshot) -> Ok (Keeper_direct_gate_continuation.Captured_agent_core snapshot)
+                     | Some (_runtime_id,_attempt,Error detail) -> Error detail
+                     | None -> Error "failed Gate producer has no attempt-owned checkpoint receipt") in
+                let gate_wait = Keeper_direct_gate_continuation.suspend
+                      ~source
                       ?runtime_lane:!deferred_lane
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in

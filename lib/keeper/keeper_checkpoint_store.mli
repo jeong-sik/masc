@@ -170,6 +170,11 @@ val exact_snapshot_messages : exact_checkpoint_snapshot -> Agent_core.Types.mess
 
 (** Strictly decode exact canonical bytes and derive their reference without
     re-encoding. *)
+val exact_snapshot_of_value :
+  expected_session_id:Keeper_id.Trace_id.t -> Agent_core.Checkpoint.t ->
+  (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
+(** Capture a producer-returned checkpoint once, using the canonical encoder. *)
+
 val exact_snapshot_of_canonical_bytes :
   expected_session_id:Keeper_id.Trace_id.t ->
   string ->

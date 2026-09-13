@@ -138,6 +138,14 @@ let has_stream_protocol_error events =
       | _ -> false)
     events
 
+let stream_protocol_error_kinds events =
+  List.filter_map
+    (function
+      | Keeper_chat_events.Agent_core_stream_protocol_error { kind; _ } ->
+        Some (Keeper_chat_events.stream_protocol_error_kind_to_string kind)
+      | _ -> None)
+    events
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -2942,9 +2950,54 @@ let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
               | Keeper_chat_events.Event_error _ | Keeper_chat_events.Run_finished _ -> true
               | _ -> false)
             events);
-       check bool (label ^ " stays visible as a typed protocol error") true
-         (has_stream_protocol_error events))
+       let kinds = stream_protocol_error_kinds events in
+       check bool (label ^ " stays visible as its own typed protocol error") true
+         (kinds <> [] && List.for_all (String.equal label) kinds))
     failures
+
+let test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once () =
+  let open Agent_core.Types in
+  let events, state =
+    translate_agent_core_stream
+      [ ContentBlockStart
+          { index = 0
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-timeout"
+          ; tool_name = Some "keeper_memory_search"
+          }
+      ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"q\":" }
+      ; Timeout "idle timeout after 120.0s"
+      ]
+  in
+  (match
+     List.filter
+       (function
+         | Keeper_chat_events.Agent_core_stream_protocol_error _ -> true
+         | _ -> false)
+       events
+   with
+   | [ Keeper_chat_events.Agent_core_stream_protocol_error
+         { kind = Keeper_chat_events.Sse_timeout
+         ; tool_call_id = Some "tc-timeout"
+         ; quarantined_occurrence = Some _
+         ; _
+         } ] -> ()
+   | _ -> fail "the open tool block was not quarantined under sse_timeout exactly once");
+  check bool "a timeout publishes no turn terminal" false
+    (List.exists
+       (function
+         | Keeper_chat_events.Event_error _ | Keeper_chat_events.Run_finished _ -> true
+         | _ -> false)
+       events);
+  (* When the timed-out attempt was the last one, the turn's Completion path
+     calls [fail_stream]. The timeout is already the recorded scope failure,
+     so nothing is added under another kind. *)
+  let after_terminal =
+    Keeper_chat_agent_core_stream_bridge.fail_stream state ~reason:"TimeoutError"
+  in
+  check (list string) "fail_stream adds nothing after a recorded timeout" []
+    (stream_protocol_error_kinds
+       after_terminal.Keeper_chat_agent_core_stream_bridge.chat_events)
 
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   let open Agent_core.Types in
@@ -3934,6 +3987,8 @@ let () =
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
           test_case "stream bridge attempt failures are not turn terminals" `Quick
             test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals;
+          test_case "stream bridge timeout quarantines the open tool once" `Quick
+            test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once;
           test_case "stream bridge surfaces unsupported provider shapes" `Quick
             test_keeper_stream_bridge_surfaces_unsupported_provider_shapes;
           test_case "stream bridge preserves NDJSON parse failure" `Quick

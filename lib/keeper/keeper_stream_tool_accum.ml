@@ -972,7 +972,10 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.SSEUnsupportedResponse _
   (* A repeat ends the generation, not just its tool blocks: the text this
      scope carries is the repetition itself. *)
-  | Agent_core.Types.StreamRepeating _ -> invalidate_current_scope t
+  | Agent_core.Types.StreamRepeating _
+  (* A liveness timeout ends the attempt the same way; the bridge quarantines
+     the scope's open tool blocks under [Sse_timeout]. *)
+  | Agent_core.Types.Timeout _ -> invalidate_current_scope t
   | Agent_core.Types.StreamIncomplete { reason } ->
     let stream_scope = t.current_stream_scope in
     let (_ : string) = reason in
@@ -988,8 +991,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
            block.stream_scope <> stream_scope)
         t.finalized
   | Agent_core.Types.Connected
-  | Agent_core.Types.Ping
-  | Agent_core.Types.Timeout _ -> ()
+  | Agent_core.Types.Ping -> ()
 ;;
 
 let to_tool_calls t =

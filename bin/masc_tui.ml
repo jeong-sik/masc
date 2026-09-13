@@ -21837,10 +21837,12 @@ and is loaded on demand through keeper_skill.
            (match state.runtime_mode with
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
-                (* The scroll belonged to the other list's length. *)
+                (* Selection and scroll belong to the same list. *)
+                state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0
             | Masc_tui_types.Runtime_all ->
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
+                state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
        | Some "p" | Some "P" when state.view = Clients ->

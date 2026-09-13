@@ -2308,10 +2308,27 @@ let test_a_repeated_failing_tool_is_counted_once_with_its_count () =
 ;;
 
 
+let test_checkpoint_wait_keeps_the_request_live () =
+  let t = fresh () in
+  feed t [Live.Run_started; tool_started ~block_index:0 "before" "read_file"; tool_ended ~block_index:0 "before";
+    tool_result ~block_index:0 "before" "exec-before"; Live.Reply_details {reply="";
+    turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
+  check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
+  check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
+  feed t [Live.Run_started];
+  check phase "continued segment is working" Transcript.Working (Transcript.phase t);
+  check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
+  feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";
+    tool_result ~block_index:0 "after" "exec-after"; Live.Text "answer"; reply_details ~reply:"answer" (); Live.Run_finished];
+  check phase "actual answer ends request" Transcript.Stream_ended (Transcript.phase t);
+  check int "reused stream coordinates preserve both segments" 2 (List.length (Transcript.tool_calls t))
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
-      , [ test_case "started_at keeps the dispatch instant" `Quick
+      , [ test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
+        ; test_case "started_at keeps the dispatch instant" `Quick
             test_started_at_keeps_the_dispatch_instant
         ; test_case "settled_at takes the first end-of-turn delta" `Quick
             test_settled_at_takes_the_first_end_of_turn_delta

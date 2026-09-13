@@ -2409,11 +2409,27 @@ let test_image_headers_sanitize_untrusted_attachment_names () =
        ~binding_name:"draw_image" ~callee:"Keeper_chat.terminal_safe_text")
 ;;
 
+let test_checkpoint_watcher_allows_new_input () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original" () in
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
+  state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.;
+    origin=Tui_types.Direct_submission; phase=Tui_types.Turn_streaming; log}];
+  List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+    [Masc_tui_keeper_chat_live.Run_started;
+     Masc_tui_keeper_chat_live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
+     Masc_tui_keeper_chat_live.Run_finished];
+  check bool "watcher remains attached" true (Option.is_some (Tui_types.inflight_for_keeper state "alpha"));
+  check bool "new operator input can be sent" true
+    (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends)
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
-      , [ test_case "image headers sanitize attachment names" `Quick
+      , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
+        ; test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick

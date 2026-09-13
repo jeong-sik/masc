@@ -2812,7 +2812,21 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               member_id, Keeper_chat_event_log.open_journal
                 ~base_dir:(Mcp_server.workspace_config state).base_path
                 ~keeper_name ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id) ()) member_ids in
-            let events = Keeper_chat_events.create
+            let first_seq =
+              let ( let* ) = Result.bind in
+              let* pending = pending_continuation ()
+                |> Result.map_error (fun detail -> Keeper_chat_event_log.Journal_unreadable detail) in
+              List.fold_left (fun result (_, journal) ->
+                let* highest = result in
+                let* next = Keeper_chat_event_log.next_sequence ~require_existing:(Option.is_some pending) journal in
+                Ok (max highest next)) (Ok 0) journals in
+            (match first_seq with
+             | Error Keeper_chat_event_log.Journal_missing ->
+               failed Keeper_chat_operation.Store_unavailable "operation journal cursor disappeared"
+             | Error (Journal_unreadable detail | Journal_corrupt detail) ->
+               failed Keeper_chat_operation.Store_unavailable detail
+             | Ok first_seq ->
+            let events = Keeper_chat_events.create ~first_seq
               ~on_publish:(fun ~seq ~ts event ->
                 List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
                   (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
@@ -3051,7 +3065,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               |> Result.map_error Keeper_owner_registry.command_error_to_string
               |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
                 | None -> Error "claimed operation disappeared before settlement") in
-            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery))))
+            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery)))))
 
   in
   match

@@ -2516,7 +2516,9 @@ let render_keeper_message (state : state) =
              then
              let activity =
                match entry.phase with
-               | Turn_streaming -> "sending"
+               | Turn_streaming ->
+                 if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
+                 then "awaiting continuation" else "sending"
                | Turn_reconciling -> "reconciling"
              in
              box_line_styled chat_buf chat_cols ~style:(Theme.warn ())

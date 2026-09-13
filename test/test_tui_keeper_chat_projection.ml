@@ -1382,10 +1382,27 @@ let test_missing_file_is_named_in_the_error () =
          "masc-attach-probe.png")
 ;;
 
+let test_checkpoint_segments_replay_until_actual_answer () =
+  let checkpoint = [run_started; text_start;
+    reply_details ~reply:"" ~turn_outcome:"continuation_checkpoint" (); text_end; run_finished] in
+  let body = List.map sse_event ([acceptance ()] @ checkpoint @ checkpoint
+    @ [run_started; text_start; delta "actual answer";
+       reply_details ~reply:"actual answer" ~turn_ref:"trace-chat#3" (); text_end; run_finished])
+    |> String.concat "" in
+  match Chat.decode_response ~request body with
+  | Ok (Chat.Turn_completed completed) ->
+    check string "last segment supplies the answer" "actual answer" completed.reply;
+    check bool "checkpoint is not the final outcome" true (completed.turn_outcome = Chat.Visible_reply)
+  | Ok _ -> fail "checkpoint replay lost the actual answer"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+
 let () =
   run "tui_keeper_chat_projection"
     [ ( "keeper chat"
-      , [ test_case "exact request body and UUIDv7" `Quick
+      , [ test_case "checkpoint segments replay until actual answer" `Quick test_checkpoint_segments_replay_until_actual_answer
+        ; test_case "exact request body and UUIDv7" `Quick
             test_request_body_and_identity
         ; test_case "a resume position rides beside the request" `Quick
             test_a_resume_position_rides_beside_the_request

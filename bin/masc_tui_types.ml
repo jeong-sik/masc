@@ -5138,6 +5138,15 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
+(* A live subscription can outlast one checkpoint segment. Such a watcher
+   keeps its identity and log while fresh input may enter the server queue. *)
+let blocking_inflight_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript))
+    state.msg_inflight
+;;
+
 let live_for_keeper state keeper_name =
   Option.map (fun entry -> entry.log) (inflight_for_keeper state keeper_name)
 ;;
@@ -5382,7 +5391,7 @@ let send_disposition state ~keeper_name : send_disposition =
     ~inflight:
       (Option.map
          (fun entry -> entry.sent_request)
-         (inflight_for_keeper state keeper_name))
+         (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
       (* The line a new one for this keeper would join (last waiting [Next], never
          a steer). Present it as "the keeper is spoken for" so Enter queues onto

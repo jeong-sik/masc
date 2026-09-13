@@ -256,6 +256,8 @@ val revision : t -> int
     transcript. *)
 
 val phase : t -> phase
+val awaiting_continuation : t -> bool
+(** A checkpoint segment ended; the original request still awaits its answer. *)
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
 (** Server acceptance and queue length observed at acceptance, if received.
     This remains historical after the run starts; inspect [phase] alongside it. *)

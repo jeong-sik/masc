@@ -5173,6 +5173,8 @@
 
 (include stanzas/test_tui_resources_empty_note.inc)
 
+(include stanzas/test_tui_data_unreliable_row.inc)
+
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test

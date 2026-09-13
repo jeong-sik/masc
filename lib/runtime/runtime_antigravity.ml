@@ -74,10 +74,23 @@ let default_config ~cwd ~model =
   }
 ;;
 
-let timeout_s_for_phase config ~turn_admitted =
-  if turn_admitted
-  then config.timeout_s
-  else Some config.admission_timeout_s
+(* Which liveness bound the next read runs under, decided by what the CLI
+   said last. agy narrates a trajectory one step at a time and writes nothing
+   while a tool step runs: the step's output arrives in its DONE (or ERROR)
+   update. Silence inside a tool step is the protocol, not a client that has
+   gone away, and an idle deadline there would measure how long the tool took,
+   which [timeout_s] must not cap. The wall-clock ceiling still bounds that
+   phase: [Runtime_wall_clock.cap_window] turns [None] into the remaining
+   budget. *)
+type read_phase =
+  | Awaiting_admission
+  | Model_turn
+  | Tool_step_running
+
+let timeout_s_for_phase config = function
+  | Awaiting_admission -> Some config.admission_timeout_s
+  | Model_turn -> config.timeout_s
+  | Tool_step_running -> None
 ;;
 
 type conversation_mode =
@@ -604,10 +617,30 @@ type protocol_state =
   ; result : (result_status * string * string option * int * usage) option
   ; tool_steps : int
   ; tool_errors : int
+  ; last_step : (step_type * step_state) option
+    (* The step the CLI reported last; [read_phase] is its only reader. *)
   }
 
 let initial_protocol_state =
-  { init = None; result = None; tool_steps = 0; tool_errors = 0 }
+  { init = None; result = None; tool_steps = 0; tool_errors = 0; last_step = None }
+;;
+
+let read_phase state =
+  match state.init with
+  | None -> Awaiting_admission
+  | Some _ ->
+    (match state.last_step with
+     | Some (Tool, Active) -> Tool_step_running
+     | None
+     | Some (Tool, (Done | Step_error))
+     | Some
+         ( ( Agent_response
+           | System_message
+           | User_input
+           | Internal
+           | Checkpoint
+           | Unrecognized _ )
+         , (Active | Done | Step_error) ) -> Model_turn)
 ;;
 
 let expected_conversation_id = function
@@ -720,6 +753,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
            ; tool_errors =
                state.tool_errors
                + if is_tool && step_state = Step_error then 1 else 0
+           ; last_step = Some (step_type, step_state)
            })
   | Result { conversation_id; status; response; error; num_turns; usage } ->
     let stage = "result event" in
@@ -826,7 +860,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
                 (Option.value config.wall_clock_ceiling_s
                    ~default:Runtime_wall_clock.default_ceiling_s));
          let timeout_s =
-           timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
+           timeout_s_for_phase config (read_phase !state)
            |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =

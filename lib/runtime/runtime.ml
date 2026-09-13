@@ -1860,7 +1860,13 @@ let verifier_exact_slot_admission ~runtime_id =
      Only a declared CLI slot adds an execution-kind constraint; the driver
      always enforces the actual candidate's required tools/native posture. *)
   match Runtime_exact_output_registry.current () with
-  | Error _ -> Ok Api_route
+  | Error Runtime_exact_output_registry.Registry_not_published -> Ok Api_route
+  (* A review captured its slot from an earlier read of the registry. While a
+     replacement holds the registry this second read cannot say whether the id
+     is still a declared CLI slot; reading it as an API route let a CLI slot
+     that shares a lane's name walk that lane's candidates, outside the
+     authority the review captured. Refuse; the review can run again. *)
+  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
     (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
      | Ok {cli_slots; _} when List.mem runtime_id cli_slots ->
@@ -1881,7 +1887,12 @@ let verifier_api_slot_ready slot_id =
     | Some runtime ->
       match runtime.execution with
       | Runtime_execution.Agent_core provider ->
+        (* The review always sends the managed verification.system prompt, and
+           an exact-output request carrying a system prompt to a model that
+           does not take one is refused as Unsupported_system_prompt. *)
         Provider_tool_support.provider_supports_inline_tools provider
+        && (Provider_tool_support.agent_core_capabilities_of_config provider)
+             .Llm_provider.Capabilities.supports_system_prompt
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
       | Runtime_execution.Antigravity_cli _ ->
@@ -1920,7 +1931,7 @@ let verifier_exact_lane_readiness () =
               "verifier_exact has no dispatchable slot: %s"
               (String.concat "; "
                 (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-                   Printf.sprintf "%S has no materialized candidate with required tools" slot.slot_id)
+                   Printf.sprintf "%S has no materialized candidate with required tools and a system prompt" slot.slot_id)
                    selected_slots @ List.rev rejected))))
 ;;
 

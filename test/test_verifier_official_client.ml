@@ -65,7 +65,7 @@ for line in sys.stdin:
   path, capture
 
 let runtime_config ?endpoint ?(protocol = "claude-code") ?(tools_support = true)
-    ?(default = "official.verifier")
+    ?(capabilities = "") ?(default = "official.verifier")
     ?(slots = [])
     ?(cli_slots = ["official.verifier"]) command = Printf.sprintf {|
 [providers.official]
@@ -79,6 +79,7 @@ tools-support = %b
 streaming = false
 [models.verifier.capabilities]
 supports-image-input = true
+%s
 [official.verifier]
 [runtime]
 default = %S
@@ -89,7 +90,7 @@ cli_slots = [%s]
   (match endpoint with
    | None -> Printf.sprintf "command = %S" command
    | Some endpoint -> Printf.sprintf "endpoint = %S" endpoint)
-  tools_support default
+  tools_support capabilities default
   (String.concat ", " (List.map (Printf.sprintf "%S") slots))
   (String.concat ", " (List.map (Printf.sprintf "%S") cli_slots))
 
@@ -262,6 +263,16 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 [api.verifier]
 |}
+    | "api-no-system-prompt" ->
+      (* Tool-capable, but declared without a system prompt: the review always
+         sends one, so this API slot cannot be the ready judge. *)
+      runtime_config ~capabilities:"supports-system-prompt = false"
+        ~slots:["api.verifier"] ~cli_slots:[] command ^ {|
+[providers.api]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[api.verifier]
+|}
     | "shadow" ->
       runtime_config ~default:"outside.verifier" command ^ outside_runtime ^ {|
 [runtime.lanes."official.verifier"]
@@ -313,7 +324,7 @@ candidates = ["outside.verifier"]
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
   let io : Agent_core.Exact_output.resolver_io = {getenv=(fun _ -> Ok None)} in
-  let catalog = if api_lane || mode = "api-tools-disabled" then
+  let catalog = if api_lane || mode = "api-tools-disabled" || mode = "api-no-system-prompt" then
       Some (Agent_core.Exact_output.Full_replacement {source="verifier-route-fixture";contents=Printf.sprintf {|
 [[providers]]
 id = "fixture_exact"
@@ -341,9 +352,28 @@ model_id = "verifier-fixture"
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
   let unavailable = List.mem mode
-    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding";"api-tools-disabled";"api-lane-tools-disabled"] in
+    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding";"api-tools-disabled";
+     "api-no-system-prompt";"api-lane-tools-disabled"] in
   check bool "readiness proves at least one actually compatible candidate"
     (not unavailable) (Result.is_ok (Runtime.verifier_exact_lane_readiness ()));
+  if mode = "valid" then (
+    (* Dispatch admits the captured slot a second time. While a configuration
+       replacement holds the registry, that read cannot tell whether the id is
+       still a declared CLI slot, so it refuses instead of routing it as API. *)
+    let admitted () = Runtime.verifier_exact_slot_admission ~runtime_id:"official.verifier" in
+    check bool "published CLI slot is admitted as a CLI runtime" true (admitted () = Ok Runtime.Cli_runtime);
+    let prepared = match Runtime_exact_output_registry.prepare_replacement ~lanes:declarations with
+      | Ok prepared -> prepared
+      | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error) in
+    (match Runtime_exact_output_registry.transact_replacement prepared
+       ~apply_write:(fun () -> Runtime_exact_output_registry.Not_committed (admitted ())) with
+     | Ok (Runtime_exact_output_registry.Not_committed (Error _)) -> ()
+     | Ok (Runtime_exact_output_registry.Not_committed (Ok _)) ->
+       fail "a slot admitted during a configuration replacement was routed"
+     | Ok (Runtime_exact_output_registry.Committed _) -> fail "the probe replacement committed"
+     | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error));
+    check bool "an uncommitted replacement leaves the CLI slot admitted" true
+      (admitted () = Ok Runtime.Cli_runtime));
   (match Runtime.verifier_exact_lane_slot_ids () with
    | Error detail -> fail detail
    | Ok slots ->
@@ -546,7 +576,7 @@ let () =
      "actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
        "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read"; "image-read";
-       "api-lane"; "api-tools-disabled"; "api-lane-exhausted";
+       "api-lane"; "api-tools-disabled"; "api-no-system-prompt"; "api-lane-exhausted";
        "api-lane-explicit-default"; "api-lane-tools-disabled"; "api-lane-uncertain-cli"];
      "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
        test_unsafe_slots_refused_before_spawn]]

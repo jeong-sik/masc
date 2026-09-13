@@ -2488,10 +2488,10 @@ let runtime_config_status_lines state ~cols =
 
 
 (* The sheet's masthead. It carries no keys and no surface name: both scroll
-   away with it, and both are said by rows that do not. The overlay's own title
-   row is fixed chrome -- it draws "hints on/off . [h] toggle . [Esc] close" at
-   every width, above the divider -- and the sheet's first section names the
-   active surface two rows under this. *)
+   away with it, and both are said by rows that do not. The overlay's title row
+   is fixed chrome that says whether hints are on, the footer row under the
+   frame draws h and Esc, and the sheet's first section names the active
+   surface two rows under this. *)
 let help_ascii_banner ~cols (_state : state) =
   let inner_width = max 1 (framed_inner_width cols) in
   let bar_char = "\xe2\x94\x80" in

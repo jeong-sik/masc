@@ -13305,11 +13305,14 @@ let render_help (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   framed_top buf cols;
+  (* The title says what state the sheet is in; the keys that change it are
+     the footer's, which draws h and Esc on this overlay and never drops Esc.
+     Both rows spelled them, so the title said the footer twice. *)
   framed_line buf cols
     (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
     ^ "hints "
     ^ (if state.hints_visible then "on" else "off")
-    ^ " \xc2\xb7 [h] toggle \xc2\xb7 [Esc] close" ^ Ansi.reset);
+    ^ Ansi.reset);
   framed_divider buf cols;
   let header = help_ascii_banner ~cols state in
   let lines = help_lines state in
@@ -13363,9 +13366,9 @@ let render_answering (state : state) =
   framed_line
     buf
     cols
+    (* Enter and Esc are in the footer row below this overlay. *)
     (screen_title " Live Keeper Turns & Answering" ^ "  "
-     ^ (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset ^ "  "
-     ^ Ansi.dim ^ "· [Enter] Chat · [Esc] Close" ^ Ansi.reset);
+     ^ (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset);
   framed_divider buf cols;
   let lines = answering_lines state in
   let content_height =
@@ -13456,7 +13459,8 @@ let render_agenda (state : state) =
   framed_line
     buf
     cols
-    (screen_title " Agenda & Upcoming Timers" ^ "  " ^ Ansi.dim ^ "· [j/k] Scroll · [Esc] Close" ^ Ansi.reset);
+    (* j/k and Esc are in the footer row below this overlay. *)
+    (screen_title " Agenda & Upcoming Timers");
   framed_divider buf cols;
   let lines =
     Agenda.overlay

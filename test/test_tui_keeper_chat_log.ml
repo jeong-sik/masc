@@ -24,6 +24,7 @@ let occurrence_to_string (o : Live.tool_occurrence) =
     (Option.value ~default:"-" o.tool_call_id)
 
 let delta_to_string : Live.delta -> string = function
+  | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       Printf.sprintf "runtime_attempt_started(%s,%s)"
@@ -233,6 +234,9 @@ let occurrence_anon : E.tool_stream_occurrence =
    test does not link) and [Event_error] (terminal; see [failed_turn]). *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
+  ; E.Batch_bound
+      { operation_id = (match Keeper_chat_operation.Operation_id.of_string "tui-req-1" with Ok id -> id | Error detail -> fail detail)
+      ; execution_id = (match Keeper_chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> fail detail) }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
       { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }

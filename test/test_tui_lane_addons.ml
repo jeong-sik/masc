@@ -251,6 +251,17 @@ let concurrent_scene () =
       (List.for_all (fun line -> Masc_tui_message_layout.display_width line<=width)
         (UI.lines ~height:20 ~width {view with selected=["browser read"]}))) [40;64;120]
 
+let failure_state_is_truthful () =
+  let idle = UI.lines ~height:20 ~width:80 UI.initial in
+  check bool "empty state does not claim a server reading" true
+    (List.exists (String.starts_with ~prefix:"No reading yet") idle);
+  let failed = UI.lines ~height:20 ~width:80
+    {UI.initial with error=Some "GET failed: connection refused"} in
+  check bool "failed request is labelled as a failure" true
+    (List.exists (String.starts_with ~prefix:"Load failed:") failed);
+  check bool "failure is not presented as an empty successful reading" false
+    (List.exists (String.starts_with ~prefix:"No reading yet") failed)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
@@ -258,5 +269,6 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
   test_case "concurrent scene preserves clocks, coverage and selection" `Quick concurrent_scene;
+  test_case "failed reads remain distinct from empty reads" `Quick failure_state_is_truthful;
   test_case "large inventories keep the selected lane visible" `Quick selection_stays_visible;
   test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]

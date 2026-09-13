@@ -312,8 +312,8 @@ let technical_lines ~width view =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))
 
-(* Enumerate only values explicitly closed by the package's schema. Required
-   open-ended fields have no invented default and use the advanced command. *)
+(* Enumerate only values explicitly closed by the package's schema. Open-ended or optional
+   fields use the parameter form so the operator can provide every field. *)
 let rec finite_values = function
   | `Assoc fields ->
       (match List.assoc_opt "const" fields, List.assoc_opt "enum" fields with
@@ -323,7 +323,8 @@ let rec finite_values = function
            match List.assoc_opt "type" fields,
                  List.assoc_opt "properties" fields,
                  List.assoc_opt "required" fields with
-           | Some (`String "object"), Some (`Assoc properties), Some (`List required) ->
+           | Some (`String "object"), Some (`Assoc properties), Some (`List required)
+             when List.length properties=List.length required ->
                let rec expand = function
                  | [] -> Some [[]]
                  | `String key :: rest ->
@@ -399,6 +400,12 @@ let submit_action view =
   let* _ = Action.validate ~schema:menu.schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id:menu.request_id ~action) in
   Ok {instance_id=instance.id;incarnation=instance.incarnation;request_id=menu.request_id;action}
+
+let paste_action ~text view =
+  match view.action_menu with
+  | Some ({form=Some form;_} as menu) ->
+      {view with action_menu=Some {menu with form=Some (Masc_tui_schema_form.insert_text ~text form)};scroll=0}
+  | _ -> view
 
 let edit_action ~key view =
   let* menu = match view.action_menu with Some menu -> Ok menu | None -> Error "No action form" in

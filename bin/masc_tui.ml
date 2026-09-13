@@ -16176,6 +16176,9 @@ and is loaded on demand through keeper_skill.
       (match input with
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
+            | Some ({ action_menu=Some {form=Some _;_};_ } as view) ->
+                state.lane_addons <- Some (Masc_tui_lane_addons.paste_action
+                  ~text:paste.Masc_tui_paste.text view)
             | Some ({ draft = Some draft; _ } as view) ->
                 state.lane_addons <- Some { view with draft = Some (draft ^ Masc_tui_types.identity_field_paste paste.Masc_tui_paste.text) }
             | Some _ | None -> ())

@@ -54,5 +54,6 @@ val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string)
 val open_actions : request_id:string -> t -> (t, string) result
 val move_action : t -> int -> t
 val submit_action : t -> (action_request, string) result
+val paste_action : text:string -> t -> t
 val edit_action : key:string -> t -> (t * action_request option, string) result
 val pending_action : t -> action_request option

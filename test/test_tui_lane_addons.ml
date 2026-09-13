@@ -298,7 +298,49 @@ let guided_actions () =
     (submitted.action=`Assoc ["query",`String "job"]);
   let replaced = {reviewed with snapshot=Some {snapshot with instances=[{instance with id="replacement";incarnation="replacement";action_schema=Some form_schema}]}} in
   check bool "review does not authorize a replaced worker" true
-    (Result.is_error (UI.edit_action ~key:"enter" replaced))
+    (Result.is_error (UI.edit_action ~key:"enter" replaced));
+  let pasted_text = "https://예시.test/경기\n\019\r" in
+  let pasted = UI.paste_action ~text:pasted_text form_view in
+  let pasted_review = edit "\019" pasted in
+  let pasted_review = UI.paste_action ~text:"must not change review" pasted_review in
+  let request = match UI.edit_action ~key:"enter" pasted_review |> ok with
+    | _,Some request -> request | _ -> fail "paste review must submit only on Enter" in
+  check bool "paste is Unicode text, never input commands; review stays immutable" true
+    (request.action=`Assoc ["query",`String pasted_text]);
+  let open_schema action =
+    let schema = match form_schema with
+      | `Assoc fields ->
+          let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+          `Assoc (("properties",`Assoc (("action",Yojson.Safe.from_string action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+      | _ -> assert false in
+    UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000003"
+      {UI.initial with snapshot=Some {snapshot with instances=[{instance with action_schema=Some schema}]}} |> ok in
+  let optional = open_schema
+    {|{"type":"object","properties":{"operation":{"type":"string","const":"search"},"query":{"type":"string"}},"required":["operation"],"additionalProperties":false}|} in
+  let optional = optional |> edit "tab" |> UI.paste_action ~text:"검색" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" optional |> ok with
+    | _,Some request -> request | _ -> fail "optional parameter action must submit" in
+  check bool "optional fields remain editable beside a required constant" true
+    (request.action=`Assoc ["operation",`String "search";"query",`String "검색"]);
+  let nested = open_schema
+    {|{"type":"object","properties":{"query":{"type":"string"},"options":{"type":"object","properties":{"mode":{"type":"string","const":"custom"},"target":{"type":"string"}},"required":["mode","target"],"additionalProperties":false}},"required":["query"],"additionalProperties":false}|} in
+  let nested = nested |> UI.paste_action ~text:"search" |> edit "tab" in
+  let reviewed = edit "\019" nested in
+  let request = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "omitted optional object must submit" in
+  check bool "nested constants never activate an omitted optional object" true
+    (request.action=`Assoc ["query",`String "search"]);
+  let enabled = nested |> edit "tab" |> UI.paste_action ~text:"selected" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" enabled |> ok with
+    | _,Some request -> request | _ -> fail "explicit optional object must submit" in
+  check bool "explicit child activates its object's required constants" true
+    (request.action=`Assoc ["options",`Assoc ["mode",`String "custom";"target",`String "selected"];"query",`String "search"]);
+  let unset = enabled |> edit "esc" |> edit "\021" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" unset |> ok with
+    | _,Some request -> request | _ -> fail "unset last child must omit optional object" in
+  check bool "unsetting the last explicit child removes optional object" true
+    (request.action=`Assoc ["query",`String "search"])
+
 
 
 let context_flow_uses_declared_connections () =

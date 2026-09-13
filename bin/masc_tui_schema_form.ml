@@ -17,7 +17,7 @@ let rec fields ~initial ~required path schema =
         ~required:(required && List.mem (`String key) names) (path @ [key]) schema) properties
   | _ ->
       let value = match at path initial with
-        | Some value -> Some value | None -> member "const" schema in
+        | Some value -> Some value | None -> if required then member "const" schema else None in
       [{path;schema;required;value}]
 let create ~schema ~initial =
   let* () = Validation.validate_value_schema schema in
@@ -29,14 +29,23 @@ let rec put path value root = match path with
       let fields = match root with `Assoc fields -> fields | _ -> [] in
       let child = Option.value ~default:(`Assoc []) (List.assoc_opt key fields) in
       `Assoc ((key,put rest value child) :: List.remove_assoc key fields)
-let rec skeleton schema =
-  match member "type" schema,member "properties" schema with
-  | Some (`String "object"),Some (`Assoc properties) ->
+(* Populate required structure only inside objects already present. Optional
+   objects become present through explicit field input, never a nested const. *)
+let rec complete schema input =
+  match member "const" schema,member "type" schema,member "properties" schema,input with
+  | None,Some (`String "object"),Some (`Assoc properties),`Assoc values ->
       let required = match member "required" schema with Some (`List names) -> names | _ -> [] in
       `Assoc (List.filter_map (fun (key,child) ->
-        if List.mem (`String key) required && member "type" child=Some (`String "object")
-        then Some (key,skeleton child) else None) properties)
-  | _ -> `Assoc []
+        let value = match List.assoc_opt key values with
+          | Some value -> Some value
+          | None when List.mem (`String key) required ->
+              (match member "const" child with
+               | Some value -> Some value
+               | None when member "type" child=Some (`String "object") -> Some (`Assoc [])
+               | None -> None)
+          | None -> None in
+        Option.map (fun value -> key,complete child value) value) properties)
+  | _ -> input
 let replace form value = {form with fields=List.mapi (fun i field ->
   if i=form.cursor then {field with value} else field) form.fields;draft=None;reviewing=false}
 let commit form = match form.draft,List.nth_opt form.fields form.cursor with
@@ -51,10 +60,17 @@ let value form =
   let* form = commit form in
   let result = List.fold_left (fun root field ->
     Option.fold ~none:root ~some:(fun value -> put field.path value root) field.value)
-      (skeleton form.schema) form.fields in
+      (`Assoc []) form.fields |> complete form.schema in
   Validation.validate_value ~schema:form.schema ~name:"Lane input" result
 let editable field = match field.value with
   | None -> "" | Some (`String text) -> text | Some value -> Yojson.Safe.to_string value
+let insert_text ~text form =
+  if form.reviewing then form else
+  match List.nth_opt form.fields form.cursor with
+  | None -> form
+  | Some field when Option.is_some (choices field.schema) -> form
+  | Some field ->
+      {form with draft=Some (Option.value ~default:(editable field) form.draft ^ text)}
 let handle ~key form =
   let selected = List.nth_opt form.fields form.cursor in
   match key with

@@ -69,6 +69,8 @@ type keeper_toml_error_kind =
   | Parse_error
   | Profile_error
   | Invalid_name
+  | Declaration_not_found of string
+  | Unknown_deny_tool of string list
 
 type keeper_toml_load_error =
   Keeper_types_profile_toml.keeper_toml_load_error =
@@ -79,6 +81,12 @@ type keeper_toml_load_error =
   }
 
 val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
+
+val unknown_deny_tools : string list -> string list
+(** The subset of a [keeper.tools.deny] list that names no model-visible
+    descriptor. Every load path refuses a profile for which this is
+    non-empty, so a reader past the load may only assert on it. *)
+
 val load_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 
@@ -101,16 +109,23 @@ val load_keeper_profile_defaults_result_for_base_path :
   base_path:string ->
   string ->
   (keeper_profile_defaults, keeper_toml_load_error) result
+(** A keeper with no [keepers/<name>.toml] is [Error] with kind
+    [Declaration_not_found name] and the expected path as [failing_path];
+    it never loads as empty defaults. *)
 
 (** One projection's immutable declaration reads. Every file is parsed once;
     capture a new snapshot for each projection so edits, additions, removals,
-    and parse/instruction errors are observed without a freshness interval. *)
+    and parse/instruction errors are observed without a freshness interval.
+    A declaration is indexed by its file name and, when [keeper.name] differs,
+    by that name too, refused under both. *)
 type keeper_profile_snapshot
 val read_keeper_profile_snapshot : base_path:string -> keeper_profile_snapshot
 val snapshot_configured_keeper_names : keeper_profile_snapshot -> string list
 val snapshot_profile_defaults :
   keeper_profile_snapshot -> string ->
   (keeper_profile_defaults, keeper_toml_load_error) result
+(** A name the snapshot holds no declaration for is [Error] with kind
+    [Declaration_not_found name]. *)
 
 type declarative_manifest_snapshot =
   | Declarative_manifest_missing

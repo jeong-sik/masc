@@ -9390,10 +9390,17 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                  let summary = match Browser_lane_view.scene_summary scene with
                    | None -> ""
                    | Some text -> " • " ^ text in
+                 let delta = match view.scene_delta with
+                   | None -> ""
+                   | Some {added; removed; unchanged; changed} ->
+                       let changed_text = if changed = 0 then ""
+                         else Printf.sprintf " · %d changed" changed in
+                       Printf.sprintf " • Δ +%d new · -%d out · =%d same%s"
+                         added removed unchanged changed_text in
                  let truncation = if scene.content.truncated then " • truncated" else "" in
-                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s" scene.elapsed_ms
+                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s%s" scene.elapsed_ms
                    (List.length scene.content.nodes)
-                   truncation summary, Theme.ok ()
+                   truncation summary delta, Theme.ok ()
              | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()

@@ -3233,6 +3233,18 @@ module Browser_lane_view = struct
     control_count : int;
     raster_count : int;
   }
+  (* A delta compares two observations only after [publish_scene] has proved
+     that they describe the same source, tab, document, view and scope.  The
+     counts describe observed node IDs, not the completeness or lifecycle of
+     the underlying page.  In particular, [removed] means absent from this
+     observation; a virtualized or truncated page can make a node disappear
+     without deleting it remotely. *)
+  type scene_delta = {
+    added : int;
+    removed : int;
+    unchanged : int;
+    changed : int;
+  }
   type navigation_guard = {
     expected_url : string;
     navigation_source : Masc.Browser_scene.navigation_source;
@@ -3274,6 +3286,7 @@ module Browser_lane_view = struct
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int; scene_scope : scene_scope_context option;
     scene_guard : navigation_guard option;
+    scene_delta : scene_delta option;
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
@@ -3300,14 +3313,14 @@ module Browser_lane_view = struct
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
-      scene_guard = None; read_view = Text_view; refresh_pending = None;
+      scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
-    scene_guard = None; read_view = Text_view }
+    scene_guard = None; scene_delta = None; read_view = Text_view }
   let after_action t =
     { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
-      scene_guard = None; selected_tab = None; scroll = 0; load = Idle;
+      scene_guard = None; scene_delta = None; selected_tab = None; scroll = 0; load = Idle;
       read_continuation = No_read_continuation }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
@@ -3392,13 +3405,13 @@ module Browser_lane_view = struct
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None;
+      reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
       scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
@@ -3413,7 +3426,7 @@ module Browser_lane_view = struct
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
                    | None, _ -> Idle
                  in
-                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scroll = 0;
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; scroll = 0;
                    client_picker = Some 0; load }, false)
     | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
@@ -3560,6 +3573,52 @@ module Browser_lane_view = struct
        control_count = 0; raster_count = 0}
       scene.content.nodes
 
+  let scene_node_table (scene : scene) =
+    let table = Hashtbl.create 64 in
+    List.iter (fun (node : Masc.Browser_scene.node) ->
+      (* A projected scene can repeat an ID for inline fragments. Keep every
+         fragment in DOM order while the delta still counts one identity. *)
+      let fragments = match Hashtbl.find_opt table node.node_id with
+        | None -> []
+        | Some fragments -> fragments in
+      Hashtbl.replace table node.node_id (node :: fragments))
+      scene.content.nodes;
+    let ids = Hashtbl.fold (fun node_id _ ids -> node_id :: ids) table [] in
+    List.iter (fun node_id ->
+      match Hashtbl.find_opt table node_id with
+      | None -> ()
+      | Some fragments -> Hashtbl.replace table node_id (List.rev fragments)) ids;
+    table
+
+  let scene_node_changed (before : Masc.Browser_scene.node) (after : Masc.Browser_scene.node) =
+    before.kind <> after.kind || before.tag <> after.tag || before.text <> after.text
+    || before.heading_level <> after.heading_level
+    || before.ancestor_region <> after.ancestor_region
+
+  let scene_fragments_changed before after =
+    let rec compare = function
+      | [], [] -> false
+      | before :: before_rest, after :: after_rest ->
+          scene_node_changed before after || compare (before_rest, after_rest)
+      | _ -> true
+    in
+    compare (before, after)
+
+  let scene_delta (before : scene) (after : scene) =
+    let old_nodes = scene_node_table before in
+    let new_nodes = scene_node_table after in
+    let added = ref 0 and unchanged = ref 0 and changed = ref 0 in
+    Hashtbl.iter (fun node_id fragments ->
+      match Hashtbl.find_opt old_nodes node_id with
+      | None -> incr added
+      | Some old_fragments ->
+          if scene_fragments_changed old_fragments fragments then incr changed else incr unchanged)
+      new_nodes;
+    let removed = ref 0 in
+    Hashtbl.iter (fun node_id _ ->
+      if not (Hashtbl.mem new_nodes node_id) then incr removed) old_nodes;
+    {added = !added; removed = !removed; unchanged = !unchanged; changed = !changed}
+
   let scene_summary scene =
     let counts = scene_counts scene in
     let add count noun parts =
@@ -3662,6 +3721,9 @@ module Browser_lane_view = struct
         && previous.content.url = scene.content.url
         && previous.content.view = scene.content.view && previous.content.scope = scene.content.scope
       | None -> false in
+    let scene_delta = if same_observation then
+      Option.map (fun previous -> scene_delta previous scene) t.scene
+      else None in
     let selected_id = if same_observation then
       Option.map (fun (node : Masc.Browser_scene.node) -> node.node_id)
         (selected_scene_target t)
@@ -3682,7 +3744,7 @@ module Browser_lane_view = struct
     let scene_scope = match scene.content.scope, t.scene_scope with
       | Some target, Some context when target = context.target -> Some context
       | (Some _ | None), _ -> None in
-    {t with scene = Some scene; scene_scope; scene_guard = None; reading; load = Idle;
+    {t with scene = Some scene; scene_scope; scene_guard = None; scene_delta; reading; load = Idle;
       read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
       scene_cursor = Option.value ~default:0 selected_index;
       scroll = if Option.is_some selected_index then t.scroll else 0}
@@ -3701,8 +3763,8 @@ module Browser_lane_view = struct
                              || (scene.content.view = Browser_lane.Regions && scene.content.scope = None
                                  && match scope with Some target -> not (region_observed target scene) | None -> false)) ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; scene_scope = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
-         | Error detail -> {t with scene = None; scene_scope = None; load = Failed detail})
+         | Ok _ -> {t with scene = None; scene_scope = None; scene_delta = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; load = Failed detail})
     | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_scroll {tab_id;_} | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
@@ -3724,12 +3786,12 @@ module Browser_lane_view = struct
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
                | _ -> t.scene_guard in
-             {t with scene = None; scene_scope = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
+             {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
          | Error detail ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
                | _ -> t.scene_guard in
-             {t with scene = None; scene_scope = None; scene_guard; load = Failed detail})
+             {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed detail})
     | _ -> t
 
   let accept_follow ~generation ~(guard : navigation_guard)
@@ -3742,9 +3804,9 @@ module Browser_lane_view = struct
                          && scene.content.view = Browser_lane.Content
                          && scene.content.scope = None ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; scene_scope = None; scene_guard = Some guard;
+         | Ok _ -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed "follow destination source, client, tab or scope mismatch"}
-         | Error detail -> {t with scene = None; scene_scope = None; scene_guard = Some guard;
+         | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed detail})
     | _ -> t
 
@@ -3923,7 +3985,7 @@ module Browser_lane_view = struct
                        | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
                        | None -> false)
                | _ -> false in
-             { t with reading = Some reading; scene_guard = None; load = Idle; read_view = Text_view;
+             { t with reading = Some reading; scene_guard = None; scene_delta = None; load = Idle; read_view = Text_view;
                scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
@@ -3946,7 +4008,7 @@ module Browser_lane_view = struct
         match List.nth_opt reading.tabs index with
         | None -> t
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0;
-            scene_scope = None; scene_guard = None; load = Idle; read_view = Text_view }
+            scene_scope = None; scene_guard = None; scene_delta = None; load = Idle; read_view = Text_view }
 
   let select_tab_index index t =
     match t.reading, index with
@@ -3957,7 +4019,7 @@ module Browser_lane_view = struct
          | None -> t
          | Some tab when Some tab.id = t.selected_tab -> t
          | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None;
-             scene_cursor = 0; scene_scope = None; scene_guard = None; load = Idle;
+             scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; load = Idle;
              read_view = Text_view })
 end
 

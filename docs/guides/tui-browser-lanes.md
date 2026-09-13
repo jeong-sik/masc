@@ -137,6 +137,13 @@ and truncation flag, so a Keeper can preserve the same reading scope.
 The scene status line also reports the observed composition, such as
 `2 articles · 6 links · 1 image`; these are typed node counts, not guesses from
 page text. Use the article count to choose `N`/`P` before reading the full body.
+After a same-document refresh or guarded page scroll it also shows an observed
+delta such as `Δ +3 new · -1 out · =8 same · 2 changed`. `new`, `out`, and
+`same` count unique observed node IDs; `out` means absent from this observation,
+not deleted from the site. Geometry-only movement from scrolling does not count
+as a content change. A different document, URL, view, or scope starts a fresh
+observation and shows no delta. The delta is a compact progress hint for the
+current viewport, not evidence that a feed is complete.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 

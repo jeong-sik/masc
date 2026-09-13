@@ -4684,13 +4684,15 @@ let launch_browser_lane state ~mailbox operation =
   | None -> ()
   | Some view when busy view -> ()
   | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
-                   && not (selected_client_available view) ->
+      && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
-        scene = None; scene_cursor = 0; scene_scope = None;
+        scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
       (* Scene geometry belongs to its observation. Browser effects and explicit
-         reads withdraw it before dispatch; a screenshot may itself observe a
+         reads and effectful gestures withdraw it before dispatch; a scroll
+         keeps the prior observation visible while its replacement is checked;
+         a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
          Scene_click and Scene_follow retain their exact reference in
          [operation], and the matching completion can install the newly
@@ -4706,8 +4708,9 @@ let launch_browser_lane state ~mailbox operation =
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
-            { view with scene = None; scene_cursor = 0; scene_scope = None }
-        | Scene_scroll _ | Scene_click _ | Scene_focus _ -> { view with scene = None; scene_cursor = 0 }
+            { view with scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None }
+        | Scene_scroll _ -> view
+        | Scene_click _ | Scene_focus _ -> { view with scene = None; scene_cursor = 0; scene_delta = None }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
@@ -18138,7 +18141,7 @@ and is loaded on demand through keeper_skill.
                       | Primary_unavailable -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
-                      | Some _, _ -> read {view with scene = None; scroll = 0}
+                      | Some _, _ -> read {view with scene = None; scene_delta = None; scroll = 0}
                       | None, Some tab_id ->
                           (match view.scene_guard with
                            | Some guard -> launch_browser_lane state ~mailbox:async_messages

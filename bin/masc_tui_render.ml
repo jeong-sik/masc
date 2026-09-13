@@ -6611,6 +6611,17 @@ let render_system_log_detail (state : state) seq =
 let activity_tab_strip ~on_logs =
   tab_strip [ ("Events", not on_logs); ("Logs", on_logs) ]
 
+(* The title: the strip, then what the reading on screen holds, after a dot.
+   The count used to follow the strip directly, so on Events it sat against
+   the tab that is not open -- "▸Events  Logs (0 of 0 held, turns)" -- and read
+   as that tab's count. It stays after the strip rather than moving before it,
+   so the tabs do not shift sideways when the count grows a digit. *)
+let activity_title ~on_logs reading =
+  Printf.sprintf "%s  %s  \xc2\xb7  %s"
+    (screen_title " MASC Activity")
+    (activity_tab_strip ~on_logs)
+    reading
+
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -6650,18 +6661,17 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s  %s"
-          (screen_title " MASC Activity")
-          (activity_tab_strip ~on_logs:true)
-          (title_missing_reading ~error:state.system_logs_error) timestamp
-          (connection_badge state)
+        Printf.sprintf "%s  %s  %s"
+          (activity_title ~on_logs:true
+             (title_missing_reading ~error:state.system_logs_error))
+          timestamp (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        Printf.sprintf "%s  %s (%d of %d, seq %d)%s  %s  %s"
-          (screen_title " MASC Activity")
-          (activity_tab_strip ~on_logs:true)
-          total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
+        Printf.sprintf "%s  %s  %s"
+          (activity_title ~on_logs:true
+             (Printf.sprintf "(%d of %d, seq %d)%s" total_entries
+                snapshot.sys_total snapshot.sys_latest_seq filter_note))
           timestamp (connection_badge state)
   in
   box_top buf cols;
@@ -10514,11 +10524,10 @@ let render_acting (state : state) =
           (Terminal_text.single_line reason)
   in
   let header =
-    Printf.sprintf "%s  %s%s  %s  %s"
-      (screen_title " MASC Activity")
-      (activity_tab_strip ~on_logs:false)
-      (Printf.sprintf " (%d of %d held, %s)" shown held
-         (Acting.filter_label state.acting_filter))
+    Printf.sprintf "%s  %s  %s"
+      (activity_title ~on_logs:false
+         (Printf.sprintf "(%d of %d held, %s)" shown held
+            (Acting.filter_label state.acting_filter)))
       timestamp
       (connection_badge state)
   in

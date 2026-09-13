@@ -1946,11 +1946,16 @@ def keeper_runtime_phase_and_identity_interaction(
         start=0,
         timeout=3.0,
     )
+    # Two surfaces spell the runtime two ways, and this one is the Keepers list
+    # row: phase then runtime id, nothing between. "configured:" belongs to the
+    # chat header, which renders through Keeper_chat_transcript's runtime
+    # identity text -- the row does not, and asking the row for the header's
+    # spelling timed this scenario out on main.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"paused configured: anthropic.claude-sonnet-4",
+        b"paused anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -1959,12 +1964,14 @@ def keeper_runtime_phase_and_identity_interaction(
     # toggle on purpose. The footer named no key for it, so the single action
     # that worked was the one the screen never mentioned. The needle carries the
     # reset that follows the key, which is what separates an offered hint from
-    # the dim `\x1b[2mx delete` an unavailable one would draw.
+    # the dim `\x1b[2mx:delete` an unavailable one would draw. The separator is
+    # a colon: the footer moved from "x delete" to "x:delete" and the needle
+    # stayed, which is the other half of why this scenario sat red on main.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"x\x1b[0m delete",
+        b"x\x1b[0m:delete",
         start=0,
         timeout=3.0,
     )
@@ -4242,7 +4249,13 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         board = send_and_wait(
             process, master_fd, output, b"s", b"post-trend"
         )
-        if b"sort:trending" not in board:
+        # The surface stopped naming the mode and started naming the order:
+        # `board_sort_explanation` in bin/masc_tui_types.ml renders Trending as
+        # "net votes / \u221aage-hours" behind "Sort [s]: ". The old needle
+        # asked for "sort:trending", a spelling this surface deliberately
+        # dropped, so the assertion had been red on main since that change.
+        trending_order = "net votes / \u221aage-hours".encode()
+        if trending_order not in board:
             raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (
@@ -7279,21 +7292,33 @@ def chat_visibility_modes_interaction(
                 timeout=5.0,
             )
         initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # "Adjacent rows" is a fact about the screen, not about one frame. The
+        # renderer redraws only dirty rows, so the frame that happens to carry
+        # ci-red-attribution can be a partial redraw starting at a date
+        # separator -- with no title row in it at all. Which rows share a frame
+        # depends on what changed, so reading a frame couples this assertion to
+        # redraw partitioning: it passes here and fails on pull requests that
+        # edit chat rendering without moving a single row (#35704, #35708).
+        # screen_rows keys by cursor address and the later write to a row wins,
+        # so it answers where each row is now.
+        drawn = screen_rows(initial)
+        title_row = screen_row_of(
+            drawn, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
+        identity_row = screen_row_of(drawn, b"gate:auto_judge")
+        if title_row < 0 or identity_row < 0:
+            raise AssertionError(
+                "the chat navigation row or the operational identity row is not "
+                f"on screen: title={title_row} identity={identity_row} "
+                f"{bytes(initial[-2000:])!r}"
+            )
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: title={title_row} "
+                f"identity={identity_row}"
             )
+        plain_initial_frame = CSI_RE.sub(b"", initial)
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         if re.search("◆\\s+SKILL".encode(), CSI_RE.sub(b"", initial)) is None:
@@ -10783,26 +10808,69 @@ def changes_keeper_and_arrow_detail_interaction(
 
 
 def keeper_gate_mode_footer_interaction(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    _slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    footer = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=200,
-        needle=re.compile(rb"g\x1b\[0m auto"),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
-        raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
-    os.write(master_fd, b"q")
+    gate: GatedHttpResponse,
+) -> Interaction:
+    """The footer names the action `g` performs, so it must name only one.
 
+    Two things had rotted here. The needles asked for "g auto" and "g yolo"
+    while the footer prints "g:auto" and "g:yolo" -- the separator changed and
+    this scenario, which CI runs only when this file is edited, was never
+    re-run, so the failure landed on whoever touched the file next.
+
+    And the check read the byte window resize_and_wait returns. That window
+    starts before the resize, so it also holds the frame drawn before the
+    approval-mode override arrived over HTTP -- and that frame's footer
+    legitimately offered g:yolo, because the Keeper was not yet known to be in
+    YOLO. Holding the response makes that first frame certain rather than
+    timing-dependent, and the assertion reads the row instead of the bytes.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        before = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=200,
+            needle=re.compile(rb"g\x1b\[0m:yolo"),
+            final_cursor=b"\x1b[?25l",
+        )
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
+            raise AssertionError("the approval-mode override never reached its fixture")
+        gate.release.set()
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            re.compile(rb"g\x1b\[0m:auto"),
+            start=len(before),
+            timeout=10.0,
+        )
+        # screen_rows keys by cursor address, so the later write to a row wins
+        # and what comes back is the footer on screen now.
+        drawn_rows = screen_rows(bytes(output))
+        footer_row = screen_row_of(drawn_rows, b"g:auto")
+        if footer_row < 0:
+            raise AssertionError(
+                f"no footer row offers Auto: {bytes(output[-2000:])!r}"
+            )
+        if b"g:yolo" in drawn_rows[footer_row]:
+            raise AssertionError(
+                "the footer offers Auto and YOLO on the same row: "
+                f"{drawn_rows[footer_row]!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
 
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
@@ -13472,14 +13540,19 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=changes_navigation_fixtures,
     )
     gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = (
-        200,
-        {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+    gate_mode_gate = GatedHttpResponse(
+        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+        subsequent_response=(
+            200,
+            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+        ),
+        hold_seconds=15.0,
     )
+    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
     run_terminal_scenario(
         executable,
         description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction,
+        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
         http_fixtures=gate_mode_fixtures,
     )
     run_terminal_scenario(

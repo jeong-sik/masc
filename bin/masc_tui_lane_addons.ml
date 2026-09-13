@@ -18,6 +18,10 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+type action_menu = {
+  target_id : string; target_incarnation : string; target_title : string; request_id : string;
+  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+}
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type t = {
   technical_details : bool; action_menu : action_menu option;

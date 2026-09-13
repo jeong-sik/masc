@@ -87,6 +87,12 @@ parse_refs=$(count_code_refs "$parse_pattern")
 allowed_parse_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy/exec_policy.ml"
+  # task-634 / #26289: the closed destination vocabulary lives beside its
+  # own judge (Exec_policy.validate_shell_ir_paths) in the same library —
+  # it re-opens a script-costumed child exactly the way exec_policy.ml
+  # already does, to name destinations for that same judge, not to invent
+  # a second parse path or a second authorization taxonomy.
+  "lib/exec_policy/execute_script_paths.ml"
 )
 
 unclassified_parse_files=()

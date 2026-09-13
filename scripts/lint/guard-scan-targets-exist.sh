@@ -122,6 +122,9 @@ case "$MODE" in
     : >"$scratch/lib/present.ml"
     : >"$scratch/lib/bare_present.ml"
     : >"$scratch/lib/glob_present.ml"
+    # A preceding argument must not become part of the captured path.
+    printf 'check "test/scenario.py" "lib/present.ml"\n' \
+      >>"$scratch/scripts/probe.sh"
     want="scripts/probe.sh|lib/absent.ml
 scripts/probe.sh|lib/bare_absent.ml
 scripts/probe.sh|lib/glob_absent.ml"

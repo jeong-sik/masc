@@ -3002,7 +3002,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
-    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('ok')
+    expect(tool.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(tool.getAttribute('data-chat-trace-entry-id')).toBeNull()
 
     const chat = container.querySelector('[data-chat-trace-step="chat"]') as HTMLElement

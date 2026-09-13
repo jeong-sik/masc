@@ -523,7 +523,7 @@ let contains ~needle haystack =
 
    Measured at 160 usable cells against the real key tables: the chat pane
    lost [Esc] -- which is also how a running turn is interrupted -- and
-   [y / n], which answers the approval a Keeper is waiting on. Config lost
+   [/approve /deny], which answers the approval a Keeper is waiting on. Config lost
    the [Esc] that leaves it. Dropping from the back was written for the
    [r] / [Tab] / [q] tail, which every surface shares and the sheet holds;
    it kept going once the row was full enough. *)
@@ -531,7 +531,7 @@ let test_the_cut_keeps_the_way_out () =
   let hints =
     "j/k:roster move  Enter:send / open  Ctrl-J:newline  Ctrl-G:next keeper  \
      Ctrl-U:clear  Ctrl-R:reasoning  Ctrl-D:tool detail  Ctrl-N:memory detail  \
-     y / n:approval  Esc:back"
+     /approve /deny:approval  Esc:back"
   in
   let line =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints ()
@@ -541,7 +541,7 @@ let test_the_cut_keeps_the_way_out () =
   Alcotest.(check bool) "the way out survives it" true
     (contains ~needle:"Esc:back" line);
   Alcotest.(check bool) "so does the answer to a pending ask" true
-    (contains ~needle:"y / n:approval" line);
+    (contains ~needle:"/approve /deny:approval" line);
   Alcotest.(check bool) "and something did give way" false
     (contains ~needle:"Ctrl-R:reasoning" line)
 

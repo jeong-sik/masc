@@ -312,7 +312,7 @@ let split_on_double_space text =
    groups print in a fixed order so that the same action sits in the same
    place on every screen, and rescuing an item by moving it would trade one
    of those promises for the other. *)
-let never_dropped_keys = [ "Esc"; "q"; "y / n" ]
+let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny" ]
 
 let item_is_pinned item =
   (* Items are [key:label]; the key is what the projection built the item

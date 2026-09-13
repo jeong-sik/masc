@@ -3501,7 +3501,8 @@ module Browser_lane_view = struct
     | Ambiguous_primary_region
 
   let primary_region_target t =
-    let regions = scene_targets t |> List.mapi (fun index node -> index, node)
+    let regions = scene_targets t |> List.mapi
+      (fun index (node : Masc.Browser_scene.node) -> index, node)
       |> List.filter_map (fun (index, node) ->
         match node.kind with
         | Region role -> Some (role, index, node)

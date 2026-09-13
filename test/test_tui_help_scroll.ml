@@ -25,7 +25,7 @@ let sectioned ~sections ~rows =
           :: List.init (rows - 1) (fun r -> Printf.sprintf "section %d row %d" s r))
          @ [ "" ]))
 
-let test_wide_terminal_halves_the_sheet () =
+let test_wide_terminal_pairs_whole_sections () =
   let sheet = Masc_tui_help.sheet ~cols:120 (sectioned ~sections:4 ~rows:18) in
   check_int "four 18-row sections fold into two pairs and a gap" 37
     (List.length sheet)
@@ -148,8 +148,8 @@ let test_key_bracket_formatting () =
 let () =
   Alcotest.run "tui_help_scroll"
     [ ( "sheet"
-      , [ Alcotest.test_case "wide terminal halves the sheet" `Quick
-            test_wide_terminal_halves_the_sheet
+      , [ Alcotest.test_case "wide terminal pairs whole sections" `Quick
+            test_wide_terminal_pairs_whole_sections
         ; Alcotest.test_case "odd line count keeps the tail" `Quick
             test_odd_line_count_keeps_the_tail
         ; Alcotest.test_case "a heading stays above its rows" `Quick

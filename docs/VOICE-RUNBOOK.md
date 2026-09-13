@@ -331,6 +331,33 @@ A failure reports the **end** of the command's output: `whisper-cli` prints
 nine lines about which Metal library it loaded before it names the model file
 it could not open.
 
+**whisper-cli does not refuse audio it cannot read.** For a container it does
+not decode it prints `error: failed to read audio file` to stderr and exits 0
+with nothing on stdout — the same answer as a recording of silence. The same
+sentence, encoded eight ways, through whisper-cpp 1.9.2:
+
+| Container | First bytes | whisper-cli |
+|---|---|---|
+| WAV | `RIFF…WAVE` | transcribes |
+| FLAC | `fLaC` | transcribes |
+| MP3, ID3-tagged | `ID3` | transcribes |
+| MP3, from the first frame | `FF F3` | transcribes |
+| WebM | `1A 45 DF A3` | exit 0, empty |
+| Ogg Opus | `OggS` … `OpusHead` | exit 0, empty |
+| AIFF-C | `FORM…AIFC` | exit 0, empty |
+| M4A | `…ftyp` | exit 0, empty |
+
+masc reads the first 36 bytes before running whisper-cli and refuses the four
+it does not read, naming the container:
+
+```
+masc voice-verify --base-path ~/work --audio probe.webm
+  whisper-local   whisper_cli   refused: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM
+```
+
+A container whose first bytes are none of the eight — Ogg Vorbis, AAC — is
+handed to whisper-cli, since none of those was measured.
+
 ## Configuration
 
 One section in `runtime.toml`, read by `Voice_config`:
@@ -861,6 +888,21 @@ POST /api/v1/voice/transcribe   (raw wav body)
 and no such field. whisper-cli detects the language (`-l auto`) but reports it
 on its own stderr, not on the wire. A caller that names a language is answered
 with that name.
+
+The dashboard microphone is not transcribed on a `whisper_cli`-only
+workspace. `voice-input.ts` posts what the browser's `MediaRecorder` recorded,
+under the recorder's own type (`audio/webm` when it names none), and the route
+answers WebM and M4A bodies before whisper-cli runs:
+
+```
+POST /api/v1/voice/transcribe   (raw webm body)
+→ 400 {"error":"all enabled STT endpoints failed: whisper-local: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM"}
+   0.004s wall
+```
+
+The dashboard puts that `error` string in an error toast. Speaking into the
+TUI, which records WAV with `rec`, and posting WAV, FLAC or MP3 from a device
+are transcribed.
 
 ### What each route refuses, measured
 

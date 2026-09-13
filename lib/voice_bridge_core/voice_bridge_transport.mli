@@ -53,7 +53,11 @@ val speak_via_command_to_file
   -> (int, string) result
 
 (** Transcribe one file by running a command. The transcript is the command's
-    own output, so this answers text where the HTTP path answers JSON. *)
+    own output, so this answers text where the HTTP path answers JSON.
+
+    A file whose first bytes name a container whisper-cli does not read
+    (WebM, Ogg Opus, AIFF, MP4) is refused before the command runs, with the
+    container named; so is a file that cannot be read. *)
 val transcribe_via_command
   :  Voice_config.endpoint
   -> audio_file:string

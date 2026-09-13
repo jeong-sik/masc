@@ -492,12 +492,18 @@ let test_batch_claim_freezes_inputs_and_settles_members () =
   check bool "member original input retained" true (member.input = Some (input "edited before dispatch"));
   check int "only unbound input remains queued" 1 (store_ok (Store.inventory store)).queued_count;
   check int "ordered member lookup" 2 (List.length (store_ok (Store.batch_operations store ~operation_id:second)));
+  (match Store.move_queued_to_front store ~now:5. ~operation_id:second with
+   | Error (Store.Not_queued owner) -> check bool "active member resolves to its exact owner" true (Id.equal owner first)
+   | _ -> fail "active batch follower was prioritized or replayed");
   (match Store.cancel_queued store ~now:5. ~operation_id:second with
    | Error _ -> () | Ok _ -> fail "a member was withdrawn from an executing shared input");
   ignore (store_ok (Store.succeed_running store ~now:6. ~operation_id:first ~outcome_ref:"turn:shared"));
   List.iter (fun operation_id -> let operation = get_exn store operation_id in
     check string "shared terminal" "succeeded" (state operation);
     check bool "terminal input removed" true (operation.input = None)) [first; second];
+  (match Store.move_queued_to_front store ~now:7. ~operation_id:second with
+   | Error (Store.Not_queued owner) -> check bool "settled member remains bound to terminal owner" true (Id.equal owner first)
+   | _ -> fail "settled batch follower was replayed by priority");
   let next = Option.get (store_ok (Store.claim_next store ~now:7.)) in
   check bool "follower cannot execute again" true (Id.equal next.operation_id third)
 ;;

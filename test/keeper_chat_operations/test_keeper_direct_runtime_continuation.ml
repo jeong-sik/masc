@@ -203,6 +203,11 @@ let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
     let retry = continuation () in
     ignore (defer store claimed retry |> ok);
     ignore (Store.submit store ~now:13. ~operation_id:arrival ~source ~input |> ok);
+    let prioritized = Store.move_queued_to_front store ~now:14. ~operation_id:follower |> ok in
+    check bool "pending follower priority retains original request identity" true
+      (Operation.Operation_id.equal prioritized.operation_id follower);
+    check bool "pending follower resolves to frozen execution" true
+      (Option.exists (fun (binding : Operation.batch_membership) -> Operation.Operation_id.equal binding.execution_id operation_id) prioritized.batch_membership);
     let forbidden _ _ = fail "resumed batch asked to reselect membership" in
     let resumed = match Store.claim_next ~batch:forbidden store ~now:14. |> ok with Some value -> value | None -> fail "no retry" in
     check bool "same frozen aggregate" true (resumed.input = claimed.input);

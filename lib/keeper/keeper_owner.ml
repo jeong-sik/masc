@@ -1004,10 +1004,11 @@ let start
             (match run_operation_read t ~label:"resolve exact interrupt execution" (fun () ->
                Chat_operation_store.get t.operation_store expected) with
              | Error _ as error -> error
-             | Ok operation ->
-               let expected = match Option.bind operation (fun operation -> operation.Chat_operation.batch_membership) with
+             | Ok None -> Ok None
+             | Ok (Some operation) ->
+               let expected = match operation.Chat_operation.batch_membership with
                  | Some member -> member.execution_id
-                 | None -> expected in
+                 | None -> operation.operation_id in
                Ok (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
                  | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
                  | _ -> None))

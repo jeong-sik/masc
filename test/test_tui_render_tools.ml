@@ -29,10 +29,21 @@ let test_the_strip_names_panes_and_leaves_the_key_to_the_footer () =
   Alcotest.(check bool) "which the footer does instead" true
     (contains "p:section" (Masc_tui_keys.footer_hints Tools))
 
+(* The strip is the shared in-screen drawing: the open pane marked, two cells
+   between names. It kept a bar between them after every other strip dropped
+   it. *)
+let test_the_strip_is_the_shared_drawing () =
+  Alcotest.(check string) "the open pane marked, two cells apart"
+    "\xe2\x96\xb8호출 범위  비동기 작업  Skill 기록  Skill 사용 집계  전체 도구"
+    (Masc_tui_theme.strip_sgr
+       (Masc_tui_render_tools.tools_pane_strip (make_state ())))
+
 let () =
   Alcotest.run "masc_tui_render_tools"
     [ ( "pane strip"
       , [ Alcotest.test_case "panes here, the key in the footer" `Quick
             test_the_strip_names_panes_and_leaves_the_key_to_the_footer
+        ; Alcotest.test_case "the shared strip drawing" `Quick
+            test_the_strip_is_the_shared_drawing
         ] )
     ]

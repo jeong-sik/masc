@@ -991,7 +991,17 @@ let test_runtime_footer_is_the_tables () =
     [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
-  Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh")
+  Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
+  (* The sheet reads the same table and names the whole walk once, because it
+     is not drawn from either reading. *)
+  let labels key =
+    Masc_tui_keys.for_surface Runtime
+    |> List.filter (fun (b : Masc_tui_keys.binding) -> String.equal b.Masc_tui_keys.key key)
+    |> List.map (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.label)
+  in
+  Alcotest.(check (list string)) "the sheet names the p walk once"
+    [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
+  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server

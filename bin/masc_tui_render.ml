@@ -2672,18 +2672,10 @@ let render_planning_list (state : state) =
        let rollup = planning_rollup_row ~cols p.pl_rollup in
        (* The backlog counts are a list. [▸] joined them -- the mark the tab
           strip puts on the surface you are on -- so "todo ▸ claimed" read as a
-          path, and claimed, the one count with no glyph, looked like it had
-          one. *)
+          path. *)
        let backlog_sep = Printf.sprintf " %s·%s " (Theme.recede ()) Ansi.reset in
        let backlog =
-         let items =
-           [ ("todo", p.pl_backlog.pb_todo, Masc_tui_theme.Glyph.task_todo ^ " todo")
-           ; ("claimed", p.pl_backlog.pb_claimed, "claimed")
-           ; ("running", p.pl_backlog.pb_running, Masc_tui_theme.Glyph.task_active ^ " running")
-           ; ("done", p.pl_backlog.pb_done, Masc_tui_theme.Glyph.task_done ^ " done")
-           ; ("cancelled", p.pl_backlog.pb_cancelled, Masc_tui_theme.Glyph.task_cancelled ^ " cancelled")
-           ]
-         in
+         let items = planning_backlog_counts p.pl_backlog in
          let counts = List.map (fun (k, v, _) -> k, v) items in
          let bands = Magnitude.of_counts counts in
          List.map2

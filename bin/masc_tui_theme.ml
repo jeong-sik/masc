@@ -446,10 +446,15 @@ let strip_sgr text =
   Buffer.contents buf
 
 module Glyph = struct
-  let task_done = "\xe2\x97\x8f"
-  let task_active = "\xe2\x97\x90"
-  let task_todo = "\xe2\x97\x8b"
-  let task_cancelled = "\xc3\x97"
+  (* How far a piece of work has got: not started, being worked, finished,
+     ended without finishing. A Task row, the Backlog counts and the Goal
+     counters above them all read these, so one mark means one stage on the
+     Planning screen. The Goal counters spelled their own -- a filled circle
+     for Executing over a Backlog row where the filled circle is done. *)
+  let progress_waiting = "\xe2\x97\x8b"
+  let progress_active = "\xe2\x97\x90"
+  let progress_done = "\xe2\x97\x8f"
+  let progress_ended = "\xc3\x97"
 
   (* Where you are, on a strip of places you could be. Read by the surface
      strip and the keeper detail tabs, which are the two strips a reader

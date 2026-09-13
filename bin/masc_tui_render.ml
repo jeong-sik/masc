@@ -12603,6 +12603,10 @@ let render_config_models (state : state) =
          then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
+       (* The window is cut at the scroll the cursor settled, not the stored
+          one. Cut before, a cursor that moved further than a row -- a page
+          key, a list that shrank -- drew its rows outside the window, and
+          they came out blank. *)
        let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)

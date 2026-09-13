@@ -11,15 +11,18 @@ SOURCE_MODULES = ("bin/masc_tui.ml", "bin/masc_tui_render.ml")
 def run_models(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     source = "\n".join(
-        f'[models.model{i:02d}]\ntemperature = 0.7\n'
-        f'[ollama_cloud.model{i:02d}]\nmax-tokens = 16384'
+        f"[models.model{i:02d}]\ntemperature = 0.7\n"
+        f"[ollama_cloud.model{i:02d}]\nmax-tokens = 16384"
         for i in range(12)
     )
-    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (200, {
-        **h.runtime_config_read_metadata(),
-        "path": "/workspace/config/runtime.toml",
-        "source_text": source,
-    })
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        200,
+        {
+            **h.runtime_config_read_metadata(),
+            "path": "/workspace/config/runtime.toml",
+            "source_text": source,
+        },
+    )
 
     def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC Config")
@@ -30,16 +33,24 @@ def run_models(executable: str) -> None:
         # The detail also names the model. Assert the marked TABLE row, not
         # merely a model name present somewhere in the output history.
         for rows in (20, 16, 30):
-            h.resize_and_wait(process, fd, output, rows=rows, columns=100,
-                              needle=b"MASC Models")
+            h.resize_and_wait(
+                process, fd, output, rows=rows, columns=100, needle=b"MASC Models"
+            )
             screen = h.screen_text(bytes(output))
-            if not any(b"> " in row and b"model11" in row
-                       for row in screen.splitlines()):
-                raise AssertionError(f"selected model vanished at {rows} rows: {screen!r}")
+            if not any(
+                b"> " in row and b"model11" in row for row in screen.splitlines()
+            ):
+                raise AssertionError(
+                    f"selected model vanished at {rows} rows: {screen!r}"
+                )
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable, description="Models selected row survives resize",
-                            interact=interact, http_fixtures=fixtures)
+    h.run_terminal_scenario(
+        executable,
+        description="Models selected row survives resize",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 def run_runtime(executable: str) -> None:
@@ -60,8 +71,12 @@ def run_runtime(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"Runtime ID: runtime-a")
         os.write(fd, b"q")
 
-    h.run_terminal_scenario(executable, description="Runtime mode resets selection with scroll",
-                            interact=interact, http_fixtures=fixtures)
+    h.run_terminal_scenario(
+        executable,
+        description="Runtime mode resets selection with scroll",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 if __name__ == "__main__":

@@ -19269,11 +19269,24 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
-            (* Themes take no page key. Applying a scheme used to live here,
-               where the footer never said it was and where PageDown is a
-               scroll everywhere else. It answers to Enter now, which is what
-               the footer has been advertising. *)
-            | Config when state.config_pane = Config_themes -> ()
+            (* Applying a scheme used to live on the page keys, where the
+               footer never said it was and where PageDown is a scroll
+               everywhere else; it answers to Enter. Emptying the arm left the
+               53-row list with j/k alone, so the page keys move the selection
+               a page, previewing where they land as j/k do. *)
+            | Config when state.config_pane = Config_themes ->
+                state.theme_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length (filtered_theme_entries ()))
+                    ~delta:(direction * page) state.theme_cursor;
+                preview_theme_under_cursor ()
+            (* The models table is read by a cursor [e] acts on, and the
+               drawing brings the window to the cursor. *)
+            | Config when state.config_pane = Config_models ->
+                state.config_models_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length state.config_models_rows)
+                    ~delta:(direction * page) state.config_models_cursor
             | _ when state.repository_changes_open ->
                 (match state.repository_changes_diff_path with
                  | Some _ ->

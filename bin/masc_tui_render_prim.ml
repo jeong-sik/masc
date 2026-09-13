@@ -527,7 +527,7 @@ let composer_line state ~cols =
       when state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
-        "  (^Y to speak, ^A to keep listening)"
+        "  " ^ Composer.voice_keys_hint
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key

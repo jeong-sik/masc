@@ -1301,6 +1301,7 @@
  (modules masc_tui_render_chat)
  (libraries
   masc_tui_render_prim
+  masc_tui_composer
   masc_tui_ansi
   masc_tui_markdown_render_cache
   masc_tui_message_layout

@@ -3896,6 +3896,8 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable keeper_chat_control_generations : (string * int) list;
+  mutable keeper_chat_control_tokens : (string * string) list;
   mutable keeper_queue_inflight : string list;
   mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
@@ -5393,6 +5395,16 @@ let promoted_inflight_for_keeper state keeper_name =
   | Some { origin = Direct_submission; _ } | None -> None
 ;;
 
+let keeper_chat_control_generation state keeper_name =
+  Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+
+let begin_keeper_chat_control state keeper_name =
+  let generation = keeper_chat_control_generation state keeper_name + 1 in
+  state.keeper_chat_control_generations <- (keeper_name, generation) ::
+    List.remove_assoc keeper_name state.keeper_chat_control_generations;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  generation
+
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
     ~inflight:
@@ -5747,6 +5759,8 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  keeper_chat_control_generations = [];
+  keeper_chat_control_tokens = [];
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
@@ -8083,7 +8097,7 @@ let keeper_observed_interrupt_rows (state : state) =
            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
          | None when Option.is_some interrupt_token ->
-           Some "Esc: stop and pause queue · /run-next: prioritize and resume · /queue: manage"
+           Some "Esc: stop and pause queue · Enter:send update · /queue: manage"
          | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
       | _ -> None) state.keeper_turns
 ;;

@@ -633,11 +633,11 @@ let test_observed_interrupt_response_identity () =
     [response "successor"; `Assoc ["signalled", `Bool true]; `Null]
 ;;
 
-let test_enter_during_a_turn_queues () =
+let test_enter_stages_the_input_before_submission () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
     failf
-      "bin/masc_tui.ml must queue a message typed while a turn is running; \
+      "bin/masc_tui.ml must stage accepted input before submitting the update; \
        queue_keeper_message is called %d time(s)"
       n
 ;;
@@ -2463,8 +2463,8 @@ let () =
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
-        ; test_case "Enter during a turn queues" `Quick
-            test_enter_during_a_turn_queues
+        ; test_case "Enter stages input before immediate submission" `Quick
+            test_enter_stages_the_input_before_submission
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
         ; test_case "steer queues then interrupts through distinct paths" `Quick

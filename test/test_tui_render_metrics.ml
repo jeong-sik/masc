@@ -113,10 +113,10 @@ let test_calculate_kpis_populated () =
   let state = make_state () in
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
   state.keeper_turns <-
-    [ { Decode.ktr_keeper_name = "running";
+    [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "running";
         ktr_state = Keeper_turn_running { lane = Turn_lane_autonomous; started_at_unix = 1.; interrupt_token = None; preview = None } };
-      { Decode.ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
-      { Decode.ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
+      { Decode.ktr_chat_control_token = None; ktr_keeper_name = "idle"; ktr_state = Keeper_turn_idle };
+      { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
   let kpis = Render_metrics.calculate_kpis state in
   check int "unpaused is a configuration count" 1 kpis.unpaused_keepers;

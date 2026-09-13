@@ -2,9 +2,6 @@
 # Run the test suites whose source this pull request edits, and nothing else.
 # RFC-0428.
 #
-# Report-only by its caller. main's red count is not known yet, and gating on
-# an unknown number blocks pull requests that changed nothing to do with it.
-#
 # What this does NOT do is run a suite the way `dune test` runs it. A stanza
 # can carry deps only the runtest action materialises, an (action (setenv ...))
 # only dune applies, or an enabled_if meaning there is no executable at all;
@@ -30,10 +27,13 @@ fi
 scope_tool="${repo_root}/scripts/ci/dune_suite_scope.py"
 stanza_reader="${repo_root}/scripts/ci/stanza_env.py"
 
-# A guess at a runaway list rather than a budget. Twelve suites is far past
-# what a pull request normally edits; past it the list is more likely wrong
-# than the pull request is large.
-max_suites=12
+python_suite_is_runnable() {
+  local stem candidate_dir
+  stem=$(basename "$1" .py)
+  candidate_dir=$(dirname "$1")
+  grep -qF "(alias runtest-${stem})" "${candidate_dir}/dune" \
+    "${candidate_dir}"/stanzas/*.inc 2>/dev/null
+}
 
 # Per suite, so one hang costs this step and not the job. The job's own
 # timeout-minutes cancels everything and reports the job failed whatever a
@@ -65,14 +65,11 @@ select_sources() {
     [ -n "${candidate}" ] || continue
     case "${candidate}" in
       *.py)
-        stem=$(basename "${candidate}" .py)
-        candidate_dir=$(dirname "${candidate}")
         # The alias can be declared in the dune file or in a stanza it
         # includes; 7 of the 48 are in an .inc. An unmatched glob leaves the
         # literal, which grep reports as a missing file on the discarded
         # stderr and does not match.
-        if grep -qF "(alias runtest-${stem})" "${candidate_dir}/dune" \
-          "${candidate_dir}"/stanzas/*.inc 2>/dev/null
+        if python_suite_is_runnable "${candidate}"
         then
           runnable=$(printf '%s\n%s\n' "${runnable}" "${candidate}")
         else
@@ -159,8 +156,8 @@ test/test_tools_coverage.ml"
   # says nothing, so it maps to none.
   #
   # Measured over origin/main's last 60 commits: 18 pick up at least one suite,
-  # the largest picks up 6, and none reaches the max_suites cap above. Of the
-  # 673 modules that match at all, the per-module cap drops 26.
+  # the largest picks up 6. Of the 673 modules that match at all, the
+  # per-module cap drops 26.
   #
   # packages/*/lib is in the scope for the same reason bin and lib are. It was
   # not, and neither test root was searched but the top one, so no edit under
@@ -221,12 +218,14 @@ SOURCES
   # which a named literal cannot say.
   # Measured 2026-09-10: 44 non-.ml files are named by a suite and exist --
   # 28 .sh, 3 .json, 2 .py, 2 .toml, 1 .ts, 1 .c -- the widest being
-  # config/runtime.toml at 9 suites, inside the max_suites bound.
+  # config/runtime.toml at 9 suites.
   #
   # Measured 2026-09-10: 132 source files are named this way across 78 suites;
   # 110 of them by exactly one suite, and bin/masc_tui_render.ml by the most, 8.
   # The per-module cap above does not apply -- it guards against a name that is
-  # a namespace, and these are exact paths. max_suites still bounds the run.
+  # a namespace, and these are exact paths. Python PTY suites declare their
+  # source inputs in the same way (SOURCE_MODULES); a helper without a runnable
+  # dune alias must not become a suite merely because it mentions a path.
   declared_suites=""
   while IFS= read -r changed_source; do
     # Trimmed, unlike the loop above: the heredoc indents its first line, and
@@ -240,10 +239,17 @@ SOURCES
     # dot matches any character, so lib/foo.ml would also select a suite that
     # names lib/fooXml.
     watchers=$( { grep -rlF "\"${changed_source}\"" \
-      test packages/agent_core/test --include='test_*.ml' 2>/dev/null \
+      test packages/agent_core/test --include='test_*.ml' --include='test_*.py' 2>/dev/null \
       || true; } | sort -u)
     [ -n "${watchers}" ] || continue
-    declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watchers}")
+    while IFS= read -r watcher; do
+      case "${watcher}" in
+        *.py) python_suite_is_runnable "${watcher}" || continue ;;
+      esac
+      declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watcher}")
+    done <<WATCHERS
+${watchers}
+WATCHERS
   done <<DECLARED
   ${changed}
 DECLARED
@@ -261,31 +267,9 @@ DECLARED
   echo "test sources this pull request edits: ${count}"
   printf '%s\n' "${sources}" | sed 's/^/  /'
 
-  # Past the cap the name-derived lists are dropped and the run continues, so
-  # the path-derived guards below still go. This used to return here, which
-  # meant a pull request over the cap ran nothing at all -- including the
-  # guards over config assets, which cannot be a wrong reading of the
-  # changed-file list. #35025 turned this step from a report into a gate, so
-  # running nothing is now a pull request passing the gate without a suite.
-  # Measured 2026-09-09: #34889 renamed across more than twelve suites and the
-  # log said NOT RUN.
-  #
-  # module_suites and declared_suites go with it. Both are derived from the
-  # same changed-file list the cap distrusts, and both scale with its length;
-  # a prefix match on config/tools does neither.
-  if [ "${count}" -gt "${max_suites}" ]; then
-    echo "DROPPED: more than ${max_suites} edited suites, which reads as a wrong list"
-    echo "  name-derived lists go with it; the path-derived guards below do not"
-    sources=""
-    module_suites=""
-    declared_suites=""
-  fi
-
-  # After the cap, not before. The cap is a heuristic against a wrong
-  # changed-file list; this guard is one named suite added for one stated
-  # reason, so counting it toward that heuristic would let a pull request that
-  # edits max_suites tests and one config asset run nothing at all -- worse
-  # than before this mapping existed.
+  # Preserve every attributed suite, including wide pull requests. The caller's
+  # job timeout reports a real failure if execution cannot finish; list length
+  # must not turn required assertions into a successful no-test result.
   if [ -n "${assets}" ]; then
     echo "this pull request changes managed config assets; adding ${asset_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${asset_guard}" \
@@ -319,10 +303,8 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
-  # The cap can leave nothing behind: a wide pull request that touches no
-  # config asset drops its whole list here. The caller reads a return of 1 as
-  # "this pull request has no suite to run", which is what that is.
-  if [ -z "$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$')" ]; then
+  # Return no selection only when no input mapped to a runnable suite.
+  if ! printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' > /dev/null; then
     echo "no suite left to run"
     return 1
   fi
@@ -342,7 +324,24 @@ self_test() {
       got=$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' | sort -u \
         | tr '\n' ' ' | sed 's/ $//')
     fi
-    if [ "${got}" = "${want}" ]; then
+    local matches=false
+    if [ "${allow_additional:-false}" = true ]; then
+      matches=true
+      for required in ${want}; do
+        case " ${got} " in
+          *" ${required} "*) ;;
+          *) matches=false ;;
+        esac
+      done
+      # The shared dispatcher is not a reason to launch the entire keyboard
+      # suite. Only explicitly attributed focused PTY scenarios belong here.
+      case " ${got} " in
+        *" test/test_tui_keyboard_input.py "*) matches=false ;;
+      esac
+    elif [ "${got}" = "${want}" ]; then
+      matches=true
+    fi
+    if [ "${matches}" = true ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
@@ -350,6 +349,12 @@ self_test() {
       echo "     got:  ${got:-<nothing>}"
       failures=$((failures + 1))
     fi
+  }
+  check_required() {
+    # Live umbrella modules gain legitimate watchers as other PRs add tests.
+    # Assert the required coverage and exclusion, without freezing that set.
+    local allow_additional=true
+    check "$@"
   }
 
   # The regression this mapping exists for: #34247 edited only this module and
@@ -359,7 +364,7 @@ self_test() {
     "bin/masc_tui_msx.ml"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
-  # still selects is the four guards that name the file themselves. The name
+  # still selects is the guards and PTY scenarios that name the file. The name
   # mapping and the declared mapping answer different questions, and only the
   # first one has to stay quiet here.
   # test_tui_decode is here for a path inside a JSON fixture rather than a
@@ -374,8 +379,8 @@ self_test() {
   # neither can say that a key in this file reaches them. It declares this file
   # because the claim it holds -- that every session mover has a key -- is a
   # fact about this dispatcher.
-  check "an umbrella module selects only the guards that name it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
+  check_required "an umbrella module selects its guards and declared PTY scenario" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the
@@ -392,8 +397,8 @@ self_test() {
   # moves it.
   # test_tui_tab_strip joined when it began reading this file: the Runtime
   # header's two views must be drawn by tab_strip, and render_runtime is here.
-  check "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
+  check_required "a watched source reaches the guard that declares it" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list
@@ -423,24 +428,19 @@ self_test() {
     "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
-  # Past the cap the name-derived list is dropped, and the path-derived guards
-  # are not: config/tools cannot be a wrong reading of the changed-file list.
-  # Before this, the cap returned before the guard blocks and the whole run was
-  # nothing -- which #35025 turned from a quiet report into a gate a wide pull
-  # request passes without running a suite.
-  # The other side of the same drop: nothing else changed, so nothing is left
-  # and the caller is told there is no suite -- the behaviour the cap had, kept
-  # for the case the cap was written for.
-  check "past the cap with no asset there is nothing left" \
-    "" \
+  # Thirteen edited suites used to be discarded, including every source-derived
+  # guard. A wide change must retain its tests with or without an asset edit.
+  local wide_sources="test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml test/test_wide_13.ml"
+  check "thirteen edited suites all remain selected" \
+    "${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
     test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml \
     test/test_wide_13.ml
 
-  check "past the cap a tool definition still reaches its guards" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
+  check "thirteen edited suites retain both themselves and asset guards" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -470,6 +470,11 @@ self_test() {
   # 9s against their 0.7s, so it is attributed instead.
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
+  check "an interface edit selects only its declared PTY scenario" \
+    "test/test_tui_browser_history.py" "bin/masc_tui_browser.mli"
+  check "an interface and its edited PTY suite select one entry" \
+    "test/test_tui_browser_history.py" \
+    "bin/masc_tui_browser.mli" "test/test_tui_browser_history.py"
   # No dune rule declares an alias for this one, so nothing can run it and
   # selecting it would fail the step on a file that is not a suite.
   check "a .py with no rule of its own selects nothing" "" \

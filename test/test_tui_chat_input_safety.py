@@ -30,7 +30,7 @@ APPROVAL = "/api/v1/keepers/tool-approval"
 def open_chat(process: subprocess.Popen[bytes], fd: int, output: bytearray) -> None:
     h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
-    h.send_and_wait(process, fd, output, b"c", "Keepers › alpha › chat".encode())
+    h.send_and_wait(process, fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
 
 def approval_typing(binary: str, decision: str) -> None:
@@ -241,7 +241,7 @@ def queued_attachments(binary: str) -> None:
                 process, fd, output, b"\x1b[A", h.composer_showing(b"cancel-check")
             )
             h.send_and_wait(
-                process, fd, output, b"\x07", "Keepers › beta › chat".encode()
+                process, fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat"
             )
             h.send_and_wait(
                 process,

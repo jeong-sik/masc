@@ -311,6 +311,9 @@ val edit_queued_operation
   -> input:Yojson.Safe.t
   -> (Chat_operation.t, error) result
 
+val move_queued_operation_to_front : t -> Chat_operation.Operation_id.t ->
+  (Chat_operation.t, error) result
+
 val move_queued_operation_to_end
   :  t
   -> Chat_operation.Operation_id.t

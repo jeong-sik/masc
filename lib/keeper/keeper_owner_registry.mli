@@ -189,6 +189,9 @@ val edit_queued_operation
   -> input:Yojson.Safe.t
   -> (Keeper_chat_operation.t, command_error) result
 
+val move_queued_operation_to_front : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t -> (Keeper_chat_operation.t, command_error) result
+
 val move_queued_operation_to_end
   :  base_path:string
   -> keeper_name:string

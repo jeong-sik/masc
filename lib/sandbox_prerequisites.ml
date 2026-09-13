@@ -5,7 +5,8 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
 type action = { id : string; label : string; detail : string;
-  source_url : string; requires_admin : bool; action_effect : action_effect }
+  source_url : string; requires_admin : bool; action_effect : action_effect;
+  writes : string option }
 type outcome = External_step_pending | Commands_completed_recheck_required
   | Failed of { step : int; reason : string }
 
@@ -28,6 +29,8 @@ let claude_source = "https://code.claude.com/docs/en/setup"
 let whisper_source = "https://github.com/ggml-org/whisper.cpp"
 let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
+let sox_formula_source = "https://formulae.brew.sh/formula/sox"
+let sox_source = "https://sourceforge.net/projects/sox/"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
    is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
@@ -44,15 +47,15 @@ let open_action ~host ~id ~label ~detail ~source_url url =
     | Linux _ -> ["xdg-open"; url]
     | Unsupported -> [] in
   {id; label; detail; source_url; requires_admin=false;
-   action_effect=Open_official_installer {url; argv}}
-let commands ~id ~label ~detail ~source_url ~requires_admin argv =
-  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv}
+   action_effect=Open_official_installer {url; argv}; writes=None}
+let commands ?writes ~id ~label ~detail ~source_url ~requires_admin argv =
+  {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv; writes}
 let install_cli client =
   let name = Runtime_official_cli_install.name client in
   {id=name ^ "_native_install"; label="Install " ^ name ^ " using its official installer";
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
-   action_effect=Install_official_cli client}
+   action_effect=Install_official_cli client; writes=None}
 let catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
@@ -71,7 +74,11 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_models_source whisper_models_source
     | Some dir ->
       let final = Filename.concat dir whisper_model_file in
-      commands ~id:"whisper_model_download"
+      (* [writes] is the final path, stated as data. A reader that needs to
+         know where the model landed used to take the curl [-o] argument, and
+         when the fetch moved to a [.part] beside the path that argument became
+         a file that never exists after a successful download. *)
+      commands ~writes:final ~id:"whisper_model_download"
         ~label:"Download the whisper model masc asks for"
         ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
         ~source_url:whisper_models_source ~requires_admin:false
@@ -99,16 +106,49 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_formula_source ~requires_admin:false
         [["brew";"install";"whisper-cpp"]]
     in
-    [ install; whisper_model_step () ]
+    (* Transcribing is not the whole of hearing: masc's own capture records
+       with sox's [rec] and marks the start and end of a recording with sox's
+       [play]. Neither is in the base system, and neither failure says so --
+       the tones are swallowed at debug level and the recorder surfaces its
+       own process error. A device that posts audio to
+       [POST /api/v1/voice/transcribe] needs none of this; a person speaking
+       into masc does. *)
+    let recorder =
+      commands ~id:"sox_brew_install"
+        ~label:"Install sox, which masc records with"
+        ~detail:"Installs the sox formula (2.4MB on this machine, version 14.4.2). It provides rec, which masc records a capture with, and play, which sounds the start and end tones. Without it masc can transcribe a file but cannot make one."
+        ~source_url:sox_formula_source ~requires_admin:false
+        [["brew";"install";"sox"]]
+    in
+    [ install; whisper_model_step (); recorder ]
   (* Homebrew is the only route this catalog can name a command for. Elsewhere
      the build is the project's own, and guessing a package would install
      something that may not exist. *)
+  (* sox is packaged here, unlike whisper.cpp, so the recorder is a command
+     rather than a link even where the transcriber is not. Written per
+     distribution because naming one package manager for every Linux installs
+     something else or nothing. *)
   | Whisper_cli, Linux _ ->
+    let recorder =
+      match distribution with
+      | Debian | Ubuntu ->
+        commands ~id:"sox_apt_install"
+          ~label:"Install sox, which masc records with"
+          ~detail:"Installs the sox package. It provides rec, which masc records a capture with, and play, which sounds the start and end tones. Without it masc can transcribe a file but cannot make one."
+          ~source_url:sox_source ~requires_admin:true
+          [["apt-get";"install";"-y";"sox"]]
+      | Other ->
+        open_ ~id:"sox_project_page"
+          ~label:"Open the sox project page"
+          ~detail:"masc records a capture with sox's rec and sounds its tones with sox's play. Install it the way this distribution packages it."
+          ~source_url:sox_source sox_source
+    in
     [ open_ ~id:"whisper_cli_build_instructions"
         ~label:"Open whisper.cpp build instructions"
         ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
         ~source_url:whisper_source whisper_source
     ; whisper_model_step ()
+    ; recorder
     ]
   | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
@@ -191,7 +231,8 @@ let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
     "source_url",`String action.source_url; "requires_admin",`Bool action.requires_admin;
-    "effect",effect_json action.action_effect; "completion",`String "recheck_required"]) actions)]
+    "effect",effect_json action.action_effect; "completion",`String "recheck_required";
+    "writes",(match action.writes with Some path -> `String path | None -> `Null)]) actions)]
 let execute ~run action =
   let rec commands completed index = function
     | [] -> completed

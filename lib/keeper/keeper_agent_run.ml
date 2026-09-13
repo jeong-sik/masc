@@ -832,7 +832,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Keeper_registry.set_turn_switch ~base_path:config.base_path meta.name (Some turn_sw);
   Eio.Switch.on_release turn_sw (fun () ->
-    Keeper_registry.clear_turn_switch ~base_path:config.base_path meta.name);
+    Keeper_registry.clear_turn_switch_if_current ~base_path:config.base_path meta.name turn_sw);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
   (* The spawn registry is bound for the same span as the turn switch, and on

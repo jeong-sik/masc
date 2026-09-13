@@ -1813,14 +1813,14 @@ let render_board_compose (state : state) =
         if Option.is_none state.board_compose_reply_to then "  h:cycle hearth"
         else ""
       in
-      Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  esc:keep writing" hearth_hint
+      Printf.sprintf "s:send  e:edit in $EDITOR%s  d:discard  Esc:keep writing" hearth_hint
     else
       (* No [q] here. While the draft has the keys, [q] is a printable
          scalar and goes into the draft like any other letter; the footer
          offered it as quit, so the operator who took the offer got a [q]
          in their post. Leaving the pane is [esc] and then [d], which the
          armed footer above names. *)
-      "type to write  Ctrl-E:$EDITOR  esc:menu  Tab:surfaces"
+      "type to write  Ctrl-E:$EDITOR  Esc:menu  Tab:surfaces"
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =
@@ -2403,7 +2403,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left/Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -6677,7 +6677,13 @@ let render_system_logs (state : state) =
       match
         empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
       with
-      | Page_failed -> "  (load failed; the count above is not a reading)"
+      (* [empty_page_of] returns [Page_failed] for an error with no snapshot
+         and for an error over one, so a note about the title's count is true
+         only in the second: with no snapshot the header draws no count at
+         all and the note pointed at a row that is not on the screen. The
+         shared note holds in both, and the staleness is already said twice
+         above -- by the badge and by the error row this listing draws. *)
+      | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note
       | Page_empty when loaded_entries > 0 ->
           "  (no entries match the current category filter)"
@@ -7519,7 +7525,7 @@ let render_harness_detail (state : state) verdict =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  Y:copy task  r:refresh"
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Left/Esc:list  Y:copy task  r:refresh"
             scroll max_scroll));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -9073,7 +9079,7 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 
@@ -9168,7 +9174,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Unread | Browser_missing -> Theme.recede ()
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title " MASC Browser Lane") (source_name view.source ^ " · " ^ browser_label view)
+      (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
+       ^ Option.value (browser_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
@@ -9185,7 +9192,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
-        | Loading (_, Read) -> "Reading " ^ browser_label view ^ "…", Theme.info ()
+        | Loading (_, Read) ->
+            (match browser_label view with
+             | Some browser -> "Reading " ^ browser ^ "…"
+             | None -> "Reading…"), Theme.info ()
         | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
@@ -9198,7 +9208,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
-        | Loading (_, Screenshot _) -> "Capturing selected " ^ browser_label view ^ " tab… (any key cancels preview)", Theme.info ()
+        | Loading (_, Screenshot _) ->
+            (match browser_label view with
+             | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
+             | None -> "Capturing selected tab… (any key cancels preview)"), Theme.info ()
         | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
@@ -9245,7 +9258,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
-             | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
+             | Live ->
+               (match browser_label view with
+                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation"
+                | None -> "  Live • b:choose browser • a:automation")
              | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
@@ -9701,7 +9717,7 @@ let render_runtime_detail (state : state) target =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  PgUp/PgDn:page  left/Esc:list  r:refresh  Tab:next");
+       ~hints:"j/k:scroll  PgUp/PgDn:page  Left/Esc:list  r:refresh  Tab:next");
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 

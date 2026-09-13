@@ -1832,13 +1832,8 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
       ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
-  let draw stop label =
-    if stop = tab then
-      (Theme.info ()) ^ Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ label ^ Ansi.reset
-  in
-  String.concat "  "
-    (screen_title " MASC Planning" :: List.map2 draw stops labels)
+  screen_title " MASC Planning" ^ "  "
+  ^ tab_strip (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2446,21 +2441,17 @@ let tools_scrolled_for_lines state display_lines =
    no mark on it: it said the key exists and not where pressing it lands, and
    a reader on runtime.toml was told neither. *)
 let config_pane_strip (state : state) =
-  let name pane label =
-    if state.config_pane = pane then
-      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
-    else Ansi.dim ^ " " ^ label ^ Ansi.reset
-  in
+  let name pane label = (label, state.config_pane = pane) in
   Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
-  ^ String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ name Config_runtime "runtime.toml"
-    ; name Config_models "models"
-    ; name Config_params "params"
-    ; name Config_prompts "prompts"
-    ; name Config_presets "presets"
-    ; name Config_themes "themes"
-    ; name Config_voice "voice"
-    ]
+  ^ tab_strip
+      [ name Config_runtime "runtime.toml"
+      ; name Config_models "models"
+      ; name Config_params "params"
+      ; name Config_prompts "prompts"
+      ; name Config_presets "presets"
+      ; name Config_themes "themes"
+      ; name Config_voice "voice"
+      ]
 
 
 let config_metadata_summary (state : state) =

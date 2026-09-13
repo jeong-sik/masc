@@ -134,15 +134,10 @@ let overview_pulse_line ~cols state = pulse_line ~cols state (calculate_kpis sta
    the order 1, 2 and 3 select. *)
 let section_pills_line ~cols ~(active : metrics_section) : string =
   let inner_width = max 10 (framed_inner_width cols) in
-  let tab section =
-    let name = metrics_section_label section in
-    if active = section then Ansi.bold ^ "\xe2\x96\xb8" ^ name ^ Ansi.reset
-    else Theme.recede () ^ " " ^ name ^ Ansi.reset
-  in
+  let tab section = (metrics_section_label section, active = section) in
   let line =
     "  "
-    ^ String.concat "  "
-        (List.map tab [ Section_fleet; Section_resources; Section_tools ])
+    ^ tab_strip (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
   if Layout.display_width line > inner_width then
     Layout.take_cells line inner_width ^ Ansi.reset

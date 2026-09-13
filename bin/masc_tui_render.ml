@@ -6609,13 +6609,7 @@ let render_system_log_detail (state : state) seq =
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
 let activity_tab_strip ~on_logs =
-  let tab label current =
-    if current then Ansi.bold ^ "▸" ^ label ^ Ansi.reset
-    else Ansi.dim ^ " " ^ label ^ Ansi.reset
-  in
-  String.concat
-    (Ansi.dim ^ " |" ^ Ansi.reset)
-    [ tab "Events" (not on_logs); tab "Logs" on_logs ]
+  tab_strip [ ("Events", not on_logs); ("Logs", on_logs) ]
 
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in

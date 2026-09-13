@@ -284,6 +284,23 @@ module Theme = struct
   end
 end
 
+(* A row of places a reader can switch between, with the one being read
+   marked: the mark and the name in the information colour, the others dim,
+   two cells apart. The surface strip above every screen draws its entries this
+   way, and the smaller strips inside a screen -- Activity's two readings,
+   Config's panes, Planning's tabs, Metrics' sections -- each drew their own
+   variant: a "|" between names on two of them, a space before the unmarked
+   names on two, a different colour on one. *)
+let tab_strip (tabs : (string * bool) list) =
+  String.concat "  "
+    (List.map
+       (fun (label, current) ->
+         if current then
+           Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
+           ^ Ansi.reset
+         else Ansi.dim ^ label ^ Ansi.reset)
+       tabs)
+
 (** One owner for the visual distinction between conversation roles.
 
     Role and state are different axes: a Keeper message is not a success, and

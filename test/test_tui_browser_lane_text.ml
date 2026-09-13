@@ -292,3 +292,40 @@ let () =
        assert (tab_id = 3 && actual = guard)
    | _ -> failwith "primary shortcut dropped the follow navigation guard");
   print_endline "PASS primary landmark shortcut stays exact and ambiguity-safe"
+
+let () =
+  let region node_id role text : Masc.Browser_scene.node =
+    { node_id; kind = Masc.Browser_scene.Region role; tag = "article"; text;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Regions; scope = None;
+    nodes = [region "nav" Masc.Browser_scene.Navigation "Navigation";
+             region "post-a" Masc.Browser_scene.Article "Post A";
+             region "sidebar" Masc.Browser_scene.Complementary "Suggestions";
+             region "post-b" Masc.Browser_scene.Article "Post B"] }
+  in
+  let scene : Lane.scene = {source = Live; client_id = None; tab_id = 4;
+    content; elapsed_ms = 1.} in
+  let view = {(Lane.create ()) with selected_tab = Some 4; scene = Some scene} in
+  let next = Lane.move_scene_article ~backwards:false {view with scene_cursor = 0} in
+  assert (next.scene_cursor = 1);
+  let following = Lane.move_scene_article ~backwards:false next in
+  assert (following.scene_cursor = 3);
+  let wrapped = Lane.move_scene_article ~backwards:false following in
+  assert (wrapped.scene_cursor = 1);
+  let previous = Lane.move_scene_article ~backwards:true following in
+  assert (previous.scene_cursor = 1);
+  let previous_wrapped = Lane.move_scene_article ~backwards:true next in
+  assert (previous_wrapped.scene_cursor = 3);
+  let no_articles = {view with scene = Some {scene with content =
+    {content with nodes = [region "main" Masc.Browser_scene.Main "Timeline"]}}} in
+  assert ((Lane.move_scene_article ~backwards:false no_articles).scene_cursor = no_articles.scene_cursor);
+  let content_scene = {view with scene = Some {scene with content =
+    {content with view = Content; nodes = [region "post-a" Masc.Browser_scene.Article "Post A"]}}} in
+  assert ((Lane.move_scene_article ~backwards:false content_scene).scene_cursor = content_scene.scene_cursor);
+  print_endline "PASS article navigation uses typed regions and skips non-article landmarks"

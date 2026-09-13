@@ -15565,7 +15565,8 @@ and is loaded on demand through keeper_skill.
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
            add_event state "system"
-             "Ctrl-C: press again to quit, or any other key to stay";
+             (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
+                ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
            Render_schedule.request render_schedule Render_schedule.Background
        | Masc_tui_exit_signals.Continue -> ());
       if
@@ -16354,7 +16355,8 @@ and is loaded on demand through keeper_skill.
            else begin
              state.quit_armed <- true;
              add_event state "system"
-               "q: press again to quit, or any other key to stay"
+               (Masc_tui_exit_signals.quit_notice ~key:"q"
+                  ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued))
            end
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the

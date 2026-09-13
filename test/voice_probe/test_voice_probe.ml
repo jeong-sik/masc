@@ -141,14 +141,10 @@ let test_the_runtime_loop_can_reach_the_command_transport () =
     (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
        ~binding_name:"transcribe_audio" ~callee:"transcribe_via_command")
 
-(* An answered TTS probe names the voice it asked for.
-
-   This is the only thing in the report that can catch a keeper mapped to a
-   voice its endpoint does not have. say answers such a mapping with the
-   system voice and exit 0, so the state is [answered] and the byte count is
-   whatever the fallback produced -- measured 2026-09-13: 79,758 bytes for a
-   name that does not exist and 79,758 for the section default, against
-   124,690 for a keeper whose voice does. The name is the difference. *)
+(* An answered TTS probe names the voice it asked for, so a reader confirming
+   which voice a keeper got reads it rather than a byte count. A say voice that
+   is not installed never reaches this: test/voice_say_voice_probe holds that
+   the probe refuses it. *)
 let test_an_answer_names_the_voice_it_asked_for () =
   Alcotest.(check string) "the voice as configured"
     "124690 bytes of audio in \"Flo (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))\""

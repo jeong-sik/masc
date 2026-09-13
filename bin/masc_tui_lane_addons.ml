@@ -599,6 +599,12 @@ let rec finite_values = function
            | _ -> None)
   | _ -> None
 
+let technical_lines ~width view =
+  match visual_lines ~height:24 ~width view with
+  | Some lines ->
+      List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
+  | None -> []
+
 let pending_action view =
   match view.last_action, view.action_receipt with
   | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request

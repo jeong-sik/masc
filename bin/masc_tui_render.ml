@@ -12701,7 +12701,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"enter:next  up:back  esc:cancel");
+       ~hints:"Enter:next  Up:back  Esc:cancel");
   finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
 ;;
 

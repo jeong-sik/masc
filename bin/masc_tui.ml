@@ -17705,6 +17705,12 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick_cursor <- 0;
                      state.runtime_lane_error <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
+       | Some "A"
+         when state.view = Lanes
+              && state.lanes_mode = Lanes_overview
+              && Option.is_none state.runtime_lane_pick ->
+           launch_lane_addons state ~mailbox:async_messages
+             Masc_tui_lane_addons.Inspect
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview

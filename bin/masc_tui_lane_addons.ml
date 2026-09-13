@@ -506,8 +506,8 @@ let visual_lines ?(failed_note = "") ~height ~width view =
         @ (match view.receipt with None -> [] | Some json ->
             List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
 
-let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
-  match visual_lines ~failed_note ~height ~width view with
+let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width view =
+  match if visual then visual_lines ~failed_note ~height ~width view else None with
   | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
@@ -556,7 +556,10 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
                             | Some item -> instance_lines {view with instance_cursor=0} [item]
                             | None -> [])
                         | None -> [])
-                    | None -> []))
+                    | None -> [])
+                 @ (if selected_declaration view |> Option.exists (fun declaration -> declaration.instance_id=None)
+                    then List.concat_map (fun item -> instance_lines {view with instance_cursor=0} [item]) snapshot.instances
+                    else []))
         | Instances ->
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
@@ -629,7 +632,7 @@ let rec finite_values = function
   | _ -> None
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
-  visual_text_lines ~height ~failed_note ~width view
+  visual_text_lines ~height ~failed_note ~visual:false ~width view
 
 let pending_action view =
   match view.last_action, view.action_receipt with
@@ -735,7 +738,7 @@ let compact_lines ~width view =
         let instances = if snapshot.instances=[] then
           ["No Add-ons installed. n creates an installation TOML; D shows configuration details."]
           else ["Installed Add-ons"] @ List.mapi (fun index instance ->
-            (if view.instance_cursor=index && view.focus=Instances then "> " else "  ")
+            (if view.instance_cursor=index then "> " else "  ")
             ^ instance.title ^ " · " ^ phase_label instance.phase
             ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
         let configurations = if view.focus<>Configurations then [] else

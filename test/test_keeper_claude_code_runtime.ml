@@ -985,6 +985,17 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       (if native_gate then
+          (* A native continuation sends only its new input; the official
+             session already owns the prior history, including the Gate. *)
+          List.iter (fun path ->
+            let raw = In_channel.with_open_bin path In_channel.input_line in
+            match raw with
+            | None -> fail "native Gate fixture did not capture its resume input"
+            | Some raw -> check string "native Gate retry preserves the exact input delta"
+                "SHRINK_HISTORY" (content_of_wire_message raw))
+            [first_prompt_marker; second_prompt_marker]
+        else (
        let full_history = prompt_history first_prompt_marker in
        let shrunk_history = prompt_history second_prompt_marker in
        let full_count = List.length full_history in
@@ -998,7 +1009,8 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
        check bool
          "retry shrinks provider-bound history"
          true
-         (shrunk_count < full_count);
+         (shrunk_count < full_count)
+        ));
        let state = load_state base_path in
        check int "retry preserves the native Gate turn ordinal"
          (if native_gate then 2 else 1) state.turn_count;

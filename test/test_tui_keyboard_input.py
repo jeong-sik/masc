@@ -5749,8 +5749,11 @@ class AtomicChatFixture:
                     "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
                     "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,
                     "workspace_id": None, "extra_mentions": [], "user_row_origin": "needs_append"},
+                # The server keeps the input as submitted, so a later /queue edit
+                # reads the staged media and attachments back from here.
                 "input": {"schema": "masc.keeper_chat_operation.input.v1", "message": request["message"],
-                    "user_blocks": [], "turn_instructions": None, "surface_context": None, "attachments": []},
+                    "user_blocks": request.get("user_blocks", []), "turn_instructions": None,
+                    "surface_context": None, "attachments": request.get("attachments", [])},
             }
             self.operations.append(operation)
             path = "/api/v1/keepers/alpha/chat/operations/" + request["request_id"]

@@ -22,6 +22,17 @@ import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
 
+// Renderer fixtures supply already-resolved evidence. The real lookup's
+// authorization, duplicate and async races run in tool-output-lookup.test.ts.
+vi.mock('./tool-output-lookup', async importOriginal => ({
+  ...await importOriginal<typeof import('./tool-output-lookup')>(),
+  useToolOutputLookup: (_executionId: unknown, output: ToolCallEntry | null) => ({
+    ref: { current: null }, output,
+    state: output ? { kind: 'loaded', entry: output } : { kind: 'idle' },
+    retry: () => {},
+  }),
+}))
+
 vi.mock('./attachments', async (importOriginal) => ({
   ...await importOriginal<typeof import('./attachments')>(),
   collectAttachments: vi.fn(),

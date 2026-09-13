@@ -14,18 +14,17 @@ type State = { kind: 'idle' } | { kind: 'loading' }
   | { kind: 'loaded'; entry: ToolCallEntry }
   | { kind: 'missing' } | { kind: 'ambiguous' } | { kind: 'failed' } | { kind: 'admin-required' }
 
-export function useToolOutputLookup(executionId: string | null | undefined, known: ToolCallEntry | null) {
+export function useToolOutputLookup(executionId: string | null | undefined, _known: ToolCallEntry | null) {
   const keeper = useContext(KeeperToolOutputScope)
   const authRevision = storedTokenRevision.value
   const [ref, inView] = useInViewOnce<HTMLDivElement>()
   const [attempt, retry] = useState(0)
   const [result, setResult] = useState<{ keeper: string; executionId: string; authRevision: number; state: State } | null>(null)
-  const output = known && keeper && known.keeper === keeper && known.execution_id === executionId ? known : null
   const state: State = result?.keeper === keeper && result?.executionId === executionId && result?.authRevision === authRevision
     ? result.state : { kind: 'idle' }
-  // Peer hydration can replace this execution ID in the shared store. A
-  // successfully loaded result for this exact scope still satisfies the lookup.
-  const needsFetch = output === null && state.kind !== 'loaded'
+  // A recent-tail cache cannot prove uniqueness across the complete ledger.
+  // Only the exact endpoint may supply evidence, including a cached identity.
+  const needsFetch = state.kind !== 'loaded'
   useEffect(() => {
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()
@@ -46,8 +45,8 @@ export function useToolOutputLookup(executionId: string | null | undefined, know
     })
     return () => controller.abort()
   }, [keeper, executionId, inView, needsFetch, attempt, authRevision])
-  return { ref, output: output ?? (state.kind === 'loaded' ? state.entry : null),
-    state: output ? { kind: 'loaded', entry: output } as const : state,
+  return { ref, output: state.kind === 'loaded' ? state.entry : null,
+    state,
     retry: () => retry(value => value + 1) }
 }
 

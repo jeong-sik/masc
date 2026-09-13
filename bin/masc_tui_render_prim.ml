@@ -1046,13 +1046,36 @@ type chrome_body = {
    itself. Everything else is the body's budget. *)
 let surface_chrome_rows = 5
 
-let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
-    ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
+(* Which frame the contract draws. A surface is the terminal's whole screen and
+   its edge is already the frame, so it draws rules and no box. An overlay is
+   opened over a surface and keeps its box, which is how a reader tells the two
+   apart. The rows around the body are five either way, so the budget is the
+   same. *)
+type chrome_frame = Chrome_screen | Chrome_overlay
+
+let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
+    ~terminal_rows ~cols ~surface_key ~title ~hints
+    ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
-  box_line buf cols title;
-  box_divider buf cols;
+  let top, line, line_styled, line_selected, divider, empty, bottom =
+    match frame with
+    | Chrome_screen ->
+        ( box_top, box_line, box_line_styled, box_line_selected, box_divider
+        , box_empty, box_bottom )
+    | Chrome_overlay ->
+        ( framed_top
+        , framed_line
+        , framed_line_styled
+        , (fun buf cols content ->
+            framed_line_styled buf cols ~style:Masc_tui_theme.selection content)
+        , framed_divider
+        , framed_empty
+        , framed_bottom )
+  in
+  top buf cols;
+  line buf cols title;
+  divider buf cols;
   let budget = max 1 (rows - surface_chrome_rows) in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
@@ -1065,20 +1088,20 @@ let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     if !used < budget then begin incr used; draw arg end
   in
   let body_pushers =
-    { push = counted (fun line -> box_line buf cols line)
+    { push = counted (fun text -> line buf cols text)
     ; push_styled =
-        (fun ~style line ->
-          counted (fun line -> box_line_styled buf cols ~style line) line)
-    ; push_selected = counted (fun line -> box_line_selected buf cols line)
-    ; push_divider = counted (fun () -> box_divider buf cols)
-    ; push_empty = counted (fun () -> box_empty buf cols)
+        (fun ~style text ->
+          counted (fun text -> line_styled buf cols ~style text) text)
+    ; push_selected = counted (fun text -> line_selected buf cols text)
+    ; push_divider = counted (fun () -> divider buf cols)
+    ; push_empty = counted (fun () -> empty buf cols)
     }
   in
   body ~budget body_pushers;
   for _ = !used + 1 to budget do
-    box_empty buf cols
+    empty buf cols
   done;
-  box_bottom buf cols;
+  bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   (* Read after the body, because that is the only moment the value exists:
      a surface whose rows the drawing counts cannot say what it clamped to

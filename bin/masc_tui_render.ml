@@ -13192,7 +13192,8 @@ let render_palette (state : state) =
    the right edge, a lightning glyph in its title, and a key row inside the box
    that the footer under it repeated, and it counted its rows by hand
    ([fixed_chrome = 9]). [surface_chrome] owns the frame, the fill and the
-   footer's row now, so the keys on screen are the footer's alone. *)
+   footer's row now, drawing the overlay's box, so the keys on screen are the
+   footer's alone. *)
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let path_label =
@@ -13221,6 +13222,7 @@ let render_patch_modal (state : state) =
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
+    ~frame:Chrome_overlay
     ~clamped:(fun () -> Some (Patch_modal_scroll scroll))
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
@@ -13268,6 +13270,7 @@ let render_link_preview_modal (state : state) =
   match url_opt with
   | None ->
       surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
            ^ Ansi.reset)
@@ -13293,6 +13296,7 @@ let render_link_preview_modal (state : state) =
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
       surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
         ~clamped:(fun () -> Some (Link_modal_scroll scroll))
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
@@ -13316,23 +13320,28 @@ let keeper_deletions_viewport (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
 
+(* The deletion record overlay drew its rows and closed the box under them,
+   with nothing filling the rows between: on a short record the footer stood in
+   the middle of the screen with the composer alone at the bottom (150x44, a
+   failed read, footer on row 9). The contract fills to the bottom. *)
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  framed_top buf cols;
-  framed_line buf cols (screen_title " 키퍼 삭제 기록"
-    ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""));
-  framed_divider buf cols;
   let lines = keeper_deletions_lines state ~cols in
-  let height = framed_content_height ~rows in
-  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.keeper_deletions_scroll in
-  lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + height)
-    |> List.iter (framed_line buf cols);
-  framed_bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols
-    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기");
-  finish_surface state ~surface_key:"keeper-deletions" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
+    ~frame:Chrome_overlay
+    ~title:
+      (screen_title " 키퍼 삭제 기록"
+       ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
+    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기"
+    ~body:(fun ~budget c ->
+      let scroll =
+        Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget
+          state.keeper_deletions_scroll
+      in
+      List.iteri
+        (fun index text ->
+          if index >= scroll && index < scroll + budget then c.push text)
+        lines)
 
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in

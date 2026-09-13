@@ -2563,10 +2563,12 @@ let test_the_config_frame_is_the_shared_contract () =
     (in_config "config_content_height")
 ;;
 
-(* The patch review and link preview overlays are the shared contract's as
-   well. Each drew its own frame with a block shadow down the right edge and a
-   key row inside the box that the footer repeated, counting its rows by hand
-   (9 and 7). The shadow frame is not theirs to draw any more. *)
+(* The patch review, link preview and deletion record overlays are the shared
+   contract's as well. The first two drew their own frame with a block shadow
+   down the right edge and a key row inside the box that the footer repeated,
+   counting their rows by hand (9 and 7); the third filled no row under a short
+   record, so its footer stood mid-screen. The shadow frame is not theirs to
+   draw any more, and neither is the box by hand. *)
 let test_the_patch_and_link_overlays_are_the_shared_contract () =
   List.iter
     (fun binding_name ->
@@ -2583,8 +2585,9 @@ let test_the_patch_and_link_overlays_are_the_shared_contract () =
           check int (Printf.sprintf "%s draws no %s" binding_name shadow) 0
             (calls shadow))
         [ "framed_shadow_top"; "framed_shadow_line"; "framed_shadow_line_styled"
-        ; "framed_shadow_divider"; "framed_shadow_empty"; "framed_shadow_bottom" ])
-    [ "render_patch_modal"; "render_link_preview_modal" ]
+        ; "framed_shadow_divider"; "framed_shadow_empty"; "framed_shadow_bottom"
+        ; "framed_top"; "framed_bottom" ])
+    [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions" ]
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines

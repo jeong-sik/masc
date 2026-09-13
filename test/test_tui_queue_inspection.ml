@@ -43,8 +43,23 @@ let test_pagination_requires_identity () =
     (get (Inbox.next_sequence (`Assoc ["operations",`List [`Assoc ["sequence",`String "123"]]])));
   Alcotest.(check bool) "missing cursor is an error" true
     (Result.is_error (Inbox.next_sequence (`Assoc ["operations",`List [`Assoc []]])))
+let test_dashboard_sender_uses_typed_route () =
+  let source = `Assoc ["schema", `String "masc.keeper_chat_operation.source.v1";
+    "submitted_by", `String "masc-tui"; "thread_id", `String "keeper:alpha";
+    "continuation_channel", `Assoc ["kind",`String "dashboard";"thread_id",`String "keeper:alpha"];
+    "surface", `Assoc ["kind",`String "dashboard"]; "channel",`String "";
+    "channel_user_id",`String ""; "channel_user_name",`String ""; "channel_workspace_id",`String "";
+    "conversation_id",`Null; "external_message_id",`Null; "workspace_id",`Null;
+    "extra_mentions",`List []; "user_row_origin",`String "needs_append"] in
+  let input = Masc.Keeper_chat_operation_payload.input_to_json ~message:"hello"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let output = get (Inbox.operation_lines (`Assoc ["operations",`List [`Assoc [
+    "operation_id",`String "tui-test"; "source",source; "input",input]]])) |> String.concat "\n" in
+  Alcotest.(check bool) "dashboard route is named even with empty channel label" true (contains output "dashboard");
+  Alcotest.(check bool) "submitting actor remains visible" true (contains output "masc-tui")
 let () = Alcotest.run "TUI queue controls"
-  ["inbox", [Alcotest.test_case "paused running work remains visible" `Quick test_pause_and_work_are_separate;
+  ["inbox", [Alcotest.test_case "dashboard sender and route" `Quick test_dashboard_sender_uses_typed_route;
+    Alcotest.test_case "paused running work remains visible" `Quick test_pause_and_work_are_separate;
     Alcotest.test_case "editing preserves media and context" `Quick test_edit_retains_media_and_turn_context;
     Alcotest.test_case "event controls address an exact source" `Quick test_exact_event_commands;
     Alcotest.test_case "queue pagination rejects missing identity" `Quick test_pagination_requires_identity]]

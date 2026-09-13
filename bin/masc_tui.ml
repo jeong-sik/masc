@@ -6824,12 +6824,13 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
       Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
 ;;
 
-let launch_keeper_run_next state ~mailbox request =
+let launch_keeper_run_next ?observed_turn state ~mailbox request =
   if Option.is_some state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
-    let interrupt_token = Option.map snd (keeper_observed_turn state keeper_name) in
+    let interrupt_token = Option.value
+      ~default:(Option.map snd (keeper_observed_turn state keeper_name)) observed_turn in
     state.keeper_run_next_inflight <- Some request_id;
     append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
     let run () =
@@ -6966,6 +6967,10 @@ let inflight_for state keeper_name =
 ;;
 
 let drop_inflight state request =
+  (match state.keeper_run_next_pending with
+   | Some (pending, _) when Keeper_chat.same_request_identity pending request ->
+     state.keeper_run_next_pending <- None
+   | Some _ | None -> ());
   state.msg_inflight <-
     List.filter
       (fun entry ->
@@ -7152,7 +7157,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
       | None, _ | _, None ->
           add_event state "error"
             "/steer needs a turn currently streaming for this Keeper"
-      | Some active_request, Some live ->
+      | Some active_request, Some _live ->
           let text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
@@ -7175,10 +7180,15 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                     "Steer queued for %s after interrupting %s (%d waiting)"
                     (Keeper_chat.terminal_safe_text keeper_name)
                     active_request.Keeper_chat.request_id waiting);
-               if
-                 Keeper_chat_transcript.interrupt live.tl_transcript
-                 = Keeper_chat_transcript.Not_requested
-               then launch_keeper_interrupt state ~mailbox active_request))
+               if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
+                 add_event state "info" "A run-next request is pending; this steer remains queued"
+               else
+                 match Chat_queue.take state.msg_queued ~request_id:request.request_id with
+                 | None -> add_event state "error" "Steer queue changed before submission"
+                 | Some (item, rest) ->
+                   state.msg_queued <- rest;
+                   state.keeper_run_next_pending <- Some (request, Option.map snd (keeper_observed_turn state keeper_name));
+                   launch_keeper_request ~promoted:item state ~mailbox request))
 ;;
 (* Send one line to one keeper.
 
@@ -8761,6 +8771,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match state.msg_target_keeper_name with
        | None -> notice ~role:Message_error "Select a Keeper first"
        | Some name ->
+         match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
+         | Some _ when Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight ->
+           notice ~role:Message_local "A run-next request is already pending"
+         | Some item ->
+           (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
+            | None -> notice ~role:Message_error "Local queue changed; inspect /queue again"
+            | Some (_, rest) ->
+              state.msg_queued <- rest;
+              state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state name));
+              launch_keeper_request ~promoted:item state ~mailbox item.request;
+              notice ~role:Message_local "Submitting queued input; it will be prioritized once the server accepts it")
+         | None ->
          match inflight_for state name, live_for_keeper state name with
          | Some _, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
            notice ~role:Message_local "Your message has already started; no new run was created"
@@ -12932,7 +12954,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let now = Unix.gettimeofday () in
            List.iter
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
-             deltas
+             deltas;
+           (match state.keeper_run_next_pending with
+            | Some (pending, observed_turn) when Keeper_chat.same_request_identity pending request ->
+              let admission = List.find_map (fun (_, delta) -> match delta with
+                | Keeper_chat_live.Accepted {admission;_} -> Some admission
+                | _ -> None) deltas in
+              (match admission with
+               | Some Keeper_chat_live.Queued ->
+                 state.keeper_run_next_pending <- None;
+                 launch_keeper_run_next ~observed_turn state ~mailbox request
+               | Some (Running | Settled) ->
+                 state.keeper_run_next_pending <- None;
+                 append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
+               | None -> ())
+            | Some _ | None -> ())
        | Some _ | None -> ())
   | Keeper_chat_stream_unavailable (request, detail) ->
       (match

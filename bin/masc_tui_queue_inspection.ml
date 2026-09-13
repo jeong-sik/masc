@@ -78,8 +78,8 @@ let operation_lines json =
     let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
     let* input = field "input" operation in
     let* input = Masc.Keeper_chat_operation_payload.input_of_json input in
-    Ok (Printf.sprintf "  %s [%s / %s]\n    %s" (safe id) (safe source.channel)
-      (safe source.channel_user_name) (safe input.message))) operations in
+    Ok (Printf.sprintf "  %s [%s / %s]\n    %s" (safe id) (safe (Masc.Keeper_continuation_channel.describe source.continuation_channel))
+      (safe source.submitted_by) (safe input.message))) operations in
   Ok ((Printf.sprintf "Server queued messages: %d" (List.length operations)) :: lines)
 let edited_input ~message operation =
   let* input = field "input" operation in

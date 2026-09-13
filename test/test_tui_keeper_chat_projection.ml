@@ -983,11 +983,14 @@ let operation_json state fields =
     | Ok digest -> digest
     | Error detail -> fail detail
   in
+  let admission_digest = match Keeper_chat_operation.admission_digest ~source:(`Assoc []) ~input with
+    | Ok digest -> digest | Error detail -> fail detail in
   `Assoc
     ([ "schema", `String "masc.keeper_chat_operation.v1"
      ; "operation_id", `String request.request_id
      ; "sequence", `String "7"
      ; "created_at", `Float 1.0
+     ; "admission_digest", `String admission_digest
      ; "execution_digest", `String execution_digest
      ; "source", `Assoc []
      ; "input", input
@@ -1034,6 +1037,95 @@ let test_operation_reconciliation_projection () =
   | Ok _ -> fail "cancelled operation projected to the wrong state"
   | Error error -> fail (Chat.stream_error_to_string error)
 
+let test_batch_preserves_original_user_history_once () =
+  let module Store = Keeper_chat_operation_store in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let module History = Masc.Keeper_chat_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let base_dir = Filename.temp_dir "batch-original-history" "" in
+  let keeper_name = "batch-history" in
+  let store = Store.open_or_create ~path:(Filename.concat base_dir "operations.sqlite3") |> store_ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
+    let continuation_channel = Keeper_continuation_channel.dashboard ~thread_id:"keeper:batch-history" |> ok in
+    let source = Payload.source_to_json ~submitted_by:"operator" ~thread_id:"keeper:batch-history"
+      ~continuation_channel ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
+      ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~user_row_origin:History.Needs_append |> ok in
+    let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
+      ["batch-original-one"; "batch-original-two"] in
+    List.iter2 (fun operation_id message ->
+      let input = Payload.input_to_json ~message ~user_blocks:[] ~turn_instructions:None
+        ~surface_context:None ~attachments:[] in
+      ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> store_ok)) ids ["original one"; "original two"];
+    let claimed = match Store.claim_next ~batch:Masc.Keeper_chat_operation_batch.select store ~now:2. |> store_ok with
+      | Some operation -> operation | None -> fail "no shared claim" in
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    let persist () = Server_routes_http_keeper_stream.For_testing.persist_batch_user_rows
+      ~base_dir ~keeper_name members |> ok in
+    persist (); persist ();
+    let rows = History.load_all ~base_dir ~keeper_name in
+    check (list string) "original messages appear once, aggregate is not another user row"
+      ["original one"; "original two"] (List.map (fun (row : History.chat_message) -> row.content) rows);
+    List.iter2 (fun operation_id (row : History.chat_message) ->
+      let expected_id = Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_chat_operation.Operation_id.to_string operation_id) |> ok in
+      let expected = { Keeper_chat_delivery_identity.delivery_key=Operation expected_id;
+        transcript_slot=Accepted_user } in
+      check bool "each accepted user row retains original request identity" true
+        (row.delivery_provenance = Some expected)) ids rows;
+    ignore (Store.succeed_running store ~now:3. ~operation_id:claimed.operation_id ~outcome_ref:"history-turn" |> store_ok);
+    let members = Store.batch_operations store ~operation_id:claimed.operation_id |> store_ok in
+    check bool "terminal membership retains identities but releases original bodies" true
+      (List.for_all (fun (member : Keeper_chat_operation.t) -> member.input = None) members))
+;;
+
+let test_batch_member_events_pass_request_bound_stream_decode () =
+  let module Events = Masc.Keeper_chat_events in
+  let module Projection = Server_keeper_chat_agui_projection in
+  let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let events =
+    [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
+    ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
+    ; Events.Text_delta "hello"
+    ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
+    ; Events.Text_message_end
+    ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in
+  let _, projected = List.fold_left (fun (state, rows) event ->
+    let member_event = Masc.Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
+    let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id ~redact_json:Fun.id state member_event in
+    state, match frame with None -> rows | Some frame -> Ag_ui.event_to_json frame :: rows)
+    (Projection.initial, []) events in
+  match decode (acceptance () :: List.rev projected) with
+  | Ok (Chat.Turn_completed completed) -> check string "follower receives complete shared reply" "hello" completed.reply
+  | Ok _ -> fail "shared reply did not complete the request"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_batch_reconciliation_preserves_original_input_binding () =
+  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
+  let original = operation_json "Running" ["started_at", `Float 2.] in
+  let original_digest = match original with `Assoc fields -> List.assoc "execution_digest" fields | _ -> fail "object" in
+  let combined = Masc.Keeper_chat_operation_payload.input_to_json ~message:"hello\n\nfollowup"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let combined_digest = match Keeper_chat_operation.execution_digest combined with Ok value -> value | Error detail -> fail detail in
+  let batch = original |> replace "input" combined |> replace "execution_digest" (`String combined_digest)
+    |> replace "batch_execution_id" (`String request.request_id) |> replace "batch_input_digest" original_digest in
+  (match Chat.decode_operation_reconciliation ~request batch with
+   | Ok (Chat.Operation_pending Chat.Running) -> ()
+   | Ok _ -> fail "wrong batch state"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  check bool "batch does not bypass original input identity" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request
+      (replace "admission_digest" (`String combined_digest) batch)));
+  check bool "batch still validates stored aggregate" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request
+      (replace "input" (`Assoc ["wrong", `String "input"]) batch)))
+;;
+
 let test_operation_reconciliation_uses_server_canonical_message () =
   let request_with_whitespace = { request with message = "  hello \n" } in
   match
@@ -1057,6 +1149,22 @@ let test_stale_completion_identity () =
     (Chat.same_request_identity current stale);
   check bool "wrong keeper rejected" false
     (Chat.same_request_identity current wrong_keeper)
+
+let test_edited_operation_reconnect_keeps_original_admission () =
+  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
+  let original = operation_json "Running" ["started_at", `Float 2.] in
+  let edited_input = Masc.Keeper_chat_operation_payload.input_to_json ~message:"corrected instruction"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let edited_digest = match Keeper_chat_operation.execution_digest edited_input with Ok digest -> digest | Error detail -> fail detail in
+  let edited = original |> replace "input" edited_input |> replace "execution_digest" (`String edited_digest) in
+  (match Chat.decode_operation_reconciliation ~request edited with
+   | Ok (Chat.Operation_pending Chat.Running) -> ()
+   | Ok _ -> fail "wrong edited operation state"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  let altered_request = {request with message="corrected instruction"} in
+  check bool "reposting edited content cannot impersonate original admission" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request:altered_request edited))
+;;
 
 let test_operation_reconciliation_binds_original_input () =
   let valid = operation_json "Running" [ "started_at", `Float 2.0 ] in
@@ -1088,7 +1196,7 @@ let test_operation_reconciliation_binds_original_input () =
      Chat.decode_operation_reconciliation ~request
        (replace "execution_digest" (`String "wrong-digest") valid)
    with
-   | Error (Chat.Event_identity_mismatch { field = "execution_digest"; _ }) -> ()
+   | Error (Chat.Malformed_event _) -> ()
    | Error error -> fail (Chat.stream_error_to_string error)
    | Ok _ -> fail "wrong durable execution digest matched the original request");
   match
@@ -1331,8 +1439,16 @@ let () =
             test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
+        ; test_case "batch accepted-user history preserves original identities" `Quick
+            test_batch_preserves_original_user_history_once
+        ; test_case "batch member stream retains strict request identity" `Quick
+            test_batch_member_events_pass_request_bound_stream_decode
+        ; test_case "batch reconciliation keeps original request binding" `Quick
+            test_batch_reconciliation_preserves_original_input_binding
         ; test_case "operation reconciliation uses server-canonical message" `Quick
             test_operation_reconciliation_uses_server_canonical_message
+        ; test_case "edited operation reconnect retains immutable admission" `Quick
+            test_edited_operation_reconnect_keeps_original_admission
         ; test_case "operation reconciliation binds original input" `Quick
             test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick

@@ -78,7 +78,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ~instructions ~world =
+  let run ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -86,7 +86,7 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal:"Continue from current World State."
+      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages:[Agent_core.Types.user_msg "Previous completed work"]
       ~model_input_projection:None ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
@@ -117,10 +117,10 @@ let test_resume_persists_no_per_turn_context () =
      surface, not a per-turn write. *)
   with_fixture @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
-    ~world:"World State: task-001 done; goal awaiting confirmation.");
+    ~world:"World State: task-001 done; goal awaiting confirmation." ());
   let first_requests = read_requests capture in
   successful (run ~instructions:"Keeper revision 2: continue remaining assigned work."
-    ~world:"World State: task-003 todo; autonomous-collaboration-continuation executing.");
+    ~world:"World State: task-003 todo; autonomous-collaboration-continuation executing." ());
   let requests = read_requests capture in
   let resumed = List.filteri (fun index _ -> index >= List.length first_requests) requests in
   let methods rows = List.filter_map (fun row -> match member "method" row with
@@ -169,12 +169,45 @@ let test_resume_persists_no_per_turn_context () =
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
-  let attempt = run ~instructions:"Keeper current instructions" ~world:"World State: task-003 todo" in
+  let attempt = run ~instructions:"Keeper current instructions" ~world:"World State: task-003 todo" () in
   check bool "context rejection is a failed turn" true (Result.is_error attempt.Keeper_codex_runtime.result);
   check bool "no model turn after rejected context" false
     (List.exists (fun row -> member "method" row = `String "turn/start") (read_requests capture));
   check int "rejected context never reports transmitted turn input" 0 (List.length !reports)
 
+let test_cooperative_resume_sends_only_remaining_work_instruction () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let initial = run ~instructions:"Keeper instructions" ~world:"Original work" () in
+  successful initial;
+  let settled = Option.get initial.Keeper_codex_runtime.settled_session in
+  let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
+    | Settled settlement -> settlement.session_id, settlement.turn_id
+    | _ -> fail "fixture did not settle a native thread" in
+  let operation_id = Keeper_chat_operation.Operation_id.of_string "cooperative-original" |> require in
+  let seed = match Keeper_semantic_execution.create
+      ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String "original user input") ~sources:[] ~now:1. with
+    | Ok value -> value | Error error -> fail (Keeper_semantic_execution.error_to_string error) in
+  let observed : Keeper_semantic_execution.official_client_checkpoint =
+    { client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
+      tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame } in
+  let checkpoint = Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+    ~observed ~expected:(Some settled) |> require in
+  let before = List.length (read_requests capture) in
+  let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
+  successful (run ~official_client_continuation:checkpoint ~goal
+    ~instructions:"Keeper instructions" ~world:"Newer steering" ());
+  let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+  check bool "cooperative continuation resumes the original vendor thread" true
+    (List.exists (fun row -> member "method" row = `String "thread/resume") rows);
+  check bool "cooperative continuation never injects old input/history again" false
+    (List.exists (fun row -> let method_ = member "method" row in
+      method_ = `String "thread/start" || method_ = `String "thread/inject_items") rows);
+  let params = List.find (fun row -> member "method" row = `String "turn/start") rows |> member "params" in
+  let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
+  check string "the model receives only continuation intent" goal sent
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

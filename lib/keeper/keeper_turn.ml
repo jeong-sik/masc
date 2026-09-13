@@ -482,10 +482,15 @@ let run_keeper_invocation_turn_admitted_inner
           ~config:ctx.config ~meta ~operation_id ~session_dir with
         | Error _ as error -> error
         | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Gate_continuation admission))
-        | Ok None -> Keeper_direct_runtime_continuation.load
-            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-            ~session_dir ~session_id
-            |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission))) with
+        | Ok None ->
+          (match Keeper_direct_checkpoint_continuation.load
+              ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~session_dir ~session_id with
+           | Error _ as error -> error
+           | Ok (Some admission) -> Ok (Some (Keeper_agent_run.Checkpoint_continuation admission))
+           | Ok None -> Keeper_direct_runtime_continuation.load
+               ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+               ~session_dir ~session_id
+               |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) with
        | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
        | Ok direct_resume ->
       let deferred_lane = ref None in
@@ -493,10 +498,10 @@ let run_keeper_invocation_turn_admitted_inner
       let gate_ids = ref [] in
       let runtime_resume = match direct_resume with
         | Some (Keeper_agent_run.Runtime_continuation admission) -> Some admission
-        | Some (Keeper_agent_run.Gate_continuation _) | None -> None in
+        | Some (Keeper_agent_run.Checkpoint_continuation _ | Keeper_agent_run.Gate_continuation _) | None -> None in
       let gate_resume = match direct_resume with
         | Some (Keeper_agent_run.Gate_continuation admission) -> Some admission
-        | Some (Keeper_agent_run.Runtime_continuation _) | None -> None in
+        | Some (Keeper_agent_run.Checkpoint_continuation _ | Keeper_agent_run.Runtime_continuation _) | None -> None in
       let resume_lane = match runtime_resume, gate_resume with
         | Some admission, _ -> Some (Keeper_direct_runtime_continuation.lane admission)
         | None, Some admission -> Keeper_direct_gate_continuation.runtime_lane admission
@@ -510,8 +515,12 @@ let run_keeper_invocation_turn_admitted_inner
          strips it from a text-only runtime's dispatch view while the
          reference itself stays requestable. A runtime that
          takes the image itself keeps it — seeing the pixels beats a reading. *)
+      let official_checkpoint_resume = Option.bind direct_resume (function
+        | Keeper_agent_run.Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.official_client admission
+        | Keeper_agent_run.Runtime_continuation _ | Keeper_agent_run.Gate_continuation _ -> None) in
       let user_blocks =
-        if Option.is_some direct_resume then user_blocks else
+        if Option.is_some official_checkpoint_resume then None
+        else if Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
              ~base_path:ctx.config.base_path
@@ -540,7 +549,9 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
+      let selected_runtime = match official_checkpoint_resume with
+        | Some checkpoint -> Ok checkpoint.Keeper_semantic_execution.runtime_id
+        | None -> resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
       match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
@@ -700,9 +711,12 @@ let run_keeper_invocation_turn_admitted_inner
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
 	              Inference_utils.timed (fun () ->
-                      let consume = match runtime_resume with
-                        | None -> Ok ()
-                        | Some admission -> Keeper_direct_runtime_continuation.consume
+                      let consume = match direct_resume with
+                        | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
+                        | Some (Keeper_agent_run.Checkpoint_continuation admission) ->
+                          Keeper_direct_checkpoint_continuation.consume
+                            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission
+                        | Some (Keeper_agent_run.Runtime_continuation admission) -> Keeper_direct_runtime_continuation.consume
                             ~base_path:ctx.config.base_path ~keeper_name:meta.name
                             ~operation_id admission in
                       match consume with
@@ -850,7 +864,9 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~base_dir
 		                                ~max_context
 		                                ~build_turn_prompt
-		                                ~user_message:message
+		                                ~user_message:(match official_checkpoint_resume with
+                                      | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
+                                      | None -> message)
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot
@@ -976,6 +992,26 @@ let run_keeper_invocation_turn_admitted_inner
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
+              let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
+                  Keeper_turn_outcome.Continuation_checkpoint in
+              let retained = if checkpoint_yield then
+                  match result.checkpoint with
+                  | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
+                      ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                      ~session_dir ~session_id ~checkpoint
+                  | None ->
+                    (match result.official_client_settlement with
+                     | None -> Error "cooperative turn omitted its producer-owned continuation authority"
+                     | Some settled_session ->
+                       (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
+                        | Error error -> Error (Keeper_repetition_snapshot.error_to_string error)
+                        | Ok frame -> Keeper_direct_checkpoint_continuation.defer_official
+                            ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                            ~settled_session ~frame))
+                else Ok () in
+              (match retained with
+               | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+               | Ok () ->
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
@@ -1033,7 +1069,10 @@ let run_keeper_invocation_turn_admitted_inner
                     Ids.Turn_ref.to_yojson turn_ref );
                 ] @ terminal_effect_fields)
               in
-              tool_result_ok_data reply_json
+              if checkpoint_yield then
+                Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
+                  ~start_time:(Time_compat.now ()) ~data:reply_json ()
+              else tool_result_ok_data reply_json)
 
 )))))
 

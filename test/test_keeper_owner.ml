@@ -1379,6 +1379,55 @@ let test_operation_executor_claims_latest_input_and_drains_fifo () =
   check int "one child drains one operation at a time" 2 !execution_count
 ;;
 
+let test_owner_coalesces_compatible_messages_and_preserves_other_conversations () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let calls = ref [] in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    if !calls = [] then (Eio.Promise.resolve resolve_started (); Eio.Promise.await release);
+    match claim () with
+    | Ok (Some operation) -> calls := operation :: !calls;
+      Owner.Operation_succeeded { outcome_ref = "shared-turn" }
+    | Ok None -> fail "no queued work"
+    | Error error -> fail (Owner.error_to_string error) in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some execute) ~keeper_name:"batch-owner"
+    ~initial_meta:(Some (make_meta "batch-owner")) ()) in
+  let source actor thread =
+    let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id:thread with
+      | Ok channel -> channel | Error detail -> fail detail in
+    match Keeper_chat_operation_payload.source_to_json ~submitted_by:actor ~thread_id:thread
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let payload message user_blocks = Keeper_chat_operation_payload.input_to_json
+    ~message ~user_blocks ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let ids = List.map operation_id ["batch-one"; "batch-two"; "batch-other-actor"; "batch-other-thread"] in
+  let submit index actor thread text blocks = ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:(List.nth ids index) ~source:(source actor thread) ~input:(payload text blocks))) in
+  let image = Keeper_multimodal_input.User_image (Url_ref {value="https://example.com/image.png"; mime_type=None}) in
+  submit 0 "alice" "keeper:batch" "one" [image];
+  Eio.Promise.await started;
+  submit 1 "alice" "keeper:batch" "two" [];
+  submit 2 "bob" "keeper:batch" "other actor" [];
+  submit 3 "alice" "keeper:other" "other thread" [];
+  Eio.Promise.resolve resolve_release ();
+  List.iter (fun id -> ignore (await_terminal owner id 1_000)) ids;
+  check int "one shared call plus separate actor and route" 3 (List.length !calls);
+  let shared = List.hd (List.rev !calls) in
+  let input = match shared.Chat_operation.input with
+    | Some input -> (match Keeper_chat_operation_payload.input_of_json input with Ok input -> input | Error detail -> fail detail)
+    | None -> fail "executor lost input" in
+  check string "ordered text" "one\n\ntwo" input.message;
+  check bool "mixed media and text preserve order" true (input.user_blocks = [User_text "one"; image; User_text "two"]);
+  check int "each original request belongs to same execution" 2
+    (List.length (owner_ok (Owner.batch_operations owner (List.nth ids 1))))
+;;
+
 let test_operation_executor_exception_is_terminal_and_next_runs () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -3328,6 +3377,8 @@ let () =
             test_startup_queued_waits_for_runner_readiness
         ; test_case "Gate waiting releases Owner without repeated children" `Quick
             test_gate_wait_releases_owner_without_repeated_children
+        ; test_case "compatible direct messages share an execution" `Quick
+            test_owner_coalesces_compatible_messages_and_preserves_other_conversations
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case

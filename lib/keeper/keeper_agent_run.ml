@@ -12,10 +12,12 @@ module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
 type direct_continuation =
+  | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
   | Gate_continuation of Keeper_direct_gate_continuation.admission
 
 let direct_checkpoint = function
+  | Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.checkpoint admission
   | Runtime_continuation admission -> Some (Keeper_direct_runtime_continuation.checkpoint admission)
   | Gate_continuation admission -> Keeper_direct_gate_continuation.checkpoint admission
 
@@ -969,6 +971,7 @@ let run_turn
   in
     let official_client_continuation = match direct_resume with
       | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
+      | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client admission
       | Some (Runtime_continuation _) | None -> None in
     let native_scope = match official_client_continuation, repetition_execution with
       | Some checkpoint, Some execution -> Keeper_repetition_scope.Execution.resume execution checkpoint.frame
@@ -1044,7 +1047,7 @@ let run_turn
       | Some _, Some evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
-          | Some (Runtime_continuation _) | None -> false) ->
+          | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> false) ->
         (match Keeper_gate_replay.approval_input evidence with
          | Error error -> Error (Keeper_approval_input_admission.error_to_string error)
          | Ok (identity, message) ->
@@ -1286,7 +1289,7 @@ let run_turn
              ~user_message:original_gate_message admission ~transmitted:user_message with
            | Ok () -> ()
            | Error detail -> failwith detail)
-        | Some (Runtime_continuation _) | None -> () in
+        | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> () in
       let prompt_context_present =
         Option.is_some acc.Keeper_run_tools.extra_system_context_size
       in

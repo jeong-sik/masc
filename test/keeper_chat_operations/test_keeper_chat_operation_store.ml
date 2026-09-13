@@ -81,8 +81,8 @@ let test_schema_identity_and_budget () =
   check string "database file" "chat-operations.sqlite3" (Filename.basename path);
   check
     (list (pair string int))
-    "three strict tables"
-    [ "metadata", 3; "operations", 13; "semantic_executions", 4 ]
+    "strict tables"
+    [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
     Store.For_testing.table_column_counts;
   store_ok (Store.close store);
   let db = Sqlite3.db_open ~mode:`READONLY path in
@@ -471,11 +471,64 @@ let test_priority_keeps_other_producers_and_survives_reopen () =
      | Error (Store.Not_queued _) -> () | _ -> fail "already running operation was promoted"))
 ;;
 
+let test_batch_claim_freezes_inputs_and_settles_members () =
+  with_store "batch" @@ fun _path store ->
+  let first = id "batch-first" and second = id "batch-second" and third = id "batch-later" in
+  List.iteri (fun index operation_id -> ignore (store_ok (Store.submit store
+    ~now:(float_of_int index) ~operation_id ~source:(source "same-person")
+    ~input:(input (Id.to_string operation_id))))) [first; second; third];
+  ignore (store_ok (Store.edit_queued store ~operation_id:second ~input:(input "edited before dispatch")));
+  let batch head candidates =
+    check string "head" (Id.to_string first) (Id.to_string head.Operation.operation_id);
+    check int "all ready inputs available" 3 (List.length candidates);
+    let second_input = (List.nth candidates 1).Operation.input in
+    check bool "claim sees edit" true (second_input = Some (input "edited before dispatch"));
+    Ok (Some { Store.members = [first; second]; input = input "combined" }) in
+  let running = Option.get (store_ok (Store.claim_next ~batch store ~now:4.)) in
+  check bool "frozen shared input" true (running.input = Some (input "combined"));
+  check bool "execution identity retained" true (Option.map (fun (member : Operation.batch_membership) -> member.execution_id) running.batch_membership = Some first);
+  let member = get_exn store second in
+  check string "member reports actual shared execution state" "running" (state member);
+  check bool "member original input retained" true (member.input = Some (input "edited before dispatch"));
+  check int "only unbound input remains queued" 1 (store_ok (Store.inventory store)).queued_count;
+  check int "ordered member lookup" 2 (List.length (store_ok (Store.batch_operations store ~operation_id:second)));
+  (match Store.cancel_queued store ~now:5. ~operation_id:second with
+   | Error _ -> () | Ok _ -> fail "a member was withdrawn from an executing shared input");
+  ignore (store_ok (Store.succeed_running store ~now:6. ~operation_id:first ~outcome_ref:"turn:shared"));
+  List.iter (fun operation_id -> let operation = get_exn store operation_id in
+    check string "shared terminal" "succeeded" (state operation);
+    check bool "terminal input removed" true (operation.input = None)) [first; second];
+  let next = Option.get (store_ok (Store.claim_next store ~now:7.)) in
+  check bool "follower cannot execute again" true (Id.equal next.operation_id third)
+;;
+
+let test_batch_restart_and_commit_failure () =
+  with_store "batch-restart" @@ fun path store ->
+  let first = id "restart-batch-first" and second = id "restart-batch-second" in
+  List.iter (fun operation_id -> ignore (store_ok (Store.submit store ~now:1. ~operation_id
+    ~source:(source "same") ~input:(input "original")))) [first; second];
+  let batch _ _ = Ok (Some { Store.members = [first; second]; input = input "combined" }) in
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  (match Store.claim_next ~batch store ~now:2. with Error _ -> () | Ok _ -> fail "precommit failure claimed batch");
+  check bool "failed commit has no membership" true ((get_exn store second).batch_membership = None);
+  check int "failed commit leaves both queued" 2 (store_ok (Store.inventory store)).queued_count;
+  ignore (store_ok (Store.claim_next ~batch store ~now:3.));
+  store_ok (Store.close store);
+  let reopened = store_ok (Store.open_or_create ~path) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
+    ignore (store_ok (Store.settle_running_after_restart reopened ~now:4.));
+    List.iter (fun operation_id -> check string "restart settles each identity" "failed"
+      (state (get_exn reopened operation_id))) [first; second];
+    check int "restart does not replay follower" 0 (store_ok (Store.inventory reopened)).queued_count)
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
     [ ( "store"
-      , [ test_case "priority preserves other producers, replay and running boundary" `Quick
+      , [ test_case "batch atomic dispatch and identity settlement" `Quick test_batch_claim_freezes_inputs_and_settles_members
+        ; test_case "batch restart and failed commit" `Quick test_batch_restart_and_commit_failure
+        ; test_case "priority preserves other producers, replay and running boundary" `Quick
           test_priority_keeps_other_producers_and_survives_reopen
         ; test_case "read-only inspection preserves absence and refuses uninitialized evidence" `Quick
             test_read_only_inspection_preserves_absence_and_refuses_uninitialized_store

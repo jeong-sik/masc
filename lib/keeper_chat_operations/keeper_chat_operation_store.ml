@@ -117,14 +117,22 @@ let legacy_schema_objects =
   ]
 ;;
 
-let expected_schema_objects =
+let base_schema_objects =
   (List.map (fun (kind, name, sql) ->
      kind, name, (if name = "metadata" then metadata_table_sql else sql)) legacy_schema_objects
    @ semantic_schema_objects)
   |> List.sort (fun (left_kind, left_name, _) (right_kind, right_name, _) ->
        compare (left_kind, left_name) (right_kind, right_name))
 ;;
-let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4 ]
+let batch_table_sql =
+  "CREATE TABLE operation_batch_members (operation_id TEXT PRIMARY KEY REFERENCES operations(operation_id), execution_id TEXT NOT NULL REFERENCES operations(operation_id), position INTEGER NOT NULL CHECK (position >= 0), admitted_digest TEXT NOT NULL CHECK (length(admitted_digest) = 64), admitted_input_json TEXT, UNIQUE(execution_id, position)) STRICT"
+;;
+let batch_schema_objects =
+  [ "table", "operation_batch_members", batch_table_sql
+  ; "trigger", "batch_members_update_immutable", "CREATE TRIGGER batch_members_update_immutable BEFORE UPDATE ON operation_batch_members WHEN NEW.operation_id <> OLD.operation_id OR NEW.execution_id <> OLD.execution_id OR NEW.position <> OLD.position OR NEW.admitted_digest <> OLD.admitted_digest OR OLD.admitted_input_json IS NULL OR NEW.admitted_input_json IS NOT NULL OR NOT EXISTS (SELECT 1 FROM operations WHERE operation_id = OLD.execution_id AND state IN ('succeeded', 'failed', 'cancelled')) BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END"
+  ; "trigger", "batch_members_delete_immutable", "CREATE TRIGGER batch_members_delete_immutable BEFORE DELETE ON operation_batch_members BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END" ]
+let expected_schema_objects = List.sort compare (base_schema_objects @ batch_schema_objects)
+let table_column_counts = [ "metadata", 3; "operations", 13; "semantic_executions", 4; "operation_batch_members", 5 ]
 
 type commit_fault =
   | Fail_before_commit
@@ -428,6 +436,7 @@ let decode_operation stmt =
     in
     Ok
       { Operation.operation_id
+      ; batch_membership = None
       ; admission_digest
       ; execution_digest
       ; sequence
@@ -462,9 +471,70 @@ let get_with_db db operation_id =
        else Error (Store_unavailable (sqlite_error db "lookup operation" rc)))
 ;;
 
+let batch_execution_with_db db operation_id =
+  with_statement db ~operation:"read batch membership"
+    "SELECT execution_id, admitted_digest FROM operation_batch_members WHERE operation_id = ?" (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind member id" 1 (Id.to_string operation_id) in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
+          let* execution_id = Id.of_string (Sqlite3.column_text stmt 0)
+            |> Result.map_error (fun detail -> Integrity_error detail) in
+          let* input_digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 1) in
+          Ok (Some { Operation.execution_id; input_digest })
+      else Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
+;;
+let project_batch_with_db db (operation : Operation.t) =
+  let* batch_membership = batch_execution_with_db db operation.operation_id in
+  match batch_membership with
+  | None -> Ok operation
+  | Some { Operation.execution_id; _ } ->
+    let* leader = get_with_db db execution_id in
+    (match leader with
+     | None -> Error (Integrity_error "batch execution owner is missing")
+     | Some leader ->
+       let* () = if Operation.is_terminal operation.state && operation.state <> leader.state
+         then Error (Integrity_error "batch member terminal fact disagrees with execution") else Ok () in
+       Ok { operation with batch_membership; state = leader.state;
+         input = if Operation.is_terminal leader.state then None else operation.input })
+;;
 let get store operation_id =
   let* () = ensure_open store in
-  get_with_db store.db operation_id
+  let* operation = get_with_db store.db operation_id in
+  match operation with None -> Ok None
+  | Some operation -> project_batch_with_db store.db operation |> Result.map Option.some
+;;
+let batch_operations store ~operation_id =
+  let* () = ensure_open store in
+  let* execution_id = batch_execution_with_db store.db operation_id in
+  match execution_id with
+  | None -> let* operation = get store operation_id in
+      (match operation with Some operation -> Ok [operation] | None -> Error (Unknown_operation operation_id))
+  | Some { Operation.execution_id; _ } ->
+    let* ids = with_statement store.db ~operation:"read ordered batch"
+      "SELECT operation_id, admitted_input_json, admitted_digest FROM operation_batch_members WHERE execution_id = ? ORDER BY position" (fun stmt ->
+        let* () = bind_text store.db stmt ~operation:"bind execution id" 1 (Id.to_string execution_id) in
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* id = Id.of_string (Sqlite3.column_text stmt 0)
+              |> Result.map_error (fun detail -> Integrity_error detail) in
+              let* original_input = match text_option stmt 1 with None -> Ok None
+                | Some json -> json_of_stored "batch original input" json |> Result.map Option.some in
+              let* digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 2) in
+              let* () = match original_input with
+                | None -> Ok ()
+                | Some input -> let* actual = Operation.execution_digest input |> Result.map_error (fun detail -> Integrity_error detail) in
+                  if actual = digest then Ok () else Error (Integrity_error "batch original input digest mismatch") in
+              read ((id, original_input, digest) :: acc)
+          else Error (Store_unavailable (sqlite_error store.db "read ordered batch" rc)) in read []) in
+    List.fold_left (fun result (id, original_input, digest) -> let* acc = result in
+      let* operation = get store id in match operation with
+      | Some operation ->
+        if Option.is_none original_input && not (Operation.is_terminal operation.state)
+        then Error (Integrity_error "active batch lost original input")
+        else Ok ({operation with input=original_input; execution_digest=digest} :: acc)
+      | None -> Error (Integrity_error "batch member is missing")) (Ok []) ids |> Result.map List.rev
 ;;
 
 let optional_text db ~operation sql =
@@ -488,7 +558,7 @@ let inventory store =
     single_int64
       store.db
       ~operation:"count queued operations"
-      "SELECT COUNT(*) FROM operations WHERE state = 'queued'"
+      "SELECT COUNT(*) FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id)"
   in
   let* running_operation_id =
     optional_text
@@ -597,7 +667,7 @@ let validate_schema_with ~version ~schema_identity ~objects db =
     if schema <> schema_identity then Error (Integrity_error "operation store schema identity mismatch")
     else
       let* observed = read_schema_objects db in
-      if observed = objects then Ok ()
+      if observed = objects || (objects = expected_schema_objects && observed = base_schema_objects) then Ok ()
       else Error (Integrity_error "operation store schema objects do not exactly match")
 ;;
 let validate_schema db =
@@ -691,6 +761,11 @@ let open_or_create ~path =
       let* () = validate_open_candidate db in
       let* count = single_int64 db ~operation:"read locked schema" "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'" in
       let* () = if count = 0L then initialize_schema db else ensure_current_schema db in
+      let* observed = read_schema_objects db in
+      let* () = if observed = base_schema_objects then
+        List.fold_left (fun result (_, _, sql) -> let* () = result in
+          exec db ~operation:"create batch membership contract" sql) (Ok ()) batch_schema_objects
+        else Ok () in
       let* () = validate_schema db in
       commit db
     in
@@ -751,6 +826,8 @@ let inspect_outstanding ~path =
     in
     let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
     let* () = if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
+    let* objects = read_schema_objects db in
+    let has_batches = List.exists (fun (_, name, _) -> name = "operation_batch_members") objects in
     let* outstanding =
       with_statement db ~operation:"inspect durable operations"
         ("SELECT " ^ select_columns ^ " FROM operations ORDER BY sequence")
@@ -760,6 +837,7 @@ let inspect_outstanding ~path =
             if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
             else if rc = Sqlite3.Rc.ROW then
               let* operation = decode_operation stmt in
+              let* operation = if has_batches then project_batch_with_db db operation else Ok operation in
               read (if Operation.is_terminal operation.state then acc else operation :: acc)
             else Error (Store_unavailable (sqlite_error db "inspect durable operations" rc))
           in read [])
@@ -871,12 +949,14 @@ let submit store ~now ~operation_id ~source ~input =
       let* existing = get_with_db store.db operation_id in
       match existing with
       | Some operation when String.equal operation.admission_digest admission_digest ->
+        let* operation = project_batch_with_db store.db operation in
         Ok (Existing operation)
       | Some _ -> Error (Idempotency_conflict operation_id)
       | None ->
         let* sequence = next_sequence store.db in
         let operation =
           { Operation.operation_id
+          ; batch_membership = None
           ; admission_digest
           ; execution_digest
           ; sequence
@@ -919,12 +999,14 @@ let reducer_error operation_id = function
 let operation_or_unknown db operation_id =
   let* operation = get_with_db db operation_id in
   match operation with
-  | Some operation -> Ok operation
+  | Some operation ->
+    let* batch_membership = batch_execution_with_db db operation_id in
+    Ok { operation with batch_membership }
   | None -> Error (Unknown_operation operation_id)
 ;;
 
 let readback_exact store expected original_error =
-  match get_with_db store.db expected.Operation.operation_id with
+  match get store expected.Operation.operation_id with
   | Ok (Some observed) when observed = expected -> Ok observed
   | Ok _ | Error _ -> Error original_error
 ;;
@@ -932,7 +1014,7 @@ let readback_exact store expected original_error =
 let persist_and_readback store expected persist =
   match with_transaction store persist with
   | Ok () ->
-    (match get_with_db store.db expected.Operation.operation_id with
+    (match get store expected.Operation.operation_id with
      | Ok (Some observed) when observed = expected -> Ok observed
      | Ok _ -> Error (Integrity_error "committed operation does not match reducer transition")
      | Error _ as error -> error)
@@ -951,7 +1033,7 @@ let gate_state = function
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_wait state; _}; _} -> Some state
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running
       | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Checkpointed _
+      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _); _}); _}
   | None -> None
 
@@ -971,7 +1053,7 @@ let blocked_queued_scopes db ~now =
           when not_before > now -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-        | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
+        | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
   Ok blocked
 ;;
@@ -979,7 +1061,7 @@ let blocked_queued_scopes db ~now =
 let claimable_queued_with_db db ~now =
   let* blocked = blocked_queued_scopes db ~now in
   with_statement db ~operation:"read claimable original operations"
-    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
+    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
     (fun statement ->
       let rec read () =
         let rc = Sqlite3.step statement in
@@ -1020,7 +1102,7 @@ let next_runtime_retry_wake store ~now =
                  | Some _ | None -> Some not_before)
               | Some _ | None -> earliest)
            | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
-           | Semantic.Checkpointed _ | Semantic.Interrupted_execution
+           | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution
            | Semantic.Gate_wait _ | Semantic.Gate_binding _ -> earliest)
         | Semantic.Preparing | Semantic.Ready | Semantic.Running
         | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
@@ -1028,7 +1110,61 @@ let next_runtime_retry_wake store ~now =
       None
       executions)
 
-let claim_next store ~now =
+type batch_plan = { members : Id.t list; input : Yojson.Safe.t }
+type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
+
+let freeze_batch_with_db db ~select (head : Operation.t) =
+  let* executions = semantic_rows db ~active_only:false in
+  let scoped operation = List.exists (fun (execution : Semantic.t) ->
+    Keeper_execution_scope_id.equal execution.id
+      (Keeper_execution_scope_id.direct_operation operation.Operation.operation_id)) executions in
+  let* existing = batch_execution_with_db db head.operation_id in
+  if Option.is_some existing || scoped head then Ok { head with batch_membership = existing }
+  else
+    let* candidates = with_statement db ~operation:"read fresh batch candidates"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id) ORDER BY sequence")
+      (fun stmt ->
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc = Sqlite3.Rc.ROW then let* operation = decode_operation stmt in
+              read (if scoped operation then acc else operation :: acc)
+          else Error (Store_unavailable (sqlite_error db "read batch candidates" rc)) in read []) in
+    let* plan = select head candidates |> Result.map_error (fun detail -> Invalid_input detail) in
+    match plan with
+    | None -> Ok head
+    | Some plan ->
+      let selected = List.filter (fun (operation : Operation.t) ->
+        List.exists (Id.equal operation.operation_id) plan.members) candidates in
+      let* () = match selected with
+        | first :: _ :: _ when Id.equal first.operation_id head.operation_id
+            && List.map (fun (operation : Operation.t) -> operation.operation_id) selected = plan.members -> Ok ()
+        | _ -> Error (Invalid_input "batch must contain its head and fresh distinct members in queue order") in
+      let* input_json = canonical_json "batch input" plan.input in
+      let* input = json_of_stored "batch input" input_json in
+      let* execution_digest = Operation.execution_digest input |> Result.map_error (fun detail -> Invalid_input detail) in
+      let* () = List.fold_left (fun result (position, (operation : Operation.t)) ->
+        let* () = result in
+        with_statement db ~operation:"freeze batch member"
+          "INSERT INTO operation_batch_members(operation_id, execution_id, position, admitted_digest, admitted_input_json) VALUES (?, ?, ?, ?, ?)" (fun stmt ->
+            let* () = bind_text db stmt ~operation:"bind member" 1 (Id.to_string operation.operation_id) in
+            let* () = bind_text db stmt ~operation:"bind batch owner" 2 (Id.to_string head.operation_id) in
+            let* () = bind_int64 db stmt ~operation:"bind position" 3 (Int64.of_int position) in
+            let* () = bind_text db stmt ~operation:"bind frozen digest" 4 operation.execution_digest in
+            let* input = required_option "batch member input" operation.input in
+            let* original = canonical_json "batch member input" input in
+            let* () = bind_text db stmt ~operation:"bind frozen original" 5 original in
+            expect_done db stmt ~operation:"freeze batch member")) (Ok ()) (List.mapi (fun i operation -> i, operation) selected) in
+      let* () = with_statement db ~operation:"freeze batch input"
+        "UPDATE operations SET input_json = ?, execution_digest = ? WHERE operation_id = ? AND state = 'queued'" (fun stmt ->
+          let* () = bind_text db stmt ~operation:"bind batch input" 1 input_json in
+          let* () = bind_text db stmt ~operation:"bind batch digest" 2 execution_digest in
+          let* () = bind_text db stmt ~operation:"bind batch owner" 3 (Id.to_string head.operation_id) in
+          expect_done db stmt ~operation:"freeze batch input") in
+      Ok { head with input = Some input; execution_digest; batch_membership = Some { Operation.execution_id = head.operation_id; input_digest = head.execution_digest } }
+;;
+
+let claim_next ?batch store ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"started_at" now
@@ -1047,6 +1183,9 @@ let claim_next store ~now =
         match current with
         | None -> Ok ()
         | Some current ->
+               let* current = match batch with
+                 | None -> operation_or_unknown store.db current.operation_id
+                 | Some select -> freeze_batch_with_db store.db ~select current in
                let* transition =
                  Reducer.apply current (Start { started_at = now })
                  |> Result.map_error (reducer_error current.operation_id)
@@ -1108,12 +1247,12 @@ let list_queued store ~after_sequence ~limit =
       match after_sequence with
       | None ->
         Printf.sprintf
-          "SELECT %s FROM operations WHERE state = 'queued' ORDER BY sequence LIMIT %d"
+          "SELECT %s FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence LIMIT %d"
           select_columns
           limit
       | Some _ ->
         Printf.sprintf
-          "SELECT %s FROM operations WHERE state = 'queued' AND sequence > ? ORDER BY sequence LIMIT %d"
+          "SELECT %s FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) AND sequence > ? ORDER BY sequence LIMIT %d"
           select_columns
           limit
     in
@@ -1130,6 +1269,7 @@ let list_queued store ~after_sequence ~limit =
         else if rc = Sqlite3.Rc.ROW
         then
           let* operation = decode_operation stmt in
+          let* operation = project_batch_with_db store.db operation in
           loop (operation :: operations)
         else Error (Store_unavailable (sqlite_error store.db "list queued operations" rc))
       in
@@ -1224,6 +1364,9 @@ let move_queued_to_front store ~now ~operation_id =
   let* () = ensure_open store in
   let* () = with_transaction store (fun () ->
     let* target = operation_or_unknown store.db operation_id in
+    let* () = match target.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) -> Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
+      | Some _ | None -> Ok () in
     let* () = match target.state with
       | Operation.Queued -> Ok ()
       | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
@@ -1234,7 +1377,7 @@ let move_queued_to_front store ~now ~operation_id =
       Error (Invalid_input "message is waiting for approval, reconciliation, or provider retry; priority cannot make it runnable")
       else Ok () in
     let* queued = with_statement store.db ~operation:"read queue order"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) ORDER BY sequence")
       (fun stmt ->
         let rec read rows =
           let rc = Sqlite3.step stmt in
@@ -1421,9 +1564,26 @@ let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation
   | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
       | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _ }
   | None -> None
+;;
+
+let pending_checkpoint = function
+  | Some { Semantic.phase = Semantic.Suspended checkpoint; _ }
+  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some (Semantic.Agent_core checkpoint)
+  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Official_checkpointed checkpoint; _ }; _ } -> Some (Semantic.Official_client checkpoint)
+  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
+      | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+          | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _ }
+  | None -> None
+;;
+let direct_checkpoint store ~operation_id =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  Ok (pending_checkpoint execution)
 ;;
 
 let direct_runtime_retry store ~operation_id =
@@ -1433,8 +1593,8 @@ let direct_runtime_retry store ~operation_id =
   Ok (pending_retry execution)
 ;;
 
-let requeue_runtime_retry_with_db db operation =
-  let* transition = Reducer.apply operation Reducer.Requeue_runtime_retry
+let requeue_continuation_with_db db operation =
+  let* transition = Reducer.apply operation Reducer.Requeue_continuation
     |> Result.map_error (reducer_error operation.Operation.operation_id) in
   let* () = with_statement db ~operation:"requeue checkpointed direct operation"
     "UPDATE operations SET state = 'queued', started_at = NULL WHERE operation_id = ? AND state = 'running'"
@@ -1485,7 +1645,7 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
       let* () = match current with
         | None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> read_existing ()
   | Error (Store_unavailable _ as error) ->
@@ -1507,6 +1667,96 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
       | None -> Error (Integrity_error "direct operation has no durable continuation")
       | Some expected ->
         let* next = semantic_transition ~now (Semantic.Resume_runtime_retry observed) expected in
+        let* outstanding = semantic_rows store.db ~active_only:true in
+        if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
+            && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
+        then Error (Integrity_error "another semantic execution owns the running slot")
+        else (expected_next := Some next; update_semantic store.db ~expected next)) in
+  match result with
+  | Ok () -> Ok ()
+  | Error (Store_unavailable _ as error) ->
+    (match !expected_next with
+     | None -> Error error
+     | Some expected ->
+       (match semantic_get_with_db store.db expected.id with
+        | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json expected -> Ok ()
+        | Ok _ | Error _ -> Error error))
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoint =
+  let* () = ensure_open store in
+  let read_existing () =
+    let* operation = operation_or_unknown store.db operation_id in
+    let* execution = direct_execution_with_db store.db operation in
+    match operation.state, pending_checkpoint execution with
+    | Operation.Queued, Some existing when String.equal operation.execution_digest execution_digest
+        && Semantic.equal_gate_checkpoint existing checkpoint -> Ok operation
+    | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
+       | Operation.Failed _ | Operation.Cancelled _), (Some _ | None) ->
+      Error (Integrity_error "direct continuation commit is not confirmed") in
+  let result = with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    if not (String.equal operation.execution_digest execution_digest)
+    then Error (Invalid_input "direct continuation execution digest changed")
+    else match operation.state with
+    | Operation.Queued -> read_existing ()
+    | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
+    | Operation.Running _ ->
+      let* current = direct_execution_with_db store.db operation in
+      let* execution = match current with
+        | Some execution -> Ok execution
+        | None ->
+          (match operation.input with
+           | None -> Error (Integrity_error "running direct operation has no input")
+           | Some input ->
+             let* created = Semantic.create ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+                 ~input ~sources:[] ~now
+               |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
+             let* ready = semantic_transition ~now Semantic.Confirm_sources created in
+             semantic_transition ~now Semantic.Begin_execution ready) in
+      let action = match checkpoint with
+        | Semantic.Agent_core checkpoint -> Semantic.Suspend checkpoint
+        | Semantic.Official_client checkpoint -> Semantic.Suspend_official_checkpoint checkpoint in
+      let* suspended = semantic_transition ~now action execution in
+      let* () = match current with
+        | None -> insert_semantic store.db suspended
+        | Some current -> update_semantic store.db ~expected:current suspended in
+      let* requeued = requeue_continuation_with_db store.db operation in
+      (* A cooperative yield hands the slot to already submitted input. Keep
+         the operation identity/input frozen, but let newer steering run first. *)
+      let* sequence = next_sequence store.db in
+      let* () = with_statement store.db ~operation:"yield checkpoint queue position"
+        "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'" (fun stmt ->
+          let* () = bind_int64 store.db stmt ~operation:"bind checkpoint sequence" 1 sequence in
+          let* () = bind_text store.db stmt ~operation:"bind checkpoint operation" 2 (Id.to_string operation_id) in
+          expect_done store.db stmt ~operation:"yield checkpoint queue position") in
+      Ok { requeued with sequence }) in
+  match result with
+  | Ok _ -> read_existing ()
+  | Error (Store_unavailable _ as error) ->
+    (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let resume_direct_checkpoint store ~now ~operation_id ~observed =
+  let* () = ensure_open store in
+  let expected_next = ref None in
+  let result = with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    match operation.state with
+    | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
+    | Operation.Running _ ->
+      let* execution = direct_execution_with_db store.db operation in
+      match execution with
+      | None -> Error (Integrity_error "direct operation has no durable continuation")
+      | Some expected ->
+        let action = match observed with
+          | Semantic.Agent_core checkpoint -> Semantic.Resume_checkpoint checkpoint
+          | Semantic.Official_client checkpoint -> Semantic.Resume_official_checkpoint checkpoint in
+        let* next = semantic_transition ~now action expected in
         let* outstanding = semantic_rows store.db ~active_only:true in
         if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
@@ -1557,7 +1807,7 @@ let direct_gate_bindings store =
         let* _ = direct_execution_with_db store.db operation in
         Ok ((operation_id, binding) :: rows)
       | Semantic.Recovering {origin=(Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
-          | Semantic.Checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _); _}
+          | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _); _}
       | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ -> Ok rows) (Ok []) executions |> Result.map List.rev
 
@@ -1575,7 +1825,7 @@ let direct_gate_binding store ~operation_id =
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_binding binding; _}; _} -> Ok (Some binding)
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
+      | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _}
   | None -> Ok None
 
@@ -1610,7 +1860,7 @@ let defer_direct_gate store ~now ~operation_id ~execution_digest ~waiting =
       let* suspended = semantic_transition ~now (Semantic.Suspend_gate waiting) execution in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
@@ -1655,7 +1905,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
             Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
@@ -1752,20 +2002,30 @@ let settle_direct_semantic_with_db db current command =
   let* execution = direct_execution_with_db db current in
   match execution with
   | None -> Ok ()
-  | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
-      | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+  | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _} -> Ok ()
-  | Some ({Semantic.phase = (Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
-      | Semantic.Recovering {origin = (Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
+  | Some ({Semantic.phase = (Semantic.Running | Semantic.Suspended _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
     let* now, terminal = match command with
       | Reducer.Cancel_queued {completed_at} -> Ok (completed_at, Semantic.Cancelled)
       | Reducer.Succeed_running {completed_at; _} -> Ok (completed_at, Semantic.Completed)
       | Reducer.Fail_running {completed_at; failure} -> Ok (completed_at, Semantic.Failed failure.detail)
-      | Reducer.Start _ | Reducer.Requeue_runtime_retry | Reducer.Edit_queued _ | Reducer.Move_queued _ ->
+      | Reducer.Start _ | Reducer.Requeue_continuation | Reducer.Edit_queued _ | Reducer.Move_queued _ ->
         Error (Integrity_error "nonterminal command cannot settle direct continuation") in
     let* next = semantic_transition ~now (Semantic.Settle terminal) expected in
     update_semantic db ~expected next
+;;
+
+let settle_batch_members_with_db db ~execution_id =
+  let* () = with_statement db ~operation:"settle shared execution members"
+    "UPDATE operations SET state = leader.state, input_json = NULL, started_at = leader.started_at, completed_at = leader.completed_at, outcome_ref = leader.outcome_ref, failure_kind = leader.failure_kind, failure_detail = leader.failure_detail FROM operations AS leader WHERE leader.operation_id = ? AND leader.state IN ('succeeded', 'failed', 'cancelled') AND operations.state = 'queued' AND operations.operation_id IN (SELECT operation_id FROM operation_batch_members WHERE execution_id = leader.operation_id AND operation_id <> execution_id)" (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind settled batch" 1 (Id.to_string execution_id) in
+      expect_done db stmt ~operation:"settle shared execution members") in
+  with_statement db ~operation:"release settled batch input"
+    "UPDATE operation_batch_members SET admitted_input_json = NULL WHERE execution_id = ? AND admitted_input_json IS NOT NULL AND EXISTS (SELECT 1 FROM operations WHERE operation_id = execution_id AND state IN ('succeeded', 'failed', 'cancelled'))" (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind settled batch input" 1 (Id.to_string execution_id) in
+      expect_done db stmt ~operation:"release settled batch input")
 ;;
 
 let persist_terminal store current command sql bind_terminal =
@@ -1776,7 +2036,7 @@ let persist_terminal store current command sql bind_terminal =
   let expected = transition.operation in
   persist_and_readback store expected (fun () ->
     let* () = settle_direct_semantic_with_db store.db current command in
-    with_statement store.db ~operation:"terminalize operation" sql (fun stmt ->
+    let* () = with_statement store.db ~operation:"terminalize operation" sql (fun stmt ->
       let* () = bind_terminal stmt in
       let* () = expect_done store.db stmt ~operation:"terminalize operation" in
       if Sqlite3.changes store.db = 1
@@ -1786,7 +2046,8 @@ let persist_terminal store current command sql bind_terminal =
         | Queued -> Error (Not_queued operation_id)
         | Running _ -> Error (Not_running operation_id)
         | Succeeded _ | Failed _ | Cancelled _ ->
-          Error (Integrity_error "terminal operation changed")))
+          Error (Integrity_error "terminal operation changed")) in
+    settle_batch_members_with_db store.db ~execution_id:operation_id)
 ;;
 
 let cancel_queued store ~now ~operation_id =
@@ -1875,11 +2136,11 @@ let settle_running_after_restart store ~now =
     let* () = List.fold_left (fun result operation ->
       let* () = result in
       let* execution = direct_execution_with_db store.db operation in
-      match pending_retry execution, gate_state execution with
-      | None, None -> Ok ()
-      | Some _, _ | None, Some _ -> requeue_runtime_retry_with_db store.db operation |> Result.map (fun _ -> ())) (Ok ()) running in
+      match pending_checkpoint execution, pending_retry execution, gate_state execution with
+      | None, None, None -> Ok ()
+      | Some _, _, _ | None, Some _, _ | None, None, Some _ -> requeue_continuation_with_db store.db operation |> Result.map (fun _ -> ())) (Ok ()) running in
     let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
-    with_statement
+    let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"
       "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = 'process restarted before terminal operation commit' WHERE state = 'running'"
@@ -1894,7 +2155,10 @@ let settle_running_after_restart store ~now =
              (Operation.failure_kind_to_string Operation.Interrupted_by_restart)
          in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
-         Ok (Sqlite3.changes store.db)))
+         Ok (Sqlite3.changes store.db)) in
+    let* () = List.fold_left (fun result (operation : Operation.t) -> let* () = result in
+      settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) running in
+    Ok count)
 ;;
 
 module For_testing = struct

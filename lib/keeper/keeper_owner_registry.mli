@@ -142,11 +142,22 @@ val create_meta
     already-open exact-name intake transaction is reused instead of reacquiring
     the same fence. *)
 
+val batch_operations : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t ->
+  (Keeper_chat_operation.t list, command_error) result
+
 val exact_operation
   :  base_path:string
   -> keeper_name:string
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
+
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
+val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
+val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
 
 val direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->

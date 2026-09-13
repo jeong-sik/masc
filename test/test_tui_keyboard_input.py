@@ -8255,9 +8255,16 @@ def run_tools_purpose_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
         require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
-        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools")
-        require("호출 범위", "비동기 작업", "Skill 기록", "사용 집계", "전체 도구", "p:다음 탭",
+        # The footer is the frame's last row, so wait for the frame to finish
+        # rather than for its title: the key is read from that row below.
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools",
+                        final_cursor=b"\x1b[?25l")
+        # The strip names the panes; the key that walks them is the footer's
+        # "p:section" (#35638). The strip used to say it again as "p:다음 탭".
+        require("호출 범위", "비동기 작업", "Skill 기록", "사용 집계", "전체 도구", "p:section",
                 "사용 증거: Skill 기록", "Tool 호출별 입출력: Acting")
+        if "p:다음 탭".encode() in screen_text(bytes(output)):
+            raise AssertionError("Tools pane strip spelled the footer's p key a second time")
         suppressed.set()
         send_and_wait(process, master_fd, output, b"r", "Runtime 도구 전달: 미지원으로 제외".encode())
         require("Runtime 도구 전달: 미지원으로 제외", "0 tools")

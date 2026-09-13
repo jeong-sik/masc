@@ -12696,7 +12696,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # its in-flight call.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
-            (b"(1 of 1 held, turns)", "the held and shown counts"),
+            ("(1 row \u00b7 1 event held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
             (b"turn 7", "the turn"),
             (b"read_file", "the in-flight tool"),
@@ -12705,14 +12705,15 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
         # The count belongs to the open reading, not to the Logs tab it
         # follows: a dot stands between the strip and the count.
-        if "Logs  \u00b7  (1 of 1 held, turns)".encode() not in CSI_RE.sub(b"", acting):
+        if "Logs  \u00b7  (1 row \u00b7 1 event held)".encode() not in CSI_RE.sub(b"", acting):
             raise AssertionError(
                 f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
             )
         # One f lands on the flat actions log, where the call is its own row
-        # and carries the task.
+        # and carries the task. The title counts the same here; the scope row
+        # under the feed says which log is open.
         flat = send_and_wait(
-            process, master_fd, output, b"f", b"(1 of 1 held, actions)"
+            process, master_fd, output, b"f", b"scope actions"
         )
         for needle, what in (
             ("\u25b6 call".encode(), "the call glyph and label"),

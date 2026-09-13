@@ -185,6 +185,7 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
+  ?official_task_reference:Keeper_official_task_reference.t ->
   ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->

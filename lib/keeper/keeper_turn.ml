@@ -518,6 +518,16 @@ let run_keeper_invocation_turn_admitted_inner
       let official_checkpoint_resume = Option.bind direct_resume (function
         | Keeper_agent_run.Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.official_client admission
         | Keeper_agent_run.Runtime_continuation _ | Keeper_agent_run.Gate_continuation _ -> None) in
+      let official_task_reference = Option.bind direct_resume (function
+        | Keeper_agent_run.Checkpoint_continuation admission ->
+          Option.map (fun original_turn -> Keeper_official_task_reference.create
+            ~operation_id ~message ~original_turn)
+            (Keeper_direct_checkpoint_continuation.official_client_original_turn admission)
+        | Keeper_agent_run.Gate_continuation admission ->
+          Option.map (fun original_turn -> Keeper_official_task_reference.create
+            ~operation_id ~message ~original_turn)
+            (Keeper_direct_gate_continuation.official_client admission)
+        | Keeper_agent_run.Runtime_continuation _ -> None) in
       let user_blocks =
         if Option.is_some official_checkpoint_resume then None
         else if Option.is_some direct_resume then user_blocks else
@@ -840,6 +850,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~runtime_rotation_attempts ->
 			                              Keeper_agent_run.run_turn
                                       ?direct_resume
+                                      ?official_task_reference
                                       ?hitl_resolution:(Option.map Keeper_direct_gate_continuation.resolution gate_resume)
                                       ~on_gate_deferred:(fun approval_id -> gate_ids := approval_id :: !gate_ids)
                                       ?on_gate_evidence_admitted:(Option.map (fun admission checkpoint ->

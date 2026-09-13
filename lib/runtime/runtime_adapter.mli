@@ -25,18 +25,47 @@ val resolve_api_key : provider_id:string -> credential:Runtime_schema.credential
   (Llm_provider.Secret.t, string) result
 (** Resolve the same protected API-key references used by HTTP bindings, for
     model discovery before a model has been selected. Errors never contain the
-    credential's contents. This does not authenticate or verify account access. *)
+    credential's contents. This does not authenticate or verify account access.
+
+    A provider with no reference and no catalog row is an error rather than an
+    empty secret: nothing has said a key is unnecessary, so answering with one
+    would report success without a credential. A catalog row that declares an
+    empty [api_key_env] still resolves to the empty secret, which is what a
+    keyless provider is. *)
+
+type credential_requirement =
+  | Reference of Runtime_schema.credential
+      (** A credential to materialize: the runtime row's own, or the catalog's
+          declared default environment reference. *)
+  | Not_required
+      (** The catalog row declares an empty [api_key_env], which is how a
+          provider says it takes no key. *)
+  | Unknown_provider
+      (** The runtime row names no credential and the catalog has no row for
+          this provider, so nothing says whether a key is needed. *)
+
+val credential_requirement :
+  provider_id:string ->
+  Runtime_schema.credential option ->
+  credential_requirement
+(** Whether this provider needs a credential, and which one names it.
+
+    [Not_required] and [Unknown_provider] are both "no reference", and reading
+    them as one answer is what let a missing credential pass as anonymous
+    access (#35651). Callers that can proceed without a key should say which of
+    the two they are accepting. *)
 
 val effective_credential_reference :
   provider_id:string ->
   Runtime_schema.credential option ->
   Runtime_schema.credential option
-(** Return the explicit credential reference, or the provider registry's
-    declared default environment reference when the runtime row omits one.
+(** The reference view of {!credential_requirement}, for callers that ask which
+    credential names an identity rather than whether one is needed.
+
     Environment aliases follow the same candidate selection as API-key
     materialization, so the returned non-secret reference names the credential
-    that was actually selected. File and inline references are preserved.
-    An unregistered provider with no explicit credential remains [None]. *)
+    that was actually selected. File and inline references are preserved. Both
+    absences answer [None], because neither names a credential. *)
 
 val binding_to_provider_config
   :  Runtime_schema.config

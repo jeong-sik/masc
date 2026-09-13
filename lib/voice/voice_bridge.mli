@@ -88,6 +88,13 @@ type probe_attempt =
   }
 
 val probe_outcome_to_string : probe_outcome -> string
+
+val spoke_detail : bytes:int -> voice:string -> string
+(** What an answered TTS probe reports: the byte count and the voice it asked
+    for. The voice is there because [say] does not fail on one it does not
+    have -- it speaks in the system voice and exits 0 -- so the bytes alone
+    cannot tell a keeper's own voice from the fallback. A blank voice reads as
+    the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
 
 (** Parse what an ElevenLabs endpoint answers. Separate from the asking so a

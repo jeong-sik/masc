@@ -32,8 +32,31 @@ let transcriber_of_endpoint endpoint =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   transcriber_of_transport adapter.transport
 
-(* Decode the provider boundary before either normal capture or the probe
-   interprets the transcript. An unreadable body is not a quiet microphone. *)
+(* What an answered TTS probe says.
+
+   The voice, not only the bytes. say does not fail on a voice it does not
+   have -- it speaks in the system voice and exits 0 -- so a byte count alone
+   cannot tell a keeper's own voice from the fallback. Measured 2026-09-13 on
+   one workstation: a keeper mapped to a voice that exists answered 124,690
+   bytes, one mapped to a name that does not answered 79,758, and so did the
+   section default. Only the name separates them, and a reader can check that
+   name against the catalogue.
+
+   Quoted by hand rather than with %S: that escapes UTF-8 into byte numbers,
+   and a Korean voice name is then unreadable. A blank voice is the system
+   voice, said as such rather than as "". *)
+let spoke_detail ~bytes ~voice =
+  Printf.sprintf
+    "%d bytes of audio in %s"
+    bytes
+    (if String.trim voice = "" then "the system voice" else "\"" ^ voice ^ "\"")
+;;
+
+(* What an endpoint reached over HTTP answered. A body carrying no [text]
+   string is not a silent microphone -- it is an answer this code does not
+   read -- and the probe reports the empty transcript as having heard nothing.
+   Kept apart here so that the one distinction the probe exists to draw is not
+   erased by a body it did not understand. *)
 let transcript_of_stt_json json =
   match json with
   | `Assoc fields ->
@@ -268,7 +291,8 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
     | [] -> None
     | endpoint :: rest ->
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-      if Voice_runtime_overlay.transport_supports_http_tts adapter
+      if Voice_runtime_overlay.speaker_of_transport adapter.transport
+         = Voice_runtime_overlay.Over_http
       then (
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
@@ -442,22 +466,21 @@ let probe_tts ?(agent_id = "probe") ~message () =
             (fun (endpoint : Voice_config.endpoint) ->
               let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
               let outcome =
-                if not endpoint.Voice_config.enabled
-                then Skipped "disabled in the configuration"
-                else match adapter.transport with
-                | Voice_runtime_overlay.Voice_mcp ->
-                  Skipped "this endpoint synthesizes through MCP; this probe does not invoke MCP"
-                | Voice_runtime_overlay.Whisper_cli ->
-                  Skipped "this endpoint transcribes and does not synthesize"
-                | Voice_runtime_overlay.Openai_compat
-                | Voice_runtime_overlay.Elevenlabs_direct
-                | Voice_runtime_overlay.Macos_say -> (
+                (* Produce the clip the way the speak path would, so what this
+                   reports is what a turn would get rather than a second
+                   opinion, then drop it: the probe answers whether the
+                   endpoint spoke, not with what. *)
+                let attempt speak =
+                  (* The format follows the adapter this endpoint resolves to,
+                     not the kind it declares: say writes WAVE and every other
+                     synthesizer here writes MP3. *)
                   let format =
                     match adapter.transport with
                     | Voice_runtime_overlay.Macos_say -> Voice_bridge_core.Wav
-                    | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct
-                    | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Whisper_cli ->
-                      Voice_bridge_core.Mp3
+                    | Voice_runtime_overlay.Openai_compat
+                    | Voice_runtime_overlay.Elevenlabs_direct
+                    | Voice_runtime_overlay.Voice_mcp
+                    | Voice_runtime_overlay.Whisper_cli -> Voice_bridge_core.Mp3
                   in
                   let output_file = make_audio_file ~format in
                   (* The voice is resolved per endpoint: an id is provider
@@ -466,32 +489,53 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   let voice =
                     Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
                   in
-                  (* The probe produces the audio the same two ways the speak
-                     path does, so that what it reports is what a turn would
-                     get rather than a second opinion. *)
-                  let result =
-                    match adapter.transport with
-                    | Voice_runtime_overlay.Macos_say ->
-                      let* () = validate_macos_voice endpoint ~voice in
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file
-                    | Voice_runtime_overlay.Openai_compat
-                    | Voice_runtime_overlay.Elevenlabs_direct
-                    | Voice_runtime_overlay.Voice_mcp
-                    | Voice_runtime_overlay.Whisper_cli ->
-                      (match tts.Voice_config.default_model with
-                       | None ->
-                         Error
-                           "this endpoint is asked for a model by name and [voice.tts] \
-                            names none"
-                       | Some model ->
-                         speak_via_http_tts_to_file
-                           endpoint ~agent_id ~message ~voice ~model ~output_file)
-                  in
+                  let result = speak ~voice ~output_file in
                   remove_quietly output_file;
                   match result with
-                  | Ok size -> Answered (Printf.sprintf "%d bytes of audio" size)
-                  | Error reason -> Refused reason)
+                  (* The voice that was asked for, not only the bytes that came
+                     back. say does not fail on a voice it does not have -- it
+                     speaks in the system voice and exits 0 -- so the byte count
+                     alone cannot tell a keeper's own voice from the fallback.
+                     Naming the voice is what lets a reader check it against the
+                     catalogue. A blank one is the system voice, said as such
+                     rather than as "". *)
+                  | Ok size -> Answered (spoke_detail ~bytes:size ~voice)
+                  | Error reason -> Refused reason
+                in
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else
+                  match Voice_runtime_overlay.speaker_of_endpoint endpoint with
+                  | Voice_runtime_overlay.Does_not_speak ->
+                    Skipped "this endpoint kind does not synthesize"
+                  | Voice_runtime_overlay.By_mcp_tool ->
+                    (* It does speak: agent_speak on its MCP endpoint. This
+                       probe cannot make that call -- voice-verify runs outside
+                       Eio_main.run and call_voice_mcp_endpoint needs a clock
+                       and a net -- so it says so, instead of being filed with
+                       the kind that cannot speak at all. *)
+                    Skipped
+                      "reached by an MCP tool call, which this probe does not make"
+                  | Voice_runtime_overlay.By_command ->
+                    attempt (fun ~voice ~output_file ->
+                      (* Reporting the voice afterwards says which one spoke;
+                         this refuses the one that does not exist before it
+                         speaks in the system voice instead. Both are kept:
+                         the check stops a wrong answer, the name shows a right
+                         one. *)
+                      let* () = validate_macos_voice endpoint ~voice in
+                      Voice_bridge_transport.speak_via_command_to_file
+                        endpoint ~message ~voice ~output_file)
+                  | Voice_runtime_overlay.Over_http ->
+                    attempt (fun ~voice ~output_file ->
+                      match tts.Voice_config.default_model with
+                      | None ->
+                        Error
+                          "this endpoint is asked for a model by name and [voice.tts] \
+                           names none"
+                      | Some model ->
+                        speak_via_http_tts_to_file
+                          endpoint ~agent_id ~message ~voice ~model ~output_file)
               in
               { endpoint_id = endpoint.Voice_config.id
               ; kind = endpoint.Voice_config.kind
@@ -997,7 +1041,11 @@ let try_http_tts_for_browser_audio
   | None -> None
   | Some model ->
   let http_endpoints =
-    List.filter Voice_runtime_overlay.endpoint_supports_http_tts endpoints
+    List.filter
+      (fun endpoint ->
+        Voice_runtime_overlay.speaker_of_endpoint endpoint
+        = Voice_runtime_overlay.Over_http)
+      endpoints
   in
   let rec try_endpoints = function
     | [] -> None

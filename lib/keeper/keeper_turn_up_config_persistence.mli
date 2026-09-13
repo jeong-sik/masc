@@ -68,6 +68,7 @@ type error =
 type 'a publication =
   | Commit of 'a
   | Commit_with_warnings of 'a * warning list
+  | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 
 val revision_to_yojson : revision -> Yojson.Safe.t
@@ -100,6 +101,23 @@ val persist_with_publication :
   publish:(Runtime.keeper_assignment_transaction -> outcome -> 'a publication) ->
   unit ->
   ('a receipt, error) result
+(** The callback participates only in the runtime assignment transaction.
+    Owner metadata, checkpoints and lane changes follow {!commit_configuration}
+    after the durable configuration pair has committed. *)
+
+val commit_configuration :
+  expected_revision:config_revision ->
+  config:Workspace.config ->
+  parsed:Keeper_turn_up_args.parsed_args ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publish:(outcome -> config_revision -> 'a) ->
+  unit ->
+  ('a receipt, error) result
+(** Commit the declaration and runtime assignment as one recoverable pair.
+    The callback runs after recovery authority is durably cleared, while the
+    same configuration locks still prevent another edit overtaking publication.
+    A later actor failure must report this committed revision without rolling
+    back concurrent actor-owned state. *)
 
 val persist :
   expected_revision:config_revision ->
@@ -110,6 +128,17 @@ val persist :
   (outcome receipt, error) result
 
 module For_testing : sig
+  val persist_with_faults :
+    ?write_manifest:(string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    on_restore:(unit -> unit) ->
+    expected_revision:config_revision ->
+    config:Workspace.config ->
+    parsed:Keeper_turn_up_args.parsed_args ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    publish:(Runtime.keeper_assignment_transaction -> outcome -> 'a publication) ->
+    unit ->
+    ('a receipt, error) result
+
   val persist_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
     expected_revision:config_revision ->

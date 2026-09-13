@@ -1,0 +1,50 @@
+{
+  "source": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.pptx",
+  "sha256": "555999e62df7260110e7661f22e342ddb717169864b7234324b8551fa092f816",
+  "bytes": 25383,
+  "scope": "ZIP XML relationship graph only; not rendered slide acceptance",
+  "errors": [
+    {
+      "part": "ppt/_rels/presentation.xml.rels",
+      "duplicate_relationship_id": "rId9",
+      "count": 2
+    },
+    {
+      "part": "ppt/_rels/presentation.xml.rels",
+      "duplicate_relationship_id": "rId10",
+      "count": 2
+    },
+    {
+      "part": "ppt/slides/_rels/slide1.xml.rels",
+      "missing_target": "ppt/slides/notesSlide1.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide2.xml.rels",
+      "missing_target": "ppt/slides/notesSlide2.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide3.xml.rels",
+      "missing_target": "ppt/slides/notesSlide3.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide4.xml.rels",
+      "missing_target": "ppt/slides/notesSlide4.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide5.xml.rels",
+      "missing_target": "ppt/slides/notesSlide5.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide6.xml.rels",
+      "missing_target": "ppt/slides/notesSlide6.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide7.xml.rels",
+      "missing_target": "ppt/slides/notesSlide7.xml"
+    },
+    {
+      "part": "ppt/slides/_rels/slide8.xml.rels",
+      "missing_target": "ppt/slides/notesSlide8.xml"
+    }
+  ]
+}

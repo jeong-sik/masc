@@ -541,6 +541,25 @@ let find_clip ~dir ~token =
    path has a path and needs the URL the dashboard fetches it by. *)
 let clip_token_of_path = audio_token_of_file
 
+(* The reverse of [find_clip]: the speak path has written a file and needs both
+   halves of what it wrote -- the token, to build the URL the dashboard fetches
+   it by, and the format, to say what the bytes are.
+
+   They come back together because determining one determines the other, and a
+   caller holding only the token has to guess the rest. One did: the keeper's
+   spoken reply announced [audio/mpeg] for every clip, so a say reply -- WAV,
+   which is what a fresh mac has -- was announced as MP3.
+
+   The token is [audio_token_of_file]'s, not a suffix chopped off here. The
+   scheme [find_clip] reads back through [audio_file_of_token] keeps [.wav] in
+   a WAVE token and leaves an MP3 token bare; chopping every extension would
+   hand [find_clip] a WAVE clip's bare id, which it reads as MP3 and looks for
+   under the wrong name -- a 404 for every say reply. *)
+let clip_of_path path =
+  match audio_token_of_file path, audio_format_of_path path with
+  | Some token, Some format -> Some (token, format)
+  | None, _ | _, None -> None
+
 let provider_metadata_keys =
   [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]
 

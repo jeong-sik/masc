@@ -163,6 +163,15 @@ val clip_token_of_path : string -> string option
     fetches it by. WAVE keeps [.wav] in the token. [None] when the filename
     does not carry a valid 128-bit capability and supported format. *)
 
+val clip_of_path : string -> (string * clip_format) option
+(** The token a clip path carries and the format its extension names -- the
+    reverse of {!find_clip}. [None] when the path is not a clip.
+
+    Both halves come back together because a caller that has the token also
+    has to say what the bytes are, and the extension it just matched is the
+    answer. Handing back the token alone left that to a guess, and the guess
+    was wrong for every [say] clip. *)
+
 (** {1 Structured logging helpers} *)
 
 val log_info : string -> unit

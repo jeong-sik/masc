@@ -205,6 +205,11 @@ val default_elevenlabs_base_url : string
 
 (** {1 Path resolution} *)
 
+val voice_config_file_in : string -> string
+(** The standalone voice source for an explicit workspace, using the same
+    cluster-aware path as {!load_detailed}. A writer must not create a TOML
+    voice section over this active source when that section is absent. *)
+
 val config_path : unit -> string
 (** [config_path ()] returns the resolved config file path —
     first existing candidate from

@@ -341,6 +341,38 @@ let test_a_clip_path_gives_its_token_back () =
   Alcotest.(check (option string)) "and something that is not a clip" None
     (Voice_bridge_core.clip_token_of_path "/x/audio/notes.txt")
 
+(* A clip path answers with both halves at once. The caller that announces a
+   spoken reply needs the token to build its URL and the type to say what the
+   bytes are, and getting only the first is what let it announce MP3 for every
+   clip -- including the WAVE one a fresh mac writes.
+
+   The token is the one [find_clip] reads back, so this pins the same scheme
+   the test above does: a 128-bit id, [.wav] kept in a WAVE token and an MP3
+   token left bare. A token that dropped [.wav] would be read as MP3 and looked
+   for under the wrong name, which is a 404 for every say reply. *)
+let test_a_clip_path_gives_back_its_token_and_its_type () =
+  let id = String.make 32 'd' in
+  let announced path =
+    Option.map
+      (fun (token, format) -> token, Voice_bridge_core.clip_content_type format)
+      (Voice_bridge_core.clip_of_path path)
+  in
+  let clip = Alcotest.(option (pair string string)) in
+  Alcotest.check clip "a say clip is WAVE and keeps its extension"
+    (Some (id ^ ".wav", "audio/wav"))
+    (announced ("/x/audio/" ^ id ^ ".wav"));
+  Alcotest.check clip "an HTTP clip is MP3 and its token is bare"
+    (Some (id, "audio/mpeg"))
+    (announced ("/x/audio/" ^ id ^ ".mp3"));
+  Alcotest.check clip "and something that is not a clip has neither" None
+    (announced "/x/audio/notes.txt");
+  (* A path with no extension at all used to raise here rather than answer. *)
+  Alcotest.check clip "nor does a name with no extension" None
+    (announced ("/x/audio/" ^ id));
+  (* What the URL is built from has to come back to the same file. *)
+  Alcotest.check clip "nor an id shorter than the 128-bit capability" None
+    (announced "/x/audio/9f3c.wav")
+
 (* The end of a failed command's output, because that is where the reason is.
    Measured on this machine: whisper-cli says which Metal library it loaded
    for nine lines before it says which file it could not open. *)
@@ -465,6 +497,8 @@ let () =
             test_each_container_is_served_as_itself
         ; Alcotest.test_case "a clip path gives its token back" `Quick
             test_a_clip_path_gives_its_token_back
+        ; Alcotest.test_case "a clip path gives back its token and its type" `Quick
+            test_a_clip_path_gives_back_its_token_and_its_type
         ; Alcotest.test_case "a failure reports its last line not its first" `Quick
             test_a_failure_reports_its_last_line_not_its_first
         ] )

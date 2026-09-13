@@ -1683,7 +1683,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          see the letter after Ctrl-V and never Ctrl-V itself. *)
       paste_image ();
       true
-    end else if c = Some 24 then begin
+    end else if c = Some (Char.code Masc_tui_keys.context_inspector_key.[0]) then begin
       (* Ctrl-X: the breakdown behind the figure in the header. The header
          names this key beside the number, so the place that shows how full
          the context is is also the place that opens what filled it. *)

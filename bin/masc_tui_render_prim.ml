@@ -543,7 +543,7 @@ let composer_line state ~cols =
       when state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
-        "  " ^ Composer.voice_keys_hint
+        "  " ^ Masc_tui_keys.voice_keys_hint
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key
@@ -1289,7 +1289,9 @@ let fit_runtime_id width runtime_id =
 let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   framed_top buf cols;
   let title = " KEEPERS" in
-  let hint = if focused then "ENTER OPEN" else "^B HIDE" in
+  let hint =
+    if focused then "ENTER OPEN" else Masc_tui_keys.roster_toggle_key ^ " HIDE"
+  in
   let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
   let title_row = title ^ String.make title_gap ' ' ^ hint in
   framed_line buf cols

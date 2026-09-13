@@ -1861,6 +1861,22 @@ let planning_phase_label = function
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
 
+(* The key a goal detail takes for each lifecycle request, and the words its
+   Actions and ARMED rows say it with. The Actions row called [c] "Complete"
+   beside a Next line saying [c] submits the goal for verification, and the
+   ARMED row called it "Request Completion": the key sends the goal to the
+   completion judge, and completing it is a confirmation this screen does not
+   offer. *)
+let planning_action_key = function
+  | Goal_phase.Public_action.Request_complete -> "c"
+  | Goal_phase.Public_action.Drop -> "x"
+  | Goal_phase.Public_action.Reopen -> "o"
+
+let planning_action_label = function
+  | Goal_phase.Public_action.Request_complete -> "Request completion"
+  | Goal_phase.Public_action.Drop -> "Drop"
+  | Goal_phase.Public_action.Reopen -> "Reopen"
+
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
    are nine cells and the column was eight, so nearly every planning row read

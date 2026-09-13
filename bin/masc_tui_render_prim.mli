@@ -277,6 +277,12 @@ val semantic_status_color : string -> string
 
 val planning_phase_label : Goal_phase.t -> string
 
+val planning_action_key : Goal_phase.Public_action.t -> string
+(** The key a goal detail takes for a lifecycle request. *)
+
+val planning_action_label : Goal_phase.Public_action.t -> string
+(** What the goal detail's Actions and ARMED rows call that request. *)
+
 val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string

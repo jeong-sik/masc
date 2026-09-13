@@ -189,3 +189,12 @@ let decide_transition ~phase ~(action : action) =
   | Awaiting_confirmation, Reopen -> Ok (Move_to Executing)
   | Awaiting_confirmation, Drop -> Ok (Move_to Dropped)
   | Awaiting_confirmation, (Record_proof_proven | Record_proof_refuted) -> invalid
+
+let moves_goal ~phase ~action =
+  match decide_transition ~phase ~action with
+  (* Explicit arms: [Ok _] would absorb a new outcome and widen every list
+     built from this without a compiler error. *)
+  | Ok (Move_to _) -> true
+  | Ok (Already _) -> false
+  | Error _ -> false
+;;

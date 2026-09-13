@@ -1735,6 +1735,34 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+(* The Board reader's title row: the screen, which post, its hearth, its score
+   and its replies. The id was fitted with [fit_width], which pads as well as
+   cuts, so a short id drew "[post-a      ]" with the padding inside the
+   brackets; it is folded only when it overruns, the way the list's ID column
+   folds it. Replies read "💬3" and then "c0" at zero -- a second spelling for
+   the same count -- and are one spelling now, receding at zero. *)
+let board_read_title ~screen ~id ~hearth ~votes ~replies =
+  let id = Terminal_text.single_line id in
+  let id =
+    if Message_layout.display_width id <= Render_schedule.board_id_width then id
+    else Message_layout.fit_middle Render_schedule.board_id_width id
+  in
+  let hearth_tag =
+    match Terminal_text.optional_single_line hearth with
+    | Some h when not (String.equal h "") ->
+        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
+    | _ -> ""
+  in
+  let score =
+    if votes > 0 then Printf.sprintf "▲%+d" votes
+    else if votes < 0 then Printf.sprintf "▼%d" votes
+    else " 0"
+  in
+  Printf.sprintf "%s  %s[%s]%s%s  %s%s%s  %s💬%d%s" screen
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (board_score_style votes) score Ansi.reset
+    (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
+
 
 (* Three steps for three bands, from the palette every other reading on this
    screen draws through. Emphasis only ever restates what the count beside it

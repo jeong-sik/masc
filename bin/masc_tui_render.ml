@@ -2106,35 +2106,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         list_post
   in
 
-  let hearth_tag =
-    match Terminal_text.optional_single_line post.bp_hearth with
-    | Some h when not (String.equal h "") ->
-        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
-    | _ -> ""
-  in
-  let score_chip =
-    if post.bp_votes > 0 then
-      Printf.sprintf "%s▲%+d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
-    else if post.bp_votes < 0 then
-      Printf.sprintf "%s▼%d%s" (board_score_style post.bp_votes) post.bp_votes Ansi.reset
-    else
-      Printf.sprintf "%s 0%s" (board_score_style post.bp_votes) Ansi.reset
-  in
-  let replies_chip =
-    if post.bp_comment_count > 0 then
-      Printf.sprintf "%s💬%d%s" (Theme.ok ()) post.bp_comment_count Ansi.reset
-    else
-      Printf.sprintf "%sc0%s" Ansi.dim Ansi.reset
-  in
   let header =
-    Printf.sprintf "%s  %s[%s]%s%s  %s  %s"
-      (screen_title " MASC Board")
-      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-      (fit_width (Terminal_text.single_line post.bp_id) 12)
-      Ansi.reset
-      hearth_tag
-      score_chip
-      replies_chip
+    board_read_title ~screen:(screen_title " MASC Board") ~id:post.bp_id
+      ~hearth:post.bp_hearth ~votes:post.bp_votes ~replies:post.bp_comment_count
   in
 
   box_top buf cols;

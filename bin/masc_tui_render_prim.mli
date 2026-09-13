@@ -256,6 +256,13 @@ val ask_question_viewport : Masc_tui_types.state -> string list * int
 
 val board_score_style : int -> string
 
+val board_read_title :
+  screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
+  string
+(** The Board reader's title row: [screen], the post id in brackets (folded
+    only when it overruns the list's ID column), the hearth, the score and the
+    reply count. *)
+
 val magnitude_tone : Magnitude.band -> string
 
 val browser_lane_rows :

@@ -4020,7 +4020,10 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Some label, Some i ->
             Printf.sprintf "[%s%d %s] "
               (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      let lines = wrap (prefix ^ node.text) in
+      let text = match Masc.Browser_scene.text_role node with
+        | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ node.text
+        | Masc.Browser_scene.Plain_text -> node.text in
+      let lines = wrap (prefix ^ text) in
       let selected = match selected, index with
         | None, Some i when i = view.scene_cursor -> Some offset
         | _ -> selected in

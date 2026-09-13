@@ -5839,6 +5839,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* The non-Info tabs draw a fetched read; the stamp has to name the
        keeper on screen or the pane shows loading, never another keeper's
        answer. *)
+    (* A pending read says how long it has been pending. Five to sixteen
+       seconds is what the Sandbox tab's status took against a live server,
+       and a bare "(loading...)" through that window reads as a stall.
+
+       The stamp is the read's own: the tab read and the container-log read are
+       two reads and the operator starts the second long after the first has
+       landed. One reading of the clock for the frame, so two rows drawn in the
+       same frame cannot disagree about what time it is. *)
+    let now_ns = Mtime_clock.elapsed_ns () in
+    let loading_row ?started_ns what =
+      Ansi.dim ^ "  "
+      ^ Masc_tui_types.loading_notice
+          ?elapsed_s:(Masc_tui_types.pending_elapsed_s ~now_ns started_ns)
+          what
+      ^ Ansi.reset
+    in
+    let tab_loading_row what =
+      loading_row
+        ?started_ns:
+          (Masc_tui_types.detail_read_started state ~tab:state.detail_tab
+             ~keeper:k.k_name)
+        what
+    in
     let stamped_or view error =
       match error with
       | Some detail -> [ (Theme.bad ()) ^ "  " ^ detail ^ Ansi.reset ]
@@ -5846,7 +5869,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           match view with
           | Some (stamp, lines) when String.equal stamp k.k_name ->
               List.map (fun line -> "  " ^ line) lines
-          | Some _ | None -> [ Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset ])
+          | Some _ | None -> [ tab_loading_row "loading" ])
     in
     let channel_lines =
       match state.connectors_error, state.connectors with
@@ -6181,8 +6204,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           in
           let logs =
             match state.keeper_sandbox_logs_inflight with
-            | Some (keeper_name, _) when String.equal keeper_name k.k_name ->
-              [ Ansi.dim ^ "  (loading actual container logs…)" ^ Ansi.reset ]
+            | Some request when String.equal request.slr_keeper k.k_name ->
+              [ loading_row ~started_ns:request.slr_started_ns
+                  "loading actual container logs" ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with
               | Some (stamp, detail) when String.equal stamp k.k_name ->
@@ -13483,11 +13507,11 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:"Tab:instances/rows  j/k:select  J/K:scroll  space:mark  e:preserve  o:observe  d:detach  r:inspect  :command  Esc:back"
+    ~hints:"n:new TOML  E:edit TOML  s:save  Tab:focus  j/k:select  J/K:scroll  e:evidence  o:observe  d:detach  r:inspect  Esc:back"
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
-      |> List.iter (fun line -> c.push (Terminal_text.single_line line)))
+      |> List.iter c.push)
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

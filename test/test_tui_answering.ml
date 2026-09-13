@@ -328,8 +328,20 @@ let lanes_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
   }
 ;;
 
-let animating ?(turns = []) ?(live_transcript = false) ?lanes () =
+let animating ?(turns = []) ?(live_transcript = false)
+    ?(awaiting_detail_read = false) ?lanes () =
   Masc_tui_answering.anything_running ~turns ~live_transcript ~lanes
+    ~awaiting_detail_read
+;;
+
+(* A Keeper detail tab that is still blank draws how long it has been blank, and
+   the seconds are honest only because something redraws them. Nothing else on a
+   screen like that moves. *)
+let test_a_blank_detail_tab_keeps_the_screen_redrawing () =
+  Alcotest.(check bool) "a read the operator is waiting on" true
+    (animating ~awaiting_detail_read:true ());
+  Alcotest.(check bool) "and nothing once it has landed" false
+    (animating ~awaiting_detail_read:false ())
 ;;
 
 let test_a_quiet_screen_does_not_animate () =
@@ -439,6 +451,8 @@ let () =
             test_a_quiet_screen_does_not_animate
         ; Alcotest.test_case "each source alone starts the mark" `Quick
             test_each_source_alone_starts_the_mark
+        ; Alcotest.test_case "a blank detail tab keeps the screen redrawing"
+            `Quick test_a_blank_detail_tab_keeps_the_screen_redrawing
         ; Alcotest.test_case "lanes that were never loaded are not running"
             `Quick test_lanes_that_were_never_loaded_are_not_running
         ] )

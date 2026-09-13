@@ -1,0 +1,39 @@
+{
+  "observed_at": "2026-09-12T14:50:24.961866+00:00",
+  "goals": [
+    {
+      "id": "exhibition-publication-baseline",
+      "title": "가상 전시 출판물 완성",
+      "phase": "awaiting_confirmation",
+      "updated_at": "2026-09-12T10:50:26Z"
+    },
+    {
+      "id": "memory-garden-serial-fiction",
+      "title": "기억의 정원: 서로의 선택을 이어가는 세 편의 연작 소설",
+      "phase": "awaiting_confirmation",
+      "updated_at": "2026-09-12T12:26:51Z"
+    },
+    {
+      "id": "memory-garden-participatory-adaptation",
+      "title": "기억의 정원: 관객의 선택을 남기는 발표와 영상 체험",
+      "phase": "executing",
+      "updated_at": "2026-09-12T12:55:48Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-003",
+      "title": "기억의 정원 세계에서 이어지는 세 편의 완결 소설과 동료 검토",
+      "status": "done",
+      "assignee": "exhibit-editor",
+      "verification_id": null
+    },
+    {
+      "id": "task-004",
+      "title": "연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기",
+      "status": "in_progress",
+      "assignee": "exhibit-editor",
+      "verification_id": null
+    }
+  ]
+}

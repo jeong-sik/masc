@@ -238,6 +238,7 @@ val keeper_world_fleet_messages_row : string
 val keeper_world_event_rows_fusion_title_succeeded : string
 val keeper_world_event_rows_fusion_title_failed : string
 val keeper_world_event_rows_fusion_title_cancelled : string
+val keeper_world_event_rows_fusion_result_lookup : string
 val keeper_world_event_rows_fusion_cancelled_preview : string
 val keeper_world_event_rows_scheduled_wake_title : string
 val keeper_world_event_rows_external_attention_title : string

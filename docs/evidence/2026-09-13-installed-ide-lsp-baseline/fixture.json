@@ -1,0 +1,12 @@
+{
+  "schema": "masc.installed-ide-lsp-fixture.v1",
+  "owner_id": "547214d8-02f7-4aa5-9024-31492a048090",
+  "root": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+  "source_relative": "lsp-acceptance-sample.ml",
+  "initial_text": "let value =\n",
+  "updated_text": "let value = 1\n",
+  "initial_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+  "updated_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3",
+  "repository_id": "lsp-acceptance-probe-20260913",
+  "worktree_head": "83f31140dbce4908ce803c65081cd0f4d80a1454"
+}

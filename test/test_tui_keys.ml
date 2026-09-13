@@ -863,6 +863,16 @@ let test_the_sheet_names_every_keeper_mark () =
             (String.length meaning > 0))
         entries
 
+(* The Keepers header words and the Mode S letters used to take two rows above
+   the roster. The sheet holds them now, next to the marks. *)
+let test_the_sheet_explains_the_keeper_columns () =
+  match List.assoc_opt "Keeper columns" (Masc_tui_keys.help_sections ()) with
+  | None -> Alcotest.fail "the sheet has no Keeper columns section"
+  | Some entries ->
+      Alcotest.(check int) "every column entry is on the sheet"
+        (List.length Masc_tui_keeper_mark.column_legend)
+        (List.length entries)
+
 let test_braille_sparkline () =
   Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
     (braille_sparkline []);
@@ -1693,6 +1703,8 @@ let () =
             test_tools_is_a_config_child
         ; Alcotest.test_case "the sheet names every keeper mark" `Quick
             test_the_sheet_names_every_keeper_mark
+        ; Alcotest.test_case "the sheet explains the keeper columns" `Quick
+            test_the_sheet_explains_the_keeper_columns
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick

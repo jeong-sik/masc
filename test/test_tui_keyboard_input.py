@@ -5640,7 +5640,8 @@ class AtomicChatFixture:
     by the OCaml suites, not simulated as a claimed production success here.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, first_working: bool = False) -> None:
+        self.first_working = first_working
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -5693,7 +5694,11 @@ class AtomicChatFixture:
             raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
         if intent.get("control_token") != self.token:
             raise AssertionError(f"Enter used stale control authority: {request!r}")
-        if intent.get("interrupt_token") != self.turn_token or intent.get("operation_id") is not None:
+        if self.first_working and self.submitted:
+            expected = self.submitted[0]["request_id"]
+            if intent.get("operation_id") != expected or intent.get("interrupt_token") is not None:
+                raise AssertionError(f"working direct execution {expected} lost to stale autonomous observation: {request!r}")
+        elif intent.get("interrupt_token") != self.turn_token or intent.get("operation_id") is not None:
             raise AssertionError(f"Enter did not bind the exact observed turn: {request!r}")
         with self.admitted:
             self.submitted.append(request)
@@ -5717,7 +5722,9 @@ class AtomicChatFixture:
         response = keeper_chat_succeeded_response(body)
         blocks = [block for block in response.body.split(b"\n\n") if block]
         acceptance = json.loads(blocks[0].removeprefix(b"data: "))
-        acceptance["value"]["queued_count"] = sequence
+        working = self.first_working and sequence == 1
+        acceptance["value"]["state"] = "Running" if working else "Queued"
+        acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
         acceptance["value"]["interactive"] = {
             "outcome": "applied", "chat_control_token": self.token,
             "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
@@ -5725,12 +5732,15 @@ class AtomicChatFixture:
         self.paused = False
 
         def chunks() -> Iterator[bytes]:
-            yield f"data: {json.dumps(acceptance)}\n\n".encode()
+            prefix = f"data: {json.dumps(acceptance)}\n\n".encode()
+            if working:
+                prefix += blocks[1] + b"\n\n"
+            yield prefix
             if not self.release.wait(timeout=30):
                 raise AssertionError("interaction never released the held server turn")
             # The original request id is retained even when queued text is edited.
             terminal = keeper_chat_succeeded_response(json.dumps({**request, "message": operation["input"]["message"]}).encode())
-            yield b"\n\n".join(terminal.body.split(b"\n\n")[1:])
+            yield b"\n\n".join(terminal.body.split(b"\n\n")[2 if working else 1:])
 
         return StreamingHttpResponse(chunks)
 
@@ -5741,15 +5751,20 @@ class AtomicChatFixture:
 
     def interrupt(self, body: bytes) -> HttpResponse:
         request = json.loads(body)
-        if request.get("interrupt_token") != self.turn_token:
+        if self.first_working and self.submitted:
+            expected = self.submitted[0]["request_id"]
+            if request.get("request_id") != expected or request.get("interrupt_token") is not None:
+                raise AssertionError(f"Esc ignored the locally working direct execution {expected}: {request!r}")
+        elif request.get("interrupt_token") != self.turn_token:
             raise AssertionError(f"Esc targeted another turn: {request!r}")
         self.paused = True
         self.interrupted.set()
         if not self.release_interrupt.wait(timeout=20):
             raise AssertionError("interaction never acknowledged Esc")
         self.token = "control-after-stop"
-        return 200, {"signalled": True, "paused": True, "interrupt_token": self.turn_token,
-                     "chat_control_token": self.token}
+        target = ({"request_id": request["request_id"]} if "request_id" in request
+                  else {"interrupt_token": self.turn_token})
+        return 200, {"signalled": True, "paused": True, **target, "chat_control_token": self.token}
 
     def unexpected_run_next(self, body: bytes) -> HttpResponse:
         self.run_next_calls += 1
@@ -5846,6 +5861,34 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
+            fixture.release_interrupt.set()
+            fixture.release.set()
+    return interact
+
+
+def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
+    """A locally running direct turn outranks a stale autonomous poll for Enter and Esc."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
+            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 1)
+            send_and_wait(process, master_fd, output, b"follow-up", composer_showing(b"follow-up"))
+            os.write(master_fd, b"\r")
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            # The fixture still advertises its autonomous token, so accepting
+            # this POST proves local Working ownership won the target choice.
+            os.write(master_fd, b"\x1b")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
+                raise AssertionError("Esc did not target the locally working direct execution")
+            fixture.release_interrupt.set()
+            fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-follow-up", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
@@ -12991,6 +13034,9 @@ def run_keyboard_regression(executable: str) -> None:
         refresh=0.2,
         http_requests=steer_requests,
     )
+    working = AtomicChatFixture(first_working=True)
+    run_terminal_scenario(executable, description="Working direct execution outranks stale autonomous observer",
+        interact=chat_working_target_interaction(working), http_fixtures=working.fixtures, refresh=0.2)
     reconcile_requests: HttpRequests = []
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
@@ -13554,6 +13600,9 @@ def run_atomic_chat_regression(executable: str) -> None:
         run_terminal_scenario(executable, description=description,
             interact=interaction(fixture), http_fixtures=fixture.fixtures,
             http_requests=requests, refresh=0.2)
+    working = AtomicChatFixture(first_working=True)
+    run_terminal_scenario(executable, description="Working direct execution outranks stale autonomous observer",
+        interact=chat_working_target_interaction(working), http_fixtures=working.fixtures, refresh=0.2)
     requests = []
     fixtures, gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(executable, description="New Enter does not await unrelated reconciliation",

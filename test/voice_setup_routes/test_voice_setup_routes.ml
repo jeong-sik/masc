@@ -522,8 +522,11 @@ let test_an_alias_shaped_id_preserves_the_declared_kind () =
      | Error error -> Alcotest.fail (Actions.error_message error)
      | Ok _ -> ());
     let endpoint =
-      match Voice_setup.observe ~runtime_config_path:path with
-      | Ok (_, Some { Voice_config.stt = Some stt; _ }) ->
+      match
+        Voice_setup.observe ~runtime_config_path:path
+          ~standalone_path:(Voice_config.voice_config_file_in base_path)
+      with
+      | Ok (_, Some (_, { Voice_config.stt = Some stt; _ })) ->
         (match List.find_opt
                  (fun (ep : Voice_config.endpoint) -> ep.id = "elevenlabs")
                  stt.endpoints with

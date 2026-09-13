@@ -1,11 +1,13 @@
 (** Optional observers run in independent server-owned fibers. No Keeper tool
     set, input queue, turn switch or environment owner is replaced. *)
 type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
+type error = Request_rejected of string | Runtime_failed of string
+val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
 val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
-  (Yojson.Safe.t, string) result
+  (Yojson.Safe.t, error) result
 (** Root-domain notification only: no I/O and no package callback. Existing
     activity can wake observers; repeated notifications coalesce visibly. *)
 val notify_activity : config:Workspace.config -> unit

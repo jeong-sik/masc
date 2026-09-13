@@ -34,7 +34,7 @@ let endpoint =
 let sentence = "안녕하세요. 키퍼입니다."
 
 let test_say_writes_audio_that_can_be_played () =
-  let output_file = Filename.temp_file "masc_say_live_" ".aiff" in
+  let output_file = Filename.temp_file "masc_say_live_" ".wav" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove output_file with
@@ -73,7 +73,7 @@ let test_say_writes_audio_that_can_be_played () =
    future macOS starts refusing unknown voices, this goes red and the reason to
    offer a list weakens. *)
 let test_an_unknown_voice_does_not_fail () =
-  let output_file = Filename.temp_file "masc_say_live_" ".aiff" in
+  let output_file = Filename.temp_file "masc_say_live_" ".wav" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove output_file with

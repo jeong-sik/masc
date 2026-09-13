@@ -527,6 +527,7 @@ type exact_lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
+  | Workspace_curator
   | Verifier
 
 val all_exact_lanes : exact_lane list

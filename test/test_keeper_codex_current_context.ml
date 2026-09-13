@@ -100,7 +100,19 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let test_current_context_reaches_resumed_thread () =
+let test_resume_persists_no_per_turn_context () =
+  (* What a resume may write into the vendor thread: nothing. The adapter once
+     injected the current Keeper instructions and the observation frame here,
+     which reads as the fix for a resumed thread being stuck on the
+     instructions it started with -- but thread/inject_items persists what it
+     is given and replays it in every later request, so each turn left another
+     copy of that turn's world state in the thread. That is the loop
+     Keeper_unified_prompt forbids by name (#25193: 943 of 945 user messages in
+     one keeper's checkpoint were byte-identical world-state frames), and with
+     no receipt on the API a retry after a lost turn/start writes the same
+     items twice. The instructions gap is real and stays open; it needs the
+     digest-and-restart shape the session store already uses for the tool
+     surface, not a per-turn write. *)
   with_fixture @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation.");
@@ -111,31 +123,43 @@ let test_current_context_reaches_resumed_thread () =
   let resumed = List.filteri (fun index _ -> index >= List.length first_requests) requests in
   let methods rows = List.filter_map (fun row -> match member "method" row with
       | `String method_ -> Some method_ | _ -> None) rows in
-  check (list string) "resume injects before submitting the next turn"
-    ["initialize";"initialized";"account/read";"thread/resume";"thread/inject_items";"turn/start"]
+  check (list string) "a resume submits its turn and writes no thread items"
+    ["initialize";"initialized";"account/read";"thread/resume";"turn/start"]
     (methods resumed);
   let params method_ rows = List.find (fun row -> member "method" row = `String method_) rows |> member "params" in
   check string "same vendor session retained" "context-thread"
     (params "thread/resume" resumed |> member "threadId" |> text);
-  let injected = params "thread/inject_items" resumed |> member "items" |> items in
-  check (list string) "only current developer context injected; no history replay"
-    ["developer";"developer"] (List.map (fun item -> member "role" item |> text) injected);
-  let content item = member "content" item |> items |> List.hd |> member "text" |> text in
-  let current_instructions = content (List.hd injected) in
-  check string "updated Keeper instructions are actually injected"
-    (String.concat "\n\n" ("Keeper revision 2: continue remaining assigned work." ::
-       Keeper_codex_runtime.For_testing.native_posture_note Runtime_native_tools.codex_default))
-    current_instructions;
-  let context = content (List.nth injected 1) |> Yojson.Safe.from_string in
-  check string "latest task and goal reach native model history"
-    "World State: task-003 todo; autonomous-collaboration-continuation executing."
-    (context |> member "message" |> member "content_blocks" |> items |> List.hd |> member "text" |> text);
   check string "autonomous cue stays user input"
     "Continue from current World State."
     (params "turn/start" resumed |> member "input" |> items |> List.hd |> member "text" |> text);
+  (* The frame of the second turn must not be anywhere in the thread. The
+     methods check above says no item was written; this says the bytes did not
+     arrive by another route on the same turn. *)
+  let resumed_text = String.concat "\n" (List.map Yojson.Safe.to_string resumed) in
+  let carries needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan index =
+      index + n <= h
+      && (String.equal (String.sub haystack index n) needle || scan (index + 1))
+    in
+    scan 0
+  in
+  check bool "the turn's world state is not persisted anywhere in the resume" false
+    (carries "task-003 todo" resumed_text);
+  (* A fresh thread is where developer items belong: its own history and the
+     context it starts from. *)
   let initial = params "thread/inject_items" first_requests |> member "items" |> items in
   check (list string) "fresh session receives seed history and current context"
     ["user";"developer"] (List.map (fun item -> member "role" item |> text) initial);
+  let content item = member "content" item |> items |> List.hd |> member "text" |> text in
+  let started = content (List.nth initial 1) |> Yojson.Safe.from_string in
+  check string "the starting context is the frame of the turn that opened the thread"
+    "World State: task-001 done; goal awaiting confirmation."
+    (started |> member "message" |> member "content_blocks" |> items |> List.hd |> member "text" |> text);
+  check string "a new thread carries the instructions of the turn that opened it"
+    (String.concat "\n\n" ("Keeper revision 1: publish the first artifact." ::
+       Keeper_codex_runtime.For_testing.native_posture_note Runtime_native_tools.codex_default))
+    (params "thread/start" first_requests |> member "developerInstructions" |> text);
   (match List.rev !reports with
    | [Keeper_official_client_host.Whole_input_transmitted _;
       Keeper_official_client_host.Held_by_client_session] -> ()
@@ -150,5 +174,5 @@ let test_rejected_context_never_submits_turn () =
   check int "rejected context never reports transmitted turn input" 0 (List.length !reports)
 
 let () = run "Keeper current Codex context" ["native requests",[
-  test_case "current World State and Keeper instructions survive native resume" `Quick test_current_context_reaches_resumed_thread;
+  test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

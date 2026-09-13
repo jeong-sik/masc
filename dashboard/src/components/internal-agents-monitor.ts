@@ -32,6 +32,7 @@ import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
 type Filter =
   | 'all'
   | 'librarian'
+  | 'workspace-curator'
   | 'auto-judge'
   | 'board-attention'
   | 'verification'
@@ -115,6 +116,7 @@ function isForbidden(reason: unknown): boolean {
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'librarian', label: 'Librarian' },
+  { id: 'workspace-curator', label: 'Workspace Curator' },
   { id: 'auto-judge', label: 'Auto Judge' },
   { id: 'board-attention', label: 'Board Attention' },
   { id: 'verification', label: 'Verification' },
@@ -126,6 +128,7 @@ function laneLabel(row: Row): string {
   if (row.source === 'fusion') return 'Fusion'
   switch (row.run.lane) {
     case 'librarian_exact': return 'Librarian'
+    case 'workspace_curator_exact': return 'Workspace Curator'
     case 'hitl_auto_judge': return 'Auto Judge'
     case 'board_attention_exact': return 'Board Attention'
   }
@@ -178,6 +181,7 @@ function rowKind(row: Row): Exclude<Filter, 'all'> {
   if (row.source === 'fusion') return 'fusion'
   switch (row.run.lane) {
     case 'librarian_exact': return 'librarian'
+    case 'workspace_curator_exact': return 'workspace-curator'
     case 'hitl_auto_judge': return 'auto-judge'
     case 'board_attention_exact': return 'board-attention'
     default: {
@@ -428,7 +432,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
             ${run.selectedSlot === undefined
               ? null
               : html` · 선택 slot <code>${run.selectedSlot ?? '미기록'}</code>`}
-             · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
+             ${run.lane === 'workspace_curator_exact'
+               ? html` · Workspace <code>${run.actor}</code> · model-proposed; semantic verification not performed`
+               : html` · <a class="text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>`}
           </p>
         </div>
         <div class="ia-tool-io">
@@ -459,7 +465,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
         ${run.persistenceError === undefined
           ? null
           : html`<p class="ia-err">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
-        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
+        <p class="ia-note"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>${run.lane === 'workspace_curator_exact'
+          ? '이 실행은 기록된 workspace inventory와 curator prompt를 사용합니다. 의미 검증이나 Keeper 기억 승격을 수행하지 않습니다.'
+          : '이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.'}</p>
         ${memoryEvidence === null
           ? null
           : html`<div class="ia-evi">
@@ -559,6 +567,10 @@ function recordedOwner(row: Row): string {
   return row.run.actor
 }
 
+function hasKeeperOwner(row: Row): boolean {
+  return !(row.source === 'exact' && row.run.lane === 'workspace_curator_exact')
+}
+
 function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
   const recorded = recordedOwner(row)
   return roster.find(keeper => keeper.name === recorded || keeper.agent_name === recorded)?.name ?? recorded
@@ -623,7 +635,9 @@ export function InternalAgentsMonitor() {
   const keepers = useMemo(() => {
     const names = new Set(roster.map(keeper => keeper.name))
     for (const name of pausedKeeperNames) names.add(name)
-    for (const row of rows) names.add(resolvedOwner(row, roster))
+    for (const row of rows) {
+      if (hasKeeperOwner(row)) names.add(resolvedOwner(row, roster))
+    }
     return Array.from(names).sort()
   }, [pausedKeeperNames, rows, roster])
   const inventory = FILTERS.filter(item => item.id !== 'all').map(item => {
@@ -636,7 +650,7 @@ export function InternalAgentsMonitor() {
     }
   })
   const owners = keepers.map(name => {
-    const owned = rows.filter(row => resolvedOwner(row, roster) === name)
+    const owned = rows.filter(row => hasKeeperOwner(row) && resolvedOwner(row, roster) === name)
     return {
       name,
       total: owned.length,
@@ -649,7 +663,7 @@ export function InternalAgentsMonitor() {
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
       <div class="ia-head">
         <h3>Internal execution evidence</h3>
-        <span class="ia-count mono">${rows.length} runs · ${keepers.length} owners</span>
+        <span class="ia-count mono">${rows.length} runs · ${keepers.length} Keeper owners</span>
         <span class="ia-route mono">monitoring?section=internal-agents</span>
         <${Btn} class="v2-monitoring-action" onClick=${() => void refresh()} disabled=${loading}>
           ${loading ? 'Loading…' : 'Refresh'}

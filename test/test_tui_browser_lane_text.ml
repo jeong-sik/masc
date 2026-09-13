@@ -191,6 +191,21 @@ let () =
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
     {view with scene=Some heading_scene; scene_cursor=0}) in
   assert (heading_lines = ["[>1] ## Post title"; "Post body"]);
+  let spaced_heading = {heading with rects=[{x=0.;y=0.;width=800.;height=20.}]} in
+  let spaced_body = {body with rects=[{x=0.;y=40.;width=800.;height=20.}]} in
+  let spaced_scene = {scene with content={content with nodes=[spaced_heading;spaced_body]}} in
+  let spaced_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some spaced_scene; scene_cursor=0}) in
+  assert (spaced_lines = ["[>1] ## Post title"; ""; "Post body"]);
+  let spaced_lines, spaced_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some spaced_scene; scene_cursor=1} in
+  assert (spaced_selected = Some 2 && spaced_lines = ["## Post title"; ""; "[>2] Post body"]);
+  let metadata = {body with node_id="metadata"; tag="time"; text="10:30";
+    rects=[{x=0.;y=25.;width=800.;height=10.}]} in
+  let inline_scene = {scene with content={content with nodes=[spaced_heading;metadata;spaced_body]}} in
+  let inline_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some inline_scene; scene_cursor=0}) in
+  assert (inline_lines = ["[>1] ## Post title"; "10:30"; "Post body"]);
   let pending = {view with load=Loading (42,Scene_read 1)} in
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
   assert ((Lane.accept_scene ~generation:42 (Ok {scene with tab_id=2}) pending).scene = None);

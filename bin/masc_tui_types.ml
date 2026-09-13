@@ -3986,6 +3986,24 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
     |> List.concat_map (fun line -> if line = "" then [""] else
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+  let block_tag = function
+    | "article" | "blockquote" | "dd" | "div" | "dt" | "figcaption"
+    | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    | "header" | "li" | "main" | "p" | "pre" | "section" | "summary" -> true
+    | _ -> false in
+  let block_geometry (node : Masc.Browser_scene.node) =
+    let semantic_block = match Masc.Browser_scene.text_role node with
+      | Masc.Browser_scene.Heading _ -> true
+      | Masc.Browser_scene.Plain_text -> block_tag node.tag in
+    if not semantic_block then None
+    else match node.rects with
+      | [] -> None
+      | first :: rest ->
+          let top, bottom = List.fold_left
+            (fun (top, bottom) (rect : Masc.Browser_scene.rect) ->
+               (min top rect.y, max bottom (rect.y +. rect.height)))
+            (first.y, first.y +. first.height) rest in
+          Some (top, bottom) in
   match view.scene with
   | Some scene ->
     (* The target index came from re-scanning [scene_targets] for every node,
@@ -3998,8 +4016,9 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    let reversed, _, selected = List.fold_left
-      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
+    let reversed, _, selected, _ = List.fold_left
+      (fun (reversed, offset, selected, previous_block_bottom)
+        (node : Masc.Browser_scene.node) ->
       let index = Hashtbl.find_opt target_index node.node_id in
       (* Text is the reading surface. DOM tags do not help read a paragraph,
          author or timestamp; the selected text still has its observed index
@@ -4024,12 +4043,22 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       let text = match Masc.Browser_scene.text_role node with
         | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ node.text
         | Masc.Browser_scene.Plain_text -> node.text in
+      let geometry = block_geometry node in
+      let separator = match geometry, previous_block_bottom with
+        | Some (top, _), Some bottom when top > bottom -> [""]
+        | _ -> [] in
       let lines = wrap (prefix ^ text) in
       let selected = match selected, index with
-        | None, Some i when i = view.scene_cursor -> Some offset
+        | None, Some i when i = view.scene_cursor ->
+            Some (offset + List.length separator)
         | _ -> selected in
-      List.rev_append lines reversed, offset + List.length lines, selected)
-      ([], 0, None) scene.content.nodes in
+      let previous_block_bottom = match geometry with
+        | Some (_, bottom) -> Some bottom
+        | None -> None in
+      List.rev_append lines (List.rev_append separator reversed),
+      offset + List.length separator + List.length lines, selected,
+      previous_block_bottom)
+      ([], 0, None, None) scene.content.nodes in
     List.rev reversed, selected
   | None -> match view.reading with
   | None -> [], None

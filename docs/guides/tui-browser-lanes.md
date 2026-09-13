@@ -147,6 +147,10 @@ is the observed heading target, plus an explicit `role="heading"` with
 `aria-level` 1–6.
 Missing or invalid ARIA levels stay plain text; the reader does not infer
 headings from text, CSS, font size, or class names.
+For eligible observed block-tag nodes, a positive vertical gap from the
+preceding eligible node becomes one blank TUI row. An intervening inline node
+breaks that comparison, zero-gap line fixtures stay compact, and the reader
+does not infer CSS display or invent spacing from a site selector.
 TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.

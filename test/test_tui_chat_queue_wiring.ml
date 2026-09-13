@@ -733,7 +733,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
     ; k_total_tokens = 0
     ; k_total_cost_usd = 0.0
     ; k_last_turn_ts = ""
-    ; k_last_proactive_outcome = "never"
+    ; k_last_proactive_outcome = None
     ; k_created_at = "2026-09-07T00:00:00Z"
     ; k_updated_at = "2026-09-07T00:00:00Z"
     }

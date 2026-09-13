@@ -1292,7 +1292,20 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
         200,
         {
             "goals": goals,
-            "goal_history": {"unlisted": []},
+            # Include retained history so resize tests account for its two
+            # non-selectable rows above the active goal list.
+            "goal_history": {
+                "unlisted": [
+                    {
+                        "goal_id": "goal-history-29424",
+                        "title": "earlier-plan-29424",
+                        "opened_at": "2026-08-20T00:00:00Z",
+                        "closed_at": "2026-08-21T00:00:00Z",
+                        "final_phase": "completed",
+                        "lifetime_hours": 24.0,
+                    }
+                ]
+            },
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
@@ -3670,11 +3683,13 @@ def keeper_ask_answer_interaction(
 
         # Open an approval's detail. The answer flow is drawn by the list, so
         # this is where [a] used to set the mode and change nothing on screen.
-        detail = send_and_wait(
-            process, master_fd, output, b"\r", b"Esc: back to the list"
-        )
+        # The detail opens on its own title, "MASC Approval"; the way out is
+        # the footer's to say (#35985). The list's title is "MASC Approvals",
+        # so the wait rules out the trailing s.
+        detail_title = re.compile(rb"MASC Approval(?!s)")
+        detail = send_and_wait(process, master_fd, output, b"\r", detail_title)
         if b"Questions waiting on you" in CSI_RE.sub(
-            b"", frame_containing(detail, b"Esc: back to the list")
+            b"", frame_containing(detail, detail_title)
         ):
             raise AssertionError(
                 "the detail draws the questions; this scenario no longer tests "
@@ -4087,28 +4102,48 @@ def planning_resize_budget_interaction(
     open_loaded_planning(process, master_fd, output)
     # The surface strip and composer consume two rows. Exercise the old
     # zero-goal case (19 surface rows) and the minimum supported surface (14).
-    for terminal_rows in (21, 16, 17, 20, 24, 16):
+    for terminal_rows, columns in (
+        (21, 120),
+        (16, 120),
+        (16, 80),
+        (17, 120),
+        (20, 120),
+        (24, 120),
+        (16, 120),
+    ):
         frame = resize_and_wait(
             process,
             master_fd,
             output,
             rows=terminal_rows,
-            columns=120,
+            columns=columns,
             needle=b"MASC Planning",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
         assert_planning_goal_selected(frame, b"plan-alpha-29424")
+        if b"earlier-plan-29424" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning lost retained goal history: {frame!r}")
+        if b"metric-goal-a-29424" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning lost the selected goal detail: {frame!r}")
+        for label in (b"Goals:", b"No longer listed:", b"sort:", b"filter:active"):
+            if label not in CSI_RE.sub(b"", frame):
+                raise AssertionError(f"Planning lost {label!r}: {frame!r}")
+        if terminal_rows == 24 and b"Backlog:" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning did not restore its full summary: {frame!r}")
         footer_row = frame_row_of(frame, b"j/k:move")
         goal_row = frame_row_of(frame, b"plan-alpha-29424")
+        detail_row = frame_row_of(frame, b"metric-goal-a-29424")
         # Row addresses include the prepended surface strip; the footer sits
         # immediately above the composer on the terminal's last row.
-        if not goal_row < footer_row < terminal_rows:
+        if not goal_row < detail_row < footer_row < terminal_rows:
             raise AssertionError(f"Planning overflowed its surface: {frame!r}")
         selected = send_and_wait(
             process, master_fd, output, b"j", b"plan-beta-29424"
         )
         assert_planning_goal_selected(selected, b"plan-beta-29424")
+        if b"metric-goal-b-29424" not in CSI_RE.sub(b"", selected):
+            raise AssertionError(f"Planning navigation lost selected detail: {selected!r}")
         restored = send_and_wait(
             process, master_fd, output, b"k", b"plan-alpha-29424"
         )
@@ -7650,7 +7685,9 @@ def chat_visibility_modes_interaction(
         # word boundaries must tolerate SGR runs and padding inside them.
         settled_at = pane_start
         for needle in (
-            b"gate:auto_judge",
+            # The header names the stance in the [w] chooser's words now,
+            # not the wire token (#35974).
+            b"gate:Auto Judge",
             "\u25c6".encode(),
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
@@ -7688,7 +7725,7 @@ def chat_visibility_modes_interaction(
         title_row = screen_row_of(
             observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        identity_row = screen_row_of(observed_rows, b"gate:Auto Judge")
         if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "

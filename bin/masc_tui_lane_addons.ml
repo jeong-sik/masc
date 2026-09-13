@@ -19,6 +19,7 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+  | Subscriptions of Yojson.Safe.t
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
@@ -160,6 +161,8 @@ let parse_request input =
     | None -> input, ""
     | Some i -> String.sub input 0 i, String.trim (String.sub input (i + 1) (String.length input - i - 1)) in
   match command, arg with
+  | "subscriptions", "" -> Ok (Subscriptions (`Assoc ["operation",`String "inspect"]))
+  | "subscriptions", arg -> let* json=json_object arg in Ok (Subscriptions json)
   | ("" | "inspect"), "" -> Ok Inspect
   | "observe", id when id <> "" -> Ok (Observe id)
   | "detach", id when id <> "" -> Ok (Detach id)
@@ -204,16 +207,21 @@ let selected_row view = Option.bind view.snapshot (fun snapshot -> List.nth_opt 
 let phase_label = function
   | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
   | Row.Detached -> "detached" | Row.Failed detail -> "failed: " ^ detail
-let timeline_lines ~width rows =
+let timeline_lines ?(instances=[]) ?selected ~width rows =
   match rows with
-  | [] -> []
+  | [] -> List.map (fun instance -> instance.title ^ " | " ^ phase_label instance.phase
+      ^ " | no observations in this view") instances
   | first :: rest ->
       let first : Row.row = first in
       let since, until = List.fold_left (fun (a, b) (row : Row.row) ->
         min a row.observed_at, max b row.observed_at) (first.observed_at, first.observed_at) rest in
       let label_width = min 28 (max 8 (width / 3)) in
-      let axis_width = max 2 (width - label_width - 3) in
-      let lanes = List.map (fun (row : Row.row) -> row.lane_id) rows |> List.sort_uniq String.compare in
+      let axis_width = max 2 (width - label_width - 4) in
+      let lanes = (List.map (fun (row : Row.row) -> row.lane_id) rows
+        @ List.concat_map (fun instance -> List.concat_map (fun (_,selection) ->
+            match selection with Row.All_lanes -> []
+            | Row.Selected_lanes lanes -> List.map (fun lane -> instance.id ^ "/" ^ lane) lanes) instance.outputs) instances)
+        |> List.sort_uniq String.compare in
       let label lane =
         match String.index_opt lane '/' with
         | Some separator when separator > 0 ->
@@ -234,7 +242,12 @@ let timeline_lines ~width rows =
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
-          label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
+          (match selected with Some (row : Row.row) when row.lane_id=lane -> ">" | _ -> " ")
+          ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
+      @ List.filter_map (fun instance ->
+          if List.exists (fun (row : Row.row) ->
+            String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None
+          else Some (instance.title ^ " | " ^ phase_label instance.phase ^ " | no observations in this view")) instances
 let configuration_lines view snapshot = match snapshot.configuration with
   | None -> ["TOML configuration status unknown"]
   | Some config ->
@@ -469,7 +482,10 @@ let compact_lines ~width view =
         let gaps = List.filter_map (fun (coverage : Row.coverage) ->
           if coverage.complete then None else Some ("Incomplete input: " ^ coverage.source_id
             ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) coverage.detail)) snapshot.output.coverage in
-        installations @ instances @ configurations @ observations @ gaps
+        installations @ instances @ configurations
+        @ ["Horizontal Lane timeline · Tab to rows, j/k select, D opens original evidence"]
+        @ timeline_lines ~instances:snapshot.instances ?selected:(if view.focus=Rows then selected_row view else None) ~width snapshot.output.rows
+        @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
    "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]

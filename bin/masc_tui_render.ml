@@ -981,8 +981,10 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   in
   let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
-  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
-    ^ "Esc: back to the list" ^ Ansi.reset);
+  (* Opens on MASC and its name, like every other surface; the way out is the
+     footer's to say, and saying it here too spelled the same key twice in two
+     notations. *)
+  box_line buf cols (screen_title " MASC Approval");
   box_divider buf cols;
   let content_height = max 1 (rows - 6) in
   let scroll =
@@ -999,9 +1001,17 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
     (fun (line : Approval_detail.line) ->
       let text = line.Approval_detail.text in
       match line.Approval_detail.label with
-      | Some _ ->
+      | Some label ->
+        (* The name is bold, what sits beside it is not: the row carries both
+           now, and bolding the whole of it would weight the value too. *)
+        let drawn = fit_width text (cols - 6) in
+        let name = String.length label in
         box_line buf cols
-          (Printf.sprintf "  %s%s%s" Ansi.bold (fit_width text (cols - 6)) Ansi.reset)
+          (if String.length drawn >= name then
+             Printf.sprintf "  %s%s%s%s" Ansi.bold (String.sub drawn 0 name)
+               Ansi.reset
+               (String.sub drawn name (String.length drawn - name))
+           else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->
         box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
     drawn;
@@ -1042,7 +1052,7 @@ let render_approval_detail (state : state) (row : approval_row) =
   end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  y:confirm  n:deny  R:retry if offered  Esc:back");
+       ~hints:Masc_tui_keys.footer_hints_approval_detail);
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
@@ -2646,8 +2656,33 @@ let render_planning_list (state : state) =
            items bands
          |> String.concat backlog_sep
        in
+       (* Budget summary chrome against the actual header and divider rows.
+          Retained history and wrapped modes already occupy [buf]; preserve
+          a goal (or empty note), its selected detail and the footer before
+          adding optional trend/backlog rows. *)
+       let phase_width = planning_phase_column + 2 in
+       let title_width =
+         Render_schedule.planning_title_width
+           ~inner_width:(max 1 (framed_inner_width cols - 2))
+           ~phase_width
+       in
+       let list_header = Buffer.create 256 in
+       box_line_styled list_header cols ~style:(Theme.recede ())
+         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       let divider = Buffer.create 128 in
+       box_divider divider cols;
+       let selection_rows = if count = 0 then 0 else 1 in
+       let reserved_rows =
+         count_frame_lines list_header + (2 * count_frame_lines divider)
+         + 1 + selection_rows + tail_rows
+       in
+       let add_summary_if_fits summary =
+         if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
+         then Buffer.add_buffer buf summary
+       in
        box_line buf cols rollup;
-       box_line_styled buf cols ~style:(Theme.info ())
+       let trend = Buffer.create 256 in
+       box_line_styled trend cols ~style:(Theme.info ())
          (match state.planning_baseline with
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
@@ -2656,18 +2691,14 @@ let render_planning_list (state : state) =
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
-       box_line buf cols
+       add_summary_if_fits trend;
+       let backlog_summary = Buffer.create 256 in
+       box_line backlog_summary cols
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
-       box_divider buf cols;
+       add_summary_if_fits backlog_summary;
+       Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
-       let phase_width = planning_phase_column + 2 in
-       let title_width =
-         Render_schedule.planning_title_width
-           ~inner_width:(max 1 (framed_inner_width cols - 2))
-           ~phase_width
-       in
-       box_line_styled buf cols ~style:(Theme.recede ())
-         ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
+       Buffer.add_buffer buf list_header;
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next --
@@ -2679,7 +2710,6 @@ let render_planning_list (state : state) =
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
-       let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
          Masc_tui_planning_proof_mark.legend_rows
@@ -5368,7 +5398,9 @@ let render_lanes (state : state) =
    whose projection says [absent]: the first means the producer has not
    answered for this Keeper yet, the second means it answered that no root is
    configured. Saying "none" for both would report a fact the server did not
-   send. *)
+   send. [None] here is the first; the tab decides what to say about it from
+   the Lanes reading the list rides on, because a list that is empty after a
+   failed read and one that is empty before any read are the same list. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
   match
@@ -5377,7 +5409,7 @@ let secret_lines (state : state) (k : keeper) =
         String.equal p.Masc.Tui_decode.ksp_keeper k.k_name)
       state.keeper_secrets
   with
-  | None -> [ dim "  (no projection reported for this Keeper)" ]
+  | None -> None
   | Some p ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
       let status_line =
@@ -5417,6 +5449,7 @@ let secret_lines (state : state) (k : keeper) =
                "  Values were read and validated. They are never sent here."
              else "  Values were not validated on the last read.")
         ]
+      |> Option.some
 
 (* The Identity tab's body. Numbering comes from
    [Masc_tui_types.identity_connectable], which is also what the key handler
@@ -5616,6 +5649,20 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         @ filter_rows)
     @ numbered @ rejected @ attached_tool_lines
 
+(* The last proactive cycle's outcome in words. The row printed the wire
+   token -- "never_started", "tool_use" -- beside a Last Turn that said
+   "(never)": one fact, two spellings, and one of them the server's. An
+   exhaustive match, so an outcome the contract adds has to be given a word
+   before the screen draws it. *)
+let proactive_outcome_word = function
+  | Masc.Keeper_meta_contract.Proactive_never_started -> "never started"
+  | Masc.Keeper_meta_contract.Proactive_unknown -> "unknown"
+  | Masc.Keeper_meta_contract.Proactive_silent -> "silent"
+  | Masc.Keeper_meta_contract.Proactive_text_response -> "replied with text"
+  | Masc.Keeper_meta_contract.Proactive_tool_use -> "used tools"
+  | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
+  | Masc.Keeper_meta_contract.Proactive_error -> "error"
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
@@ -5804,7 +5851,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_empty ();
 
     add_section "Autonomy";
-    add_row "Last Outcome:" k.k_last_proactive_outcome;
+    add_row "Last Outcome:"
+      (match k.k_last_proactive_outcome with
+       | Some outcome -> proactive_outcome_word outcome
+       | None -> "-");
     add_empty ();
 
     (* Timestamps section *)
@@ -6206,7 +6256,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           status @ logs
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
-      | Detail_secrets -> secret_lines state k
+      | Detail_secrets -> (
+          match secret_lines state k with
+          | Some lines -> lines
+          | None -> (
+              (* The projection rides the Lanes reading. Before that reading
+                 has answered, and after one that failed, the list is empty
+                 for every Keeper, and this tab said "no projection reported"
+                 -- an answer the server had not given. *)
+              match state.lanes, state.lanes_error with
+              | None, Some detail ->
+                  [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ]
+              | None, None -> [ tab_loading_row "loading" ]
+              | Some _, _ ->
+                  [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
       | Detail_github ->
           stamped_or state.github_identity_view
             state.github_identity_view_error
@@ -9221,9 +9284,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, None when Option.is_some view.scene ->
           let action = match Option.bind (selected_scene_target view) scene_target_action with
             | Some Read_region -> "Enter:read region  "
+            | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
           action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+      | None, None when Option.is_some view.scene_guard ->
+          "r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -9240,6 +9306,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
+        | Loading (_, Scene_follow _) -> "Following observed browser link…", Theme.info ()
+        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
@@ -9248,7 +9316,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             (match browser_label view with
              | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
              | None -> "Capturing selected tab… (any key cancels preview)"), Theme.info ()
-        | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | Failed detail ->
+            let retry = match view.scene_guard with
+              | Some _ -> " · followed destination pending · r:recheck"
+              | None -> "" in
+            "Read/action failed: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with

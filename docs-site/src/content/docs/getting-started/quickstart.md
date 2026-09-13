@@ -4,7 +4,7 @@ description: Connect your model runtime and talk to imp in its default sandbox.
 ---
 
 Install the prebuilt binary for macOS or Linux; no OCaml or Node.js build tools
-are required. This guide targets the **0.35.14**. Check publication on
+are required. This guide targets **0.35.14**. Check publication on
 [Releases](https://github.com/jeong-sik/masc/releases) and use the installer
 attached to the same tag as your binary.
 

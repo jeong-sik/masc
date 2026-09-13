@@ -12,7 +12,9 @@
 
 type line =
   { label : string option
-        (** A field name, on its own row above the value it introduces. *)
+        (** The field name this row opens with, when it has one. A short value
+            sits beside its name on the same row; a long or multi-line one
+            keeps the name a row of its own. *)
   ; text : string
   }
 

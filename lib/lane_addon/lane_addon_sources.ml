@@ -99,7 +99,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_dos_press | Misc_dos_type | Misc_dos_peek
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
-  | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
+  | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates
   | Misc_ask | Misc_ask_status | Misc_ask_withdraw
   | Misc_config | Misc_dashboard | Misc_gc | Misc_keeper_waiting_inventory
   | Misc_tool_help | Misc_web_fetch | Misc_web_search -> Tool_completed

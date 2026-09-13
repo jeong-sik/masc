@@ -17,6 +17,7 @@ let all_layers =
     L.Connected_surfaces;
     L.Namespace_state;
     L.Workspace_memory;
+    L.Lane_updates;
     L.Repository_freshness;
     L.Autonomous_trigger;
     L.Scheduled_automation;

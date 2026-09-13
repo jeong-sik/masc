@@ -1,0 +1,45 @@
+name = "masc_lane_updates"
+description = """
+Manage explicit Lane subscriptions and read their retained changes.
+inspect returns configuration and its revision; save replaces the subscriptions using that revision.
+read returns the caller's next immutable observation and receipt, without advancing its cursor.
+acknowledge confirms reading that exact receipt; it does not verify source completeness or semantic correctness.
+No operation wakes a Keeper or injects original source bodies into a future turn.
+"""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "operation"
+type = "string"
+required = true
+enum = ["inspect", "save", "read", "acknowledge"]
+
+[[params]]
+name = "run_id"
+type = "string"
+description = "Exact subscribed run for read and acknowledge."
+
+[[params]]
+name = "installation_id"
+type = "string"
+
+[[params]]
+name = "output_id"
+type = "string"
+
+[[params]]
+name = "expected_source_revision"
+type = "string"
+description = "Revision from inspect for save; omit only when no configuration exists."
+
+[[params]]
+name = "subscriptions"
+type = "array"
+items = {type="object", additionalProperties=false, required=["keeper_name", "run_id", "installation_id", "output_id"], properties={keeper_name={type="string"}, run_id={type="string"}, installation_id={type="string"}, output_id={type="string"}}}
+
+[[params]]
+name = "receipt"
+type = "object"
+additional_properties = true
+description = "Exact immutable receipt returned by read."

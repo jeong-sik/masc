@@ -71,6 +71,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+      ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(workspace_memory : Workspace_memory_publication.observation)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -82,6 +83,7 @@ let direct_turn_dynamic_context
   ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
    @ Option.to_list
        (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+   @ Option.to_list (Lane_addon_subscription.render lane_updates)
    @ [ approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
@@ -612,6 +614,8 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
+            let lane_updates = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Lane_addon_subscription.observe ~config:ctx.config ~keeper_name:meta.name) in
             let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
               Workspace_memory_publication.observe ~base_path:ctx.config.base_path) in
             (match workspace_memory with
@@ -677,6 +681,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~held_task_skills
                   ~task_skill_surfaces
                   ~workspace_memory
+                  ~lane_updates
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
                        world_observation.approval_authority)

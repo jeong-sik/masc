@@ -18,6 +18,7 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+  | Subscriptions of Yojson.Safe.t
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
@@ -148,6 +149,8 @@ let parse_request input =
     | None -> input, ""
     | Some i -> String.sub input 0 i, String.trim (String.sub input (i + 1) (String.length input - i - 1)) in
   match command, arg with
+  | "subscriptions", "" -> Ok (Subscriptions (`Assoc ["operation",`String "inspect"]))
+  | "subscriptions", arg -> let* json=json_object arg in Ok (Subscriptions json)
   | ("" | "inspect"), "" -> Ok Inspect
   | "observe", id when id <> "" -> Ok (Observe id)
   | "detach", id when id <> "" -> Ok (Detach id)

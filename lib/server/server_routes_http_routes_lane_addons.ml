@@ -135,6 +135,13 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
+  |> Http.Router.post "/api/v1/lane-addons/subscriptions"
+       (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           let result = let* args=decode_body body in
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Lane_addon_subscription.handle ~config:(Mcp_server.workspace_config state) ~caller args) in
+           respond request reqd result)))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.get "/api/v1/lane-addons" get_inspect

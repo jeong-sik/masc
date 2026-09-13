@@ -168,6 +168,12 @@ let dispatch ctx ~name ~args : Tool_result.result option =
               | Invalid_request | Invalid_declaration | Revision_conflict | Not_found -> Tool_result.Workflow_rejection in
             Tool_result.make_err ~tool_name:name ~start_time:start ~class_
               ~data:(Lane_addon_declaration.error_to_json error) error.message)
+  | Some Tool_schemas_misc.Misc_lane_updates ->
+      Some (match Domain_pool_ref.submit_io_or_inline (fun () ->
+        Lane_addon_subscription.handle ~config:ctx.config ~caller:ctx.agent_name args) with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error message -> Tool_result.make_err ~tool_name:name ~start_time:start
+            ~class_:Tool_result.Workflow_rejection message)
   | Some Tool_schemas_misc.Misc_lane_action_status ->
       Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Action_status args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()

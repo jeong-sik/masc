@@ -5,9 +5,10 @@ evidence_refs. The task must be claimed by you. This does not make the task \
 done: it moves to awaiting_verification and waits for a completion \
 authority's verdict, which no Keeper can produce. It also does not hold your \
 next claim while it waits. Every evidence_refs entry must be \
-artifact:<producer-root-relative-path> or note:<text>; this tool refuses any \
-other form at submit. Only an artifact: path is opened and snapshotted for \
-the reviewer — a note: entry is text the reviewer reads but cannot inspect. \
+artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
+fusion:<run-id>. Files and collaboration sources are captured at submission; \
+Board/Fusion reads during review use those frozen bytes, including comments \
+and original Fusion producer identity. A note is narrative, not captured proof. \
 Pure-placeholder results ('done', 'ok', etc.) are rejected."""
 
 [[params]]
@@ -31,13 +32,11 @@ required = true
 items = { type = "string" }
 min_items = 1
 description = """
-Trusted references substantiating completion. Every entry must be \
-artifact:<producer-root-relative-path> or note:<text>; nothing else can be \
-read back at review, so this tool refuses it here rather than letting the \
-reviewer see missing evidence. An artifact: path is opened and snapshotted, \
-and that is what satisfies the completion gate. A Board post id, a commit, a \
-PR number, or a file:// URI is narrative until something opens it: pass it \
-as note:<text> next to an artifact: entry, never on its own."""
+Trusted references substantiating completion: artifact:<producer-root-relative-path> \
+for files, board:<post-id> for a full thread, fusion:<run-id> for original advice \
+and recorded decisions, or note:<text> for narrative. Collaboration capture must \
+succeed before submission commits; later edits, author changes and expiry do not \
+change the reviewer snapshot. A commit or URL in a note must still be inspected."""
 
 [[params]]
 name = "notes"
@@ -52,7 +51,7 @@ short_description = "Submit your owned task for verification with a result summa
 when_to_use = "Use when the current keeper has finished an owned task and can cite concrete evidence_refs."
 key_constraints = [
   "Caller must own the task; no tool overrides task ownership.",
-  "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact.",
+  "Use artifact:, board:, fusion:, or note: references; the verifier judges their actual contents.",
   "The task moves to awaiting_verification, not done. Only a completion authority commits the verdict.",
 ]
 details_markdown = "Issues submit_for_verification. The task waits for an operator or auto-judge verdict, which no Keeper can produce; it does not hold your next claim while it waits, and cancelling it discards the evidence you just submitted. For PR-bearing work, include the PR URL or artifact reference in evidence_refs."

@@ -59,10 +59,12 @@ type provider_run_result =
 type provider_attempt_outcomes =
   { provider_result : provider_run_result
   ; turn_result : provider_run_result
+  ; checkpoint_after : Agent_core.Checkpoint.t option
   }
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
+  ; official_client_settlement : Keeper_official_client_session_store.t option
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
@@ -80,10 +82,11 @@ type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
 
-let selected_runtime_result (runtime : Runtime.t) ~lane_attempt_index result =
+let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~lane_attempt_index result =
   Result.map
     (fun run_result ->
        { run_result
+       ; official_client_settlement
        ; selected_runtime_id = runtime.id
        ; selected_max_context = Runtime.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
@@ -126,6 +129,7 @@ type lane_terminal_error =
   { origin_runtime_id : string
   ; origin_attempt : int
   ; lane_error : Agent_core.Error.t
+  ; checkpoint_after : Agent_core.Checkpoint.t option
   }
 
 (* Quota demotion must never promote a candidate the runtime table cannot
@@ -193,7 +197,7 @@ let canonical_checkpoint_sink ~replay_prefix_projection sink
   | Ok checkpoint -> sink { snapshot with checkpoint }
 ;;
 
-let project_provider_attempt_result ~replay_prefix_projection provider_result =
+let project_provider_attempt_result ?checkpoint_after ~replay_prefix_projection provider_result =
   let turn_result =
     match provider_result with
     | Error _ as error -> error
@@ -216,7 +220,14 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
               (Agent_core.Error.Internal
                  (Keeper_replay_prefix.restore_error_to_string error))))
   in
-  { provider_result; turn_result }
+  let turn_result, checkpoint_after = match checkpoint_after with
+    | None -> turn_result, None
+    | Some checkpoint ->
+      (match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection checkpoint with
+       | Ok checkpoint -> turn_result, Some checkpoint
+       | Error error -> Error (Agent_core.Error.Internal
+           (Keeper_replay_prefix.restore_error_to_string error)), None) in
+  { provider_result; turn_result; checkpoint_after }
 ;;
 
 let runtime_attempt_decision ~idx ~runtime_id =
@@ -414,7 +425,7 @@ let attempt_runtime_candidates
           | Some scope -> Runtime_quota_window.note_succeeded ~scope
           | None -> ());
          Ok value
-       | Error error, _checkpoint_after, effect_disposition, dispatch ->
+       | Error error, checkpoint_after, effect_disposition, dispatch ->
          emit_runtime_manifest
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
@@ -518,6 +529,7 @@ let attempt_runtime_candidates
                  { origin_runtime_id = attempt_runtime_id
                  ; origin_attempt = idx
                  ; lane_error = error
+                 ; checkpoint_after
                  }
              else None
          in
@@ -525,6 +537,7 @@ let attempt_runtime_candidates
            { origin_runtime_id = attempt_runtime_id
            ; origin_attempt = idx
            ; lane_error
+           ; checkpoint_after
            }
          in
          if not effect_retry_admitted
@@ -1486,6 +1499,7 @@ let run_named
                             "provider config transforms cannot target a \
                              codex-app-server runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             ; successful_tool_completion =
@@ -1548,7 +1562,7 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx codex_result
+        ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1618,6 +1632,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target an antigravity-cli runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1657,7 +1672,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx antigravity_result
+        ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1728,6 +1743,7 @@ let run_named
                         ; detail =
                             "provider config transforms cannot target a claude-code runtime"
                         }))
+            ; settled_session = None
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
             }
@@ -1772,7 +1788,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime ~lane_attempt_index:idx claude_result
+        ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
@@ -1952,12 +1968,10 @@ let run_named
               try_provider_ctx candidate
           in
           let outcomes =
-            project_provider_attempt_result
-              ~replay_prefix_projection
-              provider_result
-          in
+            project_provider_attempt_result ?checkpoint_after
+              ~replay_prefix_projection provider_result in
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
-          , checkpoint_after
+          , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , Keeper_attempt_dispatch.Dispatched ))))
        )))
@@ -1973,6 +1987,7 @@ module For_testing = struct
       ~next_runtime_id ~later_runtime_ids ~failure
   ;;
 
+  let produced_checkpoint (outcomes : provider_attempt_outcomes) = outcomes.checkpoint_after
   let project_provider_attempt_result = project_provider_attempt_result
   let canonical_checkpoint_sink = canonical_checkpoint_sink
   let provider_result outcomes = outcomes.provider_result

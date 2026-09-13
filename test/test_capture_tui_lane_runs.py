@@ -40,8 +40,8 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
         screen = "\n".join(
             [
                 "● Board Attention idle slots one active 0  runs 3  ok/fail/cancel 3/0/0",
-                "⠋ HITL Auto Judge running 3.2s slots an-extremely-long-fallback-chain~",
-                "● Librarian idle slots another-clipped-slot-list~",
+                "⠋ HITL Auto Judge running 3.2s slots an-extremely-long-fallback-chain…",
+                "● Librarian idle slots another-clipped-slot-list…",
                 "● Verifier idle slots two active 0  runs 2  ok/fail/cancel 1/1/0",
                 "Verifier · selected-row detail is not another matrix row",
             ]
@@ -69,7 +69,7 @@ class CaptureTuiLaneRunsTest(unittest.TestCase):
             [
                 "STARTED SUBJECT STATUS ELAPSED SLOT RUN ID",
                 "09-01 10:00:00 task-1 running — slot run-new",
-                "09-01 09:59:00 task-2 infrastruc~ 1.0s slot run-done",
+                "09-01 09:59:00 task-2 infrastruc… 1.0s slot run-done",
             ]
         )
         self.assertEqual(

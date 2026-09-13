@@ -17,7 +17,7 @@ let vote_direction_of_string_opt raw =
   | _ -> None
 
 let vote_log_path () =
-  Filename.concat (Board_paths.board_masc_dir ()) "board_votes.jsonl"
+  Board_paths.file_path ~workspace_masc_dir:(Board_paths.board_masc_dir ()) Board_paths.Votes
 
 (* Append and snapshot writers persist the cast timestamp stored for the exact
    [(target, voter)] vote identity. Returns [Error (Io_error _)] instead of
@@ -420,7 +420,7 @@ let recalculate_vote_counts store =
 ;;
 
 let load_persisted_votes store =
-  let path = vote_log_path () in
+  let path = Board_paths.store_file_path store Board_paths.Votes in
   if not (Fs_compat.file_exists path)
   then (
     recalculate_vote_counts store;
@@ -453,7 +453,7 @@ let load_persisted_votes store =
   end
 
 let load_persisted_reactions store =
-  let path = reactions_path () in
+  let path = Board_paths.store_file_path store Board_paths.Reactions in
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
@@ -484,7 +484,7 @@ let load_persisted_reactions store =
   end
 
 let load_persisted_sub_boards store =
-  let path = sub_boards_path () in
+  let path = Board_paths.store_file_path store Board_paths.Sub_boards in
   if not (Fs_compat.file_exists path) then Ok 0
   else begin
     try
@@ -763,7 +763,8 @@ let load_all_persisted store =
 
 let global_lazy : store Eio.Lazy.t ref =
   ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let store = create_store () in
+    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
+    let store = { (create_store ()) with workspace_masc_dir } in
     load_all_persisted store;
     store))
 
@@ -773,7 +774,8 @@ let global () = Eio.Lazy.force !global_lazy
     Safe: only called from test setup before concurrent fibers exist. *)
 let reset_global_for_test () =
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let store = create_store () in
+    let workspace_masc_dir = Some (Fs_compat.realpath_lenient (Board_paths.board_masc_dir ())) in
+    let store = { (create_store ()) with workspace_masc_dir } in
     load_all_persisted store;
     store)
 

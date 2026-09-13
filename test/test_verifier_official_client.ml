@@ -98,7 +98,7 @@ let test_review ?(shadow_lane=false) mode =
     (if mode = "large-read" then "verified-file-receipt\n" ^ String.make 18000 'x' ^ "\nlast-readable-proof-byte"
      else "verified-file-receipt");
   write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
-  let lookup_tools = match VAT.create_goal_proof ~config with
+  let lookup_tools = match VAT.create_goal_proof ~submitted_evidence:[] ~config with
     | Ok tools -> tools | Error detail -> fail detail in
   let lookup = AR.Lookup_tools
     { schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools

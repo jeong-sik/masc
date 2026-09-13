@@ -2199,6 +2199,7 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+(include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
@@ -3561,9 +3562,11 @@
  (libraries
   alcotest
   ast_grep
+  masc
   masc_tui_agenda
   masc_tui_markdown_render_cache
   masc_tui_message_layout
+  masc_tui_types
   unix))
 
 (test
@@ -4865,6 +4868,7 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
+(include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)

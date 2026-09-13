@@ -6,4 +6,4 @@
 (test
  (name test_goal_verification_agent)
  (modules test_goal_verification_agent)
- (libraries masc_test_deps))
+ (libraries masc_test_deps digestif))

@@ -83,6 +83,35 @@ let test_pdf_tools_reuse_selected_package_managers () =
   check int "unknown Linux distribution gets no guessed apt command" 0
     (List.length (P.catalog ~host:(S.Linux S.X64) ~distribution:P.Other P.Pdf_tools))
 
+let test_presentation_install_is_workspace_owned () =
+  let base_path = "/tmp/presentation workspace" in
+  let dependency = P.Presentation_tools {base_path} in
+  let catalog = P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other dependency in
+  let parser = find "presentation_parser_install" catalog in
+  (match parser.action_effect with
+   | P.Run_commands steps ->
+     check (list (list string)) "parser uses an isolated workspace interpreter"
+       [["python3";"-I";"-m";"venv";"--copies";base_path ^ "/.masc/runtime-tools/presentation"];
+        [base_path ^ "/.masc/runtime-tools/presentation/bin/python3";"-I";"-m";"pip";"--isolated";"install";"--require-virtualenv";"python-pptx"]] steps
+   | _ -> fail "parser must use explicit commands");
+  let poppler = find "poppler_install" catalog in
+  check bool "PDF tools remain installable from presentation setup" false poppler.requires_admin;
+  let renderer = find "presentation_renderer_install" catalog in
+  (match renderer.action_effect with
+   | P.Run_commands steps -> check (list (list string)) "mac renderer is the official Homebrew cask"
+       [["brew";"install";"--cask";"libreoffice"]] steps
+   | _ -> fail "renderer install missing");
+  let linux = find "presentation_renderer_install"
+    (P.catalog ~host:(S.Linux S.X64) ~distribution:P.Debian dependency) in
+  check bool "system package privilege is disclosed" true linux.requires_admin;
+  check bool "unknown Linux gets no guessed package command" false
+    (List.exists (fun (a:P.action) -> a.id="presentation_renderer_install")
+      (P.catalog ~host:(S.Linux S.Arm64) ~distribution:P.Other dependency));
+  let calls = ref [] in
+  let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error P.Did_not_finish) parser in
+  check int "venv failure cannot install a package into another Python" 1 (List.length !calls);
+  check bool "failed environment creation remains failed" true (match outcome with P.Failed _ -> true | _ -> false)
+
 (* Hearing is the only half of voice a fresh mac cannot already do: say is in
    the base system with nine Korean voices, and nothing transcribes. What the
    catalog offers for that was measured 2026-09-12 -- the brew bottle is 8.9MB,
@@ -266,6 +295,7 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
   test_case "explicit distro plan and failure boundary" `Quick test_linux_install_is_explicit;
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
+  test_case "presentation workspace parser and host renderer" `Quick test_presentation_install_is_workspace_owned;
   test_case "PDF package manager selection" `Quick test_pdf_tools_reuse_selected_package_managers;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready];
   "hearing on a fresh machine",[

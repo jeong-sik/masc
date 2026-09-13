@@ -173,8 +173,9 @@ type t =
   ; mutable next_seq : int
   }
 
-let create ?(now = Time_compat.now) ?on_publish () =
-  { stream = Eio.Stream.create 512; on_publish; now; next_seq = 0 }
+let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
+  if first_seq < 0 then invalid_arg "Keeper_chat_events.create: negative journal sequence";
+  { stream = Eio.Stream.create 512; on_publish; now; next_seq = first_seq }
 ;;
 
 (* [publish] is the single choke point every turn event passes through — route

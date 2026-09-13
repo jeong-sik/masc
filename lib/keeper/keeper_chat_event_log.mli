@@ -102,6 +102,11 @@ val read_journal_path_result : string -> (journaled_event list, read_failure) re
 val read_journal : journal -> (journaled_event list, read_failure) result
 (** {!read_journal_path_result} over an open journal's path. *)
 
+val next_sequence : ?require_existing:bool -> journal -> (int, read_failure) result
+(** Cursor for a new producer segment of the same operation. Missing journals
+    start at zero unless [require_existing] is true for a retained continuation;
+    corrupt, unreadable or torn journals refuse resume. *)
+
 (** {1 Replay position} *)
 
 (** Where a client wants a journal read to start: the whole turn, or only the

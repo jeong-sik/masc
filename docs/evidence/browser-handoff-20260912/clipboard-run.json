@@ -1,0 +1,221 @@
+{
+  "observer_screenshot": {
+    "request": {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 15.86,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    "response": {
+      "source": "automation",
+      "clientId": null,
+      "tabId": 1,
+      "title": "Browser handoff fixture",
+      "url": "http://127.0.0.1:55876/index.html",
+      "mimeType": "image/png",
+      "viewport": {
+        "documentId": "b9fc1755273a7af47eb73a66c8dbf822",
+        "width": 1366.0,
+        "height": 683.0,
+        "scrollX": 0.0,
+        "scrollY": 0.0
+      },
+      "elapsed_ms": 14.797833
+    }
+  },
+  "scope": "actual Browser Lane TUI y output delivered unchanged to one fresh Keeper on a synthetic page",
+  "instruction_source_commit": "c4cfc5369c23ceb969aae9c62ce0ddc7b31eff7c",
+  "instruction_file_bytes": 12612,
+  "instruction_file_sha256": "dff25891c9c85f49cc37caf3f0e9ac7732f4056cf43e1fde172172827f3467ef",
+  "instruction_body_bytes": 12380,
+  "tui": {
+    "tui_sha256": "4fdb1803db150b36f1a407cc6e10a02c36c8b7da28174f93fbed45739aa887c7",
+    "clipboard_sha256": "beed53e8cded1454450ca476f102d6df9d00606257364b360fbd428d5e94db16",
+    "clipboard_bytes": 535,
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 2,
+    "source_commit": "ba6b3a73e90d991da74fc1d16bb4756650835597",
+    "ci_run": 34689504282,
+    "artifact_id": 10297022201
+  },
+  "server": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "d5fd7f345310b1efd7b195cb31a5cf5b4a4cb481",
+    "commit_source": "embedded",
+    "binary_commit": "d5fd7f345310b1efd7b195cb31a5cf5b4a4cb481",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "4a2d014ea87f62bc2404899eaa8f2821c36e29018a8452e05fbe383de578bcee",
+    "binary_commit_unix_ts": 1789210459.0,
+    "binary_commit_age_seconds": 811,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "runtime_instance_id": "01a0954d-5bff-7000-8437-0a6445036714",
+    "started_at": "2026-09-12T11:07:50Z",
+    "uptime_seconds": 0
+  },
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "keeper": "browser-handoff-proof-80678000",
+  "trace_id": "trace-1789211276569-00000",
+  "operation_id": "kmsg-cad20c21228216fd49e14fcb4540a0b8",
+  "operation_state": "Succeeded",
+  "user_message": "선택한 영역의 본문을 읽고 담당자와 결정 사항을 간단히 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\n  \"context\": \"Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.\",\n  \"lane\": \"automation\",\n  \"clientId\": null,\n  \"tabId\": 1,\n  \"url\": \"http://127.0.0.1:55876/index.html\",\n  \"documentId\": \"b9fc1755273a7af47eb73a66c8dbf822\",\n  \"nodeId\": \"n3\",\n  \"view\": \"regions\",\n  \"scope\": null,\n  \"viewport\": {\n    \"width\": 1366.0,\n    \"height\": 683.0,\n    \"scrollX\": 0.0,\n    \"scrollY\": 0.0\n  },\n  \"truncated\": false,\n  \"tag\": \"article\",\n  \"text\": \"Alpha release\",\n  \"source\": null\n}",
+  "clipboard": {
+    "context": "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.",
+    "lane": "automation",
+    "clientId": null,
+    "tabId": 1,
+    "url": "http://127.0.0.1:55876/index.html",
+    "documentId": "b9fc1755273a7af47eb73a66c8dbf822",
+    "nodeId": "n3",
+    "view": "regions",
+    "scope": null,
+    "viewport": {
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "truncated": false,
+    "tag": "article",
+    "text": "Alpha release",
+    "source": null
+  },
+  "clipboard_base64": "ewogICJjb250ZXh0IjogIkJyb3dzZXIgZWxlbWVudCBvYnNlcnZhdGlvbjsgcGFnZS1wcm92aWRlZCBzb3VyY2UgaGludC4gVmVyaWZ5IHRoZSBjaG9zZW4gY2hlY2tvdXQgYW5kIGZpbGUgU0hBLTI1NiBiZWZvcmUgZWRpdGluZy4iLAogICJsYW5lIjogImF1dG9tYXRpb24iLAogICJjbGllbnRJZCI6IG51bGwsCiAgInRhYklkIjogMSwKICAidXJsIjogImh0dHA6Ly8xMjcuMC4wLjE6NTU4NzYvaW5kZXguaHRtbCIsCiAgImRvY3VtZW50SWQiOiAiYjlmYzE3NTUyNzNhN2FmNDdlYjczYTY2YzhkYmY4MjIiLAogICJub2RlSWQiOiAibjMiLAogICJ2aWV3IjogInJlZ2lvbnMiLAogICJzY29wZSI6IG51bGwsCiAgInZpZXdwb3J0IjogewogICAgIndpZHRoIjogMTM2Ni4wLAogICAgImhlaWdodCI6IDY4My4wLAogICAgInNjcm9sbFgiOiAwLjAsCiAgICAic2Nyb2xsWSI6IDAuMAogIH0sCiAgInRydW5jYXRlZCI6IGZhbHNlLAogICJ0YWciOiAiYXJ0aWNsZSIsCiAgInRleHQiOiAiQWxwaGEgcmVsZWFzZSIsCiAgInNvdXJjZSI6IG51bGwKfQ==",
+  "calls": [
+    {
+      "id": "call_8d353b03d2814dcca83781d1",
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "name": "browser-lanes",
+          "package_id": "browser-lanes",
+          "source_id": "project-masc"
+        }
+      },
+      "is_error": false,
+      "output_bytes": 12380,
+      "output_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+    },
+    {
+      "id": "call_1f99f7e68d014b96bc80c906",
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:55876/index.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "b9fc1755273a7af47eb73a66c8dbf822",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "is_error": false,
+      "output_bytes": 1406,
+      "output_sha256": "69f084ea07255fcfd507cd6b495fea9492f903a6eb95d97fe7a517707755d790",
+      "output": "{\"tabId\":1,\"chars\":88,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"b9fc1755273a7af47eb73a66c8dbf822\",\"nodes\":[{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":27,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n6\",\"rects\":[{\"height\":28,\"width\":175.60000610351562,\"x\":271,\"y\":107.83332824707033}],\"sourceContext\":null,\"tag\":\"h2\",\"text\":\"Alpha release\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(0, 0, 0)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n7\",\"rects\":[{\"height\":19,\"width\":500.683349609375,\"x\":271,\"y\":158.25}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Owner: Mina. Decision: ship Tuesday after accessibility review.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(0, 0, 238)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:55876/index.html#beta\",\"kind\":\"control\",\"nodeId\":\"n8\",\"rects\":[{\"height\":19,\"width\":96.06666564941406,\"x\":271,\"y\":195.25}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Next project\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"b9fc1755273a7af47eb73a66c8dbf822\",\"nodeId\":\"n3\"},\"title\":\"Browser handoff fixture\",\"truncated\":false,\"url\":\"http://127.0.0.1:55876/index.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":4.474125}"
+    }
+  ],
+  "answer": "**담당자: Mina / 결정 사항: 접근성 검토를 마친 뒤 화요일에 출시(ship Tuesday after accessibility review)**\n\n관측 이어읽기 결과(같은 문서 `b9fc17…`, URL 일치, truncated=false)로 선택 영역 `<article>`(#alpha) 본문 전체를 확인했습니다:\n\n- **h2**: Alpha release\n- **본문(p)**: \"Owner: Mina. Decision: ship Tuesday after accessibility review.\"\n- **링크**: Next project → `index.html#beta` (다음 프로젝트 영역, 이번 요청 범위 밖)\n\n영역 본문은 위 세 노드가 전부이며 잘린 부분은 없습니다. #beta 영역 내용까지 확인이 필요하면 이어서 읽어 드리겠습니다.",
+  "activation": {
+    "identity": {
+      "source_id": "project-masc",
+      "package_id": "browser-lanes",
+      "name": "browser-lanes"
+    },
+    "content_revision": "c49d5e8c50caebf781170d0dbf2b051dfb422530c1db56bca251f7fe80712ab8",
+    "snapshot_revision": "df70b86c8ba7258058942d962de61097253dde46828354db4a22a3f9bafd98c1",
+    "turn_ref": "trace-1789211276569-00000#1",
+    "runtime_id": "glm-coding.glm-5.3-flash",
+    "skill_tool_use_id": "call_8d353b03d2814dcca83781d1",
+    "agent_core_turn": 0,
+    "invocation": {
+      "kind": "instruction",
+      "origin": {
+        "kind": "session_instruction"
+      },
+      "served_content": {
+        "kind": "skill_body",
+        "bytes": 12380,
+        "sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+      }
+    },
+    "delivery": {
+      "boundary": {
+        "kind": "model_response",
+        "agent_core_turn": 1
+      },
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "delivered_at": "2026-09-12T11:08:35Z",
+      "content_bytes": 12380,
+      "content_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+    },
+    "actions": [
+      {
+        "identity": {
+          "kind": "call_id",
+          "call_id": "call_1f99f7e68d014b96bc80c906"
+        },
+        "tool_name": "BrowserRead",
+        "runtime_id": "glm-coding.glm-5.3-flash",
+        "agent_core_turn": 1,
+        "observed_at": "2026-09-12T11:08:35Z"
+      }
+    ],
+    "activated_at": "2026-09-12T11:08:21Z"
+  },
+  "cleanup": {
+    "keeper_shutdown": {
+      "kind": "finalized",
+      "evidence": {
+        "cleanup": {
+          "settled_task_ids": [],
+          "pending_confirms_removed": 0,
+          "meta_snapshot_digest": "24fbb5f92c6a47fbfaeaa43ba4b5ef4a30cbe6a73aac487d3e36f2358d75355a"
+        },
+        "meta_removed": false,
+        "session_removed": false,
+        "registry_unregistered": true,
+        "accumulator_dropped": true,
+        "completion": {
+          "kind": "not_requested"
+        }
+      }
+    },
+    "tui": {
+      "pid": 1112,
+      "exit": 0,
+      "observed_exited": true
+    },
+    "owned_runtime_processes": [
+      {
+        "name": "server",
+        "pid": 1048,
+        "exit": 0
+      },
+      {
+        "name": "driver",
+        "pid": 1017,
+        "exit": 0
+      }
+    ]
+  },
+  "limitations": [
+    "one observed fixture run, not a general performance benchmark",
+    "Keeper handoff used masc_keeper_msg, not a paste into TUI chat composer",
+    "TUI PNG replays recorded PTY output at its original 130x35 geometry",
+    "No real target-channel collection"
+  ],
+  "artifacts": {
+    "clipboard-osc52.bin": "52c7916243c16b1a047df6ef043c0c5432e20f6ff51abc300b4cf4b5daa5285c",
+    "clipboard-tui.pty": "a93511199c28dcf6bffb8cb1c61982024f31ebd916a072ed4e2756aae5bfed9e",
+    "clipboard-tui.png": "0c16f5194384e3dc1b33f6c8c960ed4d8ca48b93642178ef776b43e474c861a4",
+    "clipboard-context.json": "beed53e8cded1454450ca476f102d6df9d00606257364b360fbd428d5e94db16",
+    "clipboard-firefox.png": "5c715b04af307478aa7c16a8368c6c6d56afe95dc5fb18d2bf3d71d062a0bee6"
+  }
+}

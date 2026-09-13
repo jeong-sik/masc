@@ -28,6 +28,7 @@ const snapshot = {
   instances: [{ instance_id: 'instance-1', run_id: 'run-2', addon_id: 'unregistered-package',
     title: 'User supplied layer', revision: 'digest-1', phase: { kind: 'observing' },
     configuration: null, incarnation: 'incarnation-1', action_schema: null,
+    package: { outputs: { frames: { lanes: ['msx/frame'] }, statistics: { all_lanes: true } } },
     observation_seq: 1, rows_count: 1 }], rows: [row], coverage,
 }
 const actionSnapshot = {
@@ -58,6 +59,9 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.getByText(/World time: frame 1234/)).toBeTruthy()
     expect(screen.getByText('Configuration service has not started.')).toBeTruthy()
     expect(screen.getByText('Not managed by TOML')).toBeTruthy()
+    const ports = within(screen.getByLabelText('Output ports for instance-1'))
+    expect(ports.getByText('Output frames: msx/frame')).toBeTruthy()
+    expect(ports.getByText('Output statistics: all package lanes')).toBeTruthy()
     expect(api.preserveLaneAddonEvidence).not.toHaveBeenCalled()
     expect(screen.queryByRole('region', { name: 'Package actions' })).toBeNull()
     expect(screen.queryByLabelText('Action JSON')).toBeNull()
@@ -242,6 +246,9 @@ describe('optional Lane Add-on surface', () => {
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], configuration: undefined }] })).toThrow()
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], incarnation: undefined }] })).toThrow()
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], action_schema: undefined }] })).toThrow()
+    for (const outputs of [{ bad: { lanes: [] } }, { bad: { all_lanes: false } }, { bad: { all_lanes: true, lanes: ['frame'] } }]) {
+      expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], package: { outputs } }] })).toThrow()
+    }
   })
   it('submits an advertised package action with an exact binding while slice and other controls remain usable', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(actionSnapshot))

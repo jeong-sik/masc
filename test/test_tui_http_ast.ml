@@ -2547,22 +2547,6 @@ let test_the_board_list_frame_is_the_shared_contract () =
   check int "and no row is filled by hand" 0 (in_board "box_empty")
 ;;
 
-(* The runtime.toml pane's frame is the shared contract's too. It subtracted
-   a literal 7 for its fixed rows and drew six, so the footer stood a row above
-   the composer, and the cursor bound read the same 7. Its height is now the
-   contract's rows and the heading it draws, one function for both readers. *)
-let test_the_config_frame_is_the_shared_contract () =
-  let in_config callee =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
-      ~binding_name:"render_config" ~callee
-  in
-  check int "the frame is drawn by the contract" 1 (in_config "surface_chrome");
-  check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
-  check int "and no row is filled by hand" 0 (in_config "box_empty");
-  check int "the source height is the one the cursor reads" 1
-    (in_config "config_content_height")
-;;
-
 (* The patch review, link preview, deletion record and command palette overlays
    are the shared contract's as well: it draws their box and fills the rows
    under a short body, so the footer stays on the composer's row. Drawn by
@@ -2593,6 +2577,22 @@ let test_the_overlays_are_the_shared_contract () =
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
        ~identifiers:[ "framed_chrome_rows" ])
+;;
+
+(* The runtime.toml pane's frame is the shared contract's too. It subtracted
+   a literal 7 for its fixed rows and drew six, so the footer stood a row above
+   the composer, and the cursor bound read the same 7. Its height is now the
+   contract's rows and the heading it draws, one function for both readers. *)
+let test_the_config_frame_is_the_shared_contract () =
+  let in_config callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_config" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (in_config "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
+  check int "and no row is filled by hand" 0 (in_config "box_empty");
+  check int "the source height is the one the cursor reads" 1
+    (in_config "config_content_height")
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
@@ -2728,6 +2728,10 @@ let () =
           `Quick
           test_the_board_header_and_rows_share_one_layout;
         test_case
+          "the overlays are the shared contract"
+          `Quick
+          test_the_overlays_are_the_shared_contract;
+        test_case
           "the board list frame is the shared contract"
           `Quick
           test_the_board_list_frame_is_the_shared_contract;
@@ -2735,10 +2739,6 @@ let () =
           "the config frame is the shared contract"
           `Quick
           test_the_config_frame_is_the_shared_contract;
-        test_case
-          "the overlays are the shared contract"
-          `Quick
-          test_the_overlays_are_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

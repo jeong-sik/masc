@@ -1642,6 +1642,19 @@ def wait_for_stop(
         select.select([master_fd], [], [], min(0.05, remaining))
 
 
+def path_without_masc(path: str) -> str:
+    """PATH with every directory that holds an executable [masc] left out."""
+    return os.pathsep.join(
+        entry
+        for entry in path.split(os.pathsep)
+        if entry
+        and not (
+            os.path.isfile(os.path.join(entry, "masc"))
+            and os.access(os.path.join(entry, "masc"), os.X_OK)
+        )
+    )
+
+
 def run_terminal_scenario(
     executable: str,
     *,
@@ -1693,6 +1706,15 @@ def run_terminal_scenario(
                 # A scenario's own variables (an $EDITOR stub, say) apply
                 # before the fixed set below, so the harness keeps the last
                 # word on the terminal it describes.
+                # A TUI that reaches no server starts one, and it looks for
+                # [masc] beside itself and then on PATH. A developer with an
+                # installed masc had scenarios whose fixture did not answer
+                # start a real server on the temporary workspace, which
+                # outlives the TUI by design and so outlived the test. CI has
+                # no masc on PATH, so only a developer's machine did this.
+                # The inherited PATH is filtered; a PATH a scenario sets below
+                # is that scenario's choice.
+                environment["PATH"] = path_without_masc(environment.get("PATH", ""))
                 if extra_env is not None:
                     environment.update(extra_env)
                 environment.update(
@@ -8288,9 +8310,16 @@ def run_tools_purpose_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
         require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
-        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools")
-        require("호출 범위", "비동기 작업", "Skill 기록", "사용 집계", "전체 도구", "p:다음 탭",
+        # The footer is the frame's last row, so wait for the frame to finish
+        # rather than for its title: the key is read from that row below.
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools",
+                        final_cursor=b"\x1b[?25l")
+        # The strip names the panes; the key that walks them is the footer's
+        # "p:section" (#35638). The strip used to say it again as "p:다음 탭".
+        require("호출 범위", "비동기 작업", "Skill 기록", "사용 집계", "전체 도구", "p:section",
                 "사용 증거: Skill 기록", "Tool 호출별 입출력: Acting")
+        if "p:다음 탭".encode() in screen_text(bytes(output)):
+            raise AssertionError("Tools pane strip spelled the footer's p key a second time")
         suppressed.set()
         send_and_wait(process, master_fd, output, b"r", "Runtime 도구 전달: 미지원으로 제외".encode())
         require("Runtime 도구 전달: 미지원으로 제외", "0 tools")

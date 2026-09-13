@@ -567,6 +567,16 @@ let split_at_cells text cells =
    and draws the mark anyway rather than cutting it, so the mark would overrun.
    The marquee would overrun first, since it spends two. A two-cell mark needs
    those four sites decided, not just this value changed. *)
+(* A count and the noun it counts, in the number the count asks for. Four
+   modules each wrote this as a local [plural], and thirty-odd rows wrote
+   "%d lines" with no plural at all, so a single draft line read "1 lines". *)
+let count_noun ?plural count singular =
+  let noun =
+    if count = 1 then singular
+    else match plural with Some word -> word | None -> singular ^ "s"
+  in
+  Printf.sprintf "%d %s" count noun
+
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 

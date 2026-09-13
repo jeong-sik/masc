@@ -1,5 +1,5 @@
 (** Masc_tui_link_preview — Web link previews, OpenGraph extraction,
-    rich embed cards, and 3D drop-shadow inspection modal. *)
+    rich embed cards, and the preview overlay. *)
 
 type link_kind =
   | Github of {
@@ -108,4 +108,4 @@ val render_inline_card : width:int -> og_preview -> string list
     Uses grapheme-safe cell width measurement and Notion-style 2-column layout. *)
 
 val render_modal_card : width:int -> height:int -> og_preview -> string list
-(** Full-width rich embed layout for the 3D drop-shadow preview modal. *)
+(** Full-width rich embed layout for the link preview overlay. *)

@@ -3534,7 +3534,12 @@
 (test
  (name test_tui_render_tools)
  (modules test_tui_render_tools)
- (libraries alcotest masc_tui_keys masc_tui_render_tools masc_tui_types))
+ (libraries
+  alcotest
+  masc_tui_keys
+  masc_tui_render_tools
+  masc_tui_theme
+  masc_tui_types))
 
 (test
  (name test_tui_keeper_legend)
@@ -4919,6 +4924,7 @@
 (include stanzas/test_tui_title_counts.inc)
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
+(include stanzas/test_tui_burn_hud.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)

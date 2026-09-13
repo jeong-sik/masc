@@ -166,8 +166,13 @@ val surface_chrome_rows : int
     title and its rule, the bottom border and the footer. A key handler that
     bounds a body's scroll subtracts this, the same number the frame does. *)
 
+type chrome_frame = Chrome_screen | Chrome_overlay
+(** [Chrome_screen] draws rules without a box, for a surface that is the whole
+    screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
+
 val surface_chrome :
   ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
+  ?frame:chrome_frame ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -206,6 +211,11 @@ val write_list_sidebar :
   title:string -> focused:bool -> labels:string list -> selected:int -> unit
 
 val data_unreliable_row : cols:int -> string -> string
+
+val burn_hud_text : Masc_tui_types.state -> string option
+(** The tab row's [/burn] reading without styling: the fleet's cost, and each
+    Keeper's token total as a braille bar when any Keeper has spent one.
+    [None] while it is hidden. *)
 
 val fenced_document_text : language:string -> string -> string
 
@@ -259,10 +269,24 @@ val planning_workspace_title :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+val keeper_control_hints :
+  ?offers_chat:bool ->
+  ?offers_back:bool ->
+  Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The Keeper keys alone. A surface whose footer carries the armed or running
+    action as a status item ({!keeper_action_status}) asks for this, so the
+    fitter keeps that sentence whole instead of treating it as a droppable key. *)
+
+val keeper_action_status :
+  Masc_tui_types.state -> Masc_tui_footer.status_item list
+(** The armed or running Keeper action, if there is one. *)
+
 val keeper_action_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The armed or running sentence when there is one, otherwise
+    {!keeper_control_hints}. For the footers that do not pass status items. *)
 
 val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 

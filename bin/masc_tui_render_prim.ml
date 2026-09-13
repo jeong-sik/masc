@@ -576,6 +576,19 @@ let composer_cursor state ~rows ~cols =
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
+(* What [/burn] puts at the right of the tab row: the fleet's cost, then one
+   braille bar per Keeper for its token total when any Keeper has spent one.
+   It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
+   and, with nothing spent, bars of blank cells inside the brackets. The bars
+   are each Keeper's running total, not a rate over time. *)
+let burn_hud_text (state : state) =
+  if not state.burn_hud_visible then None
+  else
+    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
+    if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
+      Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
+    else Some cost
+
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -667,22 +680,17 @@ let surface_strip (state : state) ~cols =
   if hi < n - 1 then
     Buffer.add_string parts
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
-  if state.burn_hud_visible then begin
-    let total_cost = Masc_tui_types.fleet_total_cost_usd state in
-    let spark = Masc_tui_types.fleet_token_sparkline state in
-    let hud =
-      Printf.sprintf "%s[HUD $%.2f %s%s%s]%s"
-        (Theme.recede ()) total_cost (Theme.info ()) spark (Theme.recede ()) Ansi.reset
-    in
-    let hud_raw = Printf.sprintf "[HUD $%.2f %s]" total_cost spark in
-    let hud_cells = Message_layout.display_width hud_raw in
-    let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
-    if cols >= used_cells + hud_cells + 2 then begin
-      let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
-      Buffer.add_string parts gap;
-      Buffer.add_string parts hud
-    end
-  end;
+  (match burn_hud_text state with
+   | None -> ()
+   | Some hud_raw ->
+       let hud = Theme.recede () ^ hud_raw ^ Ansi.reset in
+       let hud_cells = Message_layout.display_width hud_raw in
+       let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
+       if cols >= used_cells + hud_cells + 2 then begin
+         let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
+         Buffer.add_string parts gap;
+         Buffer.add_string parts hud
+       end);
   Buffer.contents parts
 
 
@@ -1026,8 +1034,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 (* ── the A-family surface chrome contract ─────────────────────────────
-   One owner for a borderless surface's fixed rows: top gap, title row,
-   divider, height fill, bottom gap, and the status-tail footer. The body
+   One owner for the fixed rows of a surface, or of an overlay drawn over
+   one: top, title row, divider, height fill, bottom, and the status-tail
+   footer. The body
    pushes its rows through the record and the contract counts them, so the
    hand-tallied chrome_rows constants (the fixed-chrome-row trap: add a row,
    forget the count, lose a body line) cannot drift — there is nothing left
@@ -1043,16 +1052,42 @@ type chrome_body = {
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
-   itself. Everything else is the body's budget. *)
-let surface_chrome_rows = 5
+   itself. Everything else is the body's budget. The framed panels count the
+   same five rows, and a key handler bounding an overlay's scroll with
+   [framed_content_height] must agree with what this draws, so the number has
+   one owner. *)
+let surface_chrome_rows = framed_chrome_rows
 
-let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
-    ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
+(* Which frame the contract draws. A surface is the terminal's whole screen and
+   its edge is already the frame, so it draws rules and no box. An overlay is
+   opened over a surface and keeps its box, which is how a reader tells the two
+   apart. The rows around the body are five either way, so the budget is the
+   same. *)
+type chrome_frame = Chrome_screen | Chrome_overlay
+
+let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
+    ~terminal_rows ~cols ~surface_key ~title ~hints
+    ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
-  box_line buf cols title;
-  box_divider buf cols;
+  let top, line, line_styled, line_selected, divider, empty, bottom =
+    match frame with
+    | Chrome_screen ->
+        ( box_top, box_line, box_line_styled, box_line_selected, box_divider
+        , box_empty, box_bottom )
+    | Chrome_overlay ->
+        ( framed_top
+        , framed_line
+        , framed_line_styled
+        , (fun buf cols content ->
+            framed_line_styled buf cols ~style:Masc_tui_theme.selection content)
+        , framed_divider
+        , framed_empty
+        , framed_bottom )
+  in
+  top buf cols;
+  line buf cols title;
+  divider buf cols;
   let budget = max 1 (rows - surface_chrome_rows) in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
@@ -1065,20 +1100,20 @@ let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     if !used < budget then begin incr used; draw arg end
   in
   let body_pushers =
-    { push = counted (fun line -> box_line buf cols line)
+    { push = counted (fun text -> line buf cols text)
     ; push_styled =
-        (fun ~style line ->
-          counted (fun line -> box_line_styled buf cols ~style line) line)
-    ; push_selected = counted (fun line -> box_line_selected buf cols line)
-    ; push_divider = counted (fun () -> box_divider buf cols)
-    ; push_empty = counted (fun () -> box_empty buf cols)
+        (fun ~style text ->
+          counted (fun text -> line_styled buf cols ~style text) text)
+    ; push_selected = counted (fun text -> line_selected buf cols text)
+    ; push_divider = counted (fun () -> divider buf cols)
+    ; push_empty = counted (fun () -> empty buf cols)
     }
   in
   body ~budget body_pushers;
   for _ = !used + 1 to budget do
-    box_empty buf cols
+    empty buf cols
   done;
-  box_bottom buf cols;
+  bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   (* Read after the body, because that is the only moment the value exists:
      a surface whose rows the drawing counts cannot say what it clamped to
@@ -1868,7 +1903,31 @@ let planning_proof_mark proof =
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+(* A destructive action armed, or one already running. Status rather than a hint:
+   [?] cannot recover "press d again to delete analyst", and the next unrelated
+   key cancels the arm, so a footer that gives this up to fit something else
+   gives up the only notice of a state the operator is standing in. The keys stay
+   on the row beside it now instead of being replaced by it. *)
+let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+    [ Masc_tui_footer.Keeper_action_running
+        { gerund = Keeper_control.action_gerund action
+        ; keeper = Terminal_text.single_line keeper_name
+        }
+    ]
+  | None, Some pending ->
+    [ Masc_tui_footer.Keeper_action_armed
+        { key = Keeper_control.action_key pending.Keeper_control.pending_action
+        ; action =
+            Keeper_control.action_label pending.Keeper_control.pending_action
+        ; keeper =
+            Terminal_text.single_line pending.Keeper_control.pending_keeper
+        }
+    ]
+  | None, None -> []
+
+let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1897,26 +1956,13 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
-  match (state.keeper_action_inflight, state.keeper_action_pending) with
-  | Some (keeper_name, action), _ ->
-      Printf.sprintf "%s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-        (Keeper_control.action_gerund action)
-        (Terminal_text.single_line keeper_name)
-        Ansi.reset
-  | None, Some pending ->
-      Printf.sprintf "%s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
-        (Keeper_control.action_key pending.Keeper_control.pending_action)
-        (Keeper_control.action_label pending.Keeper_control.pending_action)
-        (Terminal_text.single_line pending.Keeper_control.pending_keeper)
-        Ansi.reset
-  | None, None ->
-      (* [key:label] items, two spaces apart: the shape every other footer
-         uses, so Masc_tui_footer can split the row, drop the lowest priority
-         item when the row is tight, and keep the keys it never drops. Written
-         "key label" and joined with a middle dot, the whole legend was one
-         item nothing could split -- at 60 columns the row cut mid-word and
-         "q quit", last in the list, went first. The two keys the footer pins
-         lead with a plain key so it can read them past the colour. *)
+  (* [key:label] items, two spaces apart: the shape every other footer
+     uses, so Masc_tui_footer can split the row, drop the lowest priority
+     item when the row is tight, and keep the keys it never drops. Written
+     "key label" and joined with a middle dot, the whole legend was one
+     item nothing could split -- at 60 columns the row cut mid-word and
+     "q quit", last in the list, went first. The two keys the footer pins
+     lead with a plain key so it can read them past the colour. *)
       String.concat "  "
           [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
@@ -1960,6 +2006,25 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 (* One colour per level so an operator scanning the column sees severity before
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
+
+(* What the footer says about the Keeper actions: the armed or running sentence
+   when there is one, otherwise the keys. The sentence's words come from
+   {!Masc_tui_footer}, which is also where the Keepers list reads them as a
+   status item, so the two footers cannot word the same state differently. *)
+let keeper_action_state_text (state : state) =
+  match keeper_action_status state with
+  | item :: _ ->
+    Option.map
+      (fun (projected : Masc_tui_footer.projected_status) ->
+        Ansi.bold ^ (Theme.warn ()) ^ projected.text ^ Ansi.reset)
+      (Masc_tui_footer.status_item_projection item)
+  | [] -> None
+
+let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+  match keeper_action_state_text state with
+  | Some text -> text
+  | None -> keeper_control_hints ~offers_chat ~offers_back state reading
+
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
   | System_info -> Ansi.reset
@@ -2368,7 +2433,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  %s" total scroll ds.ds_esc_hint
+       Printf.sprintf "[%s, scroll %d]  %s" (Masc_tui_message_layout.count_noun total "line") scroll ds.ds_esc_hint
      else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -3117,7 +3182,7 @@ let context_exact_input_summary ~width
   ( [ "  "
       ^ Context_bars.band ~width ~title:"BY KIND"
           ~caption:
-            (Printf.sprintf "%d items, %s retained" (List.length items)
+            (Printf.sprintf "%s, %s retained" (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_context_inspector.format_bytes total))
     ]
     @ bar @ rows

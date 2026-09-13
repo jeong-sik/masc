@@ -408,13 +408,13 @@ check_rule "R14-tui-row-walk" 0 \
 # hand it says "not loaded" after a failure and sends the operator to [r] while
 # the server's reason sits in red two rows below. The Memory header was taught
 # the difference in #35457; twelve other surfaces still said "not loaded" for
-# both until the words moved into Masc_tui_render_prim.
+# both until the words moved into one place, now Masc_tui_types beside empty_page.
 #
 # title_missing_reading ~error:<the surface's error> chooses between them.
 check_rule "R15-tui-title-not-loaded-literal" 0 \
   "title_missing_reading ~error:state.<surface>_error" \
   '\(not loaded' \
-  'bin/masc_tui_render_prim\.mli?:' \
+  'bin/masc_tui_types\.ml:' \
   bin
 
 # The failure note the body draws under an empty page. Thirteen sites draw it,
@@ -435,7 +435,7 @@ for fixture in \
   fi
 done
 if printf '%s\n' \
-  'Masc_tui_render_prim.page_failed_note' \
+  'Masc_tui_types.page_failed_note' \
   '| Page_failed -> page_failed_note' \
   'page_unread_note' \
   '  (no entries)' \
@@ -450,9 +450,9 @@ else
   fail=1
 fi
 check_rule "R16-tui-page-failed-note-literal" 0 \
-  "Masc_tui_render_prim.page_failed_note" \
+  "Masc_tui_types.page_failed_note" \
   "$r16_pattern" \
-  'bin/masc_tui_render_prim\.mli?:' \
+  'bin/masc_tui_types\.ml:' \
   bin
 
 # The Board sort token. It is the value the board list is asked for

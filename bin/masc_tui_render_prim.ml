@@ -3735,6 +3735,7 @@ let answering_lines (state : state) =
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
     ~error:state.keeper_turns_error
+    ~observed_at:state.keeper_turns_observed_at
     ~finishes:state.keeper_turn_finishes
     state.keeper_turns
 

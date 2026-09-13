@@ -3503,7 +3503,7 @@ module Browser_lane_view = struct
   let primary_region_target t =
     let regions = scene_targets t |> List.mapi
       (fun index (node : Masc.Browser_scene.node) -> index, node)
-      |> List.filter_map (fun (index, node) ->
+      |> List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
         match node.kind with
         | Region role -> Some (role, index, node)
         | Text | Raster | Control _ -> None) in

@@ -233,10 +233,31 @@ let test_source_activity_does_not_infer_ownership () =
   check bool "browser completion does not refresh MSX capture" false
     (Sources.interested msx Sources.Browser_changed)
 
+(* Each misc tool says which source it moves, beside the activity type rather
+   than in the event bridge. A tool that moves nothing is a plain completion,
+   and reads are not source changes. *)
+let test_misc_tools_name_the_source_they_move () =
+  let label = function
+    | Sources.Msx_changed -> "msx"
+    | Sources.Browser_changed -> "browser"
+    | Sources.Tool_completed -> "tool" in
+  let activity operation = label (Sources.activity_of_misc_operation operation) in
+  check string "stepping the MSX moves its capture" "msx"
+    (activity Tool_schemas_misc.Misc_msx_step);
+  check string "reading the MSX screen moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_msx_screen);
+  check string "interacting with a page moves its document" "browser"
+    (activity Tool_schemas_misc.Misc_browser_interact);
+  check string "listing tabs moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_browser_tabs);
+  check string "a web search is a plain completion" "tool"
+    (activity Tool_schemas_misc.Misc_web_search)
+
 let () = run "Lane source provenance" ["acquisition", [
   test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
   test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;
-  test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage]]
+  test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage;
+  test_case "misc tools name the source they move" `Quick test_misc_tools_name_the_source_they_move]]

@@ -2835,17 +2835,69 @@ let help_lines ~width (state : state) =
 
 module Context_bars = Masc_tui_context_bars
 
-let context_component_style = function
-  | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Theme.category Theme.Slot_2
-  | Turn_record.Prompt_block _ -> Ansi.bold
-  | Turn_record.Tool_schemas -> (Theme.warn ())
-  | Turn_record.Message_user -> (Theme.info ())
-  | Turn_record.Message_tool_use | Turn_record.Message_tool_result -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
-  | Turn_record.Message_system | Turn_record.Message_assistant_text
-  | Turn_record.Message_thinking | Turn_record.Message_redacted_thinking
-  | Turn_record.Message_image | Turn_record.Message_document
-  | Turn_record.Message_audio -> Ansi.reset
+(* One colour and one shade per producer, on every tab. Seven kinds took
+   seven colours picked kind by kind: two of them were the terminal's default,
+   so "Assistant text" and "Keeper instructions" were the same white row, and
+   the shade beside them cycled with the row's position, which put the same
+   shade on unrelated kinds and moved it when the sizes changed. Colour says
+   where the bytes came in; the composition tree, the request tab's kinds and
+   the proof tab's blocks all read from this one answer. *)
+let context_source_style = function
+  | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.warn ()
+  | Masc_tui_context_inspector.Effective_tool_surface ->
+      Masc_tui_theme.tone Masc_tui_theme.Accent
+  | Masc_tui_context_inspector.Provider_message_list ->
+      Theme.category Theme.Slot_2
+
+(* Shade as well as colour, so the groups stay apart where the terminal
+   reports no colour support. *)
+let context_source_glyph = function
+  | Masc_tui_context_inspector.Turn_prompt_assembly -> Context_bars.bar_full
+  | Masc_tui_context_inspector.Effective_tool_surface -> Context_bars.bar_dark
+  | Masc_tui_context_inspector.Provider_message_list -> Context_bars.bar_medium
+
+(* What the shades stand for, for a tab that draws them without a column
+   naming the producer beside every row. *)
+let context_source_legend =
+  String.concat
+    (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+    (List.map
+       (fun source ->
+         context_source_style source
+         ^ context_source_glyph source
+         ^ Ansi.reset ^ Ansi.dim ^ " "
+         ^ Masc_tui_context_inspector.input_source_label source
+         ^ Ansi.reset)
+       Masc_tui_context_inspector.input_sources)
+
+let context_component_style component =
+  context_source_style (Masc_tui_context_inspector.input_source component)
+
+(* The elbow a composition row hangs from. One producer with a single
+   component gets a straight run rather than a branch that forks into
+   nothing. *)
+let context_branch ~index ~last =
+  if last = 0 then " \xe2\x94\x80\xe2\x94\x80 "
+  else if index = 0 then " \xe2\x94\x80\xe2\x94\xac "
+  else if index = last then "  \xe2\x94\x94 "
+  else "  \xe2\x94\x9c "
+
+(* Everything a composition row spends outside the producer name and the
+   component name: the indent, the elbow, the shade, the share and the byte
+   count with their separators. Taken from the row below so the two move
+   together. *)
+let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 9
+
+(* The longest component name the record can carry ("Keeper instructions",
+   "Redacted thinking") sits inside this, so the column is as wide as the
+   names rather than as wide as the terminal. *)
+let context_flow_label_cells = 24
+
+let pad_cells ~width text =
+  text
+  ^ String.make
+      (max 0 (width - Message_layout.display_width text))
+      ' '
 
 
 let context_evidence_style = function
@@ -3079,11 +3131,11 @@ let context_composition_lines ~cols ~turn_back
                 turns_behind_latest Ansi.reset
             ]
         in
-        (* Biggest share first. The record's order is neither prompt order nor
-           size order, and the stacked bar only reads as a picture when its
-           shades run from the largest share down: there are four shades and a
-           turn can carry nine components, so an unsorted row puts the repeated
-           shade next to unrelated sizes. *)
+        (* Grouped by the producer the bytes entered through, in the order a
+           turn assembles them, and biggest share first inside a group. The
+           list was ranked by size alone: it named seven kinds in one column
+           and never said that three of them are the prompt this turn built
+           and three more are the conversation the provider was handed. *)
         let ranked =
           List.stable_sort
             (fun (left : Turn_record.input_component)
@@ -3091,40 +3143,89 @@ let context_composition_lines ~cols ~turn_back
               compare right.bytes left.bytes)
             components
         in
+        let by_source =
+          List.filter_map
+            (fun source ->
+              match
+                List.filter
+                  (fun (component : Turn_record.input_component) ->
+                    Inspector.input_source component.component = source)
+                  ranked
+              with
+              | [] -> None
+              | grouped -> Some (source, grouped))
+            Inspector.input_sources
+        in
         let bar =
           if total = 0 then []
           else
             [ "  "
               ^ Context_bars.stacked_bar ~width:bar_width
                   ~segments:
-                    (List.map
-                       (fun (component : Turn_record.input_component) ->
-                         ( context_component_style component.component
-                         , component.bytes ))
-                       ranked)
+                    (List.concat_map
+                       (fun (source, grouped) ->
+                         List.map
+                           (fun (component : Turn_record.input_component) ->
+                             ( context_source_style source
+                             , context_source_glyph source
+                             , component.bytes ))
+                           grouped)
+                       by_source)
             ]
         in
+        let source_width =
+          List.fold_left
+            (fun widest (source, _) ->
+              max widest
+                (String.length (Inspector.input_source_label source)))
+            0 by_source
+        in
+        (* Wide enough for the longest component name and no wider: the share
+           and the byte count belong beside the name they describe, not at the
+           far edge of a 140-column overlay. *)
+        let label_width =
+          min context_flow_label_cells
+            (max 10 (width - source_width - context_flow_row_chrome_cells))
+        in
         let rows =
-          List.mapi
-            (fun index (component : Turn_record.input_component) ->
-              let share =
-                if total = 0 then 0.
-                else float component.bytes /. float total *. 100.
-              in
-              (* A component with bytes in it must not print as 0.0%: the
-                 screen would then name a kind and deny it in the same row. *)
-              let share_text =
-                if component.bytes > 0 && share < 0.05 then "<0.1%"
-                else Printf.sprintf "%.1f%%" share
-              in
-              let style = context_component_style component.component in
-              Printf.sprintf "  %s%s %-22s%s %6s  %s%9s%s" style
-                (Context_bars.segment_glyph index)
-                (Inspector.input_component_label component.component)
-                Ansi.reset share_text Ansi.dim
-                (Inspector.format_bytes component.bytes)
-                Ansi.reset)
-            ranked
+          List.concat_map
+            (fun (source, grouped) ->
+              let style = context_source_style source in
+              let last = List.length grouped - 1 in
+              List.mapi
+                (fun index (component : Turn_record.input_component) ->
+                  let share =
+                    if total = 0 then 0.
+                    else float component.bytes /. float total *. 100.
+                  in
+                  (* A component with bytes in it must not print as 0.0%: the
+                     screen would then name a kind and deny it in the same
+                     row. *)
+                  let share_text =
+                    if component.bytes > 0 && share < 0.05 then "<0.1%"
+                    else Printf.sprintf "%.1f%%" share
+                  in
+                  String.concat ""
+                    [ "  "
+                    ; Ansi.dim
+                    ; pad_cells ~width:source_width
+                        (if index = 0 then Inspector.input_source_label source
+                         else "")
+                    ; context_branch ~index ~last
+                    ; Ansi.reset
+                    ; style
+                    ; context_source_glyph source
+                    ; " "
+                    ; pad_cells ~width:label_width
+                        (Inspector.input_component_label component.component)
+                    ; Ansi.reset
+                    ; Printf.sprintf " %6s  " share_text
+                    ; Ansi.dim
+                    ; Printf.sprintf "%9s" (Inspector.format_bytes component.bytes)
+                    ; Ansi.reset
+                    ])
+                grouped)
+            by_source
         in
         (* Attributed bytes and serialized bytes are compared on the same turn, never
            across two. They still disagree: on 2026-09-01 the attributed total
@@ -3143,7 +3244,20 @@ let context_composition_lines ~cols ~turn_back
                    (Inspector.format_bytes observation.body_bytes))
           | Some _ | None -> []
         in
-        gap @ bar @ rows @ against_wire
+        (* The arrow says the rows above are what the request below is made
+           of. Drawn only when both readings are the same turn: where the
+           composition is older, [gap] says so and an arrow into this turn's
+           request would deny it. *)
+        let into_request =
+          if turns_behind_latest > 0 then []
+          else
+            let indent = String.make (2 + source_width + 2) ' ' in
+            [ Ansi.dim ^ indent ^ "\xe2\x94\x82" ^ Ansi.reset
+            ; Ansi.dim ^ indent ^ "\xe2\x96\xbc  serialized and dispatched"
+              ^ Ansi.reset
+            ]
+        in
+        gap @ bar @ rows @ into_request @ against_wire
   in
   (* The per-turn input the provider itself counted, newest first, one row
      per dispatched turn the page holds. A provider that reports its usage
@@ -3225,7 +3339,16 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
+  (* Read top to bottom as the turn is built: what came in, what was sent,
+     how far back it reached, and what the provider counted on the turns
+     before it. The request stood above the components it is made of, so the
+     screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"COMPOSITION"
+          ~caption:"where this turn's bytes came in"
+    ]
+  @ component_lines @ [ "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
           ~caption:"bytes prepared before dispatch"
@@ -3239,11 +3362,6 @@ let context_composition_lines ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ [ "  "
-      ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"how this turn's content divides by kind"
-    ]
-  @ component_lines @ [ "" ]
   @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
@@ -3313,39 +3431,62 @@ let context_exact_input_summary ~width
   List.iter
     (fun (item : Inspector.exact_input_item) ->
       let key = Inspector.exact_input_category item.kind in
+      let source = Inspector.exact_input_source item.kind in
       match Hashtbl.find_opt tally key with
       | None ->
           order := key :: !order;
-          Hashtbl.replace tally key (1, item.bytes)
-      | Some (count, bytes) ->
-          Hashtbl.replace tally key (count + 1, bytes + item.bytes))
+          Hashtbl.replace tally key (1, item.bytes, source)
+      | Some (count, bytes, source) ->
+          Hashtbl.replace tally key (count + 1, bytes + item.bytes, source))
     items;
   let groups =
     List.filter_map
       (fun key ->
         match Hashtbl.find_opt tally key with
         | None -> None
-        | Some (count, bytes) -> Some (key, count, bytes))
+        | Some (count, bytes, source) -> Some (key, count, bytes, source))
       (List.rev !order)
+  in
+  (* Producer first, then size, the way the composition tab groups the same
+     bytes: a reader who learned there that the pink shade is the conversation
+     handed to the provider reads it here without a second legend. *)
+  let source_rank source =
+    let rec index position = function
+      | [] -> List.length Inspector.input_sources
+      | candidate :: rest ->
+          if candidate = source then position else index (position + 1) rest
+    in
+    index 0 Inspector.input_sources
   in
   let ranked =
     List.stable_sort
-      (fun (_, _, left) (_, _, right) -> compare right left)
+      (fun (_, _, left_bytes, left_source) (_, _, right_bytes, right_source) ->
+        match compare (source_rank left_source) (source_rank right_source) with
+        | 0 -> compare right_bytes left_bytes
+        | order -> order)
       groups
   in
-  let total = List.fold_left (fun sum (_, _, bytes) -> sum + bytes) 0 ranked in
+  let total =
+    List.fold_left (fun sum (_, _, bytes, _) -> sum + bytes) 0 ranked
+  in
   let bar_width = min 60 width in
   let bar =
     if total = 0 then []
     else
       [ "  "
         ^ Context_bars.stacked_bar ~width:bar_width
-            ~segments:(List.map (fun (_, _, bytes) -> "", bytes) ranked)
+            ~segments:
+              (List.map
+                 (fun (_, _, bytes, source) ->
+                   ( context_source_style source
+                   , context_source_glyph source
+                   , bytes ))
+                 ranked)
       ]
   in
   let rows =
-    List.mapi
-      (fun index (key, count, bytes) ->
+    List.map
+      (fun (key, count, bytes, source) ->
         let share =
           if total = 0 then 0. else float bytes /. float total *. 100.
         in
@@ -3359,9 +3500,10 @@ let context_exact_input_summary ~width
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s %s %s%3d %s%s  %9s  %6s"
-          (Context_bars.segment_glyph index)
-          label Ansi.dim count
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  %6s"
+          (context_source_style source)
+          (context_source_glyph source)
+          label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
           (Masc_tui_context_inspector.format_bytes bytes)
@@ -3544,16 +3686,28 @@ let context_exact_input_lines ~cols state ~response ~response_parts
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
              let label_width = max 8 (width - 20) in
+             (* The list carries the producer's colour the summary above it
+                groups by, except under the selection band, whose own styling
+                owns the whole row. *)
+             let label =
+               fit_width (Inspector.exact_input_label item.kind) label_width
+             in
+             let label =
+               if selected then label
+               else
+                 context_source_style (Inspector.exact_input_source item.kind)
+                 ^ label ^ Ansi.reset
+             in
              Printf.sprintf "%s %s %2d %s  %s  %9s%s" style marker (index + 1)
-               (kind_letter index item)
-               (fit_width (Inspector.exact_input_label item.kind) label_width)
+               (kind_letter index item) label
                (Inspector.format_bytes item.bytes) Ansi.reset)
           items
       in
       let legend =
-        Context_bars.wrap ~width
-          "F fixed prompt · H history · N new this turn · S schema"
-        |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+        ("  " ^ context_source_legend)
+        :: (Context_bars.wrap ~width
+              "F fixed prompt · H history · N new this turn · S schema"
+           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
       if cols >= keeper_split_threshold_cols then

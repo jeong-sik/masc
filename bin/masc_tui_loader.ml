@@ -1060,7 +1060,7 @@ let load_runtime_params ~(host : string) ~(port : int) :
 
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
-    ((string * string) list, string) result =
+    ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result =
   match fetch_keeper_tool_approval_modes ~host ~port with
   | Error err -> Error ("tool approval modes load failed: " ^ err)
   | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json

@@ -30,8 +30,12 @@ type kind =
       disabled : bool;
       href : string option;
     }
+type text_role = Plain_text | Heading of int
+val text_role_of_tag : string -> text_role
 type node = { node_id : string; kind : kind; tag : string; text : string;
+  heading_level : int option;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
+val text_role : node -> text_role
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
   view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }

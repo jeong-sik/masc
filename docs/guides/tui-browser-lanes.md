@@ -117,6 +117,9 @@ they leave the selection unchanged on content scenes without article roles.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
 destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.
+When `Enter` reads a region, the context row keeps the observed typed role and
+label (for example, `article · Post A`) while the body is scoped. `y` includes
+that same scope context with the document/node identity.
 `m` is the short semantic path for a page's primary reading surface: the first
 press observes `main`/`article` landmarks, and the second focuses the unique
 exact-role match. Role names are classified at the observation boundary;
@@ -127,12 +130,27 @@ If the destination read is still pending or fails, the footer exposes `r`/`s`/`v
 as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,
 and truncation flag, so a Keeper can preserve the same reading scope.
+The scene status line also reports the observed composition, such as
+`2 articles · 6 links · 1 image`; these are typed node counts, not guesses from
+page text. Use the article count to choose `N`/`P` before reading the full body.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 
 The scene is DOM-order text, controls and image placeholders. CSS geometry is
 available to tools; this first TUI projection does not reproduce CSS layout or
 compose inline raster regions. Use image view for the browser's painted result.
+Text nodes and observed controls with an observed heading ancestor are shown
+with a `#` outline prefix, so article titles and section headings remain
+visible while reading the DOM-order body. The scene records an `h1`–`h6`
+ancestor, including text nested under a span and links whose own control node
+is the observed heading target, plus an explicit `role="heading"` with
+`aria-level` 1–6.
+Missing or invalid ARIA levels stay plain text; the reader does not infer
+headings from text, CSS, font size, or class names.
+For eligible observed block-tag nodes, a positive vertical gap from the
+preceding eligible node becomes one blank TUI row. An intervening inline node
+breaks that comparison, zero-gap line fixtures stay compact, and the reader
+does not infer CSS display or invent spacing from a site selector.
 TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.

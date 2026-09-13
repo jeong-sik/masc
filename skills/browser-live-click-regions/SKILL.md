@@ -26,10 +26,11 @@ from navigationSource. Preserve that receipt with expectedUrl when retrying
 BrowserRead; do not remove this guard to accept the pre-reload document.
 A different destination URL may stay in the same document (SPA navigation).
 
-A matching URL is only a URL acknowledgement. Slack may still show the previous
-channel or loading content. Use slack-web instructions to verify channel title
-and actual messages; reobserve without navigation until evidence identifies the
-requested channel. This does not promise application readiness or complete history.
+A matching URL is only a URL acknowledgement. The destination may still show
+the previous view or loading content. Use the active site instruction to verify
+the destination title, requested target, and actual content; reobserve without
+navigation until that evidence is present. This does not promise application
+readiness or complete history.
 
 ```toml composition
 [[compositions]]

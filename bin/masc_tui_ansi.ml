@@ -291,15 +291,93 @@ end
    Config's panes, Planning's tabs, Metrics' sections -- each drew their own
    variant: a "|" between names on two of them, a space before the unmarked
    names on two, a different colour on one. *)
-let tab_strip (tabs : (string * bool) list) =
-  String.concat "  "
-    (List.map
-       (fun (label, current) ->
-         if current then
-           Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
-           ^ Ansi.reset
-         else Ansi.dim ^ label ^ Ansi.reset)
-       tabs)
+(* [width] is what the row can spare for the strip. A strip wider than that
+   used to be cut by the row's fitter from the right, so beside the roster pane
+   the Keeper detail's nine tabs ended at "Automatio…" and a reader on Runs
+   had no mark anywhere on the row; Config's seven panes lost "voice" the
+   same way. The entries are cut around the current one instead: it always
+   draws, its neighbours fill what is left, one side at a time, and a dim
+   "…" stands where entries were dropped. Entries that fit draw exactly as
+   before. *)
+let tab_strip_gap = "  "
+
+let tab_strip_cut = "\xe2\x80\xa6"
+
+let tab_strip ~width (tabs : (string * bool) list) =
+  let draw (label, current) =
+    if current then
+      Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
+      ^ Ansi.reset
+    else Ansi.dim ^ label ^ Ansi.reset
+  in
+  let cells text = Masc_tui_message_layout.display_width text in
+  let entries = Array.of_list tabs in
+  let n = Array.length entries in
+  if n = 0 then ""
+  else begin
+    let widths =
+      Array.map
+        (fun (label, current) ->
+          (if current then cells Masc_tui_theme.Glyph.current_entry else 0)
+          + cells label)
+        entries
+    in
+    let gap = cells tab_strip_gap in
+    let span lo hi =
+      let sum = ref 0 in
+      for i = lo to hi do
+        sum := !sum + widths.(i)
+      done;
+      !sum + (gap * (hi - lo))
+    in
+    if span 0 (n - 1) <= width then String.concat tab_strip_gap (List.map draw tabs)
+    else begin
+      let cut = cells tab_strip_cut + gap in
+      let fits lo hi =
+        span lo hi
+        + (if lo > 0 then cut else 0)
+        + (if hi < n - 1 then cut else 0)
+        <= width
+      in
+      let current =
+        let rec find i =
+          if i >= n then 0 else if snd entries.(i) then i else find (i + 1)
+        in
+        find 0
+      in
+      let lo = ref current and hi = ref current in
+      (* Grown a neighbour at a time, the side alternating, so a current
+         entry in the middle keeps both its neighbours before either side
+         reaches further. *)
+      let prefer_right = ref true in
+      let growing = ref true in
+      while !growing do
+        let right () =
+          if !hi + 1 < n && fits !lo (!hi + 1) then (incr hi; true) else false
+        in
+        let left () =
+          if !lo > 0 && fits (!lo - 1) !hi then (decr lo; true) else false
+        in
+        let grew = if !prefer_right then right () || left () else left () || right () in
+        if grew then prefer_right := not !prefer_right else growing := false
+      done;
+      let shown =
+        List.init (!hi - !lo + 1) (fun i -> draw entries.(!lo + i))
+        |> String.concat tab_strip_gap
+      in
+      let mark = Ansi.dim ^ tab_strip_cut ^ Ansi.reset in
+      (if !lo > 0 then mark ^ tab_strip_gap else "")
+      ^ shown
+      ^ if !hi < n - 1 then tab_strip_gap ^ mark else ""
+    end
+  end
+
+(* The cells a row leaves its strip: the frame's inner width less everything
+   the row draws before the strip, gap included. Callers hand over the text
+   they draw rather than a number, so the two cannot disagree. *)
+let tab_strip_width ~cols ~before =
+  Masc_tui_frame.inner_width ~cols
+  - Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr before)
 
 (** One owner for the visual distinction between conversation roles.
 

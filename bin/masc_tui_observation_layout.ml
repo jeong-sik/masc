@@ -190,7 +190,7 @@ let context_summary = function
       Context_unavailable
         (Tui_decode.context_unavailable_reason_to_string reason)
 
-let context_header_item ~max_cells observation =
+let context_header_item ~max_cells ~inspect_key observation =
   match context_summary observation with
   | Context_measured { ratio; tokens; maximum; _ } ->
       (* The key travels with the number. This line was the only place the
@@ -218,6 +218,7 @@ let context_header_item ~max_cells observation =
         Printf.sprintf "Context %.0f%% \xc2\xb7 %s/%s tok" (ratio *. 100.0)
           (grouped_int tokens) (grouped_int maximum)
       in
-      [ measured ^ " \xc2\xb7 ^X"; measured; figure ^ " \xc2\xb7 ^X"; figure ]
+      let with_key text = text ^ " \xc2\xb7 " ^ inspect_key in
+      [ with_key measured; measured; with_key figure; figure ]
       |> List.find_opt (fun candidate -> max_cells >= cells candidate)
   | Context_partial _ | Context_unavailable _ -> None

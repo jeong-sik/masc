@@ -1587,10 +1587,14 @@ let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
 
 (** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
 let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+    ~(keeper_name : string) ~(mode : Masc.Keeper_tool_approval_mode.mode) :
+    (unit, string) result =
   let body =
     Yojson.Safe.to_string
-      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+      (`Assoc
+        [ ("name", `String keeper_name)
+        ; ("mode", `String (Masc.Keeper_tool_approval_mode.mode_to_string mode))
+        ])
   in
   match
     post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body

@@ -141,7 +141,28 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
    the name on the folded line while masc_tui.ml matches the byte. Apart,
    one of them drifts and the line names a key that does nothing. *)
 let expand_turn_key = "\019"
-let expand_turn_label = "^S"
+let expand_turn_label = "Ctrl-S"
+
+(* The control keys a body row names beside a figure or a draft. They are
+   here, beside the bindings that list them, so a row and the footer cannot
+   spell one key two ways: the composer said "^Y" under a footer saying
+   "Ctrl-Y", and the context header "^X" for a key the table did not list. *)
+let voice_speak_key = "Ctrl-Y"
+let voice_listen_key = "Ctrl-A"
+let roster_toggle_key = "Ctrl-B"
+
+(* Ctrl-X opens the context inspector from the chat. It is named on the
+   context header, beside the figure it explains, and nowhere else: the
+   footer has no room for a key whose home is that row. *)
+let context_inspector_key = "\024"
+let context_inspector_label = "Ctrl-X"
+
+(* The two voice keys, named for a reader looking at an empty draft. One
+   spelling for every row that takes a draft, so the composer row and the chat
+   pane cannot come to describe the same keys two ways. *)
+let voice_keys_hint =
+  Printf.sprintf "(%s to speak, %s to keep listening)" voice_speak_key
+    voice_listen_key
 
 
 let keepers_jump =
@@ -160,7 +181,7 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
-  ; b Meta "Ctrl-B" "keeper roster beside the chat — put away until you ask"
+  ; b Meta roster_toggle_key "keeper roster beside the chat — put away until you ask"
       ~help:"the Activity pane (Ctrl-L) answers the same question for every \
              keeper, so the column starts hidden; this brings it back on a \
              terminal wide enough to hold it"
@@ -307,9 +328,9 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
-      ; b Act "Ctrl-Y" "speak"
+      ; b Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
-      ; b Act "Ctrl-A" "keep listening"
+      ; b Act voice_listen_key "keep listening"
           ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"

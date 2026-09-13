@@ -17,7 +17,7 @@ let make_state () =
   create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 
 let test_the_strip_names_panes_and_leaves_the_key_to_the_footer () =
-  let strip = Masc_tui_render_tools.tools_pane_strip (make_state ()) in
+  let strip = Masc_tui_render_tools.tools_pane_strip ~cols:120 (make_state ()) in
   List.iter
     (fun pane ->
       Alcotest.(check bool)
@@ -36,7 +36,7 @@ let test_the_strip_is_the_shared_drawing () =
   Alcotest.(check string) "the open pane marked, two cells apart"
     "\xe2\x96\xb8호출 범위  비동기 작업  Skill 기록  Skill 사용 집계  전체 도구"
     (Masc_tui_theme.strip_sgr
-       (Masc_tui_render_tools.tools_pane_strip (make_state ())))
+       (Masc_tui_render_tools.tools_pane_strip ~cols:120 (make_state ())))
 
 (* The Keeper surface line says which of the two missing readings it is. It
    said "not loaded" under a failed inventory read. *)

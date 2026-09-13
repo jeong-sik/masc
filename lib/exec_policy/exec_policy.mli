@@ -45,11 +45,17 @@ val validate_shell_ir_paths :
   ?workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
-(** Validate only explicit typed filesystem scopes carried by Shell IR:
-    [cwd] and redirect targets — including those carried by the stages inside
-    a [Shell_ir.Subst] child, which dispatch executes. Positional argv is
-    opaque application data and is never classified from command names, flag
-    strings, or token shapes.
+(** Validate the filesystem destinations a Shell IR can name: typed [cwd]
+    and redirect targets — including those carried by the stages inside a
+    [Shell_ir.Subst] child, which dispatch executes — plus (task-634 /
+    #26289, operator: amend_closed_keys + cd_promote) the closed-table
+    argv operands and the cd/operand targets of a re-opened [sh -c]
+    subscript, judged by the same authority and message vocabulary
+    (task-1565 pins this coupling, including the [workdir=None] plain argv
+    path). Positional argv outside the closed table stays opaque
+    application data and is never classified from command names, flag
+    strings, or token shapes; unnameable operands (variables, globs,
+    substitutions) are left to the box's existing authority.
     Runtime sandbox containment remains authoritative for the process itself. *)
 
 (** Flatten all literal stage words from a parsed shell IR.

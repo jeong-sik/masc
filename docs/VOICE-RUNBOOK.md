@@ -188,6 +188,30 @@ The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
 whisper.cpp requires, so nothing is converted between the microphone and the
 transcript. And `-l auto` detects Korean, so there is no language to configure.
 
+### Checking one keeper's voice
+
+The section default is not what a keeper speaks in — a keeper mapped under
+`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
+
+```
+masc voice-verify --agent sangsu --json
+```
+
+Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
+exists and `nowhere` to a name that does not:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
+
+All three say `answered`, because `say` answers a name it does not have by
+speaking in the system voice. The byte counts cannot separate them either —
+the third is the same 79,758 as the default. **The voice name in the report is
+what separates them**, and a name that is not in `say -v '?'` is a mapping
+that never took.
+
 ### The trap: a wrong voice name is silent
 
 `say` does not fail on a voice it does not have. It exits 0 and speaks in the
@@ -506,6 +530,30 @@ separates them.
 
 The binding is a control code because every printable key in a focused row is
 draft text.
+
+### Speaking without touching the keyboard
+
+`Ctrl-Y` records one sentence and appends the transcript to the draft. The
+mode that lets a conversation run is a different key:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
+| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
+| `Esc` | discard a running capture (the draft keeps what was there before) |
+
+Continuous mode measures the room's noise floor **once** when it turns on,
+which is what keeps the gap between sentences short enough to speak across; it
+measures again if the mode is turned off and on in a different room. Silence
+re-arms too, so a pause longer than the trailing-silence window does not end
+the mode. Only the key that started it ends it.
+
+Both are control codes rather than letters because every printable key in a
+focused composer row is draft text.
+
+That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
+it: ending a capture hands the draft to the same send path Enter uses. Off by
+default, and described under Configuration below.
 
 ## External devices
 

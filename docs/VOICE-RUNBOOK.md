@@ -171,6 +171,22 @@ base path:
 The writer is the one the HTTP setup route uses: the same revision guard, and
 the same refusal to publish a section the loader would reject.
 
+`--voice` is looked up in the list `--list-voices` prints before anything is
+written, ignoring ASCII case as `say` does. `say` would speak a name it does not
+print in another voice and exit 0, so a name that is not in the list is
+refused, exit 1, with `runtime.toml` left as it was. Measured 2026-09-13 on an initialized workspace:
+
+| `--voice` | exit | `runtime.toml` | stderr |
+|---|---|---|---|
+| `NoSuchVoice` | 1 | unchanged | `say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has. Nothing was written.` |
+| `Eddy` | 1 | unchanged | `say has no voice named "Eddy", …` |
+| `eddy (한국어(한국))` | 0 | written | |
+| `Yuna` | 0 | written | |
+| `Yuna`, with no `say` on `PATH` | 1 | unchanged | `the voices say has could not be listed to check "Yuna": say is not installed. Nothing was written.` |
+
+Before the lookup, `--voice NoSuchVoice` exited 0 and wrote
+`default_voice = "NoSuchVoice"`.
+
 ### What the configuration says
 
 After a voice, a model, and one keeper mapped by hand:
@@ -266,8 +282,9 @@ Both exited 0.
 `say -v Eddy` picks one of the fourteen `Eddy (…)` voices. Only the whole label
 is in the list, so only the whole label passes.
 
-The lookup runs in the probe and nowhere else. Listing took 0.56–0.59 s per
-call, and a keeper would wait that long before every sentence. A keeper mapped
+The lookup runs in this probe and in `voice-local-setup --voice`, not when a
+keeper speaks. Listing took 0.56–0.59 s per call, and a keeper would wait that
+long before every sentence. A keeper mapped
 to a missing voice still speaks, in another voice, with nothing logged, until
 `voice-verify --agent` is run for it.
 

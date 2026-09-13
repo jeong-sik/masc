@@ -1,0 +1,21 @@
+{
+  "integration_source_head": "43b4c81a672ef86e9c6d7ae7d86a885c1f11e1d9",
+  "base": "4324764e959a5ff8b265b292e5bab9f68e550313",
+  "sources": {
+    "presentation": "a008692a6a11d17f2f5a6adb90225a222e66fac6",
+    "video": "60f948bd809d2f4d8716d1242e11f6eec620dfcd",
+    "collaboration": "25847ebcbccbfcc5a36c009fb98e04ccd6af2f8b"
+  },
+  "validation": {
+    "source_ancestors": true,
+    "source_component_files_identical": 21,
+    "changed_ocaml_parse_only": 30,
+    "setup_python_executed": 56,
+    "setup_python_native_skipped": 12,
+    "det_gate": "pass",
+    "dashboard_server_keeper_agent_core_runtime_unchanged_from_base": true,
+    "local_native_build": "not_run",
+    "runtime_installation": "not_run",
+    "native_ci": "not_requested"
+  }
+}

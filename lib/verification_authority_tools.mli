@@ -8,6 +8,11 @@
     refused, validated redirects, bounded extraction — live in the tool. Descriptor registry drift and unreadable
     producer state reject surface construction. Every dispatched call is
     validated and translated by the same descriptor that was advertised.
+    Exact Board/Fusion source reads are also available. Task authority uses
+    the actual producer identity; Goal authority permits shared workspace
+    records. Direct posts are readable only by their author via Task review,
+    because immutable target readership is not available at this boundary.
+    Neither surface grants general access to the MASC storage directory.
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)
 
@@ -45,7 +50,7 @@ val schemas : t -> Types_core.tool_schema list
 
 val image_delivery_note : string
 (** The sentence [schemas] appends to the read_file descriptor: this surface
-    reads images and inspected PDF pages as visual input. Exposed so the schema-parity test asserts
+    reads images and inspected PDF/PPTX pages as visual input. Exposed so the schema-parity test asserts
     against the same spelling the surface publishes. *)
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
@@ -53,4 +58,10 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
     model content, with path, media type, size and SHA-256 in the text receipt.
     PDFs are inspected from complete captured source bytes using Poppler: source
     identity, parsed page metadata/text and all rendered PNG pages are returned.
+    PPTX files additionally expose ordered source slide text and speaker notes,
+    with every slide rendered from the captured presentation. Animations and
+    embedded audio/video playback remain explicitly uninspected.
+    MP4 files return complete captured source identity, FFprobe stream metadata,
+    and direct FFmpeg audio/video decode results. Decode success does not assert
+    visual frame inspection or an accessibility verdict.
     Other binary output is a stated lookup failure, never text or visual proof. *)

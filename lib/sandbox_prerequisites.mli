@@ -1,8 +1,7 @@
 (** User-selected prerequisite actions. Catalog inspection never installs or
     starts anything; successful action execution still requires readiness checks. *)
 type distribution = Debian | Ubuntu | Other
-type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Pdf_tools | Whisper_cli
+type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client

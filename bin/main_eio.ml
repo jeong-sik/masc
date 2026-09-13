@@ -3355,8 +3355,8 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, or pdf-tools.")
-    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, or presentation-tools.")
+    Term.(const (fun base_path dependency action -> Masc_cli_prerequisites.run ~base_path ~dependency ~action) $ base_path $ dependency $ action)
 
 let cmd =
   let doc =

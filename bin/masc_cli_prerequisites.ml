@@ -4,11 +4,12 @@ module Apple = Masc.Apple_container_install
 module Docker = Masc.Docker_desktop_install
 type action = Standard of Prerequisites.action | Verified_apple_install
   | Verified_docker_install | Verified_docker_launch
-let dependency = function
+let dependency ~base_path = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
   | "pdf-tools" -> Some Prerequisites.Pdf_tools
+  | "presentation-tools" -> Some (Prerequisites.Presentation_tools {base_path})
   | "whisper" -> Some Prerequisites.Whisper_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
@@ -114,8 +115,9 @@ let execute host = function
       ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) () with
      | Error error -> Prerequisites.Failed {step=1; reason=Docker.error_message error}
      | Ok _ -> Prerequisites.External_step_pending)
-let run ~dependency:name ~action =
-  match dependency name with
+let run ~base_path ~dependency:name ~action =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match dependency ~base_path name with
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
   | Some dependency ->
     let host = Sandbox.detect_host ~run:Sandbox.system_runner in
@@ -126,8 +128,10 @@ let run ~dependency:name ~action =
       let catalog = match dependency, catalog with
         | Prerequisites.Pdf_tools, `Assoc fields ->
           `Assoc (("dependency_readiness", Masc.Pdf_runtime_dependencies.(observe () |> to_json)) :: fields)
+        | Prerequisites.Presentation_tools {base_path}, `Assoc fields ->
+          `Assoc (("dependency_readiness", Masc.Presentation_runtime_dependencies.(observe ~base_path () |> to_json)) :: fields)
         | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Whisper_cli), _ -> catalog
-        | Pdf_tools, _ -> invalid_arg "prerequisite catalog encoder must return an object" in
+        | (Pdf_tools | Presentation_tools _), _ -> invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->
       (match List.find_opt (fun action -> id action = requested) actions with
@@ -151,6 +155,30 @@ let run ~dependency:name ~action =
              `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
                ("dependency_readiness",Masc.Pdf_runtime_dependencies.to_json checks) :: fields),
              (if ready then 0 else 1)
+           | Prerequisites.Presentation_tools {base_path}, outcome ->
+             let checks = Masc.Presentation_runtime_dependencies.observe ~base_path () in
+             let ready = Masc.Presentation_runtime_dependencies.available checks in
+             let selected_component_ready = match action with
+               | Standard {id="presentation_parser_install"; _} ->
+                 Masc.Presentation_runtime_dependencies.parser_available checks
+               | Standard {id="presentation_renderer_install"; _} ->
+                 Masc.Presentation_runtime_dependencies.renderer_available checks
+               | Standard _ | Verified_apple_install | Verified_docker_install | Verified_docker_launch -> ready in
+             let fields = match receipt with `Assoc fields -> fields
+               | _ -> invalid_arg "prerequisite outcome encoder must return an object" in
+             let fields = List.remove_assoc "readiness" fields in
+             let fields = match outcome with
+               | Prerequisites.Commands_completed_recheck_required when not selected_component_ready ->
+                 ("status",`String "failed") ::
+                 ("reason",`String "The selected installation commands finished, but that component did not start. Inspect dependency_readiness and correct the installation before refreshing detection.") ::
+                 List.remove_assoc "status" fields
+               | Prerequisites.Commands_completed_recheck_required when ready ->
+                 ("status",`String "commands_completed") :: List.remove_assoc "status" fields
+               | Prerequisites.Commands_completed_recheck_required | External_step_pending | Failed _ -> fields in
+             `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
+               ("dependency_readiness",Masc.Presentation_runtime_dependencies.to_json checks) :: fields),
+             (match outcome with Prerequisites.Failed _ -> 1 | External_step_pending -> 0
+              | Commands_completed_recheck_required -> if selected_component_ready then 0 else 1)
            | _, Prerequisites.Failed _ -> receipt, 1
            | _, (External_step_pending | Commands_completed_recheck_required) -> receipt, 0 in
          print_endline (Yojson.Safe.to_string receipt);

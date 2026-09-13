@@ -1,0 +1,49 @@
+=== Scan: new deterministic-boundary ratchet ===
+PASS: no new deterministic-boundary debt added in 4324764e95...HEAD, staged diff, or worktree diff
+=== Scan: deterministic branch on non-deterministic source ===
+=== Scan: permissive default on unknown input ===
+WARN: Option.value with default on potentially unknown input (sound partial?):
+lib/mcp_server_eio_protocol.ml-463-       let arguments =
+lib/mcp_server_eio_protocol.ml:464:         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
+--
+lib/mcp_server_eio_protocol.ml-1216-        else None)
+lib/mcp_server_eio_protocol.ml:1217:      |> Option.value ~default:0
+--
+lib/mcp_server_eio_call_tool.ml-317-    ~(execution_id : Ids.Execution_id.t) : unit =
+lib/mcp_server_eio_call_tool.ml:318:  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+--
+lib/mcp_server_eio_call_tool.ml-323-  in
+lib/mcp_server_eio_call_tool.ml:324:  let turn = Option.value ~default:0 ctx.turn in
+--
+lib/keeper/keeper_world_observation_board_signal.ml-236-let list_posts_after_cursor (cursor_ts, cursor_post_id) =
+lib/keeper/keeper_world_observation_board_signal.ml:237:  let cursor_post_id = Option.value ~default:"" cursor_post_id in
+--
+lib/keeper/keeper_person_notes.ml-57-    | Some id when String.trim id <> "" ->
+lib/keeper/keeper_person_notes.ml:58:        Some (String.trim id, Option.value (field "note") ~default:"")
+--
+lib/keeper/keeper_sandbox_factory.ml-63-    let actual_network =
+lib/keeper/keeper_sandbox_factory.ml:64:      Option.value t.default_network_override ~default:effective_network
+=== Scan: catch-all permissive default ===
+WARN: catch-all branch returning Some (possible unsound default):
+lib/fs_compat/fs_compat.ml:3025:     | _ -> Some failure)
+lib/fs_compat/fs_compat.ml-3026-;;
+--
+lib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))
+lib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))
+lib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))
+lib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )
+--
+lib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate
+lib/telemetry_unified/telemetry_unified.ml-114-
+--
+lib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))
+lib/dashboard/dashboard_execution_helpers.ml-44-  in
+--
+lib/server/server_dashboard_http_keeper_api.ml:1122:                  | _ -> Some entry.ts)
+lib/server/server_dashboard_http_keeper_api.ml-1123-                None entries
+--
+lib/server/server_dashboard_http_keeper_api.ml:1809:            | _ -> Some r.ts)
+lib/server/server_dashboard_http_keeper_api.ml-1810-          None records
+--
+=== Scan: unordered iteration in deterministic context ===
+=== DET/NDT gate: PASS ===

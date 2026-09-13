@@ -271,7 +271,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
-    ?on_request_attribution ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -315,6 +315,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?raw_trace
                            ?on_official_client_native_action
                            ?on_request_attribution
+                           ?official_client_continuation
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -928,7 +929,7 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_statusless_context_error () =
+let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
   let base_path = temp_workspace () in
   let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
   let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
@@ -948,6 +949,19 @@ let test_keeper_shrinks_history_after_statusless_context_error () =
       reset_shrink_state ();
       cleanup_tree base_path)
     (fun () ->
+       let official_client_continuation = if not native_gate then None else (
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-gated" "GATE_WAIT")
+           ; Emit (result ~turn_id:"turn-gated" "GATE_WAIT") ]
+           (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"GATE" () with
+             | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+         let stored = load_state base_path in
+         match stored.phase with
+         | Settled {session_id; turn_id} ->
+           Some ({ client_kind=stored.client_kind; runtime_id=stored.runtime_id;
+             session_id; turn_id; tool_surface_sha256=stored.tool_surface_sha256;
+             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint)
+         | _ -> fail "native Gate seed did not settle") in
        with_fixture_sequence
          ~first_prompt_marker
          ~second_prompt_marker
@@ -958,6 +972,7 @@ let test_keeper_shrinks_history_after_statusless_context_error () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ?official_client_continuation
                 ~initial_messages
                 ~base_path
                 ~cli_path
@@ -970,6 +985,17 @@ let test_keeper_shrinks_history_after_statusless_context_error () =
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       (if native_gate then
+          (* A native continuation sends only its new input; the official
+             session already owns the prior history, including the Gate. *)
+          List.iter (fun path ->
+            let raw = In_channel.with_open_bin path In_channel.input_line in
+            match raw with
+            | None -> fail "native Gate fixture did not capture its resume input"
+            | Some raw -> check string "native Gate retry preserves the exact input delta"
+                "SHRINK_HISTORY" (content_of_wire_message raw))
+            [first_prompt_marker; second_prompt_marker]
+        else (
        let full_history = prompt_history first_prompt_marker in
        let shrunk_history = prompt_history second_prompt_marker in
        let full_count = List.length full_history in
@@ -983,9 +1009,18 @@ let test_keeper_shrinks_history_after_statusless_context_error () =
        check bool
          "retry shrinks provider-bound history"
          true
-         (shrunk_count < full_count);
+         (shrunk_count < full_count)
+        ));
        let state = load_state base_path in
-       check int "fresh retry settles as turn one" 1 state.turn_count;
+       check int "retry preserves the native Gate turn ordinal"
+         (if native_gate then 2 else 1) state.turn_count;
+       (match official_client_continuation with
+        | None -> ()
+        | Some checkpoint ->
+          check bool "bound Gate resumes after shrink in original session" true
+            (Keeper_official_client_session_store.validate_completed_continuation
+              ~checkpoint ~expected:(Some state) = Ok ()));
+
        match state.phase with
        | Settled { turn_id = "turn-shrunk"; _ } -> ()
        | _ -> fail "shrunk Claude Code retry did not settle")
@@ -1746,7 +1781,9 @@ let () =
         ; test_case
             "shrinks history after statusless context error"
             `Quick
-            test_keeper_shrinks_history_after_statusless_context_error
+            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:false)
+        ; test_case "native Gate retains its session across overflow shrink" `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick

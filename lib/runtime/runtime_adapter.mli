@@ -44,6 +44,13 @@ type credential_requirement =
       (** The runtime row names no credential and the catalog has no row for
           this provider, so nothing says whether a key is needed. *)
 
+val explicit_credential_requirement : Runtime_schema.credential -> credential_requirement
+(** Classify an explicit reference with the same environment alias precedence as dispatch. *)
+
+val resolve_credential_requirement : credential_requirement ->
+  (Llm_provider.Secret.t, string) result
+(** Materialize a classified credential requirement without inferring a provider. *)
+
 val credential_requirement :
   provider_id:string ->
   Runtime_schema.credential option ->

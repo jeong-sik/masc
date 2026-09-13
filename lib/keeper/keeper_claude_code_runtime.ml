@@ -390,12 +390,14 @@ end
    observation-free overflow (the only shape mapped to [Api ContextOverflow]
    in [claude_error_to_core_error]) and a strictly smaller next capacity — so
    consuming the just-written [Input_rejected] recovery with
-   an explicit [Restart_fresh] resolution cannot bypass the fence: a
+   an explicit recovery resolution cannot bypass the fence: a
    next-cycle replay never passes through that callback, and [Effect_fenced]
    recoveries are never resolved here because an effect-observed overflow is
    never retry-safe. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)
-let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
+(* A Gate is bound to its previous settlement. An observation-free rejected
+   input may retry there, but may never discard that session for a fresh one. *)
+let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id ()
   =
   match Session_store.load ~base_path ~keeper_name with
   | Error _ -> ()
@@ -416,7 +418,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:Session_store.Restart_fresh
+         ~resolution:(match official_client_continuation with
+           | Some _ -> Session_store.Retry_previous
+           | None -> Session_store.Restart_fresh)
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
@@ -425,7 +429,7 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
   | Ok _ -> ()
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -502,6 +506,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~native_posture tools
     in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -1124,7 +1134,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1190,7 +1200,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
               ~capacity_bytes)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
-            resolve_input_rejected_for_shrink_retry
+            resolve_input_rejected_for_shrink_retry ~official_client_continuation
               ~base_path
               ~keeper_name
               ~runtime_id
@@ -1202,7 +1212,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity_bytes ->
-          run_without_lifecycle
+          run_without_lifecycle ~official_client_continuation
             ~runtime_id
             ~keeper_name
     ~pre_tool_rejects

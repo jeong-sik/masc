@@ -46,6 +46,11 @@ links whose control node is the observed heading target. An explicit
 `role="heading"` is included only with a valid `aria-level` from 1 to 6. Use
 that visual cue to find a post title or section boundary, but do not infer a
 missing heading from styling, font size, text resemblance, or class names.
+The TUI keeps one blank row when eligible observed block-tag geometry has a
+positive gap, so an article's title and body can be scanned as separate groups.
+An intervening inline metadata node breaks that comparison. This is measured
+scene geometry, not a CSS display guarantee, site-specific selector, or claim
+that hidden feed items are loaded.
 
 After an article is scoped, keep the displayed role and label with the body
 when reporting it. The copied context must retain that observed scope label

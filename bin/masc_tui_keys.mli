@@ -67,6 +67,11 @@ val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
+val footer_hints_approval_detail : string
+(** The keys an open approval answers to. The decision keys are one item
+    ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
+    the scroll before it gives up the answer. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)

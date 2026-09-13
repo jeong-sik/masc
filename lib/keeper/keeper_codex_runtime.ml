@@ -318,7 +318,8 @@ let codex_error_to_core_error = function
   | Runtime_codex_app_server.Invalid_config detail ->
     config_error ~field:"codex_app_server" detail
   | Runtime_codex_app_server.Subscription_required detail ->
-    config_error ~field:"codex_subscription" detail
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "codex_app_server"; detail })
   | Runtime_codex_app_server.Context_window_exceeded
       { message; tool_effect_attempted = false } ->
     Agent_core.Error.Api

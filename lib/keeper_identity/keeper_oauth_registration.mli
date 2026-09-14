@@ -41,8 +41,13 @@ type post =
   url:string -> headers:(string * string) list -> body:string ->
   (int * string, string) result
 
+val http_post :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> timeout_sec:float -> post
+(** The production transport: one request bounded by [timeout_sec] on
+    [clock]. The only way to register outside a test. *)
+
 val register :
-  ?post:post ->
+  post:post ->
   registration_url:string ->
   client_name:string ->
   redirect_uri:string ->

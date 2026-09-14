@@ -94,8 +94,14 @@ type post =
   url:string -> headers:(string * string) list -> body:string ->
   (int * string, string) result
 
+val http_post :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> timeout_sec:float -> post
+(** The production transport: one request to the token endpoint, bounded by
+    [timeout_sec] on [clock]. The only way to reach a provider outside a
+    test; it cannot be built without a clock. *)
+
 val complete :
-  ?post:post ->
+  post:post ->
   ?client_secret:string ->
       (** Sent in the form body when registration returned one. Absent rather
           than empty when it did not: a server that issued no secret refuses
@@ -113,7 +119,7 @@ val complete :
     sent. *)
 
 val refresh :
-  ?post:post ->
+  post:post ->
   ?client_secret:string ->
   discovered:Keeper_oauth_discovery.t ->
   client_id:string ->

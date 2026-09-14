@@ -381,6 +381,7 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_keeper_provider_subcall
+  test_keeper_identity_transports
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -734,6 +735,7 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_keeper_provider_subcall
+  test_keeper_identity_transports
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id

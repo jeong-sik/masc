@@ -50,6 +50,7 @@ val set_client :
     most needs to check. *)
 
 val start :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   base_path:string ->
   keeper:string ->
   provider_id:string ->
@@ -86,6 +87,7 @@ type attached = {
 }
 
 val refresh_tools :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   base_path:string ->
   keeper:string ->
   provider_id:string ->
@@ -105,6 +107,7 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
     whoever is looking. *)
 
 val finish :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   base_path:string ->
   state:string ->
   code:string ->

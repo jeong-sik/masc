@@ -112,7 +112,8 @@ let gate_unavailable_message reason =
 ;;
 
 let agent_tool
-      ?post
+      ?transports
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -121,17 +122,40 @@ let agent_tool
       (offered : Keeper_identity_tools.offered_tool)
   =
   let base_path = config.Workspace.base_path in
-  let run_raw arguments =
-    Keeper_identity_tools.tool_result_of_call
-      (Keeper_identity_tools.run_call
-         ?post
-         ~base_path
-         ~keeper_name:meta.name
-         ~provider:offered.Keeper_identity_tools.provider
-         ~remote_name:offered.Keeper_identity_tools.remote_name
-         ~arguments
-         ())
+  (* Injected transports are a test's. Production builds bounded ones from a
+     clock, the turn's when the bundle carries one and the process's
+     otherwise. A process with no clock cannot bound the call and does not
+     make it: that is a precondition failure like a missing credential, and
+     the model is told it is deterministic. *)
+  let transports () =
+    match transports with
+    | Some transports -> Ok transports
+    | None ->
+      (match
+         (match clock with
+          | Some clock -> Some clock
+          | None -> Eio_context.get_clock_opt ())
+       with
+       | Some clock -> Ok (Keeper_identity_tools.http_transports ~clock)
+       | None ->
+         Error
+           (Keeper_identity_tools.Precondition
+              "this process has no clock to bound the call with; nothing was sent"))
   in
+  let send arguments =
+    match transports () with
+    | Error error -> Error error
+    | Ok transports ->
+      Keeper_identity_tools.run_call
+        ~transports
+        ~base_path
+        ~keeper_name:meta.name
+        ~provider:offered.Keeper_identity_tools.provider
+        ~remote_name:offered.Keeper_identity_tools.remote_name
+        ~arguments
+        ()
+  in
+  let run_raw arguments = Keeper_identity_tools.tool_result_of_call (send arguments) in
   let gated arguments =
     match offered.Keeper_identity_tools.read_only with
     (* The provider's own word, written down at attach time. Only an
@@ -325,13 +349,5 @@ let replay_call_with_outcome
      | Keeper_gate.Allow authorization ->
        Keeper_tool_execution.with_gate_authorization
          authorization
-         (execution_of_call_result
-            (Keeper_identity_tools.run_call
-               ?post
-               ~base_path:config.Workspace.base_path
-               ~keeper_name:meta.name
-               ~provider
-               ~remote_name:call.remote_name
-               ~arguments:call.arguments
-               ())))
+         (execution_of_call_result (send call.arguments)))
 ;;

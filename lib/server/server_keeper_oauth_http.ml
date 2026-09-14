@@ -27,7 +27,7 @@ let respond_page ?status reqd ~title ~heading ~detail =
   Http.Response.html ?status (page ~title ~heading ~detail) reqd
 ;;
 
-let handle_callback request reqd =
+let handle_callback ~clock request reqd =
   let query name = Server_utils.query_param request name in
   match Server_auth.current_server_state () with
   | None ->
@@ -50,7 +50,7 @@ let handle_callback request reqd =
      | None, Some code, Some state_value
        when String.trim code <> "" && String.trim state_value <> "" ->
        (match
-          Server_keeper_oauth.finish ~base_path ~state:state_value ~code
+          Server_keeper_oauth.finish ~clock ~base_path ~state:state_value ~code
             ~now:(Unix.gettimeofday ())
         with
         | Ok attached ->
@@ -172,9 +172,9 @@ let handle_set_client request reqd =
     request reqd
 ;;
 
-let add_routes router =
+let add_routes ~clock router =
   router
-  |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
+  |> Http.Router.get Server_keeper_oauth.callback_path (handle_callback ~clock)
   |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
   |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
   |> Http.Router.post "/api/v1/keepers/oauth/client" handle_set_client

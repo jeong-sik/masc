@@ -44,8 +44,12 @@ type started = {
 }
 
 val start :
-  ?discover:(mcp_url:string -> (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
-  ?register:
+  discover:(mcp_url:string -> (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
+      (** How the provider's metadata is read. Production passes
+          {!Keeper_oauth_discovery.discover} over its clock-bound transports;
+          there is no default because the only one there could be is
+          unbounded. *)
+  register:
     (registration_url:string ->
      client_name:string ->
      redirect_uri:string ->
@@ -110,7 +114,9 @@ type finished = {
 }
 
 val finish :
-  ?post:Keeper_oauth_flow.post ->
+  post:Keeper_oauth_flow.post ->
+      (** The token endpoint, clock-bound in production
+          ({!Keeper_oauth_flow.http_post}). *)
   pending:Keeper_oauth_pending.t ->
   state:string ->
   code:string ->

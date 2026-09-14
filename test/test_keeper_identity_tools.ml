@@ -106,11 +106,26 @@ let names offering =
    tests here pin is the layer under it — which credential is read and what
    the model is told — and [run_call] plus [tool_result_of_call] is that
    layer. *)
-let execute_offered ?post ~base_path (offered : Identity_tools.offered_tool)
-    arguments =
+(* The hops a case does not pin are not allowed to be reached: a case that
+   expected a precondition failure and got a request instead has found a
+   defect, and says so instead of hitting a fixture that answers. *)
+let never_post ~url:_ ~headers:_ ~body:_ =
+  Alcotest.fail "the MCP server was reached when it should not have been"
+
+let never_token_post ~url:_ ~headers:_ ~body:_ =
+  Alcotest.fail "the token endpoint was reached when it should not have been"
+
+let never_discover ~mcp_url:_ =
+  Alcotest.fail "renewal reached the network when it should not have"
+
+let transports_of_post post =
+  { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
+
+let execute_offered ?(post = never_post) ~base_path
+    (offered : Identity_tools.offered_tool) arguments =
   Identity_tools.tool_result_of_call
-    (Identity_tools.run_call ?post ~base_path ~keeper_name:"acme-daycare"
-       ~provider:offered.Identity_tools.provider
+    (Identity_tools.run_call ~transports:(transports_of_post post) ~base_path
+       ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
 
 (* ── the on/off switch ───────────────────────────────────────────────── *)
@@ -499,7 +514,7 @@ let test_github_cli_credential_is_what_gets_sent () =
   write_gh_identity ~base_path ~keeper_name "gho_from_device_login";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~post ~base_path ~keeper_name
+    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
       ~provider:(github_provider ()) ~remote_name:"list_issues"
       ~arguments:(`Assoc []) ()
   with
@@ -516,7 +531,7 @@ let test_github_cli_credential_follows_a_relogin () =
   write_gh_identity ~base_path ~keeper_name "gho_first";
   let post, sent = recording_transport () in
   (match
-     Identity_tools.run_call ~post ~base_path ~keeper_name
+     Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
        ~provider:(github_provider ()) ~remote_name:"list_issues"
        ~arguments:(`Assoc []) ()
    with
@@ -525,7 +540,7 @@ let test_github_cli_credential_follows_a_relogin () =
   write_gh_identity ~base_path ~keeper_name "gho_second";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~post ~base_path ~keeper_name
+    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
       ~provider:(github_provider ()) ~remote_name:"list_issues"
       ~arguments:(`Assoc []) ()
   with
@@ -543,7 +558,7 @@ let test_an_oauth_provider_ignores_the_gh_credential () =
   write_gh_identity ~base_path ~keeper_name "gho_not_for_atlassian";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~post ~base_path ~keeper_name ~provider:(provider ())
+    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name ~provider:(provider ())
       ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
   with
   | Ok _ -> Alcotest.fail "an OAuth provider spent the gh credential"
@@ -750,7 +765,7 @@ let test_an_expected_not_found_does_not_reach_for_the_catalog () =
   project_token ~base_path;
   let post, sent, calls = drifting_transport () in
   match
-    Identity_tools.run_call ~post ~base_path ~keeper_name:"acme-daycare"
+    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name:"acme-daycare"
       ~provider:(provider ()) ~remote_name:"aToolNobodyOffered"
       ~arguments:(`Assoc []) ()
   with
@@ -863,15 +878,12 @@ let store_expiry ~base_path ~provider ~at =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not store an expiry: %s" message
 
-let never_discover ~mcp_url:_ =
-  Alcotest.fail "renewal reached the network when it should not have"
-
 let test_a_fresh_token_is_left_alone () =
   let base_path = temp_base () in
   let provider = provider () in
   store_expiry ~base_path ~provider ~at:10_000.0;
   match
-    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover:never_discover ~base_path
       ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"still-good" ()
   with
   | Ok token -> check str "unchanged" "still-good" token
@@ -883,7 +895,7 @@ let test_no_stored_expiry_renews_nothing () =
      gains nothing. *)
   let base_path = temp_base () in
   match
-    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover:never_discover ~base_path
       ~keeper_name:"attaching-fixture" ~provider:(provider ()) ~now:0.0
       ~access_token:"unknown-age" ()
   with
@@ -991,7 +1003,8 @@ let test_a_transient_renewal_failure_is_marked_transient () =
          { url = "https://auth.example.com"; detail = "connection refused" })
   in
   match
-    Identity_tools.renew_if_needed ~discover ~base_path ~keeper_name:"attaching-fixture"
+    Identity_tools.renew_if_needed ~token_post:never_token_post ~discover ~base_path
+      ~keeper_name:"attaching-fixture"
       ~provider ~now:0.0 ~access_token:"about-to-expire" ()
   with
   | Error (Identity_tools.Renew_transient _) -> ()
@@ -1071,7 +1084,8 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
       }
   in
   match
-    Identity_tools.run_call ~post:mcp_post ~token_post ~discover ~base_path ~keeper_name
+    Identity_tools.run_call ~transports:{ Identity_tools.mcp_post; token_post; discover }
+      ~base_path ~keeper_name
       ~provider ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
   with
   | Ok result ->

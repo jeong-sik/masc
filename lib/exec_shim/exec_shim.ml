@@ -23,6 +23,17 @@ external restrict_self : string -> bool -> bool -> bytes -> int
 
 let observe_supported () = observe_support_abi () >= 1
 
+(* Capability probe only (task-1568, PR #36032 review 5192723206): whether
+   this kernel would accept SECCOMP_FILTER_FLAG_NEW_LISTENER at all. Nothing
+   downstream consumes this yet — [deny_sockets] still answers socket(2)
+   with EPERM straight from the filter, and [decide_after_observation]
+   still defers every [Observed_refused] to the judge regardless of what
+   this reports. Wiring it in needs a listener fd carried from the child
+   to the parent (a plain pipe cannot carry a file descriptor: a new
+   SCM_RIGHTS stub) and a supervisor loop that reads/decodes/responds to
+   notifications — deferred to the PR that adds that loop. *)
+external user_notif_supported : unit -> bool = "ocaml_shim_user_notif_supported"
+
 let observe_unsupported_code = "observe_unsupported"
 let observe_scratch_code = "observe_scratch_error"
 

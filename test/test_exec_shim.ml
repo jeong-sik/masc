@@ -218,6 +218,23 @@ let test_observe_support_is_consistent () =
   if Sys.os_type <> "Unix" || not (Sys.file_exists "/proc/version")
   then check bool "no Landlock outside Linux" false supported
 
+let test_user_notif_support_is_consistent () =
+  (* Task-1568 (#36032 follow-up, review 5192723206): the capability probe
+     for a future observation path. Same invariant as
+     [test_observe_support_is_consistent] — false off Linux — plus the
+     probe must never raise: it forks and waits on a throwaway child that
+     runs no payload, so an exception here means the fork/wait bookkeeping
+     itself is broken, not that the kernel lacks the feature (a kernel
+     that lacks it, or a seccomp policy above this process that filters
+     seccomp(2) itself — e.g. running inside masc's own Execute sandbox —
+     is a plain [false], never a raised exception). *)
+  match Exec_shim.user_notif_supported () with
+  | supported ->
+    if Sys.os_type <> "Unix" || not (Sys.file_exists "/proc/version")
+    then check bool "no seccomp listener support outside Linux" false supported
+  | exception exn ->
+    fail ("user_notif_supported raised: " ^ Printexc.to_string exn)
+
 let test_parse_config_path_ok () =
   let content =
     "remote_root=/masc-work\npath=/home/opam/.opam/5.5/bin:/usr/local/bin:/usr/bin:/bin\n"
@@ -559,4 +576,6 @@ let () =
              ; test_case "plan for mode" `Quick test_plan_for_mode
              ; test_case "scratch env" `Quick test_scratch_env
              ; test_case "scratch_root config" `Quick test_parse_config_scratch_root
-             ; test_case "support is consistent" `Quick test_observe_support_is_consistent ] ]
+             ; test_case "support is consistent" `Quick test_observe_support_is_consistent
+             ; test_case "user_notif support is consistent" `Quick
+                 test_user_notif_support_is_consistent ] ]

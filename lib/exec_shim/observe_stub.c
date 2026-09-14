@@ -26,6 +26,23 @@
  *   Raises Unix.Unix_error naming the failing call. Non-Linux: raises
  *   ENOSYS, and the shim never gets here because support reads 0.
  *
+ * ocaml_shim_user_notif_supported : unit -> bool
+ *   Whether this kernel accepts SECCOMP_FILTER_FLAG_NEW_LISTENER (Linux
+ *   >= 5.0): the flag [deny_sockets] would need to hand the supervisor a
+ *   listener fd instead of answering socket(2) with EPERM straight out of
+ *   the filter, so a refused observe can carry evidence of the attempt
+ *   itself rather than only "the box applied" (task-1568, PR #36032
+ *   review 5192723206). A capability probe only: it forks a throwaway
+ *   child that tries to install an allow-all listener filter and reports
+ *   whether the kernel accepted it, then exits without running a payload.
+ *   The calling thread's own seccomp state is untouched either way — a
+ *   filter, once installed on a thread, can only add restrictions, so this
+ *   can never be probed in-process without side effects that outlive the
+ *   probe. Nothing in this PR wires the fd this reports back to the
+ *   parent yet: doing that needs SCM_RIGHTS across the existing boundary
+ *   pipe (a plain pipe cannot carry a file descriptor), which is deferred
+ *   to the PR that also adds the supervisor's read/decode/respond loop.
+ *
  * Constants are spelled here rather than taken from <linux/landlock.h> and
  * <linux/seccomp.h>: the static musl build (scripts/build-shim-static.sh)
  * has no linux-headers, and these are stable kernel ABI values.
@@ -47,6 +64,8 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #ifndef SYS_landlock_create_ruleset
 #define SYS_landlock_create_ruleset 444
@@ -113,6 +132,17 @@ struct shim_sock_fprog {
 #ifndef SECCOMP_MODE_FILTER
 #define SECCOMP_MODE_FILTER 2
 #endif
+#ifndef SYS_seccomp
+#if defined(__aarch64__)
+#define SYS_seccomp 277
+#elif defined(__x86_64__)
+#define SYS_seccomp 317
+#else
+#error "observe_stub: no SYS_seccomp for this architecture"
+#endif
+#endif
+#define SECCOMP_SET_MODE_FILTER 1U
+#define SECCOMP_FILTER_FLAG_NEW_LISTENER (1U << 3)
 #if defined(__aarch64__)
 #define SHIM_AUDIT_ARCH 0xC00000B7U
 #elif defined(__x86_64__)
@@ -223,6 +253,41 @@ static int deny_sockets(void)
   struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
   return (int) prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
 }
+
+/* Runs only in the throwaway child forked by user_notif_supported below.
+   An allow-all filter: the probe cares whether the kernel accepts the
+   NEW_LISTENER flag at all, not about filtering anything, and the child
+   never runs a payload past this point. Exits 0 when the kernel handed
+   back a listener fd, 1 otherwise (old kernel, or the syscall itself is
+   filtered out by an ancestor's seccomp policy, e.g. running the probe
+   itself inside masc's own Execute sandbox). */
+static int probe_user_notif_child(void)
+{
+  struct shim_sock_filter filter[] = {
+    { BPF_RET_K, 0, 0, SECCOMP_RET_ALLOW },
+  };
+  struct shim_sock_fprog prog = { sizeof filter / sizeof filter[0], filter };
+  long fd = syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+                     (unsigned long) SECCOMP_FILTER_FLAG_NEW_LISTENER, &prog);
+  if (fd < 0) return 1;
+  close((int) fd);
+  return 0;
+}
+
+static int user_notif_supported(void)
+{
+  pid_t pid = fork();
+  if (pid < 0) return 0;
+  if (pid == 0) _exit(probe_user_notif_child());
+  {
+    int status;
+    pid_t waited;
+    do { waited = waitpid(pid, &status, 0); }
+    while (waited < 0 && errno == EINTR);
+    if (waited != pid) return 0;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  }
+}
 #endif /* __linux__ */
 
 CAMLprim value ocaml_shim_observe_support(value vunit)
@@ -237,6 +302,16 @@ CAMLprim value ocaml_shim_observe_support(value vunit)
   }
 #else
   CAMLreturn(Val_int(0));
+#endif
+}
+
+CAMLprim value ocaml_shim_user_notif_supported(value vunit)
+{
+  CAMLparam1(vunit);
+#ifdef __linux__
+  CAMLreturn(Val_bool(user_notif_supported()));
+#else
+  CAMLreturn(Val_bool(0));
 #endif
 }
 

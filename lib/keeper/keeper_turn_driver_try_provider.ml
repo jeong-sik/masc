@@ -1227,11 +1227,24 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
       | None ->
-        (* No Eio clock in this process, so nothing can sleep out the
-           threshold: the attempt runs with no MASC-side ceiling. The
-           server installs its clock at boot before any turn; this arm is
-           reached by suites that drive the driver without one. *)
-        run_attempt_switch ()
+        (* A process with no clock cannot count the threshold down, and an
+           attempt with no bound is the hang this deadline exists to end.
+           The server installs its clock at boot before any turn, so a turn
+           that gets here is a wiring fault; it is refused the way
+           [Keeper_identity_gate] refuses a call it cannot bound: typed, and
+           nothing was sent. *)
+        Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig
+                { field = "provider_call_deadline_sec"
+                ; detail =
+                    Printf.sprintf
+                      "provider call attempt refused: this process has no \
+                       clock to bound the %.0fs no-progress threshold with; \
+                       nothing was sent (runtime_id=%s)"
+                      threshold_sec
+                      ctx.runtime_id
+                }))
     in
     let result =
       match result with

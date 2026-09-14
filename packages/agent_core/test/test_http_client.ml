@@ -453,10 +453,10 @@ let test_read_ndjson_idle_without_clock_raises () =
 ;;
 
 (* The first-event budget is one window to the first [Output] line, not one
-   per prelude line. Four prelude lines 0.3 s apart keep every gap under the
+   per prelude line. Five prelude lines 0.3 s apart keep every gap under the
    1.0 s budget; the line the consumer would report as [Output] is written at
-   1.2 s, past the window, so the read must time out before it arrives. A
-   reader that re-armed the window on each prelude line would deliver it. *)
+   1.5 s, well past the window, so the read must time out before it arrives.
+   A reader that re-armed the window on each prelude line would deliver it. *)
 let test_read_ndjson_prelude_lines_do_not_extend_the_first_event_budget () =
   Eio_main.run
   @@ fun env ->
@@ -474,7 +474,12 @@ let test_read_ndjson_prelude_lines_do_not_extend_the_first_event_budget () =
          (fun line ->
             Eio.Flow.copy_string line sink;
             Eio.Time.sleep clock 0.3)
-         [ "{\"prelude\":1}\n"; "{\"prelude\":2}\n"; "{\"prelude\":3}\n"; "{\"prelude\":4}\n" ];
+         [ "{\"prelude\":1}\n"
+         ; "{\"prelude\":2}\n"
+         ; "{\"prelude\":3}\n"
+         ; "{\"prelude\":4}\n"
+         ; "{\"prelude\":5}\n"
+         ];
        Eio.Flow.copy_string (output_line ^ "\n") sink;
        Eio.Flow.close sink)
     (fun () ->

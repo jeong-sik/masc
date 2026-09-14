@@ -186,6 +186,34 @@ let test_prelude_events_do_not_extend_the_first_event_budget () =
       (List.length events)
 ;;
 
+let test_idle_standing_in_for_the_first_event_stays_a_gap () =
+  (* A caller that wired only an idle deadline has it bound the first event
+     too, with the meaning it always had: every payload line renews it. The
+     same prelude cadence that trips a first-event budget above (events every
+     0.4 under a 1.0 budget, the token at 1.6) runs to EOF here, so the total
+     window is the first-event knob's meaning and not a new bound on these
+     callers. *)
+  let classify data =
+    if String.equal data "out" then Http_client.Output else Http_client.Prelude
+  in
+  match
+    read_sse_over
+      ~classify
+      ~budget_kind:`Idle
+      [ "data: created\n\n"; "data: ping\n\n"; "data: ping\n\n"; "data: out\n\n" ]
+  with
+  | Ok events ->
+    check
+      (list (pair (option string) string))
+      "every event delivered under the idle gap"
+      [ None, "created"; None, "ping"; None, "ping"; None, "out" ]
+      events
+  | Error (`Timed_out delivered) ->
+    failf
+      "an idle budget standing in for the first event became a total: tripped after %d events"
+      (List.length delivered)
+;;
+
 let test_ignored_fields_do_not_renew_idle_budget () =
   (* Same hole after the stream has produced: the inter-token budget must
      measure from the last payload, not from the last ignorable line. *)
@@ -243,6 +271,10 @@ let () =
             "prelude events do not extend the first-event budget"
             `Quick
             test_prelude_events_do_not_extend_the_first_event_budget
+        ; test_case
+            "an idle budget standing in for the first event stays a gap"
+            `Quick
+            test_idle_standing_in_for_the_first_event_stays_a_gap
         ] )
     ; ( "idle"
       , [ test_case

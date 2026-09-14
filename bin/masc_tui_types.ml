@@ -4486,6 +4486,7 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable user_input_priority_next: bool;
   mutable keeper_chat_control_generations : (string * int) list;
   mutable keeper_chat_control_tokens : (string * string) list;
   mutable keeper_chat_control_pending : (string * int64) list;
@@ -6417,6 +6418,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  user_input_priority_next = true;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
@@ -8782,18 +8784,35 @@ let keeper_message_activity_rows (state : state) =
          | _ -> [])
       | Some _ | None -> []
     in
-    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+    let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
+    let local_count = List.length waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
+    let queue_rows =
+      match waiting_items with
+      | [] -> []
+      | first :: _ ->
+        let preview =
+          let single = String.map (fun c -> if c = '\n' || c = '\r' then ' ' else c) first.request.message in
+          let trimmed = String.trim single in
+          if String.length trimmed > 34 then
+            String.sub trimmed 0 31 ^ "..."
+          else trimmed
+        in
+        let intent_str = match first.intent with
+          | Steer_after_interrupt -> " [steer]"
+          | Next -> ""
+        in
+        let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
+        [ Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
+            local_count auto_tag intent_str preview ]
+    in
     activity @ submitted @ (if retained then
       ["Input retained after Esc; /queue resume sends it"]
-      else []) @ (if local_count > 0 then
-      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
-        local_count (if local_count = 1 then "message" else "messages")]
-      else [])
+      else []) @ queue_rows
 ;;
 
 let keeper_message_status_rows (state : state) =

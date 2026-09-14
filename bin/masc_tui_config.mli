@@ -8,6 +8,7 @@ type t = private {
   hints_visible : bool option;
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
+  user_input_priority_next : bool option;
 }
 
 val load : base_path:string -> t
@@ -80,5 +81,10 @@ val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
     Only a next-turn line waiting for that same Keeper is joined. A steer
     keeps its own entry: it was created to replace one exact operation, and
     folding another line into it would move that causal parent. *)
+
+val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
+(** [tui].user_input_priority_next: whether user chat messages submitted
+    while a turn is running are automatically prioritized to run next.
+    [None] where absent -- defaults to [true]. *)
 
 val set_board_sort : base_path:string -> string -> (unit, string) result

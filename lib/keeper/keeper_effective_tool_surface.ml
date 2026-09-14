@@ -333,7 +333,8 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core _ -> Ok None
   | Runtime_execution.Claude_code _ ->
-    Keeper_official_client_host.resolve_native_posture ~required:None
+    Keeper_official_client_host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
       ~base_path
       ~keeper_name
       ~client_label:"Claude Code"
@@ -341,7 +342,8 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
       ~none_supported:true
     |> Result.map Option.some
   | Runtime_execution.Codex_app_server _ ->
-    Keeper_official_client_host.resolve_native_posture ~required:None
+    Keeper_official_client_host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
       ~base_path
       ~keeper_name
       ~client_label:"Codex"
@@ -349,7 +351,8 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
       ~none_supported:false
     |> Result.map Option.some
   | Runtime_execution.Antigravity_cli _ ->
-    Keeper_official_client_host.resolve_native_posture ~required:None
+    Keeper_official_client_host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
       ~base_path
       ~keeper_name
       ~client_label:"Antigravity"

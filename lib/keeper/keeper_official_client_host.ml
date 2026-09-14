@@ -1328,85 +1328,104 @@ let native_posture_static_contradiction_gate : (string, unit) Hashtbl.t =
   Hashtbl.create 16
 ;;
 
-let resolve_native_posture ~required ~base_path ~keeper_name ~client_label ~default
-    ~none_supported =
-  match
-    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      keeper_name
-  with
-  | Error load_error ->
-    Error
-      (config_error
-         ~field:"keeper.tools.native"
-         (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
-  | Ok defaults ->
-    let declared = Option.value required
-      ~default:(Option.value defaults.native_tool_posture ~default) in
-    let approval_mode =
-      Keeper_tool_approval_mode.resolve
-        (Keeper_tool_approval_mode.shared ())
-        ~keeper_name
-    in
-    let static_contradiction_key = keeper_name ^ "\000" ^ client_label in
+let resolve_native_posture ~posture_source ~base_path ~keeper_name ~client_label
+    ~default ~none_supported =
+  let approval_mode =
+    Keeper_tool_approval_mode.resolve
+      (Keeper_tool_approval_mode.shared ())
+      ~keeper_name
+  in
+  let static_contradiction_key = keeper_name ^ "\000" ^ client_label in
+  let honored declared =
+    (* The declaration is honored: any earlier static contradiction for
+       this pair is resolved, so a future re-contradiction reports
+       again instead of being swallowed by the gate. *)
+    Hashtbl.remove
+      native_posture_static_contradiction_gate
+      static_contradiction_key;
+    Ok declared
+  in
+  match (posture_source : Runtime_native_tools.posture_source) with
+  | Runtime_native_tools.Program_defined declared ->
+    (* The program that created this keeper stated its posture as a value.
+       There is no keepers/<name>.toml for it and none is looked for; a
+       stated posture is never degraded, so a refusal is a config error. *)
     (match
        admit_native_posture ~posture:declared ~approval_mode ~none_supported
          ~client_label
      with
-     | Ok () ->
-       (* The declaration is honored: any earlier static contradiction for
-          this pair is resolved, so a future re-contradiction reports
-          again instead of being swallowed by the gate. *)
-       Hashtbl.remove
-         native_posture_static_contradiction_gate
-         static_contradiction_key;
-       Ok declared
-     | Error detail when Option.is_some required ->
-       Error (config_error ~field:"required_native_posture" detail)
-     | Error detail ->
-       let effective =
-         Runtime_native_tools.degrade_on_admission
-           ~posture:declared
-           ~none_supported
-           ()
+     | Ok () -> honored declared
+     | Error detail -> Error (config_error ~field:"required_native_posture" detail))
+  | Runtime_native_tools.Declared_on_disk ->
+    (match
+       Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+         ~base_path
+         keeper_name
+     with
+     | Error load_error ->
+       Error
+         (config_error
+            ~field:"keeper.tools.native"
+            (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
+     | Ok defaults ->
+       let declared =
+         match defaults.native_tool_posture with
+         | Some declared -> declared
+         | None ->
+           (* The profile states no [keeper.tools.native]: the runtime's
+              own stance ([Runtime_native_tools.*_default]) is the
+              declared one. *)
+           default
        in
-       let static_contradiction =
-         (declared : Runtime_native_tools.posture) = Native_none
-         && not none_supported
-       in
-       if static_contradiction then (
-         if
-           not
-             (Hashtbl.mem
+       (match
+          admit_native_posture ~posture:declared ~approval_mode ~none_supported
+            ~client_label
+        with
+        | Ok () -> honored declared
+        | Error detail ->
+          let effective =
+            Runtime_native_tools.degrade_on_admission
+              ~posture:declared
+              ~none_supported
+              ()
+          in
+          let static_contradiction =
+            (declared : Runtime_native_tools.posture) = Native_none
+            && not none_supported
+          in
+          if static_contradiction then (
+            if
+              not
+                (Hashtbl.mem
+                   native_posture_static_contradiction_gate
+                   static_contradiction_key)
+            then (
+              Hashtbl.replace
                 native_posture_static_contradiction_gate
-                static_contradiction_key)
-         then (
-           Hashtbl.replace
-             native_posture_static_contradiction_gate
-             static_contradiction_key
-             ();
-           Log.Keeper.warn
-             "%s: static native-posture contradiction (reported once per \
-              boot, not per turn): profile declares native = \"none\" but %s \
-              cannot disable its built-in tools; the lane runs at its \
-              \"read\" floor until the profile or the runtime.toml \
-              assignment changes"
-             keeper_name client_label;
-           Keeper_event_publisher.publish_native_posture_degraded
-             ~keeper_name
-             ~client_label
-             ~declared:(Runtime_native_tools.to_string declared)
-             ~effective:(Runtime_native_tools.to_string effective)
-             ~reason:detail))
-       else
-         (* Turn-scoped degradation ([full] under a non-yolo approval
-            mode): the condition can appear and disappear with the
-            approval mode, so it stays per-turn. *)
-         Keeper_event_publisher.publish_native_posture_degraded
-           ~keeper_name
-           ~client_label
-           ~declared:(Runtime_native_tools.to_string declared)
-           ~effective:(Runtime_native_tools.to_string effective)
-           ~reason:detail;
-       Ok effective)
+                static_contradiction_key
+                ();
+              Log.Keeper.warn
+                "%s: static native-posture contradiction (reported once per \
+                 boot, not per turn): profile declares native = \"none\" but %s \
+                 cannot disable its built-in tools; the lane runs at its \
+                 \"read\" floor until the profile or the runtime.toml \
+                 assignment changes"
+                keeper_name client_label;
+              Keeper_event_publisher.publish_native_posture_degraded
+                ~keeper_name
+                ~client_label
+                ~declared:(Runtime_native_tools.to_string declared)
+                ~effective:(Runtime_native_tools.to_string effective)
+                ~reason:detail))
+          else
+            (* Turn-scoped degradation ([full] under a non-yolo approval
+               mode): the condition can appear and disappear with the
+               approval mode, so it stays per-turn. *)
+            Keeper_event_publisher.publish_native_posture_degraded
+              ~keeper_name
+              ~client_label
+              ~declared:(Runtime_native_tools.to_string declared)
+              ~effective:(Runtime_native_tools.to_string effective)
+              ~reason:detail;
+          Ok effective))
 ;;

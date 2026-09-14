@@ -359,18 +359,24 @@ val admit_native_posture :
     what a refusal does to the turn. *)
 
 val resolve_native_posture :
-  required:Runtime_native_tools.posture option ->
+  posture_source:Runtime_native_tools.posture_source ->
   base_path:string ->
   keeper_name:string ->
   client_label:string ->
   default:Runtime_native_tools.posture ->
   none_supported:bool ->
   (Runtime_native_tools.posture, Agent_core.Error.t) result
-(** A required invocation posture is never degraded; failed admission returns
-    an error. Without one, read the keeper's declared posture from its profile TOML (cached loader),
-    fall back to [default] when the profile declares nothing, then apply
-    {!admit_native_posture} against the keeper's current approval stance.
-    A profile that fails to load is a config error, not a silent default.
+(** The two sources of a posture are handled exhaustively.
+    [Program_defined posture]: the program that created the keeper stated
+    the posture; no [keepers/<name>.toml] is read (there is none — the
+    task-completion reviewer runs in a fresh root it owns), and a stated
+    posture is never degraded: failed admission is a config error.
+    [Declared_on_disk]: read the keeper's declared posture from its profile
+    TOML under [base_path], take [default] when the profile declares no
+    [keeper.tools.native], then apply {!admit_native_posture} against the
+    keeper's current approval stance. A profile that fails to load — a
+    keeper nothing declares included (audit F386) — is a config error, not
+    a silent default.
     An admission refusal does not fail this call: the posture degrades to
     the safest weaker one ([full] -> [read]; [none] -> [read] where the
     client cannot disable built-ins) and the downgrade is published as a

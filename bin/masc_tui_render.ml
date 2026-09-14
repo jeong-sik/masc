@@ -4755,8 +4755,8 @@ let render_lanes_overview (state : state) =
              ~width:
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap))
-             [ ( Printf.sprintf "Keeper Lanes (%d)" keeper_lane_count, false )
-             ; ( Printf.sprintf "All Runtimes (%d)" all_count, false )
+             [ ( Printf.sprintf "Lanes (%d)" keeper_lane_count, false )
+             ; ( Printf.sprintf "All runtimes (%d)" all_count, false )
              ; ( Printf.sprintf "Standalone (%s)"
                    (Masc_tui_message_layout.count_noun standalone_count "lane"), true )
              ])
@@ -10367,10 +10367,10 @@ let render_runtime (state : state) =
              ~width:
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap))
-             [ ( Printf.sprintf "Keeper Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
+             [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
                    (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
-             ; (Printf.sprintf "All Runtimes (%d)" all_count, not lanes_active)
+             ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
              ; (Printf.sprintf "Standalone (%d)" standalone_count, false)
              ])
           probe_status probe_read timestamp (connection_badge state)

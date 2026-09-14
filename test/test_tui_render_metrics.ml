@@ -470,8 +470,17 @@ let test_memory_block_names_its_reading () =
   check bool "unread says so" true (contains (section ()) "Memory health: not observed");
   check bool "and sends nobody elsewhere" false (contains (section ()) "visit Memory");
   state.memory_health_error <- Some "memory health load failed: HTTP 503";
+  (* The loader's message names its own subject and verdict, so the row draws
+     it and nothing else. "unavailable: " in front of it was the verdict a
+     second time, and it pushed three of the four rows in this block past the
+     pane at a hundred and fifty columns. The server's own reason still gets
+     the word -- "Standing Rules: unavailable: rules-store-offline", pinned in
+     the approval-source case -- because a reason alone says nothing about
+     what state it is a reason for. *)
   check bool "a failed read carries its reason" true
-    (contains (section ()) "Memory health: unavailable: memory health load failed: HTTP 503");
+    (contains (section ()) "Memory health: memory health load failed: HTTP 503");
+  check bool "and does not say it failed twice" false
+    (contains (section ()) "unavailable: memory health load failed");
   let kh = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
   state.memory_health <- Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
   check bool "a failed refresh over a reading is stale" true

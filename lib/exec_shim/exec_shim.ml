@@ -18,7 +18,8 @@ external host_signal_number : int -> int = "ocaml_shim_host_signal_number"
    or not Linux). [restrict_self scratch deny_fs deny_net] is applied in the
    child right before exec; see observe_stub.c for what each flag denies. *)
 external observe_support_abi : unit -> int = "ocaml_shim_observe_support"
-external restrict_self : string -> bool -> bool -> unit = "ocaml_shim_restrict_self"
+external restrict_self : string -> bool -> bool -> bytes -> int
+  = "ocaml_shim_restrict_self"
 
 let observe_supported () = observe_support_abi () >= 1
 
@@ -418,6 +419,30 @@ let scratch_env ~scratch env =
   let upsert (k, v) env = (k, v) :: List.remove_assoc k env in
   env |> upsert ("HOME", scratch) |> upsert ("TMPDIR", scratch)
 
+(* Setup can be refused by one of the child's own two rules. The
+   acknowledgement channel is typed, so the refusal crosses as its rule's
+   name, not as prose the parent would have to re-read out of stderr. *)
+exception Sandbox_refused_socket
+exception Sandbox_refused_write
+
+(* The C stub writes the rule name into a fixed 8-byte buffer and leaves the
+   rest zeroed, so the raw bytes are never equal to the bare tag. Trim the
+   NUL padding by content -- a hardcoded length is exactly how the "N"/"W"
+   path went dead once (review 5192723206). Pure, so the emission mapping is
+   testable without a real seccomp/Landlock refusal. *)
+let refusal_of_rule_bytes (rule : bytes) =
+  let n = Bytes.length rule in
+  let rec last_non_nul i =
+    if i < 0 then 0
+    else if Bytes.get rule i = '\000' then last_non_nul (i - 1)
+    else i + 1
+  in
+  match Bytes.sub_string rule 0 (last_non_nul (n - 1)) with
+  | "socket" -> Sandbox_refused_socket
+  | "write" -> Sandbox_refused_write
+  | padded -> failwith ("box setup refused by unknown rule: " ^ padded)
+;;
+
 let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
   let opened = ref [] in
   let pipe ?(cloexec = false) () =
@@ -468,6 +493,14 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        Unix.execvpe (List.hd argv) (Array.of_list argv)
          (Array.of_list (List.map (fun (k, v) -> k ^ "=" ^ v) env))
      with
+     | Sandbox_refused_socket ->
+       acknowledge "N";
+       Unix.close boundary_w;
+       exit 127
+     | Sandbox_refused_write ->
+       acknowledge "W";
+       Unix.close boundary_w;
+       exit 127
      | exn ->
        acknowledge (if !sandbox_applied then "E" else "S");
        Unix.close boundary_w;
@@ -521,6 +554,12 @@ let child_boundary_of_ack = function
   | "A" -> Exec_ssh_protocol.Sandbox_applied
   | "AE" -> Exec_failed
   | "S" -> Setup_failed
+  (* "N"/"W" are the child attributing a setup refusal to its own rule:
+     "N" is the seccomp socket filter, "W" the Landlock write ruleset. The
+     child knows this from the syscall that failed, never from anything
+     the payload printed. *)
+  | "N" -> Exec_ssh_protocol.Refused_socket
+  | "W" -> Exec_ssh_protocol.Refused_write
   | _ -> Child_ack_unavailable
 
 let read_child_boundary fd =
@@ -819,8 +858,20 @@ let run () =
                match box with
                | None -> env, (fun () -> ()), (fun () -> ())
                | Some (deny_fs, deny_net, scratch) ->
+                 let refusing_rule = Bytes.make 8 '\000' in
                  ( scratch_env ~scratch env
-                 , (fun () -> restrict_self scratch deny_fs deny_net)
+                 , (fun () ->
+                       (* The child knows which of its own rules refused
+                          from the syscall that failed -- the parent never
+                          guesses it back out of stderr. The name crosses
+                          the boundary pipe as the acknowledgement byte's
+                          companion: "R" + rule. [refusal_of_rule_bytes]
+                          trims the NUL padding by content; the mapping is
+                          pure so the emission path is testable without a
+                          real seccomp/Landlock refusal. *)
+                       if restrict_self scratch deny_fs deny_net refusing_rule = 0
+                       then ()
+                       else raise (refusal_of_rule_bytes refusing_rule))
                  , (fun () -> remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
                try spawn ~before_exec ~argv ~env ~cwd () with

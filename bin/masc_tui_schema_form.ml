@@ -199,7 +199,7 @@ let rec lines form =
       let name = match member "title" field.schema with Some (`String title) -> title
         | _ -> String.concat "." field.path in
       (if index=form.cursor then "> " else "  ") ^ name ^ (if field.required then " *" else "") ^ ": " ^
-      (if index=form.cursor && Option.is_some form.draft
-       then Yojson.Safe.to_string (`String (Option.get form.draft))
-       else Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)))
+      (match form.draft with
+       | Some draft when index=form.cursor -> Yojson.Safe.to_string (`String draft)
+       | _ -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)))
       (List.mapi (fun index (field : field) -> index,field) form.fields)

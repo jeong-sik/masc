@@ -676,8 +676,7 @@ let test_explicit_deadline_requires_finite_positive_timeout () =
 
 let test_timeout_phase_policy_labels () =
   let cases =
-    [ Http_client.Admission, "admission"
-    ; Http_client.Queue, "queue"
+    [ Http_client.Queue, "queue"
     ; Http_client.First_token, "first_token"
     ; Http_client.Wall_clock, "wall_clock"
     ; Http_client.Capacity_backpressure, "capacity_backpressure"

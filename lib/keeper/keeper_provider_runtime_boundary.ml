@@ -93,8 +93,8 @@ type t =
 (* Direct variant-to-variant translation (RFC-0371 B12): this used to render
    the agent-core phase to its label and re-parse the label into the MASC
    vocabulary — a typed->string->typed round trip inside one function. Both
-   matches are exhaustive, so a new constructor on either side is a compile
-   error here instead of a silent [None]. *)
+   matches are exhaustive and total, so a new constructor on either side is
+   a compile error here. *)
 let stream_idle_state_of_agent_core :
       Llm_provider.Http_client.stream_idle_state -> stream_idle_state
   = function
@@ -110,24 +110,22 @@ let stream_idle_state_of_agent_core :
 ;;
 
 let timeout_phase_of_agent_core_phase :
-      Llm_provider.Http_client.timeout_phase -> timeout_phase option
+      Llm_provider.Http_client.timeout_phase -> timeout_phase
   = function
-  | Llm_provider.Http_client.First_token -> Some First_token
-  | Http_operation -> Some Http_operation
-  | Non_streaming_body -> Some Non_streaming_body
-  | Stream_body -> Some Stream_body
-  | Stream_idle state -> Some (Stream_idle (stream_idle_state_of_agent_core state))
-  | Provider_step -> Some Provider_step
-  | Cli_stdout_idle -> Some Cli_stdout_idle
-  | Wall_clock -> Some Wall_clock
-  | Capacity_backpressure -> Some Capacity_backpressure
-  | Unknown_timeout -> Some Unknown_timeout
+  | Llm_provider.Http_client.First_token -> First_token
+  | Http_operation -> Http_operation
+  | Non_streaming_body -> Non_streaming_body
+  | Stream_body -> Stream_body
+  | Stream_idle state -> Stream_idle (stream_idle_state_of_agent_core state)
+  | Provider_step -> Provider_step
+  | Cli_stdout_idle -> Cli_stdout_idle
+  | Wall_clock -> Wall_clock
+  | Capacity_backpressure -> Capacity_backpressure
+  | Unknown_timeout -> Unknown_timeout
   (* [Queue] is the wait for a provider admission permit that ran out of its
      bound with nothing sent: the keeper's sub-call, and since the stream
-     admission bound its turn attempts, produce it. [Admission] is Agent
-     Core's pre-flight vocabulary with no producer on a keeper path. *)
-  | Queue -> Some Queue
-  | Admission -> None
+     admission bound its turn attempts, produce it. *)
+  | Queue -> Queue
 ;;
 
 let suffix_after_prefix text prefix =
@@ -192,7 +190,7 @@ let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () 
   | Some { Keeper_turn_terminal_code.phase } ->
     Provider_timeout
       { source = Agent_core_provider
-      ; phase = Option.bind phase timeout_phase_of_agent_core_phase
+      ; phase = Option.map timeout_phase_of_agent_core_phase phase
       }
   | None ->
     if provider_runtime_error_looks_like_timeout ~code
@@ -234,11 +232,11 @@ let classify_provider_error = function
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     provider_timeout
       ~source:Agent_core_provider
-      ~phase:(Option.bind timeout_phase timeout_phase_of_agent_core_phase)
+      ~phase:(Option.map timeout_phase_of_agent_core_phase timeout_phase)
   | Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ } ->
     provider_timeout
       ~source:Agent_core_provider
-      ~phase:(timeout_phase_of_agent_core_phase phase)
+      ~phase:(Some (timeout_phase_of_agent_core_phase phase))
   | Llm_provider.Error.MissingApiKey _
   | Llm_provider.Error.InvalidConfig _
   | Llm_provider.Error.ParseError _

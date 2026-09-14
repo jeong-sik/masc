@@ -76,7 +76,6 @@ type core_error_poly =
 
 let is_streaming_timeout_phase = function
   | Http_client.First_token | Http_client.Stream_body | Http_client.Stream_idle _ -> true
-  | Http_client.Admission
   | Http_client.Queue
   | Http_client.Wall_clock
   | Http_client.Capacity_backpressure

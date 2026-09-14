@@ -90,7 +90,7 @@ type try_provider_ctx =
        attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line
        gap) and [body_timeout_s] (non-streaming body read only): both of
        those are AGENT_CORE-internal and observe the transport only, which is
-       why they left the non-streaming and pre-first-token (Admission/Queue)
+       why they left the non-streaming and pre-first-token (Queue)
        stalls of #27355 unprotected.
 
        #27349 measured this against total elapsed wall-clock. Elapsed cannot

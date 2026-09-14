@@ -176,7 +176,7 @@ let ownership_of_network = function
 ;;
 
 let ownership_of_timeout = function
-  | Http.Admission | Http.Queue | Http.Capacity_backpressure -> Attempt_local
+  | Http.Queue | Http.Capacity_backpressure -> Attempt_local
   | Http.First_token
   | Http.Wall_clock
   | Http.Http_operation

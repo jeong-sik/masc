@@ -507,10 +507,22 @@ let test_store_failure_fences_mutations () =
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "store-fenced owner accepted another mutation");
+  (* The metadata persistence fault is its own slot now (#36203). A drain wake
+     touches only the operation store, which is healthy here, so it returns Ok;
+     the metadata fault does not clear on operation-store activity, proven by
+     the next meta commit still being refused. *)
   (match Owner.wake_operation_drain owner with
-   | Error (Owner.Store_unavailable _) -> ()
-   | Error error -> fail (Owner.error_to_string error)
-   | Ok () -> fail "operation-store recovery cleared metadata persistence failure");
+   | Ok () -> ()
+   | Error error ->
+     fail ("operation drain was blocked by a metadata persistence fault: " ^ Owner.error_to_string error));
+  (match
+     Owner.apply_meta
+       owner
+       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "still-fenced-after-drain" })
+   with
+   | Error (Owner.Store_unavailable "disk unavailable") -> ()
+   | Error error -> fail ("metadata fault was not preserved: " ^ Owner.error_to_string error)
+   | Ok _ -> fail "operation drain cleared the metadata persistence fault");
   match Owner.exact_projection owner with
   | Ok projection ->
     check bool
@@ -2851,10 +2863,25 @@ let test_recovery_keeps_integrity_failure_fenced () =
       Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-integrity")
         ~source:operation_source ~input:(operation_input "must remain fenced")
       |> expect_store_unavailable;
-      (* Metadata is refused on the same fault: a command is where the fence
-         is re-examined, and an integrity fault does not lift there either. *)
-      Owner.apply_meta owner
-        (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
+      (* The metadata store is healthy, so a metadata commit lands even while
+         the operation store is fenced for integrity reconciliation (#36203).
+         The two fault slots are independent: the commit does not clear the
+         operation fault, and operation commands stay refused. *)
+      (match
+         Owner.apply_meta owner
+           (Set_activation_mode
+              { mode = Masc.Keeper_activation_mode.Autonomous
+              ; updated_at = "meta-commits-through-op-fence" })
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail
+           ("metadata commit was blocked by an operation integrity fault: "
+            ^ Owner.error_to_string error));
+      check bool "the operation store stays fenced after the meta commit" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-still-fenced")
+        ~source:operation_source ~input:(operation_input "operation path stays fenced")
       |> expect_store_unavailable)
 ;;
 

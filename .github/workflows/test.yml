@@ -284,14 +284,29 @@ jobs:
             suite="${suite// /}"
             [ -n "${suite}" ] || continue
             # A suite that is a script under a dune alias rather than an
-            # executable. Two spellings reach the same place: test/<suite>.py
-            # for a script named after its file, and any name a test/ dune
-            # file declares as (alias runtest-<suite>) — the PTY suite's
-            # per-family lanes are named that way and have no file of their
-            # own. Dune runs the script as the alias's action, so building
-            # the alias is the run.
-            if [ -f "test/${suite}.py" ] \
-              || grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
+            # executable. Three spellings reach the same place: test/<suite>.py
+            # for a script named after its file, the same written as a path
+            # from the root, and any name a test/ dune file declares as
+            # (alias runtest-<suite>) — the PTY suite's per-family lanes are
+            # named that way and have no file of their own. Dune runs the
+            # script as the alias's action, so building the alias is the run.
+            #
+            # The path spelling is accepted because the .ml branch below takes
+            # it and an OCaml suite in its own directory needs it, so the two
+            # halves of one input read differently otherwise. Measured
+            # 2026-09-14: three dispatches in forty minutes named a Python
+            # suite as test/<name> and each burned a full build to say the
+            # name resolved to nothing. The alias itself is the stem, never
+            # the path.
+            #
+            # A name with no directory in it is the only one matched against
+            # the declared aliases: those are bare names, and taking the last
+            # segment of a path to match one would let an OCaml suite under
+            # packages/ be answered by a same-named alias under test/.
+            if [ -f "test/${suite}.py" ] || [ -f "${suite}.py" ]; then
+              aliases+=("${suite##*/}")
+            elif [ "${suite}" = "${suite##*/}" ] \
+              && grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
                    test/dune test/stanzas 2>/dev/null; then
               aliases+=("${suite}")
             else
@@ -325,7 +340,7 @@ jobs:
           resolution_status=0
           if [ "${#unresolved[@]}" -ne 0 ]; then
             for suite in ${unresolved[@]+"${unresolved[@]}"}; do
-              log "[targeted] FAIL - no test/${suite}.ml and no ${suite}.ml"
+              log "[targeted] FAIL - ${suite} names no suite: no test/${suite}.ml, ${suite}.ml, test/${suite}.py or ${suite}.py, and no (alias runtest-${suite##*/})"
             done
             resolution_status=1
           fi

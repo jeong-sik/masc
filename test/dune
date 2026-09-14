@@ -1945,6 +1945,13 @@
  (modules test_keeper_attempt_without_clock)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; The operator's body-timeout override reaches a non-streaming run_named turn
+; that named none. Slow: the setting's lower bound is ten seconds.
+(test
+ (name test_keeper_body_timeout_override)
+ (modules test_keeper_body_timeout_override)
+ (libraries alcotest masc_test_deps eio_main unix))
+
 (test
  (name test_keeper_required_tools)
  (modules test_keeper_required_tools)

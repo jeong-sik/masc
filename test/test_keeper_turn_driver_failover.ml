@@ -774,7 +774,6 @@ let test_deferred_tail_rejects_transformed_invalid_request_cap () =
           if String.equal provider_config.base_url "http://127.0.0.1:2"
           then Ok { provider_config with max_request_body_bytes = Some 0 }
           else Ok provider_config)
-        ~body_timeout_s:0.5
         ~sw
         ~net:env#net
         ()
@@ -913,7 +912,6 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~goal_blocks:[ audio ]
          ~runtime_manifest_context:context
          ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
-         ~body_timeout_s:0.5
          ~sw
          ~net:env#net
          ()
@@ -1328,7 +1326,6 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
         ~runtime_manifest_context:context
         ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
         ~deferred_runtime_lane
-        ~body_timeout_s:0.5
         ~sw
         ~net:env#net
         ()
@@ -1451,7 +1448,6 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
         ~agent_core_checkpoint:checkpoint
         ~runtime_manifest_context:context
         ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
-        ~body_timeout_s:0.5
         ~sw
         ~net:env#net
         ()

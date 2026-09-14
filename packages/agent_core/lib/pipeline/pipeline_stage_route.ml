@@ -189,14 +189,14 @@ let provider_config_for_turn ?on_provider_failure ~turn_config agent =
     Error detailed.error
 ;;
 
-(* The call deadline as one window across the exact-fit path: the
-   count-tokens measurement (its permit wait and round trip) and then the
-   completion (its permit wait and round trip). [open_] anchors it at the
-   resolved deadline as the measurement starts; [remaining] is what the
-   completion may arm from it, in seconds from now, and refuses a window
-   the measurement spent so the completion is never handed a bound that is
-   not greater than zero. *)
-module Call_window = struct
+(* A caller's budget as one window across the exact-fit path: the
+   count-tokens measurement first, then the completion or the stream.
+   [open_] anchors it at the resolved deadline as the measurement starts;
+   [remaining] is what the next stage may arm from it, in seconds from now,
+   and says when the measurement spent it, so no stage is handed a bound
+   that is not greater than zero. The caller names the phase a spent window
+   is. *)
+module Window = struct
   type 'clock t =
     | Unbounded
     | Bounded of
@@ -211,25 +211,30 @@ module Call_window = struct
       Bounded { clock; timeout_s; deadline_at = Eio.Time.now clock +. timeout_s }
   ;;
 
+  (* [`Spent] carries the budget as declared, for the message. *)
   let remaining = function
-    | Unbounded -> Ok None
+    | Unbounded -> `Unbounded
     | Bounded { clock; timeout_s; deadline_at } ->
       let remaining_s = deadline_at -. Eio.Time.now clock in
-      if Float.compare remaining_s 0.0 <= 0
-      then
-        Error
-          (Llm_provider.Http_client.TimeoutError
-             { message =
-                 Printf.sprintf
-                   "call_timeout_s deadline exceeded after %.17gs in the count-tokens \
-                    request, before the completion was sent \
-                    (Pipeline_stage_route.dispatch_sync)"
-                   timeout_s
-             ; phase = Llm_provider.Http_client.Non_streaming_body
-             })
-      else Ok (Some remaining_s)
+      if Float.compare remaining_s 0.0 <= 0 then `Spent timeout_s else `Remaining remaining_s
   ;;
 end
+
+(* The measurement spent the caller's whole window; the next stage is not
+   sent. *)
+let window_spent_by_the_measurement ~operation ~parameter ~seconds ~phase ~next_stage =
+  Llm_provider.Http_client.TimeoutError
+    { message =
+        Printf.sprintf
+          "%s deadline exceeded after %.17gs in the count-tokens request, before the %s \
+           was sent (Pipeline_stage_route.%s)"
+          parameter
+          seconds
+          next_stage
+          operation
+    ; phase
+    }
+;;
 
 let dispatch_sync
       ~sw
@@ -311,14 +316,16 @@ let dispatch_sync
                   spends from it -- its permit wait and its count round trip
                   -- and the completion arms what that left, permit wait
                   included. *)
-               let call_window = Call_window.open_ call_deadline in
+               let call_window = Window.open_ call_deadline in
                let measured =
                  Llm_provider.Complete.measure_request
                    ~sw
                    ~net:agent.net
                    ?clock
                    ?timeout_s:agent.options.body_timeout_s
-                   ?call_timeout_s:agent.options.call_timeout_s
+                   ~next_stage:
+                     (Llm_provider.Complete.Completion
+                        { call_timeout_s = agent.options.call_timeout_s })
                    serialized
                  |> Result.map_error
                       (measurement_error
@@ -337,7 +344,19 @@ let dispatch_sync
                    with
                    | Error error -> Error (fit_error ~binding error)
                    | Ok admitted ->
-                     (match Call_window.remaining call_window with
+                     (match
+                        match Window.remaining call_window with
+                        | `Unbounded -> Ok None
+                        | `Remaining remaining_s -> Ok (Some remaining_s)
+                        | `Spent seconds ->
+                          Error
+                            (window_spent_by_the_measurement
+                               ~operation:"dispatch_sync"
+                               ~parameter:"call_timeout_s"
+                               ~seconds
+                               ~phase:Llm_provider.Http_client.Non_streaming_body
+                               ~next_stage:"completion")
+                      with
                       | Error error ->
                         Error
                           (Provider_failure_attribution.of_http_error ~binding ~provider error)
@@ -430,42 +449,113 @@ let dispatch_stream
           | Error error -> Error (fit_error ~binding error)
           | Ok max_context_tokens ->
             (match
-               Llm_provider.Complete.measure_request
-                 ~sw
-                 ~net:agent.net
-                 ?clock
-                 ?timeout_s:agent.options.body_timeout_s
-                 serialized
+               Llm_provider.Http_client.resolve_explicit_deadline
+                 ~operation:"Pipeline_stage_route.dispatch_stream"
+                 ~parameter:"admission_timeout_s"
+                 ~clock
+                 ~timeout_s:agent.options.admission_timeout_s
              with
              | Error error ->
-               Error
-                 (measurement_error
-                    ~binding
-                    ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
-                    ~provider
-                    error)
-             | Ok measured ->
-               (match
-                  Llm_provider.Complete.admit_request
-                    ~now_unix_s
-                    ~max_context_tokens
-                    measured
-                with
-                | Error error -> Error (fit_error ~binding error)
-                | Ok admitted ->
-                  Llm_provider.Complete.complete_stream_admitted
-                    ~sw
-                    ~net:agent.net
-                    ?clock
-                    ?admission_timeout_s:agent.options.admission_timeout_s
-                    ?transport:agent.options.transport
-                    admitted
-                    ~on_event
-                    ?on_telemetry
-                    ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                    ()
-                  |> Result.map_error
-                       (Provider_failure_attribution.of_http_error ~binding ~provider)))))
+               Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
+             | Ok admission_deadline ->
+               (* Two of the stream's budgets are one window from here. The
+                  admission budget spans both permit waits, the measurement's
+                  and the stream's, with the count round trip between them
+                  not paused. The first-event budget is provider silence
+                  before the first token: the count round trip spends from
+                  it, and the stream arms what that left; permit waits are
+                  queueing and spend none of it. *)
+               let admission_window = Window.open_ admission_deadline in
+               let measured =
+                 Llm_provider.Complete.measure_request
+                   ~sw
+                   ~net:agent.net
+                   ?clock
+                   ?timeout_s:agent.options.body_timeout_s
+                   ~next_stage:
+                     (Llm_provider.Complete.Stream
+                        { admission_timeout_s = agent.options.admission_timeout_s
+                        ; first_event_timeout_s = agent.options.first_event_timeout_s
+                        })
+                   serialized
+                 |> Result.map_error
+                      (measurement_error
+                         ~binding
+                         ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                         ~provider)
+               in
+               (match measured with
+                | Error error -> Error error
+                | Ok measured ->
+                  let first_event_left =
+                    match
+                      ( agent.options.first_event_timeout_s
+                      , Llm_provider.Complete.count_round_trip_s measured )
+                    with
+                    | None, _ -> Ok None
+                    | Some budget_s, None ->
+                      (* Not timed: no clock, and the stream stage refuses
+                         the budget as unenforceable itself. *)
+                      Ok (Some budget_s)
+                    | Some budget_s, Some spent_s ->
+                      let left_s = budget_s -. spent_s in
+                      if Float.compare left_s 0.0 <= 0
+                      then
+                        Error
+                          (window_spent_by_the_measurement
+                             ~operation:"dispatch_stream"
+                             ~parameter:"first_event_timeout_s"
+                             ~seconds:budget_s
+                             ~phase:Llm_provider.Http_client.First_token
+                             ~next_stage:"stream")
+                      else Ok (Some left_s)
+                  in
+                  let admission_left =
+                    match Window.remaining admission_window with
+                    | `Unbounded -> Ok None
+                    | `Remaining remaining_s -> Ok (Some remaining_s)
+                    | `Spent seconds ->
+                      Error
+                        (window_spent_by_the_measurement
+                           ~operation:"dispatch_stream"
+                           ~parameter:"admission_timeout_s"
+                           ~seconds
+                           ~phase:Llm_provider.Http_client.Queue
+                           ~next_stage:"stream")
+                  in
+                  (match first_event_left, admission_left with
+                   | Error error, _ | Ok _, Error error ->
+                     Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                   | Ok first_event_timeout_s, Ok admission_timeout_s ->
+                     (match
+                        Llm_provider.Complete.admit_request
+                          ~now_unix_s
+                          ~max_context_tokens
+                          measured
+                      with
+                      | Error error -> Error (fit_error ~binding error)
+                      | Ok admitted ->
+                        let admitted =
+                          match first_event_timeout_s with
+                          | None -> admitted
+                          | Some first_event_timeout_s ->
+                            Llm_provider.Complete.with_first_event_timeout_s
+                              first_event_timeout_s
+                              admitted
+                        in
+                        Llm_provider.Complete.complete_stream_admitted
+                          ~sw
+                          ~net:agent.net
+                          ?clock
+                          ?admission_timeout_s
+                          ?transport:agent.options.transport
+                          admitted
+                          ~on_event
+                          ?on_telemetry
+                          ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                          ()
+                        |> Result.map_error
+                             (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
   in
   finish_call ?on_provider_failure result
 ;;

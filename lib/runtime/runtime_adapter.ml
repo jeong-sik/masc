@@ -547,13 +547,6 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
            ~provider_id:provider.id
            spec
        in
-       let model_capabilities_override =
-         match model_capabilities_override, provider.api_format with
-         | None, (Gemini_api | Vertex_gemini_api) ->
-           Llm_provider.Capabilities.for_provider_model_id ~wire:(Some kind)
-             ~allow_bare_fallback:true ~provider_label:"gemini" ~model_id:spec.api_name
-         | existing, _ -> existing
-       in
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in

@@ -283,7 +283,18 @@ let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
    [source_incarnation] so the operator boundary still resolves the row, and
    every member event id rides in [detail]. A single pending Connector event
    renders exactly the ungrouped row. Every non-Connector stimulus keeps its
-   own row. *)
+   own row.
+
+   Pending Schedule_due stimuli of one schedule repeat the same way: a
+   recurring schedule advances as soon as its wake is durably enqueued
+   ([Schedule_store.accept_running]), so a Keeper whose autonomous lane has
+   not run for hours holds one occurrence per period -- 31 rows of "예약
+   실행 시각 도래 · 삼국지 2 캠페인 플레이 이어가기" on 2026-09-14. The turn
+   consumes them as one batch, so per-occurrence rows carry no decision the
+   aggregate loses. They collapse into one row per schedule with the count,
+   the oldest arrival, the first and last due instant, and every member's
+   exact address in [detail]. A single pending occurrence renders exactly
+   the ungrouped row. *)
 let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
   let connector_selections =
     List.filter_map
@@ -310,6 +321,31 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
     |> List.sort String.compare
   in
   let connectors_emitted = ref false in
+  (* One entry per schedule_id with two or more pending occurrences. Members
+     keep queue order; the aggregate row takes the position of the first. *)
+  let schedule_members
+    : (string, (Keeper_event_queue.scheduled_wake * Keeper_event_queue_state.pending_selection) list) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  List.iter
+    (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       match selection.source.payload with
+       | Keeper_event_queue.Schedule_due wake ->
+         let existing =
+           Option.value (Hashtbl.find_opt schedule_members wake.schedule_id) ~default:[]
+         in
+         Hashtbl.replace schedule_members wake.schedule_id ((wake, selection) :: existing)
+       | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+       | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+       | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+       | Workspace_message _ | Delegate_completed _ | Composition_completed _ -> ())
+    selections;
+  let schedule_group wake_schedule_id =
+    match Hashtbl.find_opt schedule_members wake_schedule_id with
+    | Some (_ :: _ :: _ as members) -> Some (List.rev members)
+    | Some ([] | [ _ ]) | None -> None
+  in
+  let schedules_emitted : (string, unit) Hashtbl.t = Hashtbl.create 8 in
   let rec go queue_index acc = function
     | [] -> List.rev acc
     | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
@@ -347,6 +383,65 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         ; detail
         }
       in
+      let grouped_schedule =
+        match stimulus.payload with
+        | Keeper_event_queue.Schedule_due wake ->
+          Option.map (fun members -> wake, members) (schedule_group wake.schedule_id)
+        | _ -> None
+      in
+      (match grouped_schedule with
+       | Some (wake, _) when Hashtbl.mem schedules_emitted wake.schedule_id ->
+         (* Already represented by the schedule's aggregate row. *)
+         go (queue_index + 1) acc rest
+       | Some (wake, members) ->
+         Hashtbl.replace schedules_emitted wake.schedule_id ();
+         let count = List.length members in
+         let oldest_arrived_at, first_due, last_due =
+           List.fold_left
+             (fun (oldest, first, last)
+                  ((member_wake : Keeper_event_queue.scheduled_wake), (member : Keeper_event_queue_state.pending_selection)) ->
+                ( Float.min oldest member.source.arrived_at
+                , Float.min first member_wake.due_at
+                , Float.max last member_wake.due_at ))
+             (stimulus.arrived_at, wake.due_at, wake.due_at)
+             members
+         in
+         (* Every member's exact address, in due order, so the operator
+            boundary can cancel or reprioritize any one of them from this row. *)
+         let member_addresses =
+           members
+           |> List.sort (fun ((a : Keeper_event_queue.scheduled_wake), _) ((b : Keeper_event_queue.scheduled_wake), _) ->
+                Float.compare a.due_at b.due_at)
+           |> List.map (fun ((member_wake : Keeper_event_queue.scheduled_wake), (member : Keeper_event_queue_state.pending_selection)) ->
+                `Assoc
+                  [ ( "source_ref"
+                    , `String (Keeper_event_queue_state.source_snapshot_ref member.source) )
+                  ; ( "source_incarnation"
+                    , `String (Int64.to_string member.admitted_revision) )
+                  ; "due_at_unix", `Float member_wake.due_at
+                  ])
+         in
+         go
+           (queue_index + 1)
+           (row
+              ~what:
+                (Printf.sprintf
+                   "%s ×%d%s"
+                   (queue_payload_what stimulus.payload)
+                   count
+                   (urgency_what_suffix stimulus.urgency))
+              ~since:(Some oldest_arrived_at)
+              ~detail:
+                (`Assoc
+                   (base_detail
+                    @ [ ("group_count", `Int count)
+                      ; ("group_first_due_unix", `Float first_due)
+                      ; ("group_last_due_unix", `Float last_due)
+                      ; ("group_members", `List member_addresses)
+                      ]))
+              :: acc)
+           rest
+       | None ->
       (match stimulus.payload with
        | Keeper_event_queue.Connector_attention _
          when connector_count > 1 && not !connectors_emitted ->
@@ -388,7 +483,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
               ~since:(Some stimulus.arrived_at)
               ~detail:(`Assoc base_detail)
               :: acc)
-           rest)
+           rest))
   in
   go 0 [] selections
 ;;

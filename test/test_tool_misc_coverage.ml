@@ -895,6 +895,73 @@ let () =
      | `Assoc fields -> assert (List.assoc_opt "group_count" fields = None)
      | _ -> failwith "expected json object"))
 
+let schedule_selection ~schedule_id ~occurrence ~due_at ~arrived_at =
+  { Keeper_event_queue_state.source =
+      { Keeper_event_queue.post_id = "occ-" ^ occurrence
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at
+      ; payload =
+          Keeper_event_queue.Schedule_due
+            { occurrence_id = "occ-" ^ occurrence
+            ; schedule_instance_id = "inst-" ^ schedule_id
+            ; schedule_id
+            ; due_at
+            ; payload_digest = "digest-" ^ occurrence
+            ; title = Some "삼국지 2 캠페인 플레이 이어가기"
+            ; message = "continue"
+            ; result_delivery = None
+            }
+      }
+  ; admitted_revision = Int64.of_string occurrence
+  ; checkpoint_retentions = 0
+  ; repetition_scope = None
+  }
+
+let () =
+  test "waiting_inventory_groups_pending_occurrences_of_one_schedule" (fun () ->
+    let rows =
+      Server_keeper_waiting_inventory.For_testing.rows_for_queue_snapshot
+        ~keeper_name:"group-fixture"
+        ~source:Server_keeper_waiting_inventory.Event_queue_pending
+        ~next_action:"keeper_cycle"
+        (schedule_selection ~schedule_id:"sched-a" ~occurrence:"2" ~due_at:400.0 ~arrived_at:405.0
+        :: schedule_selection ~schedule_id:"sched-b" ~occurrence:"9" ~due_at:150.0 ~arrived_at:155.0
+        :: schedule_selection ~schedule_id:"sched-a" ~occurrence:"1" ~due_at:100.0 ~arrived_at:105.0
+        :: schedule_selection ~schedule_id:"sched-a" ~occurrence:"3" ~due_at:700.0 ~arrived_at:705.0
+        :: [])
+    in
+    (* The aggregate takes the first member's position; the other schedule
+       keeps its own ungrouped row. *)
+    assert (List.length rows = 2);
+    let grouped = List.hd rows in
+    assert (String.equal grouped.what "예약 실행 시각 도래 · 삼국지 2 캠페인 플레이 이어가기 ×3");
+    assert (grouped.since = Some 105.0);
+    assert (json_int_member "group_count" grouped.detail = 3);
+    (match grouped.detail with
+     | `Assoc fields ->
+         assert (List.assoc_opt "group_first_due_unix" fields = Some (`Float 100.0));
+         assert (List.assoc_opt "group_last_due_unix" fields = Some (`Float 700.0));
+         (match List.assoc_opt "group_members" fields with
+          | Some (`List members) ->
+              assert (List.length members = 3);
+              (* Members ride in due order, each with the exact address the
+                 operator boundary resolves. *)
+              let incarnations =
+                List.map
+                  (function
+                    | `Assoc member -> List.assoc_opt "source_incarnation" member
+                    | _ -> None)
+                  members
+              in
+              assert (incarnations = [ Some (`String "1"); Some (`String "2"); Some (`String "3") ])
+          | _ -> failwith "missing group_members")
+     | _ -> failwith "expected json object");
+    let other = List.nth rows 1 in
+    assert (String.equal other.what "예약 실행 시각 도래 · 삼국지 2 캠페인 플레이 이어가기");
+    (match other.detail with
+     | `Assoc fields -> assert (List.assoc_opt "group_count" fields = None)
+     | _ -> failwith "expected json object"))
+
 let () =
   Alcotest.run "Tool_misc"
     [

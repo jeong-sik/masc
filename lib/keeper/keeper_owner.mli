@@ -39,19 +39,29 @@ type operation_interrupt_result =
   | Operation_interrupt_signalled
   | Operation_not_current of
       { running_operation_id : Chat_operation.Operation_id.t option }
+  | Operation_settling
+  | Operation_maintenance_running
   | Operation_interrupt_failed of string
 (** Result of a mailbox-linearized compare-and-interrupt. A stale caller can
-    never signal a newer operation: the expected id is compared by the Owner
-    before its exact child cancel capability is invoked. *)
+    never signal a newer operation: the expected name is compared against the
+    slot the Owner holds before its exact child cancel capability is invoked.
+    [Operation_settling] means the named execution has already returned and
+    only its durable settle is pending: nothing is left to cancel, and the slot
+    is released when that settle completes (a settle hook that blocks keeps it
+    held with no cancel handle). [Operation_maintenance_running] means the slot
+    is held by a maintenance run, an internal transaction whose caller expects
+    a value or a typed error; a chat stop names it and cancels nothing. *)
 
 type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
 
 type interrupt_target =
-  | Observed_turn of
-      { current : Keeper_registry_types.turn_switch option Atomic.t
-      ; interrupt_token : string
-      }
+  | Observed_turn of { interrupt_token : Keeper_interrupt_token.t }
   | Direct_operation of Chat_operation.Operation_id.t
+(** The two names a client can give the execution it wants stopped: the token
+    the Owner published with the turn slot ({!turn_in_flight}), or the id of
+    the chat operation the child is running. Both are compared against Owner
+    state only. The inner agent switch a turn registers in {!Keeper_registry}
+    ends before the child does and is not a stop handle. *)
 
 type run_next_result =
   | Run_next_paused
@@ -71,6 +81,9 @@ type turn_lane =
 type turn_in_flight =
   { lane : turn_lane
   ; started_at : float
+  ; interrupt_token : Keeper_interrupt_token.t
+        (** Minted with the slot and dropped with it: the name
+            {!interrupt_turn} compares. A running turn never lacks one. *)
   }
 (** At most one turn runs per Keeper, across all three lanes. The Owner holds
     that slot; {!Keeper_turn_dispatch_authority} states the same boundary from

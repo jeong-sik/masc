@@ -59,6 +59,7 @@
   mirage-crypto-rng.unix
   mtime.clock.os
   domain-name
+  ipaddr
   uri)
  (inline_tests)
  (preprocess

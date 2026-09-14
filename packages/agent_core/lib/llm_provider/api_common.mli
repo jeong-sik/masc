@@ -226,13 +226,21 @@ val https_init_error_to_string : https_init_error -> string
     retried on the next call. *)
 val tls_client_config : unit -> (Tls.Config.client, https_init_error) result
 
+(** The name a TLS peer's certificate is checked against: a URL host is
+    either an address, checked against the certificate's iPAddress names,
+    or a host name, sent as SNI and checked against its dNSName names. *)
+type tls_peer =
+  | Peer_host of [ `host ] Domain_name.t
+  | Peer_ip of Ipaddr.t
+
+val tls_peer_of_host : string -> (tls_peer, string) result
+(** [tls_peer_of_host host] reads a URL host as an address first and a host
+    name second; a host that is neither is [Error] with the parser's reason.
+    There is no third answer: this client never opens a TLS session with no
+    name for the authenticator to check. *)
+
 val make_https_result
   :  unit
-  -> ( Uri.t -> [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t -> Tls_eio.t
+  -> ( tls_peer -> [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t -> Tls_eio.t
        , https_init_error )
        result
-
-val make_https
-  :  unit
-  -> (Uri.t -> [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t -> Tls_eio.t)
-       option

@@ -784,36 +784,62 @@ let tls_client_config () : (Tls.Config.client, https_init_error) result =
           Ok config))
 ;;
 
-let make_https_result () : (Uri.t -> _ -> _, https_init_error) result =
+type tls_peer =
+  | Peer_host of [ `host ] Domain_name.t
+  | Peer_ip of Ipaddr.t
+
+(* The name the peer's certificate is checked against is decided before a
+   socket exists, and there is no third answer: a URL host is an address,
+   checked against the certificate's iPAddress names, or a host name, sent
+   as SNI and checked against its dNSName names. [Domain_name.of_string]
+   accepts "127.0.0.1" (numeric labels are syntactically a domain name), so
+   the address reading comes first. A host that is neither is a URL this
+   client cannot validate a certificate for, and it says so instead of
+   handing x509 no name at all, which would make it check the chain and skip
+   the name. *)
+let tls_peer_of_host host =
+  match Ipaddr.of_string host with
+  | Ok ip -> Ok (Peer_ip ip)
+  | Error (`Msg _) ->
+    (match Domain_name.of_string host with
+     | Error (`Msg reason) -> Error reason
+     | Ok domain ->
+       (match Domain_name.host domain with
+        | Ok name -> Ok (Peer_host name)
+        | Error (`Msg reason) -> Error reason))
+;;
+
+let%test "tls peer: an IPv4 literal is an address" =
+  match tls_peer_of_host "127.0.0.1" with
+  | Ok (Peer_ip ip) -> String.equal (Ipaddr.to_string ip) "127.0.0.1"
+  | Ok (Peer_host _) | Error _ -> false
+;;
+
+let%test "tls peer: an IPv6 literal is an address" =
+  match tls_peer_of_host "::1" with
+  | Ok (Peer_ip _) -> true
+  | Ok (Peer_host _) | Error _ -> false
+;;
+
+let%test "tls peer: a host name is a name" =
+  match tls_peer_of_host "api.example.com" with
+  | Ok (Peer_host name) -> String.equal (Domain_name.to_string name) "api.example.com"
+  | Ok (Peer_ip _) | Error _ -> false
+;;
+
+let%test "tls peer: neither is an error, not a nameless handshake" =
+  match tls_peer_of_host "1.2.3.4.5" with
+  | Error _ -> true
+  | Ok _ -> false
+;;
+
+let make_https_result () : (tls_peer -> _ -> _, https_init_error) result =
   match tls_client_config () with
   | Error _ as e -> e
   | Ok tls_config ->
     Ok
-      (fun uri flow ->
-        (* SNI carries a host name, never an address. [Domain_name.of_string]
-           accepts "127.0.0.1" (numeric labels are syntactically a domain
-           name) and [host_exn] then raised [Invalid_argument "invalid host
-           name"] out of the connect path as an untyped exception, so an
-           https endpoint written as an IP literal crashed the attempt
-           instead of failing it. [host] answers the same question as a
-           result; an address goes without SNI and the authenticator
-           decides the rest. *)
-        let host =
-          match Uri.host uri with
-          | None -> None
-          | Some h ->
-            (match Domain_name.of_string h with
-             | Error _ -> None
-             | Ok dn ->
-               (match Domain_name.host dn with
-                | Ok host -> Some host
-                | Error _ -> None))
-        in
-        Tls_eio.client_of_flow tls_config ?host flow)
-;;
-
-let make_https () =
-  match make_https_result () with
-  | Ok wrap -> Some wrap
-  | Error _ -> None
+      (fun peer flow ->
+        match peer with
+        | Peer_host host -> Tls_eio.client_of_flow tls_config ~host flow
+        | Peer_ip ip -> Tls_eio.client_of_flow tls_config ~ip flow)
 ;;

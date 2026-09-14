@@ -1713,8 +1713,23 @@ let resolve_origin net (origin : validated_uri) =
           ; kind = https_init_error_network_kind reason
           }
       in
-      let+ wrap = Result.map_error wrap_error (Api_common.make_https_result ()) in
-      Some wrap
+      let* wrap = Result.map_error wrap_error (Api_common.make_https_result ()) in
+      let+ peer =
+        Result.map_error
+          (fun reason ->
+             NetworkError
+               { message =
+                   Printf.sprintf
+                     "https host %S of %s is neither an address nor a host name; the \
+                      certificate cannot be checked against it: %s"
+                     origin.host
+                     origin.url
+                     reason
+               ; kind = Tls_error
+               })
+          (Api_common.tls_peer_of_host origin.host)
+      in
+      Some (wrap peer)
     | Http -> Ok None
   in
   Ok (net, addresses, tls_wrap)
@@ -1732,7 +1747,7 @@ let make_client ~net ~origin =
     let transport : connection =
       try
         match tls_wrap with
-        | Some wrap -> (wrap origin.uri sock :> connection)
+        | Some wrap -> (wrap sock :> connection)
         | None -> (sock :> connection)
       with exn ->
         let bt = Printexc.get_raw_backtrace () in
@@ -1788,7 +1803,7 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
     let conn : connection =
       try
         match tls_wrap with
-        | Some wrap -> (wrap origin.uri sock :> connection)
+        | Some wrap -> (wrap sock :> connection)
         | None -> (sock :> connection)
       with exn ->
         let bt = Printexc.get_raw_backtrace () in
@@ -2480,18 +2495,16 @@ type pre_header_budget =
   | Connect_budget
   | First_event_budget
 
-(* The phase before the response headers -- the connection (DNS, TCP, TLS),
-   the request and the wait for the status line -- runs under the narrower
-   of the connect budget and the first-event budget. Until 2026-09-14 it ran
-   under the connect budget alone, and a provider with no connect-timeout-s
-   declared (nine of the ten live providers) had no bound on it at all: the
-   first-event budget is anchored at the first body read, which a server
-   that accepts the request and never answers never reaches. The one live
-   provider that declared a connect budget (ollama_cloud, 180 s) spent it on
-   that wait six times on 2026-09-14 alone, so the wait is real, and on the
-   other nine only the keeper's watchdog stood behind it. The first-event
-   budget is the operator's word on how long a provider may stay silent
-   before its first token; silence before the headers is that silence. *)
+(* The phase before the response headers -- the connection (TCP, TLS), the
+   request and the wait for the status line -- runs under the narrower of
+   the connect budget and the first-event budget. The first-event budget is
+   the operator's word on how long a provider may stay silent before its
+   first token, and silence before the headers is that silence; the
+   reader's own first-event window is anchored at the first body read, which
+   a server that accepts the request and never answers never reaches. DNS
+   is the one step the window cannot end: [getaddrinfo] runs in a systhread
+   with no cancellation, so a closed window is observed once the lookup
+   returns, and the resolver's own timeout is the bound until then. *)
 let pre_header_deadline
       ~(connect : 'clock explicit_deadline)
       ~(first_event : 'clock explicit_deadline)
@@ -2570,14 +2583,12 @@ let with_post_stream
   in
   (* Phase 1a: the connection, the request and the response headers, one
      window under [deadline] (see [pre_header_deadline]). The connection is
-     made inside the window: DNS, TCP and the TLS handshake are the first
-     things a dead or blackholed endpoint stalls on, and a budget that
-     started after them bounded only the part of the wait that was already
-     the easiest to end. Cohttp_eio.Client.post returns once headers are
-     parsed (body is a lazy flow), so wrapping only this stage in
-     [catch_network] keeps a pre-header stall as a [TimeoutError] named for
-     its budget without absorbing body-phase timeouts (first-token / prefill
-     wait, inter-chunk idle).
+     made inside the window: the TCP connect and the TLS handshake are the
+     first things a dead or blackholed endpoint stalls on. Cohttp_eio.Client.post
+     returns once headers are parsed (body is a lazy flow), so wrapping only
+     this stage in [catch_network] keeps a pre-header stall as a
+     [TimeoutError] named for its budget without absorbing body-phase
+     timeouts (first-token / prefill wait, inter-chunk idle).
 
      Streaming is handled manually rather than through [with_client] so the
      connection is NOT parked until [f] has fully consumed the reader. *)

@@ -8019,11 +8019,19 @@ let render_fusion_list (state : state) =
             0 runs
         in
         let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in
+        (* The running count is a state, not a second noun for the runs: with
+           nothing running the title read "2 runs \xc2\xb7 2 done \xc2\xb7 0 run",
+           where the last pair says nothing and reads as a third total. It is
+           left out when it is zero, the way the failures beside it already
+           are. *)
         let stats_note =
-          Printf.sprintf " (%s · %s%d done%s · %s%d run%s%s)"
+          Printf.sprintf " (%s · %s%d done%s%s%s)"
             (Masc_tui_message_layout.count_noun (List.length runs) "run")
             (Theme.ok ()) completed_count Ansi.reset
-            (Theme.info ()) running_count Ansi.reset
+            (if running_count > 0 then
+               Printf.sprintf " · %s%d running%s" (Theme.info ()) running_count
+                 Ansi.reset
+             else "")
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
         Printf.sprintf "%s%s  %s  %s"

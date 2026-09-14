@@ -10,10 +10,10 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Validation_failed of { exit : Unix.process_status; stderr : string }
       (** The native stage validator ran and did not exit 0. Carries how it
           ended and what it wrote to stderr. *)
-  | Verification_failed of { runtime_id : string; code : string; detail : string option }
+  | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
       (** The runtime's own verification report says it is not verified.
-          [code] and [detail] are the report's failure, read back through
-          {!Runtime_verification.of_json}. *)
+          [code], [message] and [detail] are the report's failure, read back
+          through {!Runtime_verification.of_json}. *)
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
       (** The verification child produced no report this module can read, or
           a verified report with a failing exit. *)

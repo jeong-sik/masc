@@ -357,12 +357,11 @@ let attempt_runtime_candidates
 
      The identity is the name the provider serves ([model.api_name]), not the
      runtime.toml model id: operators declare one [models.*] row per provider
-     for the same model ([models.ollama-cloud-glm-5-3-flash] and
-     [models."glm-5.3-flash"] both serve "glm-5.3-flash"), so ids never meet
-     across providers and a skip keyed on them would fire nowhere. A provider
-     that prefixes the name ("z-ai/glm-5.3-flash") is not recognised as the
-     same model by this rule; that gap is named, not guessed at. The
-     id-table default reads the registry; richer callers inject it. *)
+     for the same model, each under its own id, so ids never meet across
+     providers and a skip keyed on them would fire nowhere. A provider that
+     serves the same model under a prefixed name is not recognised as the
+     same model by this rule; that gap is named (RFC-0419 §9), not guessed
+     at. The id-table default reads the registry; richer callers inject it. *)
   let model_of =
     match model_of with
     | Some model_of -> model_of

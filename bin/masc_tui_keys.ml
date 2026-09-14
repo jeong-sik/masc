@@ -1262,6 +1262,11 @@ let help_sections ?current () =
              column draws with. *)
           ; ("Memory marks", Masc_tui_memory_mark.legend)
           ; ("Board marks", Masc_tui_board_kind_mark.legend)
+          (* The Code tree's file marks. A folder takes the arrow and a file
+             takes its kind's mark, and neither carries a word -- the name
+             beside it says the extension the mark was read from, not what the
+             mark means. Seven marks drew with nothing anywhere saying so. *)
+          ; ("File marks", Masc_tui_file_icon.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)

@@ -118,7 +118,8 @@ let launcher_server text =
         let uri = Uri.of_string origin in
         if Uri.scheme uri = Some "http" then
           match Uri.port uri with
-          | Some port -> Server_port port
+          | Some port when port > 0 && port <= 65535 -> Server_port port
+          | Some _ -> Unusable_origin
           | None -> Server_port 80
         else Unusable_origin
     | _ :: rest -> scan rest
@@ -157,7 +158,10 @@ let browser_lane_check base_path =
                  [Inspect_configuration]
            | No_server_argument ->
                check "browser_lane" Satisfied
-                 "The browser lane launcher follows the workspace connection port."
+                 (String.concat " "
+                    [ "The browser lane launcher resolves the workspace connection port at";
+                      "run time. An exported MASC_HTTP_PORT still takes precedence over the" ;
+                      "file, which this observation cannot see." ])
                  [Inspect_configuration]
            | Server_port port when port = expected ->
                check "browser_lane" Satisfied

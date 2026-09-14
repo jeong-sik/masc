@@ -153,6 +153,17 @@ let resolve_config ~base_path ~server ~token_file =
       | Some path -> Env_config_core.normalize_masc_base_path_input path
       | None -> Env_config_core.base_path ()
     in
+    (* Workspace_connection reads the connection file through an ownership
+       chain that rejects a relative root. The browser spawns this host with
+       the launcher's absolute base; a manually invoked relative base keeps
+       working by anchoring it to the working directory. *)
+    let base =
+      if Filename.is_relative base then
+        match Sys.getcwd () with
+        | directory -> Filename.concat directory base
+        | exception Sys_error _ -> base
+      else base
+    in
     (* The workspace connection.toml owns the server port for the CLI and the
        TUI; the lane host follows the same file instead of a port baked at
        install time. A port that fails to resolve is reported, never silently

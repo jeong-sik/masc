@@ -136,8 +136,8 @@ let browser_lane_fixture ?(server_argument="") ?(connection_port="") () f =
   with_workspace @@ fun base ->
   let root = Filename.concat base ".masc" in
   List.iter (fun path -> Unix.mkdir path 0o700)
-    [root; Filename.concat root "config";
-     Filename.concat (Filename.concat (Filename.concat root "browser-lane") "host")];
+    [root; Filename.concat root "config"; Filename.concat root "browser-lane";
+     Filename.concat (Filename.concat root "browser-lane") "host"];
   if connection_port <> "" then
     write (Filename.concat root "config/connection.toml")
       ("[server]\nhttp_port = " ^ connection_port ^ "\n");

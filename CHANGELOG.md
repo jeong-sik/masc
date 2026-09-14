@@ -89,6 +89,10 @@
 - Runtime: `runtime-verify` installs the process clock its deadlines need, so a verification request carrying a body deadline is no longer refused as unenforceable (#36287); and the verify command bounds its HTTP arm on its own clock (#36263).
 - Schedule: one call cancels every pending occurrence of a schedule (#36254), and a `delivery=none` interval wake reads its own clock so occurrences follow consumption (#36249).
 - Keeper: `run_named` injects the stream idle bound itself (#36250), and a redacted thinking block counts as production rather than a carrier frame (#36271).
+- Keeper: a chat request the restart cut off leaves a failure row in the transcript (#36291); the transcript window trims old tool rows, never the conversation (#36292); and `run_named` reads the body-timeout override itself (#36293).
+- Agent core: the first-event budget is one window from the request (#36289), and an idle gap after the first output keeps its state and its telemetry (#36283).
+- Tasks: new tasks are named in the list page and the keeper frame (#36273).
+- TUI: modal page keys move by the window height (#36304); the Activity row keeps the filter that makes Enter mean something (#36301); a rejection the server answered is not reported as a lost connection (#36300); the Runtime row leads with the lane fact, not the keeper assignment (#36288); the Lane Add-ons and Connectors footers name the keys those surfaces answer (#36295); and a tab strip draws no wider than the width it was given (#36290).
 - Lane add-ons: the package preview reads only manifests inside the workspace (#36269).
 - Dashboard: the keeper runtime panel stays on screen when the server reports fail-safe floors (#36247).
 - TUI: the Metrics safety block says what failed once instead of twice (#36253); an opened call's facts row leads with the disposition and fits the pane (#36262); the Planning title keeps its clock and badge (#36264); and the title's tab strip leaves room for what sits to its right (#36246).

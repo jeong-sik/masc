@@ -2824,6 +2824,69 @@ let test_startup_queued_waits_for_runner_readiness () =
          (List.rev_map Chat_operation.Operation_id.to_string !executed))
 ;;
 
+(* A reopen closes the handle before it opens a new one, so a reopen that
+   fails leaves the Owner holding a closed database. The reads that run while
+   the fence is up -- a dashboard poll, a TUI refresh -- used to be what
+   discovered that, and "database handle is closed" then replaced the reason
+   the reopen failed. The cause has to survive its own consequence. *)
+let test_a_read_under_a_failed_reopen_keeps_the_cause () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let path = Filename.temp_file "keeper-owner-reopen-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path
+         ~now:(fun () -> 42.0)
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         ~keeper_name:"reopen-failure"
+         ~initial_meta:(Some (make_meta "reopen-failure")))
+  in
+  let fenced = operation_id "kmsg-reopen-failure" in
+  let detail_of label = function
+    | Error (Owner.Store_unavailable detail) -> detail
+    | Error error -> fail (label ^ ": wrong error: " ^ Owner.error_to_string error)
+    | Ok _ -> fail (label ^ ": the fenced store answered")
+  in
+  Fun.protect
+    ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+    (fun () ->
+       Keeper_chat_operation_store.For_testing.fail_next_commit
+         Keeper_chat_operation_store.For_testing.Fail_before_commit;
+       ignore
+         (detail_of "fencing submit"
+            (Owner.submit_operation owner ~operation_id:fenced ~source:operation_source
+               ~input:(operation_input "fences the store"))
+          : string);
+       (* The file goes while the fence is up, so the next mutation's reopen
+          closes the handle and then has nothing to open. *)
+       Unix.unlink path;
+       let reopen_failure =
+         detail_of "reopen"
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-unlink")
+              ~source:operation_source ~input:(operation_input "attempts the reopen"))
+       in
+       check bool "the reopen failure names something other than the closure" true
+         (reopen_failure <> "database handle is closed");
+       let read = detail_of "read" (Owner.exact_operation owner fenced) in
+       check string "a read under the closed handle repeats the cause"
+         reopen_failure read;
+       (* The sharper half: the read must not have replaced the recorded
+          fault with its own symptom. *)
+       let after_read =
+         detail_of "submit after read"
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-read")
+              ~source:operation_source ~input:(operation_input "reads the fault back"))
+       in
+       check string "the cause survives the read" reopen_failure after_read)
+;;
+
 let test_operation_store_failure_is_retried_at_the_next_mutation () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -3104,6 +3167,66 @@ let test_availability_recovers_under_an_autonomous_child () =
       | Ok (`Busy _) -> fail "the autonomous child reported itself busy"
       | Ok `Interrupted -> fail "nothing interrupted the autonomous child"
       | Error error -> fail (Owner.error_to_string error))
+;;
+
+(* #36203 #4: on a free slot the autonomous lane must not take the turn ahead
+   of a claimable queued chat. [start_child_if_needed] already gives a freed
+   slot to a queued chat everywhere else; the autonomous admission path is the
+   one place it did not, so a chat at the head of the queue waited a whole
+   autonomous turn. *)
+let test_autonomous_admission_defers_to_a_queued_chat () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let ready = ref false in
+  let executed = ref [] in
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let op = Option.get (owner_ok (claim ())) in
+    executed := op.Chat_operation.operation_id :: !executed;
+    Eio.Promise.resolve resolve_started ();
+    Eio.Promise.await release;
+    Owner.Operation_succeeded { outcome_ref = "chat-answered" }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor_ready ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_ready:(fun ~keeper_name:_ -> !ready)
+         ~operation_executor:(Some execute) ~keeper_name:"admission-order"
+         ~initial_meta:(Some (make_meta "admission-order")) ())
+  in
+  let queued = operation_id "kmsg-admission" in
+  (* Queue a chat while the runner is not ready so it stays Queued with the
+     slot free. *)
+  ignore
+    (owner_ok
+       (Owner.submit_operation owner ~operation_id:queued ~source:operation_source
+          ~input:(operation_input "answer me")));
+  (match Owner.turn_in_flight owner with
+   | None -> ()
+   | Some _ -> fail "the chat started before the runner was ready");
+  ready := true;
+  (match
+     Owner.run_autonomous_if_idle owner (fun () ->
+       fail "the autonomous lane ran ahead of a queued chat")
+   with
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
+   | Ok (`Busy other) ->
+     fail ("autonomous deferred to the wrong lane: " ^ Owner.autonomous_block_to_string other)
+   | Ok (`Ran _) -> fail "autonomous took the slot ahead of the queued chat"
+   | Ok `Interrupted -> fail "nothing interrupted the autonomous admission"
+   | Error error -> fail (Owner.error_to_string error));
+  Eio.Promise.await started;
+  Eio.Promise.resolve resolve_release ();
+  let answered = await_terminal owner queued 1_000 in
+  (match answered.state with
+   | Chat_operation.Succeeded { outcome_ref; _ } ->
+     check string "the queued chat is what took the slot" "chat-answered" outcome_ref
+   | _ -> fail "the deferred-to chat did not complete");
+  check (list string) "only the queued chat executed"
+    [ Chat_operation.Operation_id.to_string queued ]
+    (List.map Chat_operation.Operation_id.to_string !executed)
 ;;
 
 let test_keeper_owners_do_not_cross_block () =
@@ -4454,6 +4577,10 @@ let () =
             "operation store failure is retried at the next mutation"
             `Quick
             test_operation_store_failure_is_retried_at_the_next_mutation
+        ; test_case
+            "a read under a failed reopen keeps the cause"
+            `Quick
+            test_a_read_under_a_failed_reopen_keeps_the_cause
         ; test_case "autonomous operator interrupt is a typed outcome" `Quick
             test_autonomous_operator_interrupt_is_a_typed_outcome
         ; test_case "idle wake recovers storage and answers queued chat" `Quick
@@ -4464,6 +4591,8 @@ let () =
             test_recovery_does_not_replay_an_active_or_uncertain_child
         ; test_case "availability recovers under an autonomous child" `Quick
             test_availability_recovers_under_an_autonomous_child
+        ; test_case "autonomous admission defers to a queued chat" `Quick
+            test_autonomous_admission_defers_to_a_queued_chat
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

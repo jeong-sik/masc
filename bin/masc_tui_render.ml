@@ -1652,8 +1652,17 @@ let render_approvals (state : state) =
     match List.nth_opt approvals state.approval_cursor with
     | None -> "", ""
     | Some (Operator_row approval) ->
+        (* The same clock as [created] beside it. This one kept the server's
+           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
+           the local reading next to it -- so a row could show a decision
+           created at 09:03 expiring at 00:03 and read as already gone. It is
+           also the longer of the two spellings, on the row this surface cuts
+           first (#36333). A decision with no deadline still draws "-": that
+           is not a time. *)
         let expires =
-          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
+          match Terminal_text.optional_single_line approval.ap_expires_at with
+          | None -> "-"
+          | Some at -> Terminal_text.short_timestamp at
         in
         let payload =
           Masc_tui_operator_projection.approval_payload_for_terminal
@@ -1918,6 +1927,18 @@ let render_board_compose (state : state) =
     ~cols buf
 
 
+(* A tail this heading can do without. The two rows above the board each end
+   in something atomic -- a key hint, the clause that finishes a sentence --
+   and a cut one says nothing a reader can act on: "H:choo" names no key, and
+   "f narrows once" stops before the condition. So the tail is drawn whole or
+   not at all, the way the footer drops a hint rather than cutting it. What
+   the row drops is under [?], which the footer already points at. *)
+let board_heading_with_tail ~cols head tail =
+  if Message_layout.display_width head + Message_layout.display_width tail
+     <= framed_inner_width cols
+  then head ^ tail
+  else head
+
 (* Every hearth on the board and how many posts it holds, with the one being
    read marked. [f] walked this list and drew none of it, so narrowing was a
    press into the dark: a reader could not see which hearths existed, which
@@ -1936,7 +1957,8 @@ let board_hearth_census_line ~cols (state : state) =
          that f walks hearths once something is. It used to open with
          "H:choose hearth" too, which put that key on two adjacent rows
          whenever the board had no counted hearth. *)
-      ^ "  f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
+      ^ board_heading_with_tail ~cols "  f/F:next/previous · none counted yet"
+          " \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -2048,8 +2070,10 @@ let render_board_list (state : state) =
                was invisible while the key to change it was not. H is in the
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
-              (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
-                 (board_sort_explanation state.board_sort)))
+              (board_heading_with_tail ~cols
+                 (Printf.sprintf "  Sort [s]: %s"
+                    (board_sort_explanation state.board_sort))
+                 " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; c.push_divider
         ; (fun () ->
@@ -4825,7 +4849,9 @@ let render_lanes_overview (state : state) =
     in
     match Masc_tui_lane_addons.installed view with
     | Masc_tui_lane_addons.Not_read ->
-        title_missing_reading ~error:view.Masc_tui_lane_addons.error
+        (* Behind "Lane Add-ons:", which is the label this pair of words
+           would otherwise repeat in brackets. *)
+        field_missing_reading ~error:view.Masc_tui_lane_addons.error
     | Masc_tui_lane_addons.Nothing_installed -> "none installed"
     | Masc_tui_lane_addons.Installed count ->
         Message_layout.count_noun count "installed");
@@ -10190,6 +10216,21 @@ let runtime_name_column width text =
       (max 0 (width - Message_layout.display_width clipped))
       ' '
 
+(* The same column, for the rows whose cell is a word this renderer wrote
+   rather than a name the workspace chose. A name is told apart by its tail,
+   which is why {!runtime_name_column} cuts from the middle; a label is told
+   apart by its head, and cutting one from the middle keeps the half that
+   says nothing. At a hundred columns the lane column is ten cells and
+   the fallback cell came out as the tree glyph, an ellipsis, and the last
+   six characters of the word -- the end of something the reader never
+   sees the start of. *)
+let runtime_label_column width text =
+  let clipped = fit_width text width in
+  clipped
+  ^ String.make
+      (max 0 (width - Message_layout.display_width clipped))
+      ' '
+
 let runtime_detail_field ~width ~style label value =
   let prefix = "  " ^ label ^ ": " in
   let continuation = String.make (Message_layout.display_width prefix) ' ' in
@@ -10696,15 +10737,18 @@ let render_runtime (state : state) =
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
           let is_active = Option.is_some candidate.rcr_preferred_at_ts in
-          let lane_col =
-            if candidate.rcr_candidate_count <= 1 then
-              Terminal_text.single_line candidate.rcr_lane_id
-            else if is_first then
-              Terminal_text.single_line candidate.rcr_lane_id
-            else if is_last then
-              Printf.sprintf "  \xe2\x94\x94\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+          (* A lane id is the workspace's name and a fallback row's cell is
+             this renderer's own word, and the two are cut by different
+             rules -- see [runtime_label_column]. *)
+          let lane_cell =
+            if candidate.rcr_candidate_count <= 1 || is_first then
+              runtime_name_column runtime_lane_width
+                (Terminal_text.single_line candidate.rcr_lane_id)
             else
-              Printf.sprintf "  \xe2\x94\x9c\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+              runtime_label_column runtime_lane_width
+                (Printf.sprintf "  %s fallback #%d"
+                   (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
+                   (candidate.rcr_position - 1))
           in
           let candidate_label =
             Printf.sprintf "%s%d/%d %s"
@@ -10787,7 +10831,7 @@ let render_runtime (state : state) =
           in
           let line =
             "  "
-            ^ runtime_name_column runtime_lane_width lane_col
+            ^ lane_cell
             ^ " " ^ runtime_name_column runtime_candidate_width candidate_label
             ^ " " ^ runtime_column runtime_identity_width provider_model
             ^ " " ^ runtime_column runtime_status_width route_probe

@@ -295,6 +295,7 @@ let dispatch_sync
            serialized
            ?body_timeout_s:agent.options.body_timeout_s
            ?call_timeout_s:agent.options.call_timeout_s
+           ?on_permit_wait:agent.options.permit_wait_observer
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
            ()
          |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
@@ -326,6 +327,7 @@ let dispatch_sync
                    ~next_stage:
                      (Llm_provider.Complete.Completion
                         { call_timeout_s = agent.options.call_timeout_s })
+                   ?on_permit_wait:agent.options.permit_wait_observer
                    serialized
                  |> Result.map_error
                       (measurement_error
@@ -369,6 +371,7 @@ let dispatch_sync
                           admitted
                           ?body_timeout_s:agent.options.body_timeout_s
                           ?call_timeout_s
+                          ?on_permit_wait:agent.options.permit_wait_observer
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
                           ()
                         |> Result.map_error
@@ -437,6 +440,7 @@ let dispatch_stream
            ~net:agent.net
            ?clock
            ?admission_timeout_s:agent.options.admission_timeout_s
+           ?on_permit_wait:agent.options.permit_wait_observer
            ?transport:agent.options.transport
            serialized
            ~on_event
@@ -477,6 +481,7 @@ let dispatch_stream
                         { admission_timeout_s = agent.options.admission_timeout_s
                         ; first_event_timeout_s = agent.options.first_event_timeout_s
                         })
+                   ?on_permit_wait:agent.options.permit_wait_observer
                    serialized
                  |> Result.map_error
                       (measurement_error
@@ -548,6 +553,7 @@ let dispatch_stream
                           ~net:agent.net
                           ?clock
                           ?admission_timeout_s
+                          ?on_permit_wait:agent.options.permit_wait_observer
                           ?transport:agent.options.transport
                           admitted
                           ~on_event

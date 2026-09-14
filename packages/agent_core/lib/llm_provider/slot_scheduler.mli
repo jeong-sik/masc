@@ -21,6 +21,16 @@ val create : max_slots:int -> t
     Raises the original exception if [f] fails; the permit is still released. *)
 val with_permit : t -> (unit -> 'a) -> 'a
 
+(** Whether the caller is waiting for a slot. Told to a bounded wait's
+    [on_wait] as the wait begins and again as it ends, however it ends
+    (granted, expired, cancelled); a slot granted at once is no wait and is
+    not told. Only a bounded wait reports, so a caller that stands its own
+    watchdog down while [Waiting_for_permit] never stands it down for a wait
+    nothing else ends. The observer must not raise. *)
+type wait_state =
+  | Waiting_for_permit
+  | Not_waiting
+
 (** [with_permit] whose wait for a slot ends at [deadline_at] on [clock]:
     [Error `Permit_wait_expired] when no slot was granted by then (the waiter
     leaves the queue), [Ok (f ())] otherwise, including when the slot was
@@ -28,7 +38,8 @@ val with_permit : t -> (unit -> 'a) -> 'a
     bounds is over, and the slot is the caller's. [f] runs without this
     deadline; the caller bounds it. *)
 val with_permit_until
-  :  clock:_ Eio.Time.clock
+  :  ?on_wait:(wait_state -> unit)
+  -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> t
   -> (unit -> 'a)

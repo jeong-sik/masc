@@ -122,6 +122,11 @@ val with_call_timeout : float -> t -> t
     clock on the underlying request. @since 0.231.15 *)
 val with_admission_timeout : float -> t -> t
 
+(** Set the observer of bounded permit waits
+    ({!Agent_types.options.permit_wait_observer}): told as such a wait
+    begins and ends, on every route. Must not raise. *)
+val with_permit_wait_observer : (Llm_provider.Provider_admission.wait_state -> unit) -> t -> t
+
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 val with_description : string -> t -> t

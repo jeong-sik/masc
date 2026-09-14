@@ -48,8 +48,17 @@ val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
     runs at once. [f] itself
     runs without this deadline, so a caller that bounds the whole call arms
     what is left of it around [f]. *)
+(** {!Slot_scheduler.wait_state}: told to [on_wait] by the bounded waits
+    below as a wait begins and ends. An unbounded [with_admission] tells
+    nothing, so a caller that stands its own watchdog down while
+    [Waiting_for_permit] never does so for a wait nothing else ends. *)
+type wait_state = Slot_scheduler.wait_state =
+  | Waiting_for_permit
+  | Not_waiting
+
 val with_admission_until
-  :  clock:_ Eio.Time.clock
+  :  ?on_wait:(wait_state -> unit)
+  -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> config:Provider_config.t
   -> (unit -> 'a)
@@ -71,7 +80,8 @@ type deadline_expiry =
     phase each expiry is: the first two are queueing, the third is the work.
     The work's own narrower bounds still arm inside it. *)
 val with_admission_and_work_until
-  :  clock:_ Eio.Time.clock
+  :  ?on_wait:(wait_state -> unit)
+  -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> config:Provider_config.t
   -> (unit -> 'a)

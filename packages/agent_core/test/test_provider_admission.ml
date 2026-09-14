@@ -529,6 +529,106 @@ let test_one_deadline_over_the_permit_wait_and_the_work () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
+(* What a bounded wait tells its observer: nothing when the permit is
+   granted at once; [Waiting_for_permit] then [Not_waiting] when it waits,
+   however the wait ends -- expired, granted late, or cancelled from
+   outside. A caller stands its watchdog down on the first and back up on
+   the second, so the second must come on every path. *)
+let test_a_bounded_wait_tells_its_observer_on_every_path () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://wait-observer.test:1" ~max_concurrent_requests:1 ()
+  in
+  let told = ref [] in
+  let on_wait state = told := state :: !told in
+  let told_so_far () = List.rev !told in
+  let deadline_at () = Eio.Time.now clock +. call_deadline_s in
+  let wait_states = testable (fun fmt -> function
+    | Provider_admission.Waiting_for_permit -> Format.pp_print_string fmt "Waiting_for_permit"
+    | Provider_admission.Not_waiting -> Format.pp_print_string fmt "Not_waiting") ( = ) in
+  (* Granted at once: no wait, nothing told. *)
+  (match
+     Provider_admission.with_admission_until ~on_wait ~clock ~deadline_at:(deadline_at ()) ~config (fun () -> ())
+   with
+   | Ok () -> ()
+   | Error `Permit_wait_expired -> fail "a free permit expired");
+  check (list wait_states) "a permit granted at once is no wait" [] (told_so_far ());
+  (* Held until released before the deadline: waited, then granted. *)
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Time.sleep clock (call_deadline_s /. 4.0);
+    Eio.Promise.resolve resolve_release ());
+  let ran = ref false in
+  (match
+     Provider_admission.with_admission_until
+       ~on_wait
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> ran := true)
+   with
+   | Ok () -> ()
+   | Error `Permit_wait_expired -> fail "a permit released before the deadline expired");
+  check bool "the work ran once the permit came" true !ran;
+  check
+    (list wait_states)
+    "a wait that was granted was told twice"
+    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
+    (told_so_far ());
+  told := [];
+  (* Held past the deadline: waited, then expired. *)
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  (match
+     Provider_admission.with_admission_until
+       ~on_wait
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> fail "the work ran while the permit was held")
+   with
+   | Error `Permit_wait_expired -> ()
+   | Ok () -> fail "a held permit was granted");
+  check
+    (list wait_states)
+    "a wait that expired was told twice"
+    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
+    (told_so_far ());
+  told := [];
+  (* Cancelled from outside while waiting: still told twice. *)
+  (match
+     Eio.Fiber.first
+       (fun () ->
+          match
+            Provider_admission.with_admission_until
+              ~on_wait
+              ~clock
+              ~deadline_at:(deadline_at ())
+              ~config
+              (fun () -> fail "the work ran while the permit was held")
+          with
+          | Ok () | Error `Permit_wait_expired -> `Wait_ended)
+       (fun () ->
+          Eio.Time.sleep clock (call_deadline_s /. 4.0);
+          `Cancelled_from_outside)
+   with
+   | `Cancelled_from_outside -> ()
+   | `Wait_ended -> fail "the wait ended before the outside cancel");
+  check
+    (list wait_states)
+    "a wait cancelled from outside was told twice"
+    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
+    (told_so_far ());
+  Eio.Promise.resolve resolve_release ()
+;;
+
 let () =
   run
     "provider_admission"
@@ -577,6 +677,10 @@ let () =
             "one deadline over the permit wait and the work"
             `Quick
             test_one_deadline_over_the_permit_wait_and_the_work
+        ; test_case
+            "a bounded wait tells its observer on every path"
+            `Quick
+            test_a_bounded_wait_tells_its_observer_on_every_path
         ] )
     ]
 ;;

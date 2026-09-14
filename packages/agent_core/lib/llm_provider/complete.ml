@@ -85,6 +85,7 @@ let complete_prepared_sync
       ?(metrics : Metrics.t option)
       ?body_timeout_s
       ?call_timeout_s
+      ?on_permit_wait
       ?request_wire_observer
       ?admitted_body
       ()
@@ -237,6 +238,7 @@ let complete_prepared_sync
            in
            (match
               Provider_admission.with_admission_and_work_until
+                ?on_wait:on_permit_wait
                 ~clock:call_clock
                 ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
                 ~config:request_config
@@ -379,6 +381,7 @@ let complete_admitted
       ?metrics
       ?body_timeout_s
       ?call_timeout_s
+      ?on_permit_wait
       ?request_wire_observer
       ()
   =
@@ -395,6 +398,7 @@ let complete_admitted
     ?metrics
     ?body_timeout_s
     ?call_timeout_s
+    ?on_permit_wait
     ?request_wire_observer
     ()
 ;;
@@ -410,6 +414,7 @@ let complete_serialized
       ?metrics
       ?body_timeout_s
       ?call_timeout_s
+      ?on_permit_wait
       ?request_wire_observer
       ()
   =
@@ -425,6 +430,7 @@ let complete_serialized
     ?metrics
     ?body_timeout_s
     ?call_timeout_s
+    ?on_permit_wait
     ?request_wire_observer
     ()
 ;;
@@ -436,6 +442,7 @@ let complete_prepared_stream
       ~net
       ?clock
       ?admission_timeout_s
+      ?on_permit_wait
       ?(transport : Llm_transport.t option)
       ?wire_observer
       ?request_wire_observer
@@ -576,6 +583,7 @@ let complete_prepared_stream
       | Http_client.Bounded (admission_clock, admission_timeout_s) ->
         (match
            Provider_admission.with_admission_until
+             ?on_wait:on_permit_wait
              ~clock:admission_clock
              ~deadline_at:(Eio.Time.now admission_clock +. admission_timeout_s)
              ~config:request_config
@@ -665,6 +673,7 @@ let complete_stream_admitted
       ~net
       ?clock
       ?admission_timeout_s
+      ?on_permit_wait
       ?transport
       ?wire_observer
       ?request_wire_observer
@@ -681,6 +690,7 @@ let complete_stream_admitted
     ~net
     ?clock
     ?admission_timeout_s
+    ?on_permit_wait
     ?transport
     ?wire_observer
     ?request_wire_observer
@@ -698,6 +708,7 @@ let complete_stream_serialized
       ~net
       ?clock
       ?admission_timeout_s
+      ?on_permit_wait
       ?transport
       ?wire_observer
       ?request_wire_observer
@@ -713,6 +724,7 @@ let complete_stream_serialized
     ~net
     ?clock
     ?admission_timeout_s
+    ?on_permit_wait
     ?transport
     ?wire_observer
     ?request_wire_observer

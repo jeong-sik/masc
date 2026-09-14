@@ -132,6 +132,14 @@ type options =
         count-tokens request's and the stream's. The non-streaming path's
         whole-call bound is [call_timeout_s]. Requires [clock].
         @since 0.231.15 *)
+  ; permit_wait_observer : (Llm_provider.Provider_admission.wait_state -> unit) option
+    (** Told when a bounded wait for a provider admission permit begins and
+        ends, on every route ({!Pipeline.stage_route} hands it to each
+        completion and to the count-tokens measurement). Only a wait with a
+        deadline of its own ([call_timeout_s] or [admission_timeout_s])
+        reports; a permit granted at once is no wait. A caller with a
+        no-progress watchdog stands it down while [Waiting_for_permit],
+        knowing the wait it hears about is bounded. Must not raise. *)
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

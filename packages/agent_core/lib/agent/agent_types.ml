@@ -55,6 +55,7 @@ type options =
   ; body_timeout_s : float option
   ; call_timeout_s : float option
   ; admission_timeout_s : float option
+  ; permit_wait_observer : (Llm_provider.Provider_admission.wait_state -> unit) option
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t
@@ -129,6 +130,7 @@ let default_options =
   ; body_timeout_s = None
   ; call_timeout_s = None
   ; admission_timeout_s = None
+  ; permit_wait_observer = None
   ; hooks = Hooks.empty
   ; guardrails_async = Guardrails_async.empty
   ; tracer = Tracing.null

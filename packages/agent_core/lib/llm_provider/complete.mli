@@ -93,6 +93,7 @@ val measure_request
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
   -> next_stage:measurement_next_stage
+  -> ?on_permit_wait:(Provider_admission.wait_state -> unit)
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized_request
@@ -234,6 +235,7 @@ val complete_admitted
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
   -> ?call_timeout_s:float
+  -> ?on_permit_wait:(Provider_admission.wait_state -> unit)
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
@@ -252,6 +254,7 @@ val complete_serialized
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
   -> ?call_timeout_s:float
+  -> ?on_permit_wait:(Provider_admission.wait_state -> unit)
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
@@ -264,6 +267,12 @@ val complete_serialized
     endpoint is saturated, the wait for a permit is FIFO queueing and is
     unbounded by this value, so a caller that sets 30 seconds can still wait
     longer than that in total.
+
+    [on_permit_wait] is told when a bounded wait for the admission permit
+    begins and ends ({!Provider_admission.wait_state}); an unbounded wait
+    tells nothing, and a permit granted at once is no wait. A caller that
+    stands its own watchdog down while a permit wait is on can, because the
+    wait it hears about always has a deadline of its own.
 
     [call_timeout_s] bounds both, in seconds from the call: the wait for the
     admission permit and the round trip after it. It must be finite and
@@ -428,6 +437,7 @@ val complete_stream_admitted
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
   -> ?admission_timeout_s:float
+  -> ?on_permit_wait:(Provider_admission.wait_state -> unit)
   -> ?transport:Llm_transport.t
   -> ?wire_observer:Wire_observer.try_observe
   -> ?request_wire_observer:Request_wire_observer.try_observe
@@ -445,6 +455,7 @@ val complete_stream_serialized
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
   -> ?admission_timeout_s:float
+  -> ?on_permit_wait:(Provider_admission.wait_state -> unit)
   -> ?transport:Llm_transport.t
   -> ?wire_observer:Wire_observer.try_observe
   -> ?request_wire_observer:Request_wire_observer.try_observe

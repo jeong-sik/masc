@@ -275,11 +275,29 @@ let content_of_wire_message raw =
   |> String.concat ""
 ;;
 
+(* A keeper nothing declares is not configured (#36066): the profile loader
+   refuses it before the turn runs. A fixture declares the keeper it is about
+   to run under the base path the turn reads, with the instructions the turn
+   is given. *)
+let declare_keeper ~base_path ~keeper_name ~instructions =
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun output ->
+    output_string
+      output
+      (Otoml.Printer.to_string
+         (Otoml.TomlTable
+            [ "keeper", Otoml.TomlTable [ "instructions", Otoml.TomlString instructions ] ])))
+;;
+
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
+  declare_keeper ~base_path ~keeper_name:"claude-fixture" ~instructions:system_prompt;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1518,6 +1536,7 @@ let run_direct_attempt
       ~tools
       ()
   =
+  declare_keeper ~base_path ~keeper_name:"claude-pre-dispatch" ~instructions:system_prompt;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)

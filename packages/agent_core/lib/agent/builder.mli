@@ -101,6 +101,14 @@ val with_first_event_timeout : float -> t -> t
     deadline. @since 0.181.0 *)
 val with_body_timeout : float -> t -> t
 
+(** Set the per-call bound on a non-streaming completion as a whole: the
+    wait for a provider admission permit and the round trip after it. A call
+    still waiting for its permit when the bound runs out ends as
+    [TimeoutError { phase = Queue }] without being sent; [with_body_timeout]
+    still arms inside it for the round trip. The streaming completion does
+    not read it. Requires a clock on the underlying request. @since 0.231.15 *)
+val with_call_timeout : float -> t -> t
+
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 val with_description : string -> t -> t

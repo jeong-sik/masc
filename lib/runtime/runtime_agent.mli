@@ -101,6 +101,7 @@ type config = Runtime_agent_context.config = {
   stream_idle_timeout_s : float option;
   first_event_timeout_s : float option;
   body_timeout_s : float option;
+  call_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
   hooks : Agent_core.Hooks.hooks option;

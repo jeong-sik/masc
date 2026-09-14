@@ -61,6 +61,14 @@ type config =
         streams are not killed by total duration; streaming liveness is
         owned by [stream_idle_timeout_s] plus attempt observation. Non-HTTP
         transports ignore it. *)
+  ; call_timeout_s : float option
+    (** Bound on a non-streaming completion as a whole, the wait for the
+        provider's admission permit included: a call still queued behind
+        another caller's permit when it runs out ends as
+        [TimeoutError { phase = Queue }] without being sent. A caller that
+        has one deadline for its whole call (a verification probe, a fusion
+        panelist) sets this together with [body_timeout_s]; the streaming
+        path does not read it. *)
   ; max_tokens : int option
     (** Caller-level output-token override. [None] adds no override, so an
         explicit [provider_cfg.max_tokens] remains authoritative; when both are
@@ -152,6 +160,7 @@ let default_config
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None
   ; body_timeout_s = None
+  ; call_timeout_s = None
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
@@ -279,6 +288,11 @@ let builder
   let builder =
     match config.body_timeout_s with
     | Some s -> Agent_core.Builder.with_body_timeout s builder
+    | None -> builder
+  in
+  let builder =
+    match config.call_timeout_s with
+    | Some s -> Agent_core.Builder.with_call_timeout s builder
     | None -> builder
   in
   let builder =
@@ -425,6 +439,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; first_event_timeout_s = config.first_event_timeout_s
     ; body_timeout_s = config.body_timeout_s
+    ; call_timeout_s = config.call_timeout_s
     ; context_injector = config.context_injector
     ; tool_approval = config.tool_approval
     ; event_bus = config.event_bus

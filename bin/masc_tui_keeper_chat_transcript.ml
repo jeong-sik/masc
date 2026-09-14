@@ -1245,7 +1245,6 @@ let phase_text ~now t =
           | None -> ""
           | Some age -> Printf.sprintf ", nothing back for %s" age)
       in
-      let attempt_shown = t.attempt + 1 in
       (* The runtime and the attempt, as one tag. The heading above this row
          already says IN PROGRESS or FAILOVER IN PROGRESS (render.ml); the tag
          carries only what the heading cannot. *)

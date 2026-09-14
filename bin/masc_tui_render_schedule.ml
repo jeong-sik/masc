@@ -704,6 +704,62 @@ let system_log_row ~styles ~level_style ~message_width values =
   Table.row
     (system_log_cells ~styles ~level_style ~message_width values)
 
+(* Task Review columns.
+
+   The header and the rows carried the same widths in two format strings, and
+   printf's width is a floor rather than a field: a task id past fourteen
+   cells printed whole and pushed the three columns after it out of line,
+   which is the pair this module was written to replace.
+
+   The header also spelled its names in sentence case -- "Task  Submitted by
+   Evidence  What it asks for" -- the one table in the TUI that did. Its
+   sibling tab, one press of [v] away, reads TIME TASK GATE VERDICT EVALUATOR
+   REASON, and all fifty-six columns declared through {!Masc_tui_table} are
+   capitals.
+
+   The last column carries the task's own title, which is what a verification
+   request asks for: that this task be verified. *)
+let verification_task_width = 14
+let verification_evidence_width = 9
+let verification_minimum_title_width = 16
+
+type verification_row_values = {
+  vrow_task : string;
+  vrow_submitted_by : string;
+  vrow_evidence : string;
+  vrow_title : string;
+}
+
+let verification_no_values =
+  { vrow_task = ""
+  ; vrow_submitted_by = ""
+  ; vrow_evidence = ""
+  ; vrow_title = ""
+  }
+
+let verification_cells ~submitter_width ~title_width values =
+  [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
+  ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
+      values.vrow_submitted_by
+  ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width
+      values.vrow_evidence
+  ; Table.cell ~header:"TITLE" ~width:title_width values.vrow_title
+  ]
+
+let verification_title_width ~inner_width ~submitter_width =
+  let named =
+    Table.used_width
+      (verification_cells ~submitter_width ~title_width:0 verification_no_values)
+  in
+  max verification_minimum_title_width (inner_width - named)
+
+let verification_header_row ~submitter_width ~title_width =
+  Table.header_row
+    (verification_cells ~submitter_width ~title_width verification_no_values)
+
+let verification_row ~submitter_width ~title_width values =
+  Table.row (verification_cells ~submitter_width ~title_width values)
+
 (* Lane run columns.
 
    The header and the rows carried the same six widths in two format strings,

@@ -903,6 +903,85 @@ let system_log_overflowing =
   ; slog_message = String.concat "" (List.init 20 (fun _ -> "message "))
   }
 
+(* Task Review drew its header and its rows from two format strings, and
+   printf's width is a floor: a task id past its fourteen cells printed whole
+   and pushed SUBMITTED BY, EVIDENCE and the title out of line. The header
+   also spelled sentence case, alone among the TUI's tables. *)
+let holds needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  n = 0 || scan 0
+
+let verification_probe : Schedule.verification_row_values =
+  { vrow_task = "task-verify-000000000000001"
+  ; vrow_submitted_by = "pinewood-pr-jira-checker-and-more"
+  ; vrow_evidence = "12/12"
+  ; vrow_title = String.concat "" (List.init 12 (fun _ -> "title "))
+  }
+
+let test_verification_rows_stay_on_the_header_columns () =
+  for inner_width = 60 to 240 do
+    let submitter_width = 16 in
+    let title_width =
+      Schedule.verification_title_width ~inner_width ~submitter_width
+    in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header =
+      width (Schedule.verification_header_row ~submitter_width ~title_width)
+    in
+    check int
+      (Printf.sprintf "inner %d: an overlong row matches the header" inner_width)
+      header
+      (width
+         (Schedule.verification_row ~submitter_width ~title_width
+            verification_probe));
+    check int
+      (Printf.sprintf "inner %d: an empty row matches the header" inner_width)
+      header
+      (width
+         (Schedule.verification_row ~submitter_width ~title_width
+            { Schedule.vrow_task = ""
+            ; vrow_submitted_by = ""
+            ; vrow_evidence = ""
+            ; vrow_title = ""
+            }))
+  done
+
+(* The title takes what the named columns leave, down to a floor below which
+   a request says nothing worth the row it costs. *)
+let test_verification_title_takes_the_remainder () =
+  for inner_width = 20 to 300 do
+    let submitter_width = 16 in
+    let title_width =
+      Schedule.verification_title_width ~inner_width ~submitter_width
+    in
+    let drawn =
+      Masc_tui_message_layout.display_width
+        (Schedule.verification_header_row ~submitter_width ~title_width)
+    in
+    if title_width > Schedule.verification_minimum_title_width then
+      check int
+        (Printf.sprintf "inner %d is fully allocated" inner_width)
+        inner_width drawn
+    else
+      check bool
+        (Printf.sprintf "inner %d keeps the floor" inner_width)
+        true
+        (title_width = Schedule.verification_minimum_title_width)
+  done
+
+(* The column names read as every other table's do. *)
+let test_verification_names_its_columns_in_capitals () =
+  let header = Schedule.verification_header_row ~submitter_width:16 ~title_width:20 in
+  List.iter
+    (fun name ->
+      check bool (name ^ " names a column") true (holds name header))
+    [ "TASK"; "SUBMITTED BY"; "EVIDENCE"; "TITLE" ];
+  List.iter
+    (fun retired ->
+      check bool (retired ^ " is gone") false (holds retired header))
+    [ "Submitted by"; "What it asks for" ]
+
 (* Escapes have no display width, so a dressed row measures exactly what an
    undressed one does -- and what the header does. A colour cannot move a
    column. *)
@@ -1671,6 +1750,12 @@ let () =
             test_workspace_row_width_does_not_depend_on_its_readings
         ; test_case "system log colour costs no cells" `Quick
             test_system_log_colour_costs_no_cells
+        ; test_case "verification rows stay on the header columns" `Quick
+            test_verification_rows_stay_on_the_header_columns
+        ; test_case "verification names its columns in capitals" `Quick
+            test_verification_names_its_columns_in_capitals
+        ; test_case "verification title takes the remainder" `Quick
+            test_verification_title_takes_the_remainder
         ; test_case "system log message takes the remainder" `Quick
             test_system_log_message_takes_the_remainder
         ; test_case "system log header and row share their offsets" `Quick

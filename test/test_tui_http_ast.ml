@@ -495,6 +495,26 @@ let test_the_attention_note_starts_where_its_rows_do () =
        ~needle:"(nothing needs attention)")
 ;;
 
+(* A surface whose load failed draws the loader's message. The message names
+   its own subject and verdict -- "standalone lanes load failed: <reason>" --
+   so a sentence in front of it says both a second time and pushes the reason
+   right, which on this surface put it past the pane edge. Fourteen error rows
+   in this renderer draw the message bare; the two that add words add words the
+   message does not carry -- which action was refused, or that the rows on
+   screen are the last good ones. *)
+let test_the_lane_failure_row_adds_no_second_verdict () =
+  check int "the load failure draws the loader's message alone" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_lanes_overview"
+       ~needle:"  standalone lane observation unavailable: ");
+  check int "the stale row keeps the word the message has not got" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_lanes_overview"
+       ~needle:"  STALE \xc2\xb7 refresh failed: ")
+;;
+
 let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
   (* Asked where the body is built, and on the whole literal. The needle used
@@ -2817,6 +2837,8 @@ let () =
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "the attention note starts where its rows do" `Quick
           test_the_attention_note_starts_where_its_rows_do;
+        test_case "the lane failure row adds no second verdict" `Quick
+          test_the_lane_failure_row_adds_no_second_verdict;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;
         test_case "auth headers used" `Quick test_http_get_uses_auth_headers;

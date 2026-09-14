@@ -4828,7 +4828,15 @@ let render_lanes_overview (state : state) =
          (match state.standalone_lanes_error with
           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
           | Some detail ->
-              (Theme.bad ()) ^ "  standalone lane observation unavailable: "
+              (* The loader already names the subject and the verdict --
+                 "standalone lanes load failed: <reason>" -- so the sentence
+                 that stood here said "standalone lane" a second time and
+                 "unavailable" beside "load failed", and pushed the reason
+                 twenty-two cells right, past the pane edge. Fourteen other
+                 surfaces draw the loader's message and nothing in front of
+                 it; the one row that does add words, "lane write refused",
+                 names an action the message does not. *)
+              (Theme.bad ()) ^ "  "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
   (* Use only the body's remaining rows. At small terminal heights the matrix
      stays complete and the detail truncates explicitly; at ordinary heights

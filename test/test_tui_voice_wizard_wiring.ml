@@ -75,6 +75,13 @@ let test_saving_is_followed_by_asking_the_endpoints () =
     (Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_wizard_probe" > 0
      && Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_wizard_save" > 0)
 
+(* Where the voice is written depends on what the section already holds, and
+   the save is the only place that knows. A save that asked no one would be
+   back to writing the section default every time, which is the shape that
+   handed an ElevenLabs endpoint a say voice. *)
+let test_saving_reads_the_section_it_writes_into () =
+  reached tui "launch_voice_wizard_save" "voice_setup_section_kinds"
+
 (* The keeper-voice screen, the same way: a session type and two cursors are
    testable where they live, and neither says whether a key opens the screen,
    whether anything draws it, or whether Enter writes. *)
@@ -123,6 +130,8 @@ let () =
         ; Alcotest.test_case "every mover has a key" `Quick test_every_mover_has_a_key
         ; Alcotest.test_case "saving is followed by asking the endpoints" `Quick
             test_saving_is_followed_by_asking_the_endpoints
+        ; Alcotest.test_case "saving reads the section it writes into" `Quick
+            test_saving_reads_the_section_it_writes_into
         ; Alcotest.test_case "a opens the keeper voices" `Quick
             test_a_opens_the_keeper_voices
         ; Alcotest.test_case "every keeper-voice axis has a key" `Quick

@@ -2775,9 +2775,20 @@ let voice_wizard_probe_lines json =
 (* The kinds already in the section the draft is going into. A voice name is
    provider vocabulary, so whether the draft's voice can be the section default
    depends on what else falls back to it -- {!Voice_setup.voice_placement} is
-   the rule and this is its input. A kind this binary cannot name stays [None]
-   rather than being guessed at: the answer then keeps the voice off the
-   section default, which is the side that breaks nothing. *)
+   the rule and this is its input.
+
+   Three answers, and the difference between the last two is what this is
+   careful about. An empty list is "read it, nothing is there": the draft owns
+   the default. A [None] entry is "something is there whose kind this binary
+   cannot name", which is not a kind anything can be said to share. And a
+   section that could not be read at all is reported as one unnameable entry
+   rather than as an empty one -- the pane drops its answer whenever a refresh
+   fails, and reading that as an empty section is what would put a voice over a
+   default it never saw. The save then refuses, because a section written with
+   no default it can read is one the loader rejects. A refusal is the answer
+   that can be acted on; a quiet overwrite is not. *)
+let unread_section = [ None ]
+
 let voice_setup_section_kinds state (section : Voice_setup.section) =
   let side =
     match section with
@@ -2785,9 +2796,11 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
     | Voice_setup.Stt -> "stt"
   in
   match state.voice_setup with
-  | None -> []
+  | None -> unread_section
   | Some (`Assoc fields) ->
     (match List.assoc_opt side fields with
+     (* The route answers null for a side nothing is configured for. *)
+     | Some `Null | None -> []
      | Some (`Assoc section_fields) ->
        (match List.assoc_opt "endpoints" section_fields with
         | Some (`List entries) ->
@@ -2800,9 +2813,9 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
                  | Some _ | None -> None)
               | _ -> None)
             entries
-        | Some _ | None -> [])
-     | Some _ | None -> [])
-  | Some _ -> []
+        | Some _ | None -> unread_section)
+     | Some _ -> unread_section)
+  | Some _ -> unread_section
 ;;
 
 let launch_voice_wizard_save state ~mailbox

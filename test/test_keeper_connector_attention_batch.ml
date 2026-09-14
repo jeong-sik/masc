@@ -361,6 +361,82 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
        |> Result.value ~default:(-1)))
 ;;
 
+let test_proactive_yields_only_to_ready_intake () =
+  with_ctx "proactive-ready-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    (match Keeper_owner_registry.install_from_store
+        ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    (match Keeper_owner_registry.create_meta ~base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "readiness fixture metadata disappeared"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+    (match Keeper_approval_queue.install_persistence ~base_path with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
+    let approval_id =
+      match Keeper_approval_queue.submit_pending ~keeper_name
+          ~tool_name:"external-effect" ~input:(`Assoc []) ~call_summary:None ~base_path () with
+      | Ok submission -> submission.approval_id
+      | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
+    in
+    (* Model a resolution wake observed before the approval leaves pending. *)
+    let waiting : Q.stimulus =
+      { post_id = "pending-resolution-wake"; urgency = Q.Immediate; arrived_at = 1.0
+      ; payload = Q.Hitl_resolved
+          { approval_id; decision = Q.Hitl_approved
+          ; channel = Keeper_continuation_channel.unrouted "readiness fixture" } }
+    in
+    enqueue_exn ~base_path keeper_name waiting;
+    let yield_request () =
+      match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
+      | Ok request -> request
+      | Error detail -> fail detail
+    in
+    check bool "pending approval does not interrupt proactive progress" true
+      (Option.is_none (yield_request ()));
+    let ready : Q.stimulus =
+      { post_id = "ready-bootstrap"; urgency = Q.Normal; arrived_at = 2.0
+      ; payload = Q.Bootstrap }
+    in
+    enqueue_exn ~base_path keeper_name ready;
+    (match yield_request () with
+     | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
+       check int "only ready successor is reported" 1 summary.pending_count;
+       check (option string) "ready source owns the yield" (Some ready.post_id)
+         (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head)
+     | Some {Keeper_agent_run.reason = Operation_queued} | None ->
+       fail "ready event did not request the next intake");
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check (list string) "intake agrees with proactive readiness" [ready.post_id]
+      (List.map (fun (source : Q.stimulus) -> source.post_id)
+         (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
+    check int "observation and selection preserve both durable sources" 2
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> Result.map Q.length |> Result.value ~default:(-1));
+    let owner = match Keeper_owner_registry.get ~base_path ~keeper_name with
+      | Ok owner -> owner
+      | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error) in
+    let path = Keeper_chat_operation_store.path_for_keeper
+        ~keepers_runtime_dir:(Workspace.keepers_runtime_dir ctx.config) ~keeper_name in
+    let db = Sqlite3.db_open path in
+    let dropped = Sqlite3.exec db "DROP TABLE operations" in
+    ignore (Sqlite3.db_close db);
+    check bool "fixture removes chat inventory authority" true (dropped = Sqlite3.Rc.OK);
+    (match Keeper_owner.wake_operation_drain owner with
+     | Error (Keeper_owner.Store_unavailable _) -> ()
+     | Error error -> fail (Keeper_owner.error_to_string error)
+     | Ok () -> fail "broken chat store appeared readable");
+    check bool "chat outage is explicitly projected" true
+      (Keeper_owner.operation_projection owner).store_unavailable;
+    (match yield_request () with
+     | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
+       check int "chat outage still allows independent event progress" 1 summary.pending_count
+     | Some {Keeper_agent_run.reason = Operation_queued} | None ->
+       fail "chat outage prevented independent ready event progress"))
+;;
+
 let test_one_intake_admits_only_one_hitl_resolution () =
   with_ctx "hitl-exact-replay-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (* Intake reconciles approved wakes against the authoritative Gate store.
@@ -1032,7 +1108,9 @@ let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
-      , [ test_case "checkpoint yields preserve requests until exact settlement" `Quick
+      , [ test_case "proactive yields only to a ready intake" `Quick
+            test_proactive_yields_only_to_ready_intake
+        ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
         ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
             test_exact_mixed_bindings_reach_dispatch_and_settlement

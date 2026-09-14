@@ -2500,10 +2500,13 @@ type pre_header_budget =
    first token, and silence before the headers is that silence: what this
    phase spends of it is handed to the reader, which arms the rest, so the
    budget is one window from the request to the first token. A server that
-   accepts the request and never answers never reaches the reader. DNS
-   is the one step the window cannot end: [getaddrinfo] runs in a systhread
-   with no cancellation, so a closed window is observed once the lookup
-   returns, and the resolver's own timeout is the bound until then. *)
+   accepts the request and never answers never reaches the reader. Two
+   steps the window cannot end: [getaddrinfo] runs in a systhread with no
+   cancellation, so a closed window is observed once the lookup returns,
+   and the resolver's own timeout is the bound until then; and the
+   process's first https connection loads the system trust store
+   ([Api_common.tls_client_config], cached after that) synchronously on
+   this domain, so no timer runs until it is back. *)
 let pre_header_deadline
       ~(connect : 'clock explicit_deadline)
       ~(first_event : 'clock explicit_deadline)

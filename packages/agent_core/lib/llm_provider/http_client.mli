@@ -608,10 +608,11 @@ val post_stream
     budget ends surfaces as [TimeoutError { phase = First_token; _ }], the
     provider having sent neither a first token nor a complete refusal in
     the whole time allowed before a first token. With neither supplied the
-    phase is unbounded. DNS resolution runs
-    in a systhread the window cannot cancel: a closed window is observed
-    once the lookup returns, and until then the resolver's own timeout is
-    the bound. [f] receives [pre_header_elapsed_s], the seconds this phase
+    phase is unbounded. Two steps run outside the window's reach: DNS
+    resolution, in a systhread the window cannot cancel (a closed window is
+    observed once the lookup returns, and until then the resolver's own
+    timeout is the bound), and the process's first trust-store load for
+    https, synchronous on this domain. [f] receives [pre_header_elapsed_s], the seconds this phase
     took on [clock] (0 without one), and arms what is left of the
     first-event budget on the reader ({!read_sse}, {!read_ndjson}): the
     budget is one window from the request to the first token, not one in

@@ -103,6 +103,7 @@
   (tls (>= 2.1.2))
   (tls-eio (>= 2.1.2))
   (domain-name (>= 0.4))
+  (ipaddr (>= 5.6))
   (ca-certs (>= 0.2))
   (ppx_deriving_yojson (>= 3.6))
   (ppx_enumerate (>= v0.17.0))

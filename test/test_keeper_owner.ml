@@ -507,6 +507,10 @@ let test_store_failure_fences_mutations () =
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "store-fenced owner accepted another mutation");
+  (match Owner.wake_operation_drain owner with
+   | Error (Owner.Store_unavailable _) -> ()
+   | Error error -> fail (Owner.error_to_string error)
+   | Ok () -> fail "operation-store recovery cleared metadata persistence failure");
   match Owner.exact_projection owner with
   | Ok projection ->
     check bool
@@ -2694,6 +2698,159 @@ let test_operation_store_failure_fences_owner_mutations () =
        | Ok _ -> fail "operation store failure did not fence metadata mutation")
 ;;
 
+let expect_store_unavailable = function
+  | Error (Owner.Store_unavailable _) -> ()
+  | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
+  | Ok _ -> fail "unavailable store unexpectedly admitted work"
+;;
+
+let inject_operation_failure owner id =
+  Fun.protect
+    ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+    (fun () ->
+      Keeper_chat_operation_store.For_testing.fail_next_commit
+        Keeper_chat_operation_store.For_testing.Fail_before_commit;
+      Owner.submit_operation owner ~operation_id:id ~source:operation_source
+        ~input:(operation_input "rolled back input")
+      |> expect_store_unavailable)
+;;
+
+let test_idle_wake_recovers_store_and_answers_queued_chat () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let ready = ref false in
+  let executed = ref [] in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = Option.get (owner_ok (claim ())) in
+    executed := operation.Chat_operation.operation_id :: !executed;
+    Owner.Operation_succeeded { outcome_ref = "answer:recovered-queue" }
+  in
+  let owner = owner_ok (start_owner_with_executor_ready ~sw
+    ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+    ~operation_ready:(fun ~keeper_name:_ -> !ready)
+    ~operation_executor:(Some execute) ~keeper_name:"recovered-queue"
+    ~initial_meta:(Some (make_meta "recovered-queue")) ()) in
+  let queued = operation_id "kmsg-recovery-queued" in
+  let failed = operation_id "kmsg-recovery-rolled-back" in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:queued
+    ~source:operation_source ~input:(operation_input "please answer")));
+  inject_operation_failure owner failed;
+  ready := true;
+  ignore (owner_ok (Owner.wake_operation_drain owner));
+  let answered = await_terminal owner queued 1_000 in
+  (match answered.state with
+   | Chat_operation.Succeeded {outcome_ref; _} ->
+     check string "queued chat reaches its answer" "answer:recovered-queue" outcome_ref
+   | _ -> fail "recovered queued chat did not succeed");
+  check (list string) "only durable input executed, exactly once"
+    [Chat_operation.Operation_id.to_string queued]
+    (List.map Chat_operation.Operation_id.to_string !executed);
+  check bool "failed submission was not replayed" true
+    (Option.is_none (owner_ok (Owner.exact_operation owner failed)));
+  ignore (owner_ok (Owner.wake_operation_drain owner));
+  check int "healthy wake does not rerun a terminal operation" 1 (List.length !executed)
+;;
+
+let with_recovery_store ~sw ~keeper_name ~runner ~on_turn_slot_released f =
+  let path = Filename.temp_file "keeper-owner-recovery-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  let owner = owner_ok (Owner.start ~sw
+    ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+    ~operation_store_path:path ~now:(fun () -> 42.)
+    ~operation_runner:runner ~on_turn_slot_released ~keeper_name
+    ~initial_meta:(Some (make_meta keeper_name))) in
+  f owner path
+;;
+
+let test_recovery_keeps_integrity_failure_fenced () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  with_recovery_store ~sw ~keeper_name:"recovery-integrity" ~runner:None
+    ~on_turn_slot_released:None (fun owner path ->
+      inject_operation_failure owner (operation_id "kmsg-integrity-rollback");
+      let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+      Eio.Switch.on_release sw (fun () -> ignore (Sqlite3.db_close db : bool));
+      let execute sql =
+        match Sqlite3.exec db sql with
+        | Sqlite3.Rc.OK -> ()
+        | rc -> fail (Sqlite3.Rc.to_string rc) in
+      execute "CREATE TABLE foreign_contract (value TEXT)";
+      Owner.wake_operation_drain owner |> expect_store_unavailable;
+      execute "DROP TABLE foreign_contract";
+      (* Even after the bytes have been repaired, a detected integrity failure
+         needs explicit lifecycle reconciliation, not availability retry. *)
+      Owner.wake_operation_drain owner |> expect_store_unavailable;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-integrity")
+        ~source:operation_source ~input:(operation_input "must remain fenced")
+      |> expect_store_unavailable)
+;;
+
+(* The Owner clears its child slot in the same mailbox turn that settles the
+   child, so an empty slot is the observable end of the child even when that
+   settlement was refused by a fenced store. [on_turn_slot_released] cannot be
+   used for this: it fires only after the autonomous lane lost the slot. *)
+let rec await_child_slot_empty owner remaining =
+  if remaining = 0
+  then fail "child slot did not empty"
+  else
+    match Owner.turn_in_flight owner with
+    | None -> ()
+    | Some _ ->
+      Eio.Fiber.yield ();
+      await_child_slot_empty owner (remaining - 1)
+;;
+
+let test_recovery_does_not_replay_an_active_or_uncertain_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let executions = ref 0 in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    ignore (Option.get (owner_ok (claim ())));
+    incr executions;
+    Eio.Promise.resolve resolve_started ();
+    Eio.Promise.await release;
+    Owner.Operation_succeeded {outcome_ref="external-effect-already-completed"} in
+  with_recovery_store ~sw ~keeper_name:"recovery-active"
+    ~runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true); execute;
+      on_execution_settled=noop_execution_settled})
+    ~on_turn_slot_released:None
+    (fun owner _path ->
+      let original = operation_id "kmsg-recovery-active" in
+      ignore (owner_ok (Owner.submit_operation owner ~operation_id:original
+        ~source:operation_source ~input:(operation_input "run once")));
+      Eio.Promise.await started;
+      inject_operation_failure owner (operation_id "kmsg-active-rollback");
+      let active_wake = Owner.wake_operation_drain owner in
+      Eio.Promise.resolve resolve_release ();
+      active_wake |> expect_store_unavailable;
+      await_child_slot_empty owner 1_000;
+      let expect_reconciliation_fence result =
+        match result with
+        | Error (Owner.Store_unavailable detail) ->
+          check bool "fence names the orphaned Running operation" true
+            (String_util.string_contains_substring
+               ~needle:(Chat_operation.Operation_id.to_string original)
+               detail)
+        | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
+        | Ok _ -> fail "orphaned Running row did not fence the Owner"
+      in
+      Owner.wake_operation_drain owner |> expect_reconciliation_fence;
+      (* The fence is sticky: a second wake does not reopen the handle again
+         and a new submission is refused with the same reason. *)
+      Owner.wake_operation_drain owner |> expect_reconciliation_fence;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-orphan")
+        ~source:operation_source ~input:(operation_input "must stay fenced")
+      |> expect_reconciliation_fence;
+      let durable = Option.get (owner_ok (Owner.exact_operation owner original)) in
+      (match durable.state with
+       | Chat_operation.Running _ -> ()
+       | _ -> fail "recovery fabricated an outcome for an uncertain terminal commit");
+      check int "external-effect child was never replayed" 1 !executions)
+;;
+
 let test_keeper_owners_do_not_cross_block () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -4033,6 +4190,12 @@ let () =
             "operation store failure fences owner mutations"
             `Quick
             test_operation_store_failure_fences_owner_mutations
+        ; test_case "idle wake recovers storage and answers queued chat" `Quick
+            test_idle_wake_recovers_store_and_answers_queued_chat
+        ; test_case "recovery keeps integrity failures fenced" `Quick
+            test_recovery_keeps_integrity_failure_fenced
+        ; test_case "recovery never replays active or uncertain child" `Quick
+            test_recovery_does_not_replay_an_active_or_uncertain_child
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

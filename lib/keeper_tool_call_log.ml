@@ -1032,10 +1032,11 @@ let log_call
       else append_or_enqueue entry
 ;;
 
-(* Scan multiplier applied before the keeper filter: [read_recent] reads
-   [n * read_over_scan_factor] fleet rows to find [n] matching entries.
-   Named (rather than a literal 5) so callers sharing one fleet read can
-   size their window to reproduce [read_recent]'s coverage exactly. *)
+(* Scan multiplier for callers sharing one fleet read ([read_recent_rows] +
+   [filter_rows_for_keeper]): to end up with [n] rows from one keeper such a
+   read covers [n * read_over_scan_factor] fleet rows. Named (rather than a
+   literal 5) so those callers size their window to the coverage the old
+   per-keeper over-scan had. [read_recent] no longer applies it. *)
 let read_over_scan_factor = 5
 
 let keeper_matches name json =
@@ -1069,14 +1070,24 @@ let ring_keep_last ~n ~keep rows : Yojson.Safe.t list =
       List.init count (fun i -> buf.((start + i) mod n))))
 ;;
 
-let read_recent_rows ~n () : Yojson.Safe.t list =
+(* Why the index cannot be fallen back from, and why its failure is the
+   caller's to see, is written above [read_recent]. Both readers share the
+   one path. *)
+type index_error = Index_unavailable of string
+
+let index_rows ?keeper_name ~n () : (Yojson.Safe.t list, index_error) result =
   if n <= 0
-  then []
+  then Ok []
   else (
     match (Atomic.get store_state).store with
-    | None -> []
-    | Some store -> Dated_jsonl.read_recent store n)
+    | None -> Ok []
+    | Some store ->
+      Result.map_error
+        (fun detail -> Index_unavailable detail)
+        (Keeper_tool_call_index.recent_rows ~store ?keeper_name ~n ()))
 ;;
+
+let read_recent_rows ~n () = index_rows ~n ()
 
 let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
   ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows
@@ -1097,21 +1108,14 @@ let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
 
    An index failure is an error, not a reason to scan: a fallback would mean
    two read paths whose answers can differ with nobody able to say which is
-   right. The failure is logged and the answer is empty, which is what a
-   caller already handles for an unconfigured store. *)
-let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
-  if n <= 0
-  then []
-  else (
-    match (Atomic.get store_state).store with
-    | None -> []
-    | Some store ->
-      (match Keeper_tool_call_index.recent_rows ~store ?keeper_name ~n () with
-       | Ok rows -> rows
-       | Error detail ->
-         Log.Misc.warn "[keeper_tool_call_log] read index unavailable: %s" detail;
-         []))
-;;
+   right. It is also not an empty answer: until 2026-09 the failure was
+   logged and [[]] returned, which a caller could not tell from a keeper that
+   made no calls, so a dashboard showed "no tool calls" and a composite
+   envelope "no claim" while the index was the thing that was broken (audit
+   F397). The failure now travels to the caller as [Index_unavailable] and
+   every reader states it. An unconfigured store is a different fact and
+   stays [Ok []]: there is no ledger to be unable to read. *)
+let read_recent ?keeper_name ?(n = 100) () = index_rows ?keeper_name ~n ()
 
 
 let ts_of_entry (json : Yojson.Safe.t) : float option =

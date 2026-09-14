@@ -1230,25 +1230,43 @@ let test_warmup_boundary_and_steady_cadence () =
 
 (* #26068 / task-1200: the sleep calculation must actually distinguish
    failure routes. A rate-limit route with a provider [Retry-After] hint
-   backs off to that hint; a hint below the cadence defers to the cadence
-   (no hint at all is not a rate-limit signal, so the cadence stands); a
-   hint beyond the configured cap is clamped, so a misread header can
-   never park the lane; and a negative or NaN hint degrades to the
-   cadence instead of an immediate retry. *)
+   backs off to that hint; a hint below the cadence defers to the cadence;
+   a hint beyond the configured cap is clamped, so a misread header can
+   never park the lane; and a route with no hint at all, or with a zero,
+   negative or NaN hint, is still a rate-limit signal and waits for the one
+   named floor ([Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec])
+   instead of the plain cadence or an immediate retry.
+
+   Audit F171/F029: [None] is passed through as an option end to end (no
+   [0.0] sentinel is minted on the way), and the no-hint floor is the named
+   constant that also clamps the cap, not a literal repeated in two files.
+   This proves the option arrives at [retry_backoff_sec] and lands on that
+   constant. *)
 let test_rate_limit_backoff_sec_clamps_and_escalates () =
   let backoff = Keeper_runtime_failure_route.retry_backoff_sec in
+  let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
   check (float 0.001) "provider retry-after hint wins when above cadence" 120.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120.0) ~cadence_sec:30.0);
   check (float 0.001) "hint below cadence defers to the cadence" 30.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 5.0) ~cadence_sec:30.0);
-  check (float 0.001) "no usable hint still backs off past the cadence" 60.0
+  check (float 0.001) "no hint at all backs off to the named floor" floor_sec
+    (backoff ~cap_sec:900.0 ~retry_after_hint:None ~cadence_sec:30.0);
+  check (float 0.001) "no hint with a cadence above the floor keeps the cadence"
+    120.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:None ~cadence_sec:120.0);
+  check (float 0.001) "zero hint backs off to the named floor" floor_sec
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.0) ~cadence_sec:30.0);
   check (float 0.001) "cap clamps an absurd provider hint" 900.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120000.0) ~cadence_sec:30.0);
-  check (float 0.001) "negative hint degrades to the bounded default" 60.0
+  check (float 0.001) "negative hint backs off to the named floor" floor_sec
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some (-5.0)) ~cadence_sec:30.0);
-  check (float 0.5) "NaN hint degrades to the bounded default" 60.0
+  check (float 0.5) "NaN hint backs off to the named floor" floor_sec
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some nan) ~cadence_sec:30.0);
+  (* Read at module init from an unset env: the default cap never sits below
+     the floor, so a no-hint backoff is never cut by the cap by default. *)
+  check bool "default cap is not below the named floor" true
+    (Float.compare Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec floor_sec
+     >= 0);
   (* Fractional Retry-After hint when cadence is zero floors at 1.0s (#35246) *)
   check (float 0.001) "fractional hint with zero cadence floors at 1.0s" 1.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.001) ~cadence_sec:0.0);

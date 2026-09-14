@@ -496,6 +496,19 @@ val auth_headers_for_kind_and_key
   -> api_key:string
   -> (string * string) list
 
+(** Resolve auth headers from the authentication fields alone, without a
+    [t]. [api_key] is the static secret and is read only for
+    [Static_credential]; a [Refreshable_credential] is refreshed and its token
+    is placed according to [auth_scheme] and [kind]. Vertex model discovery
+    calls this before any model exists. Refresh failures return the same fixed
+    messages as {!resolve_auth_headers}. *)
+val auth_headers_for
+  :  kind:provider_kind
+  -> auth_scheme:auth_scheme
+  -> api_key:Secret.t
+  -> credential_source:credential_source
+  -> ((string * string) list, string) result
+
 val resolve_auth_headers : t -> ((string * string) list, string) result
 (** Resolve credentials for a new HTTP request or frozen exact-output preflight.
     Refresh failures return fixed safe messages; no stale token fallback occurs.

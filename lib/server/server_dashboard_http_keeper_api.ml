@@ -26,8 +26,21 @@ let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
 ;;
 
 let tool_call_entries ~keeper_name ~limit =
-  Keeper_tool_call_log.read_recent ~keeper_name ~n:limit ()
-  |> List.map Keeper_tool_definition_source.annotate_row
+  Result.map
+    (List.map Keeper_tool_definition_source.annotate_row)
+    (Keeper_tool_call_log.read_recent ~keeper_name ~n:limit ())
+;;
+
+(* An index the reader cannot open is answered as the same 503 the exact
+   execution lookup above gives for unavailable storage, not as an empty
+   entry list: [count: 0] was indistinguishable from a keeper that made no
+   calls (audit F397). *)
+let tool_call_store_unavailable_json ~keeper_name detail =
+  `Assoc
+    [ "keeper", `String keeper_name
+    ; "error", `String detail
+    ; "code", `String "tool_call_store_unavailable"
+    ]
 ;;
 
 (* Maximum number of trajectory/trace entries returned per query. *)
@@ -1197,11 +1210,13 @@ let handle_keeper_get_subroutes state req request reqd =
          tail cannot bound the requested Keeper's history when others are busy.
          Keep ledger/index I/O off the request domain and preserve chronological
          order and row annotation from the existing response contract. *)
-      let json =
+      let status, json =
         Domain_pool_ref.submit_io_or_inline (fun () ->
-              let entries =
-                tool_call_entries ~keeper_name:name ~limit
-              in
+              match tool_call_entries ~keeper_name:name ~limit with
+              | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+                `Service_unavailable,
+                tool_call_store_unavailable_json ~keeper_name:name detail
+              | Ok entries ->
               let latest_ts =
                 List.fold_left
                   (fun acc json ->
@@ -1243,6 +1258,7 @@ let handle_keeper_get_subroutes state req request reqd =
                        latest_gap)
                   ~latest_ts ~latest_age_s ~freshness_slo_s
               in
+              `OK,
               `Assoc [
                 ("keeper", `String name);
                 ("count", `Int (List.length entries));
@@ -1266,7 +1282,7 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("entries", `List entries);
               ])
       in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/waiting-inventory" then
     let name = extract_name "/waiting-inventory" in
     if String.length name = 0 then

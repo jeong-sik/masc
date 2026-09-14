@@ -249,10 +249,13 @@ type world_observation = {
       reach the dashboard and never the prompt. Disjoint from
       [pending_messages] by construction. *)
 
-  own_recent_actions : Keeper_own_recent_actions.turn list;
+  own_recent_actions :
+    (Keeper_own_recent_actions.turn list, Keeper_tool_call_log.index_error) result;
   (** This keeper's own tool calls from its newest
       [Keeper_config.keeper_own_recent_turns_max] turns, oldest turn first,
-      each turn's calls in the order they ran. An autonomous turn otherwise
+      each turn's calls in the order they ran; or the tool-call read index's
+      failure, kept so the prompt can say the history is missing rather than
+      render it as no calls made. An autonomous turn otherwise
       carries no record of what this keeper already did, so a finished task
       gets claimed again and a rejected call gets repeated. *)
 }

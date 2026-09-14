@@ -266,7 +266,8 @@ type world_observation =
   ; connected_surface_failures : Gate_surface.presence_failure list
   ; own_recent_board_posts : Board.post list
   ; fleet_messages : Keeper_world_observation_message_scope.fleet_message list
-  ; own_recent_actions : Keeper_own_recent_actions.turn list
+  ; own_recent_actions :
+      (Keeper_own_recent_actions.turn list, Keeper_tool_call_log.index_error) result
   }
 
 type keeper_cycle_channel =
@@ -1649,7 +1650,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
        performs no transcript I/O at all. The keeper sees fleet context on its
        next [observe] turn, where the same load already happens. *)
   ; fleet_messages = []
-  ; own_recent_actions = []
+  ; own_recent_actions = Ok []
   }
 ;;
 

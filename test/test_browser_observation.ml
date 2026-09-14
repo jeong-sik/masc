@@ -122,7 +122,10 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       Log.log_call ~keeper_name:"mcp-reader" ~tool_name:"masc_browser_read" ~input:args
         ~output_text:(Tool_result.message bound_scene) ~success:true ~duration_ms:1.
         ~typed_result:bound_scene ();
-      let row = List.hd (Log.read_recent ~keeper_name:"reader" ()) in
+      let row = match Log.read_recent ~keeper_name:"reader" () with
+        | Ok (row :: _) -> row
+        | Ok [] -> fail "no receipt row"
+        | Error (Log.Index_unavailable detail) -> fail detail in
       let open Yojson.Safe.Util in
       check string "receipt joins original execution" (Ids.Execution_id.to_string execution_id)
         (row |> member "execution_id" |> to_string);

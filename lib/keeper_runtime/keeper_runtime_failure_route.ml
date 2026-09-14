@@ -291,17 +291,23 @@ let retry_after_of_route = function
    the chat lane's deferred-retry [not_before]. *)
 let retry_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
   let cap_sec = Float.max 0.0 cap_sec in
-  let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
-  (* A garbage [Retry-After] (negative, NaN, infinite) is still a signal the
-     provider rate-limited this lane, but carries no usable duration: both
-     degrade to the same bounded default rather than diverging.
+  (* No hint, or a garbage one (zero, negative, NaN, infinite), is still a
+     signal the provider rate-limited this lane but carries no usable
+     duration: all of them take the same named floor
+     ({!Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec})
+     rather than diverging. The option stays an option to this point so the
+     caller never has to invent a sentinel for "no hint".
      A positive fractional hint (e.g. 0.001s) must not cause an immediate
      re-fire loop when cadence_sec is 0.0 (chat lane); clamp positive hints to
      at least 1.0s (#35246). *)
+  let no_usable_hint () =
+    Float.max cadence_sec Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
+  in
   let base =
-    if Float.is_nan retry_after_hint || retry_after_hint <= 0.0
-    then Float.max cadence_sec 60.0
-    else Float.max (Float.max retry_after_hint 1.0) cadence_sec
+    match retry_after_hint with
+    | None -> no_usable_hint ()
+    | Some hint when Float.is_nan hint || hint <= 0.0 -> no_usable_hint ()
+    | Some hint -> Float.max (Float.max hint 1.0) cadence_sec
   in
   Float.min cap_sec base
 ;;

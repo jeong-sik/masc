@@ -27,10 +27,15 @@ val unknown_runtime_profile_bucket : string
     [runtime_contract]. *)
 
 val aggregate :
-  ?n:int -> ?window_hours:float -> unit -> Yojson.Safe.t
+  ?n:int ->
+  ?window_hours:float ->
+  unit ->
+  (Yojson.Safe.t, Keeper_tool_call_log.index_error) result
 (** Build the dashboard payload from the most recent [n] keeper
     tool-call log records (default [5000]), optionally narrowed to
-    the last [window_hours] hours. The payload includes per-tool /
+    the last [window_hours] hours. The recent-[n] read goes through the
+    tool-call read index; an index that cannot be read is the [Error],
+    never a payload with zero calls. The payload includes per-tool /
     per-keeper / per-thinking-mode / per-hour rate tables plus the
     source-metadata envelope and the canonical
     [dashboard_surface] tag. Typed deferred records are reported in

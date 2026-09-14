@@ -61,10 +61,10 @@ let composite_claim_attempt_absent =
 ;;
 
 (* Rows one keeper's claim lookup considers, and the fleet-wide window that
-   covers it. [read_recent ~keeper_name ~n] over-scans by
-   [read_over_scan_factor] before its keeper filter, so a shared read of
-   [claim_window_rows] covers exactly what a per-keeper [read_recent ~n:100]
-   would have read. *)
+   covers it. [read_recent ~keeper_name ~n] used to over-scan by
+   [read_over_scan_factor] before its keeper filter; the factor is kept here
+   so a shared read of [claim_window_rows] still covers what that per-keeper
+   [read_recent ~n:100] read. Both readers now answer from the index. *)
 let claim_rows_per_keeper = 100
 
 let claim_window_rows =
@@ -82,11 +82,20 @@ let claim_window_rows =
    the store this was measured against, rows average 6.8 KB.
 
    Constructed only by [read_claim_window] so a caller cannot pass a list that
-   was filtered, reordered, or read with a different window. *)
-type claim_window = Claim_window of Yojson.Safe.t list
+   was filtered, reordered, or read with a different window.
+
+   A window the index could not read is its own case, not an empty window: an
+   empty window says every keeper made no claim, which is what the envelope
+   reported while the index was the thing that was broken (audit F397). *)
+type claim_window =
+  | Claim_window of Yojson.Safe.t list
+  | Claim_window_unavailable of string
 
 let read_claim_window () =
-  Claim_window (Keeper_tool_call_log.read_recent_rows ~n:claim_window_rows ())
+  match Keeper_tool_call_log.read_recent_rows ~n:claim_window_rows () with
+  | Ok rows -> Claim_window rows
+  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+    Claim_window_unavailable detail
 ;;
 
 let row_is_task_claim json =
@@ -124,20 +133,39 @@ let row_is_task_claim json =
    previous code relied on. The row's own [ts] is deliberately not consulted:
    that would make append order and timestamp order two competing authorities
    for "latest". *)
-let latest_task_claim_row (Claim_window rows) ~keeper_name =
-  Keeper_tool_call_log.filter_rows_for_keeper
-    ~keeper_name
-    ~n:claim_rows_per_keeper
-    rows
-  |> List.fold_left
-       (fun latest json -> if row_is_task_claim json then Some json else latest)
-       None
+let latest_task_claim_row claim_window ~keeper_name =
+  match claim_window with
+  | Claim_window_unavailable detail ->
+    Error (Keeper_tool_call_log.Index_unavailable detail)
+  | Claim_window rows ->
+    Ok
+      (Keeper_tool_call_log.filter_rows_for_keeper
+         ~keeper_name
+         ~n:claim_rows_per_keeper
+         rows
+       |> List.fold_left
+            (fun latest json -> if row_is_task_claim json then Some json else latest)
+            None)
+;;
+
+let composite_claim_attempt_unavailable detail =
+  `Assoc
+    [ "present", `Bool false
+    ; "source", `String "keeper_task_claim_tool_call"
+    ; "status", `String "tool_log_unavailable"
+    ; "detail", `String detail
+    ; "result", `Null
+    ; "claimed_task_id", `Null
+    ; "claimed_goal_id", `Null
+    ]
 ;;
 
 let composite_claim_attempt_json ~claim_window ~keeper_name =
   match latest_task_claim_row claim_window ~keeper_name with
-  | None -> composite_claim_attempt_absent
-  | Some call ->
+  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+    composite_claim_attempt_unavailable detail
+  | Ok None -> composite_claim_attempt_absent
+  | Ok (Some call) ->
     let output =
       match parse_tool_call_output call with
       | Some (`Assoc _ as output) -> output

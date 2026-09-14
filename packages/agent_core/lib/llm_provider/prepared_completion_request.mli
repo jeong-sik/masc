@@ -52,15 +52,42 @@ val admit_serialized_body
   -> t
   -> (serialized, Http_client.http_error) result
 
+(** What the measurement is ahead of, and the caller's bounds for it. The
+    measurement takes the endpoint's admission permit like the stage after
+    it, and its count round trip is provider time before that stage's first
+    byte, so it runs under the same budgets that stage will. Ahead of a
+    non-streaming completion that is the whole-call bound: the permit wait
+    ends as [TimeoutError { phase = Queue }] and the round trip as
+    [TimeoutError { phase = Non_streaming_body }]. Ahead of a stream the
+    permit wait ends under the admission budget as [Queue] and the round
+    trip under the first-event budget as [First_token], the count round trip
+    being provider silence before the first token. Each is carried as
+    [Input_count_failed (Transport _)]; none is a bound without [clock]. *)
+type next_stage =
+  | Completion of { call_timeout_s : float option }
+  | Stream of
+      { admission_timeout_s : float option
+      ; first_event_timeout_s : float option
+      }
+
 val measure
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
-  -> ?call_timeout_s:float
+  -> next_stage:next_stage
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized
   -> (measured, Count_tokens_sync.completion_request_error) result
+
+(** Seconds the count round trip took on [clock], the permit wait excluded;
+    [None] when [measure] had no clock to time it on, or the measurement was
+    attached rather than made here. *)
+val count_round_trip_s : measured -> float option
+
+(** The admitted request with the first-event budget the stream stage will
+    arm: what the count round trip left of the caller's. *)
+val with_first_event_timeout_s : float -> admitted -> admitted
 
 val attach_measurement
   :  t

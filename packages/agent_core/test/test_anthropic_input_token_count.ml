@@ -83,6 +83,10 @@ let config
     ()
 ;;
 
+(* The stage these measurements are ahead of, with no bound on it: the
+   cases here are about what is measured, not when the wait ends. *)
+let unbounded_completion = Complete.Completion { call_timeout_s = None }
+
 let serialize_sync prepared =
   match Complete.admit_request_body ~stream:false prepared with
   | Ok serialized -> serialized
@@ -496,7 +500,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
            | Error (Http_client.AcceptRejected { reason }) -> fail reason
            | Error _ -> fail "initial frozen-body admission failed"
          in
-         let measured = Complete.measure_request ~sw ~net serialized |> Result.get_ok in
+         let measured = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion serialized |> Result.get_ok in
          let admitted =
            Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured
            |> Result.get_ok
@@ -645,7 +649,7 @@ let test_prepared_measure_admit_dispatch () =
         ()
     in
     let measured =
-      match Complete.measure_request ~sw ~net (serialize_sync prepared) with
+      match Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) with
       | Ok measured -> measured
       | Error _ -> fail "expected prepared request measurement"
     in
@@ -704,7 +708,7 @@ let test_prepared_context_overflow_is_typed () =
         ~tools:[ tool ]
         ()
     in
-    match Complete.measure_request ~sw ~net (serialize_sync prepared) with
+    match Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) with
     | Error _ -> fail "expected prepared request measurement"
     | Ok measured ->
       (match Complete.resolve_context_limit prepared with
@@ -732,7 +736,7 @@ let test_prepared_admission_resolves_catalog_context_limit () =
     in
     let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
     let measured =
-      Complete.measure_request ~sw ~net (serialize_sync prepared) |> Result.get_ok
+      Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) |> Result.get_ok
     in
     let max_context_tokens = Complete.resolve_context_limit prepared |> Result.get_ok in
     Complete.admit_request ~now_unix_s:0 ~max_context_tokens measured, expected
@@ -1101,7 +1105,7 @@ let test_measurement_uses_provider_admission () =
     @@ fun ~sw ~net ~base_url ->
     let cfg = config ~max_context:512 ~max_concurrent_requests:1 base_url in
     let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
-    let result = Complete.measure_request ~sw ~net (serialize_sync prepared) in
+    let result = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion (serialize_sync prepared) in
     result, Provider_admission.snapshot_for ~config:cfg
   in
   match result with

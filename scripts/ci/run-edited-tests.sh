@@ -454,6 +454,13 @@ self_test() {
   # out of this file and compares it to the dashboard mirror; the name mapping
   # looks for test_keeper_meta_contract_*, and there is no suite by that name,
   # so before this the only edit that ran the mirror was an edit to itself.
+  # The regression this declaration exists for: #36290 narrowed the tab strip
+  # in this module, and the scenario that reads a tab name off the row lived
+  # only inside the whole-screen walk -- which names no source. Nothing ran.
+  # It merged green and main was red until #36327.
+  check_required "the shared chrome selects the strip scenario" \
+    "test/test_tui_tab_strip_pty.py" \
+    "bin/masc_tui_ansi.ml"
   check "a guard that opens its input is selected too" \
     "test/test_blocker_class_mirror.ml" \
     "lib/keeper/keeper_meta_contract.ml"

@@ -151,8 +151,8 @@ val find_goal : Workspace_utils.config -> goal_id:string -> lookup
 val unavailable_to_string : unavailable -> string
 (** {!Goal_store_unavailable.to_string}: one line naming the reason
     constructor, the field when there is one, the file, the mirror status and
-    the reset step. For surfaces whose terminus is a string (prompt
-    fragments, WARN lines, the scan contract RFC-0444 PR-5 retypes). Render
+    the reset step. For surfaces whose terminus is a string (the verifier's
+    WARN line, a test's failure message). Render
     at the very end; never branch on the output. The typed tool/HTTP envelope
     is {!Goal_unavailable_envelope}. *)
 

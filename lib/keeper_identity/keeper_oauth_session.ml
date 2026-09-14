@@ -41,14 +41,9 @@ type started = {
 
 let ( let* ) = Result.bind
 
-let default_discover ~mcp_url = Discovery.discover ~mcp_url ()
-
-let default_register ~registration_url ~client_name ~redirect_uri =
-  Registration.register ~registration_url ~client_name ~redirect_uri ()
-
 let start
-      ?(discover = default_discover)
-      ?(register = default_register)
+      ~discover
+      ~register
       ~(provider : Provider.t)
       ~configured
       ~client_name
@@ -150,7 +145,7 @@ type finished = {
   expiry : expiry;
 }
 
-let finish ?post ~pending ~state ~code ~now () =
+let finish ~post ~pending ~state ~code ~now () =
   match Pending.take pending ~now ~state with
   | None -> Error Unknown_state
   | Some in_flight ->
@@ -158,7 +153,7 @@ let finish ?post ~pending ~state ~code ~now () =
     let* tokens =
       Result.map_error
         (fun err -> Exchange_failed err)
-        (Flow.complete ?post ~discovered:in_flight.Pending.discovered
+        (Flow.complete ~post ~discovered:in_flight.Pending.discovered
            ~client_id:in_flight.Pending.client_id
            ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
            ~code

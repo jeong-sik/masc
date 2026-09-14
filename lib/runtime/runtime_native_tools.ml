@@ -3,6 +3,15 @@ type posture =
   | Native_read
   | Native_full
 
+type posture_source =
+  | Declared_on_disk
+  | Program_defined of posture
+
+let posture_source_of_required = function
+  | None -> Declared_on_disk
+  | Some posture -> Program_defined posture
+;;
+
 type action_identity =
   | Call_id of string
   | Provider_step of

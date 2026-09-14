@@ -434,6 +434,22 @@ let test_http_get_uses_auth_headers () =
    "Started: 2026-08-24 16:47:49 (20d21h ago) (local)". A marker on four rows
    reads as a distinction, which invites the next row to carry one too. The
    guide states the zone once, for the whole screen. *)
+(* Config, Runtime and Clients are three surfaces -- [Masc_tui_types.surface]
+   names all three -- and the Clients title walked from one to the next twice,
+   spelling the first step "/" and the second the middle dot: "MASC Config /
+   Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
+   string. Every other title that walks surfaces uses "/" (Config / Runtime,
+   Config / Resources, Workspace / Code). *)
+let test_the_clients_path_spells_its_steps_alike () =
+  let module_path = "bin/masc_tui_render.ml" in
+  check int "no step spelled with the middle dot" 0
+    (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
+  check bool "the path reads with one separator" true
+    (Ast_grep.count_string_literals ~module_path
+       ~needle:"Config / Runtime / Clients"
+     > 0)
+;;
+
 let test_no_row_marks_its_own_timestamp_with_a_zone () =
   List.iter
     (fun module_path ->
@@ -461,6 +477,22 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_calls ~module_path ~callee:"Env_config_core.get_float_nonneg");
   check int "no local timeout env binding" 0
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
+;;
+
+(* The Overview's Attention panel writes two cells of indent ahead of every
+   row it draws. Its empty and unread notes stand in for rows, and they are
+   written for a body that indents them itself -- pasted in whole, a note sat
+   two cells right of the rows it replaces and of the title above them, while
+   the Events panel beside it put its title and its rows on one column. *)
+let test_the_attention_note_starts_where_its_rows_do () =
+  check int "the note carries no indent of its own" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
+       ~needle:"  (nothing needs attention)");
+  check int "it is still the panel's word" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
+       ~needle:"(nothing needs attention)")
 ;;
 
 let test_keeper_chat_uses_current_async_contract () =
@@ -2783,6 +2815,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the attention note starts where its rows do" `Quick
+          test_the_attention_note_starts_where_its_rows_do;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;
         test_case "auth headers used" `Quick test_http_get_uses_auth_headers;
@@ -2792,6 +2826,8 @@ let () =
           test_http_client_does_not_own_tui_env_contract;
         test_case "no row marks its own timestamp with a zone" `Quick
           test_no_row_marks_its_own_timestamp_with_a_zone;
+        test_case "the clients path spells its steps alike" `Quick
+          test_the_clients_path_spells_its_steps_alike;
         test_case
           "keeper chat uses current async contract"
           `Quick

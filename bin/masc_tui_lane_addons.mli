@@ -36,6 +36,17 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
+type installed_reading =
+  | Not_read
+  | Nothing_installed
+  | Installed of int
+(** What this view knows about installed Add-ons. [Not_read] is the state
+    before anything asked -- the Lanes surface loads standalone lanes and not
+    Add-ons -- and is not the same answer as [Nothing_installed]. [Installed]
+    carries at least one. *)
+
+val installed : t -> installed_reading
+
 val initial : t
 val parse_request : string -> (request, string) result
 val decode : Yojson.Safe.t -> (snapshot, string) result

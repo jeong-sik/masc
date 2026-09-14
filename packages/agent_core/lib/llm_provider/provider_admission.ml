@@ -76,6 +76,14 @@ let with_admission ~(config : Provider_config.t) f =
     Slot_scheduler.with_permit scheduler f
 ;;
 
+let with_admission_until ~clock ~deadline_at ~(config : Provider_config.t) f =
+  match config.max_concurrent_requests with
+  | None -> Ok (f ())
+  | Some max ->
+    let scheduler = entry_for ~key:(key_of_config config) ~max in
+    Slot_scheduler.with_permit_until ~clock ~deadline_at scheduler f
+;;
+
 let snapshot_for ~(config : Provider_config.t) =
   let key = key_of_config config in
   let snapshot = Stdlib.Mutex.protect state_mutex (fun () -> !state) in

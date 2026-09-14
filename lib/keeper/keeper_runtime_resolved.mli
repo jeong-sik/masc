@@ -72,10 +72,11 @@ val first_event_failsafe_floor_sec : float
     per-provider tuned default; an explicit env/toml value overrides it. *)
 
 val first_event_timeout_sec : unit -> float option
-(** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. Bounds
-    only the wait for the provider's first token-bearing event (an opening
-    frame such as Responses [response.created] does not end it);
-    [stream_idle_timeout_sec] arms the inter-line gaps after it
+(** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. One
+    window from the first body read to the provider's first token-bearing
+    event (an opening frame such as Responses [response.created] neither ends
+    it nor extends it); [stream_idle_timeout_sec] arms the inter-line gaps
+    after it
     (RFC-AC-037). Always [Some] at runtime: an
     explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] (or runtime.toml
     [turn.first_event_timeout_sec]) is honoured verbatim; when unset,
@@ -96,12 +97,12 @@ val first_event_timeout_sec : unit -> float option
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option
 
-(** Total wall-clock deadline for one provider call attempt (#27349).
-    [None] (env unset) means no MASC-side enforcement -- the provider
-    attempt caller skips the [Eio.Time.with_timeout_exn] wrap and runs
-    unbounded, same as before this knob existed. Deliberately no failsafe
-    floor: unlike [stream_idle_timeout_sec], a reasonable total-call
-    ceiling depends on provider and workload, so MASC does not guess one.
+(** The keeper's no-progress threshold for a provider call attempt (#27349,
+    measured against the turn's progress signal since #28417). The attempt
+    watchdog ends an attempt that made no progress for this long while no
+    tool is in flight and no approval is pending; a tool's provider sub-call
+    runs under it ({!Keeper_provider_subcall}). [None] (unset) means no
+    MASC-side enforcement and no failsafe floor.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float option

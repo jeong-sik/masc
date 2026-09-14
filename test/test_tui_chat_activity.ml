@@ -14,7 +14,7 @@ let state () =
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
   { ktr_chat_control_token = None; ktr_keeper_name = keeper_name
-  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = None; preview = None }
+  ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = "fixture-token"; preview = None }
   }
 
 let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
@@ -117,6 +117,23 @@ let test_working_request_survives_newer_queued_view () =
   check (list string) "stale autonomous interrupt rows are suppressed" []
     (Tui.keeper_observed_interrupt_rows state)
 
+(* Esc and its hint read one fact. While the turns poll is failing the stale
+   running row stays on screen, but Esc has no target, so no row may offer
+   the stop. *)
+let test_esc_hint_follows_the_observed_turn () =
+  let state = state () in
+  state.keeper_turns <- [running Turn_lane_chat_operation];
+  check (option (pair (float 0.001) string)) "a running row is the target"
+    (Some (1., "fixture-token")) (Tui.keeper_observed_turn state "alpha");
+  check (list string) "the hint offers the stop Esc will send"
+    ["Esc: stop and pause queue · Enter:send update · /queue: manage"]
+    (Tui.keeper_observed_interrupt_rows state);
+  state.keeper_turns_error <- Some "poll failed";
+  check (option (pair (float 0.001) string)) "a failing poll leaves Esc without a target"
+    None (Tui.keeper_observed_turn state "alpha");
+  check (list string) "no row offers a stop Esc would not send" []
+    (Tui.keeper_observed_interrupt_rows state)
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
@@ -129,4 +146,7 @@ let () =
           test_started_and_finished_requests_stop_waiting
       ; test_case "local queue is distinct from server admission" `Quick
           test_local_queue_is_not_server_admission
+      ; test_case "Esc hint follows the observed turn" `Quick
+          test_esc_hint_follows_the_observed_turn
       ] ]
+

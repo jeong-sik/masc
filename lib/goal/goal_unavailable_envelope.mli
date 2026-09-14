@@ -13,8 +13,16 @@
 val error_code : Tool_args.error_code
 (** {!Tool_args.Unavailable}; its wire token is [goal_store_unavailable]. *)
 
+val fields : Goal_store.unavailable -> (string * Yojson.Safe.t) list
+(** The five descriptive members — [reason], [field], [file], [mirror],
+    [reset_step] — without [ok] and [error_code]. Records that carry the
+    value inside another object (a keeper decision record, a skipped
+    verifier scan row; RFC-0444 PR-5) splice these so every surface spells
+    the same keys. *)
+
 val to_yojson : Goal_store.unavailable -> Yojson.Safe.t
-(** The envelope as a JSON object. HTTP routes send it as the body. *)
+(** The envelope as a JSON object: [ok], [error_code], then {!fields}. HTTP
+    routes send it as the body. *)
 
 val tool_result : tool_name:string -> start_time:float -> Goal_store.unavailable -> Tool_result.result
 (** The envelope as a failed tool result: {!to_yojson} is both the structured

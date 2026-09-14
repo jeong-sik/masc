@@ -101,6 +101,17 @@ let retained_run_kind = function
   | Goal_verification_run _ -> Goal_verification
 ;;
 
+(* A skipped verifier scan (RFC-0444 §2.3 row 7) is retained beside the Goal
+   reviews but is not a lane run: no lane admitted it and no model ran. The
+   lane overview and the run drill-down read only the reviews; the skipped
+   scans are served by the goal-verification-runs route. *)
+let retained_goal_reviews () =
+  Goal_verification_run_registry.list_runs (Goal_verification_run_registry.global ())
+  |> List.filter_map (function
+    | Goal_verification_run_registry.Review run -> Some run
+    | Goal_verification_run_registry.Scan_skipped _ -> None)
+;;
+
 type detail_lookup =
   | Detail_found of Yojson.Safe.t
   | Detail_not_found
@@ -352,9 +363,7 @@ let recent_run_page_json ~limit ~before ~lane ~run_kind =
       (Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ()))
     ~verification_runs:
       (Verification_run_registry.list_runs (Verification_run_registry.global ()))
-    ~goal_verification_runs:
-      (Goal_verification_run_registry.list_runs
-         (Goal_verification_run_registry.global ()))
+    ~goal_verification_runs:(retained_goal_reviews ())
 ;;
 
 let run_detail_json_with
@@ -389,9 +398,7 @@ let run_detail_json ~run_id =
     ~exact_runs
     ~verification_runs:
       (Verification_run_registry.list_runs (Verification_run_registry.global ()))
-    ~goal_verification_runs:
-      (Goal_verification_run_registry.list_runs
-         (Goal_verification_run_registry.global ()))
+    ~goal_verification_runs:(retained_goal_reviews ())
 ;;
 
 let terminal_kind_to_string = function
@@ -770,9 +777,7 @@ let snapshot_json () =
     ~exact_runs
     ~verification_runs:
       (Verification_run_registry.list_runs (Verification_run_registry.global ()))
-    ~goal_verification_runs:
-      (Goal_verification_run_registry.list_runs
-         (Goal_verification_run_registry.global ()))
+    ~goal_verification_runs:(retained_goal_reviews ())
 ;;
 
 module For_testing = struct

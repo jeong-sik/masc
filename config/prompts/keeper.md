@@ -140,9 +140,9 @@ freshness unavailable: {{reason}}
 - revision={{revision}} state=unavailable
 - No pending/resolved inference is valid.
 
-### world.active_goals.unavailable (vars: detail)
+### world.active_goals.unavailable (vars: reason, file, mirror, reset)
 ### Active Goals — source unavailable
-goal_store_unavailable: {{detail}}
+goal_store_unavailable: reason={{reason}} file={{file}} mirror={{mirror}} reset={{reset}}
 The current Goal set is unknown. Continue independent work; do not infer that there are no Goals from this read failure.
 
 ### world.active_goals.heading (vars: count)

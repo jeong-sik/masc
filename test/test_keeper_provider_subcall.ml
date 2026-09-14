@@ -1,49 +1,19 @@
 (* The sub-call boundary is the only bound on a provider call made from inside
-   a tool: the attempt watchdog exempts a tool in flight, and a non-streaming
-   call shows no progress until it completes. These cases pin which declared
-   setting bounds such a call, and that the bound reaches the HTTP client. *)
+   a tool: the attempt watchdog exempts a tool in flight, a non-streaming call
+   shows no progress until it completes, and a call queued for its binding's
+   admission permit shows none either. Agent Core's own suite pins how
+   [call_timeout_s] splits between the queue and the round trip with
+   sub-second values; this case pins that the keeper threshold reaches it. *)
 
 open Alcotest
 open Masc
 module Subcall = Keeper_provider_subcall
 
-let declared_body_deadline_s = 120.0
-let declared_provider_call_deadline_s = 900.0
 let deadline = option (float 0.0)
-
-let test_a_declared_body_deadline_is_the_narrower_statement () =
-  check
-    deadline
-    "the body deadline wins"
-    (Some declared_body_deadline_s)
-    (Subcall.deadline_s
-       ~body_timeout_override_sec:(Some declared_body_deadline_s)
-       ~provider_call_deadline_sec:(Some declared_provider_call_deadline_s))
-;;
-
-let test_the_keeper_no_progress_threshold_bounds_an_undeclared_body () =
-  check
-    deadline
-    "the provider-call deadline applies"
-    (Some declared_provider_call_deadline_s)
-    (Subcall.deadline_s
-       ~body_timeout_override_sec:None
-       ~provider_call_deadline_sec:(Some declared_provider_call_deadline_s))
-;;
-
-let test_nothing_declared_is_the_operator_choice_of_no_bound () =
-  check
-    deadline
-    "no bound"
-    None
-    (Subcall.deadline_s ~body_timeout_override_sec:None ~provider_call_deadline_sec:None)
-;;
 
 (* [turn.provider_call_deadline_sec] is clamped to [30, 3600] where it is
    read, so thirty seconds is the shortest deadline a declared threshold can
-   produce. This case pays it once: it is the only proof that the threshold
-   reaches the HTTP client through the boundary rather than stopping at the
-   resolver. *)
+   produce. This case pays it once. *)
 let shortest_declared_threshold_s = 30.0
 let threshold_slack_s = 5.0
 
@@ -97,7 +67,11 @@ let fixture_messages =
   ]
 ;;
 
-let test_the_declared_threshold_reaches_the_http_client () =
+(* The live shape: a binding declared with one concurrent request, its only
+   permit held by another call (a keeper streaming a turn on it). The holder
+   keeps the permit past the threshold, so a boundary that bounded only the
+   round trip would wait for the permit first and end well after it. *)
+let test_the_declared_threshold_bounds_the_wait_for_an_admission_permit () =
   with_declared_provider_call_deadline shortest_declared_threshold_s (fun () ->
     check
       deadline
@@ -115,21 +89,35 @@ let test_the_declared_threshold_reaches_the_http_client () =
               ~kind:Llm_provider.Provider_config.Ollama
               ~model_id:"fixture"
               ~base_url
+              ~max_concurrent_requests:1
               ()
           in
+          (* [Fiber.fork] runs the holder until it blocks, so it already holds
+             the permit when the fork returns. *)
+          Eio.Fiber.fork ~sw (fun () ->
+            Llm_provider.Provider_admission.with_admission ~config (fun () ->
+              Eio.Time.sleep clock (shortest_declared_threshold_s +. threshold_slack_s)));
+          (match Llm_provider.Provider_admission.snapshot_for ~config with
+           | Some snapshot ->
+             check int "the holder has the only permit" 1 snapshot.Llm_provider.Slot_scheduler.active
+           | None -> fail "the holder did not take a permit");
           let started = Eio.Time.now clock in
           (match Subcall.complete ~sw ~net ~clock ~config ~messages:fixture_messages () with
            | Error
                (Llm_provider.Http_client.TimeoutError
-                  { phase = Llm_provider.Http_client.Non_streaming_body; _ }) ->
+                  { phase = Llm_provider.Http_client.Queue; _ }) ->
              let elapsed = Eio.Time.now clock -. started in
              check
                bool
-               "the call ended at the declared threshold"
+               "the call ended at the declared threshold while still queued"
                true
                (elapsed >= shortest_declared_threshold_s
                 && elapsed < shortest_declared_threshold_s +. threshold_slack_s)
-           | Error _ -> fail "the call did not end as a non-streaming body deadline"
+           | Error (Llm_provider.Http_client.TimeoutError { phase; _ }) ->
+             failf
+               "the call ended in phase %s, not while waiting for the permit"
+               (Llm_provider.Http_client.timeout_phase_to_label phase)
+           | Error _ -> fail "the call did not end as a timeout"
            | Ok _ -> fail "a server that never answers completed the call");
           Eio.Switch.fail sw Exit)
       with
@@ -141,21 +129,9 @@ let () =
     "keeper_provider_subcall"
     [ ( "deadline"
       , [ test_case
-            "a declared body deadline is the narrower statement"
-            `Quick
-            test_a_declared_body_deadline_is_the_narrower_statement
-        ; test_case
-            "the keeper no-progress threshold bounds an undeclared body"
-            `Quick
-            test_the_keeper_no_progress_threshold_bounds_an_undeclared_body
-        ; test_case
-            "nothing declared is the operator choice of no bound"
-            `Quick
-            test_nothing_declared_is_the_operator_choice_of_no_bound
-        ; test_case
-            "the declared threshold reaches the HTTP client"
+            "the declared threshold bounds the wait for an admission permit"
             `Slow
-            test_the_declared_threshold_reaches_the_http_client
+            test_the_declared_threshold_bounds_the_wait_for_an_admission_permit
         ] )
     ]
 ;;

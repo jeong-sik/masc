@@ -574,6 +574,25 @@ let record_runtime_toml_load_failure (failure : Keeper_runtime_config.load_failu
       [ "reason", Keeper_runtime_config.load_failure_kind_label failure.kind ]
     ()
 
+(* Apply the keeper runtime overrides from the resolved config root's
+   runtime.toml. Must run before any module that reads
+   [Env_config_keeper.KeeperKeepalive] settings, and in every process that
+   resolves them: the server at boot, and a CLI that makes a provider call
+   under the keeper's settings (the capability probe), which otherwise reads
+   the process env alone and runs its call with none of what the operator
+   declared in the file. Existing process env vars take precedence; TOML only
+   fills unset slots. A file that does not load is a configuration error and
+   stops the process. *)
+let apply_runtime_toml ~base_path =
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok 0 -> ()
+  | Ok n -> Log.Server.info "runtime.toml: applied %d override(s)" n
+  | Error failure ->
+    record_runtime_toml_load_failure failure;
+    let msg = Keeper_runtime_config.load_failure_to_string failure in
+    Log.Server.error "runtime.toml load failed: %s" msg;
+    raise (Env_config_core.Config_error msg)
+
 let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
@@ -617,19 +636,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_agent_core_model_catalog_env () in
   let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in
-  (* Apply keeper runtime overrides from the resolved config root's
-     runtime.toml. Must run before any module that reads
-     [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
-     process env vars take precedence — TOML only fills unset slots. *)
-  (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Ok 0 -> ()
-   | Ok n ->
-       Log.Server.info "runtime.toml: applied %d override(s)" n
-   | Error failure ->
-       record_runtime_toml_load_failure failure;
-       let msg = Keeper_runtime_config.load_failure_to_string failure in
-       Log.Server.error "runtime.toml load failed: %s" msg;
-       raise (Env_config_core.Config_error msg));
+  apply_runtime_toml ~base_path;
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after
      they freeze. Without this line a knob that is CONFIGURED in runtime.toml but

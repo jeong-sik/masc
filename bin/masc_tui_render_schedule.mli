@@ -259,6 +259,32 @@ val system_log_row :
     widths used to live in two format strings, the row's threaded between five
     escape sequences where nothing could compare them with the header's. *)
 
+(** {1 Task Review columns} *)
+
+type verification_row_values = {
+  vrow_task : string;
+  vrow_submitted_by : string;
+  vrow_evidence : string;
+  vrow_title : string;
+}
+
+val verification_minimum_title_width : int
+
+val verification_title_width : inner_width:int -> submitter_width:int -> int
+(** Cells the title may occupy: what the named columns leave, never below
+    {!verification_minimum_title_width}. *)
+
+val verification_header_row : submitter_width:int -> title_width:int -> string
+
+val verification_row :
+  submitter_width:int ->
+  title_width:int ->
+  verification_row_values ->
+  string
+(** One request, on the same columns as {!verification_header_row}. The widths
+    used to live in two format strings, and printf's width is a floor: a task
+    id past fourteen cells pushed every column after it out of line. *)
+
 (** {1 Lane run columns} *)
 
 type lane_run_row_values = {

@@ -1022,3 +1022,26 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       else compact_lines ~width view |>  List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
+
+(* The Lanes surface drew a fixed sentence -- "No Add-ons installed. Press A
+   to inspect installed add-ons" -- with no state behind it, so it said so
+   whether or not any were installed and whether or not anything had read.
+   Nothing on that surface asks for Add-ons: [launch_lanes_load] fetches
+   standalone lanes only, so the honest answer there is that nobody has read
+   yet. The three answers are apart in the type; the row that draws them
+   chooses the words. *)
+type installed_reading =
+  | Not_read
+  | Nothing_installed
+  | Installed of int
+
+let installed view =
+  match view.snapshot with
+  | None -> Not_read
+  | Some snapshot ->
+    (match snapshot.configuration with
+     | None -> Not_read
+     | Some configuration ->
+       (match List.length configuration.declarations with
+        | 0 -> Nothing_installed
+        | count -> Installed count))

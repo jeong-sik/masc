@@ -38,6 +38,14 @@ let test_an_answer_is_counted_even_when_empty () =
   let two = Fetched.complete ~equal:Unit.equal loading request (Ok [ (); () ]) in
   Alcotest.(check string) "and a full one its size" "2" (count_of (view two))
 
+(* A title brackets the words because it has no label to hang them on; a
+   labelled field has one. Both spellings say the same words, and the field
+   pays no cells for brackets the label already earns -- the keeper chat
+   header is one cell short of its runtime id without that saving. *)
+let test_the_field_says_the_words_without_the_brackets () =
+  Alcotest.(check string) "the field is the words" "not loaded" field_unread;
+  Alcotest.(check string) "the title brackets them" "(not loaded)" title_unread
+
 let () =
   Alcotest.run "tui_title_counts"
     [ ( "fetched view"
@@ -45,6 +53,8 @@ let () =
             test_no_count_before_an_answer
         ; Alcotest.test_case "a failed read is not a count" `Quick
             test_a_failed_read_is_not_a_count
+        ; Alcotest.test_case "the field says the words without the brackets" `Quick
+            test_the_field_says_the_words_without_the_brackets
         ; Alcotest.test_case "an answer is counted even when empty" `Quick
             test_an_answer_is_counted_even_when_empty
         ] )

@@ -44,14 +44,23 @@ let discovery_headers =
   ; "Accept", "application/json, */*"
   ]
 
-let default_get ~url = Masc_http_client.get_sync ~url ~headers:discovery_headers ()
+(* The production transports, each one short JSON round trip bounded by
+   [timeout_sec] on [clock]. No defaults: the shared client's default arm is
+   unbounded, and discovery runs on a keeper's turn when a token is renewed. *)
+let http_get ~clock ~timeout_sec : get =
+  fun ~url ->
+    Masc_http_client.get_sync ~clock ~timeout_sec ~url ~headers:discovery_headers ()
 
 type ask = url:string -> (string * string) list option
 
-let default_ask ~url =
-  match Masc_http_client.get_response_sync ~url ~headers:discovery_headers () with
-  | Error _ -> None
-  | Ok response -> Some response.Masc_http_client.headers
+let http_ask ~clock ~timeout_sec : ask =
+  fun ~url ->
+    match
+      Masc_http_client.get_response_sync
+        ~clock ~timeout_sec ~url ~headers:discovery_headers ()
+    with
+    | Error _ -> None
+    | Ok response -> Some response.Masc_http_client.headers
 
 let ( let* ) = Result.bind
 
@@ -173,7 +182,7 @@ let fetch_with_root_fallback ~get ~url ~segment ~base_url =
   | Error (Malformed _ as err) -> Error err
   | Error (No_authorization_server _ as err) -> Error err
 
-let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
+let discover ~get ~ask ~mcp_url () =
   (* Asked before computed. Of 41 live MCP servers measured on 2026-08-27,
      eleven name a location the computed URL does not reach -- they publish
      at the origin while serving MCP below it -- and nine send no such

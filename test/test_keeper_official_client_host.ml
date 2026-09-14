@@ -1662,13 +1662,13 @@ let with_declared_keepers names body =
        body ~base_path)
 ;;
 
+(* A program-defined posture is a value, not a declaration: the base path
+   does not exist and the host must not look there. *)
 let test_required_native_none_never_degrades () =
-  with_declared_keepers [ "required-native-posture" ]
-  @@ fun ~base_path ->
   let resolve ~none_supported =
     Host.resolve_native_posture
-      ~required:(Some Runtime_native_tools.Native_none)
-      ~base_path
+      ~posture_source:(Runtime_native_tools.Program_defined Runtime_native_tools.Native_none)
+      ~base_path:"/nonexistent-required-native-posture-base"
       ~keeper_name:"required-native-posture"
       ~client_label:"fixture"
       ~default:Runtime_native_tools.Native_read
@@ -1697,7 +1697,11 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
     ; "rfc0390-read-codex"
     ]
   @@ fun ~base_path ->
-  let run = Host.resolve_native_posture ~required:None in
+  let run =
+    Host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
+      ~base_path
+  in
   let posture_of = function
     | Ok p -> Runtime_native_tools.to_string p
     | Error detail ->
@@ -1708,7 +1712,6 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
      (#36066); this is the one outcome that is not a posture. *)
   (match
      run
-       ~base_path
        ~keeper_name:"rfc0390-undeclared"
        ~client_label:"Claude Code"
        ~default:Runtime_native_tools.claude_code_default
@@ -1725,7 +1728,6 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "declared without tools.native keeps the runtime default" "none"
     (posture_of
        (run
-          ~base_path
           ~keeper_name:"rfc0390-default-posture"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.claude_code_default
@@ -1734,7 +1736,6 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "full under Auto degrades to read" "read"
     (posture_of
        (run
-          ~base_path
           ~keeper_name:"rfc0390-full-auto"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.Native_full
@@ -1743,7 +1744,6 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "none on Codex degrades to read" "read"
     (posture_of
        (run
-          ~base_path
           ~keeper_name:"rfc0390-none-codex"
           ~client_label:"Codex"
           ~default:Runtime_native_tools.Native_none
@@ -1754,7 +1754,6 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "read is admitted untouched" "read"
     (posture_of
        (run
-          ~base_path
           ~keeper_name:"rfc0390-read-codex"
           ~client_label:"Codex"
           ~default:Runtime_native_tools.Native_read
@@ -1824,10 +1823,14 @@ let test_static_contradiction_reports_once_until_rearmed () =
      state); [none] exactly once across its four turns, and a previously
      gated pair must publish again after an honoring resolution re-arms
      the gate. *)
+  with_declared_keepers
+    [ "rfc0390-full-auto-per-turn"; "rfc0390-none-codex-static" ]
+  @@ fun ~base_path ->
   (* [full] under Auto: per-turn publication, two turns -> two events. *)
   ignore
     (posture_of
-       (Host.resolve_native_posture ~required:None
+       (Host.resolve_native_posture
+          ~posture_source:Runtime_native_tools.Declared_on_disk
           ~base_path
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
@@ -1835,7 +1838,8 @@ let test_static_contradiction_reports_once_until_rearmed () =
           ~none_supported:true));
   ignore
     (posture_of
-       (Host.resolve_native_posture ~required:None
+       (Host.resolve_native_posture
+          ~posture_source:Runtime_native_tools.Declared_on_disk
           ~base_path
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
@@ -1853,7 +1857,8 @@ let test_static_contradiction_reports_once_until_rearmed () =
   for _ = 1 to 4 do
     ignore
       (posture_of
-         (Host.resolve_native_posture ~required:None
+         (Host.resolve_native_posture
+            ~posture_source:Runtime_native_tools.Declared_on_disk
             ~base_path
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"
@@ -1865,7 +1870,8 @@ let test_static_contradiction_reports_once_until_rearmed () =
   (* A honoring resolution for the same pair re-arms the gate. *)
   ignore
     (posture_of
-       (Host.resolve_native_posture ~required:None
+       (Host.resolve_native_posture
+          ~posture_source:Runtime_native_tools.Declared_on_disk
           ~base_path
           ~keeper_name:"rfc0390-none-codex-static"
           ~client_label:"Codex"
@@ -1876,7 +1882,8 @@ let test_static_contradiction_reports_once_until_rearmed () =
   for _ = 1 to 2 do
     ignore
       (posture_of
-         (Host.resolve_native_posture ~required:None
+         (Host.resolve_native_posture
+            ~posture_source:Runtime_native_tools.Declared_on_disk
             ~base_path
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"

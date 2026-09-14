@@ -129,10 +129,48 @@ let project_token ~base_path =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not project a token: %s" message
 
+(* The renewal hops are not what these cases pin; reaching one is a defect
+   the case reports rather than a fixture that answers. *)
+let never_token_post ~url:_ ~headers:_ ~body:_ =
+  Alcotest.fail "the token endpoint was reached when it should not have been"
+
+let never_discover ~mcp_url:_ =
+  Alcotest.fail "renewal reached the network when it should not have"
+
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
+  in
+  n = 0 || scan 0
+
+let transports_of_post post =
+  { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
+
 let execute ?post ~base_path tool_fixture arguments =
   let config = Masc.Workspace.default_config base_path in
-  let tool = Gate.agent_tool ?post ~config ~meta:(meta ()) tool_fixture in
+  let tool =
+    Gate.agent_tool ?transports:(Option.map transports_of_post post) ~config
+      ~meta:(meta ()) tool_fixture
+  in
   Agent_core.Base.Tool.execute tool arguments
+
+(* Production builds its transports from a clock. This process runs no Eio
+   loop, so there is none to find, and the tool must refuse rather than open
+   an unbounded session: a read-only tool, so the Gate is not what stops it,
+   and no transport injected, so nothing else can answer. *)
+let test_without_a_clock_the_call_is_refused_not_unbounded () =
+  let base_path = temp_base () in
+  let config = Masc.Workspace.default_config base_path in
+  let tool = Gate.agent_tool ~config ~meta:(meta ()) (offered ~read_only:true "getJiraIssue") in
+  match Agent_core.Base.Tool.execute tool (`Assoc [ ("key", `String "PK-1") ]) with
+  | Ok output ->
+      Alcotest.failf "a call with no clock ran: %s" output.Agent_core.Types.content
+  | Error err ->
+      check Alcotest.bool "the model is not told to retry" false
+        err.Agent_core.Types.recoverable;
+      check Alcotest.bool "and is told why" true
+        (contains ~needle:"no clock" err.Agent_core.Types.message)
 
 let member key json =
   match json with
@@ -157,13 +195,6 @@ let pending_dump ~base_path =
   | Error error ->
       Alcotest.failf "the pending queue did not read: %s"
         (Queue.storage_error_to_string error)
-
-let contains ~needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  let rec scan i =
-    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
-  in
-  n = 0 || scan 0
 
 (* ── routing: the provider's word, and only that word ─────────────────── *)
 
@@ -340,7 +371,9 @@ let test_the_decoder_is_strict () =
 let () =
   Alcotest.run "keeper_identity_gate"
     [ ( "routing",
-        [ Alcotest.test_case "silence defers durably" `Quick
+        [ Alcotest.test_case "without a clock the call is refused, not unbounded"
+            `Quick test_without_a_clock_the_call_is_refused_not_unbounded;
+          Alcotest.test_case "silence defers durably" `Quick
             test_silence_defers_durably;
           Alcotest.test_case "a declared write defers durably" `Quick
             test_a_declared_write_defers_durably;

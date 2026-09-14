@@ -212,31 +212,23 @@ module KeeperKeepalive : sig
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)
 
-  val body_timeout_sec_override_live : unit -> float option
-  (** Re-reads the env var on every call. [body_timeout_sec_override] is this
-      same reader run once at module load; both exist because one surface
-      reports what the process booted with and another resolves what is in
-      effect now. The parse and the clamp live here only. *)
-
-  val body_timeout_sec_override : float option
-  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
-      calls. [None] (env unset) leaves the runtime builder wire untouched.
+  val body_timeout_sec_override : unit -> float option
+  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE
+      completion calls, read on every call (env, then the runtime.toml boot
+      override). [None] (unset) leaves the runtime builder wire untouched.
       [Some s] forwards to [Builder.with_body_timeout] for sync completion
-      paths. Streaming paths ignore it and rely on an explicitly configured
-      {!stream_idle_timeout_sec} plus attempt liveness observation.
+      paths. Streaming paths ignore it and rely on {!stream_idle_timeout_sec}
+      plus attempt liveness observation. A declared value that is not a
+      finite positive number of seconds raises {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 
-  val provider_call_deadline_sec_override_live : unit -> float option
-  (** Live counterpart of [provider_call_deadline_sec_override], same relation
-      as {!body_timeout_sec_override_live}. *)
-
-  val provider_call_deadline_sec_override : float option
-  (** Total wall-clock deadline for one provider call attempt, independent
-      of streaming progress and covering both streaming and non-streaming
-      calls (#27349). [None] (env unset) means no MASC-side enforcement;
-      deliberately no failsafe floor, unlike {!stream_idle_timeout_sec}'s
-      RFC-0345 fallback.
+  val provider_call_deadline_sec_override : unit -> float option
+  (** The keeper's no-progress threshold for a provider call attempt
+      (#27349, #28417), read on every call (env, then the runtime.toml boot
+      override). [None] (unset) means no MASC-side enforcement and no
+      failsafe floor. A declared value that is not a finite positive number
+      of seconds raises {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Clamp range: [30, 3600] s. *)
 

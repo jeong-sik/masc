@@ -367,6 +367,12 @@ let () =
     | _ -> error "--base-path or MASC_BASE_PATH is required"
   in
   Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+  (* The probe's provider call runs under the keeper's declared settings
+     ([turn] in runtime.toml: the no-progress threshold is its only bound
+     from inside a tool), so the file is applied here as the server applies
+     it at boot. Without this the process reads its env alone and the probe
+     measures a call the keeper would never make. *)
+  Server_runtime_bootstrap.apply_runtime_toml ~base_path;
   Server_runtime_bootstrap.bootstrap_prompt_assets ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   ignore

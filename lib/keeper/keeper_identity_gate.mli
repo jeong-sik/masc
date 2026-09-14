@@ -49,7 +49,13 @@ val call_summary : replay_call -> string option
     payload and take no part in it. *)
 
 val agent_tool :
-  ?post:Mcp_client.post ->
+  ?transports:Keeper_identity_tools.transports ->
+      (** A test's recorded answers. Absent in production, where the tool
+          builds {!Keeper_identity_tools.http_transports} from [clock]. *)
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+      (** The turn's clock when the bundle carries one; the process clock
+          ({!Eio_context.get_clock_opt}) otherwise. With neither, a call is
+          refused as a precondition failure rather than made unbounded. *)
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->
@@ -67,7 +73,10 @@ val agent_tool :
     inside the woken cycle can also spend it. *)
 
 val replay_call_with_outcome :
-  ?post:Mcp_client.post ->
+  ?transports:Keeper_identity_tools.transports ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+      (** Resolved exactly as for {!agent_tool}: injected, else the given
+          clock, else the process clock; with none the replay is refused. *)
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->

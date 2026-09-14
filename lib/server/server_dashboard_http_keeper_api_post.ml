@@ -94,7 +94,7 @@ let declared_provider_id json =
    the operator has to open; the provider sends the browser to
    [Server_keeper_oauth_http]'s callback, which is where credentials are
    actually written. Nothing is written to the Keeper by this request. *)
-let handle_keeper_oauth_login_post state req reqd body_str =
+let handle_keeper_oauth_login_post ~clock state req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_oauth_login in
   let config = Mcp_server.workspace_config state in
@@ -115,6 +115,7 @@ let handle_keeper_oauth_login_post state req reqd body_str =
           | Ok provider_id ->
             (match
                Server_keeper_oauth.start
+                 ~clock
                  ~base_path:config.Workspace.base_path
                  ~keeper:name
                  ~provider_id
@@ -128,7 +129,7 @@ let handle_keeper_oauth_login_post state req reqd body_str =
 (* Ask an attached service again what tools it has. The same work the
    callback does when a Keeper attaches, reachable on its own so a catalog
    that went stale does not need a whole new consent. *)
-let handle_keeper_identity_refresh_post state req reqd body_str =
+let handle_keeper_identity_refresh_post ~clock state req reqd body_str =
   let req_path = Http.Request.path req in
   let name =
     extract_keeper_name_for_suffix req_path keeper_suffix_identity_refresh
@@ -151,6 +152,7 @@ let handle_keeper_identity_refresh_post state req reqd body_str =
           | Ok provider_id ->
             (match
                Server_keeper_oauth.refresh_tools
+                 ~clock
                  ~base_path:config.Workspace.base_path
                  ~keeper:name
                  ~provider_id

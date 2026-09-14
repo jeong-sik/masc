@@ -28,7 +28,8 @@ def receive():
 if 'auth' in sys.argv:
     emit({'loggedIn':True,'authMethod':'claude.ai','subscriptionType':'team','apiProvider':'firstParty'})
     sys.exit(0)
-record({'argv':sys.argv,'cwd':os.getcwd()})
+declarations = sorted(os.path.relpath(os.path.join(d, f), os.getcwd()) for d, _, fs in os.walk(os.getcwd()) for f in fs if f.endswith('.toml'))
+record({'argv':sys.argv,'cwd':os.getcwd(),'declarations':declarations})
 assert sys.argv[sys.argv.index('--tools')+1] == ''
 assert '--setting-sources=' in sys.argv
 session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
@@ -177,6 +178,12 @@ candidates = ["forbidden.verifier", "official.verifier"]
   let client_root = member "cwd" invocation |> Yojson.Safe.Util.to_string in
   check bool "client does not run in workspace" false (String.equal root client_root);
   check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);
+  (* #36066 refuses a keeper with no keepers/<name>.toml. The reviewer is
+     program-defined: its posture reaches the host as a value and the host
+     reads no declaration, so the review root holds no TOML at launch. *)
+  check (list string) "completion review runs with no keeper declaration under its root" []
+    (member "declarations" invocation |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string);
   let serialized = Yojson.Safe.to_string (`List rows) in
   check bool "real contained text reaches tool response" true
     (String_util.contains_substring serialized "verified-file-receipt");

@@ -564,10 +564,16 @@ let render_overview (state : state) =
      below it does. It said nothing: an overview that answered with no items,
      one not read yet and one that failed all left the panel blank under its
      title. A failure is already the summary row's to say. *)
+  (* These notes stand in for rows, so they start where rows start. This
+     panel writes its own two cells of indent ahead of every row, and the
+     notes are written for a body that adds its own -- pasted in whole, the
+     note sat two cells right of the rows it replaces and of the title above
+     them, while the Events panel beside it put its title and its rows on one
+     column. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
-    | Page_empty -> Some "  (nothing needs attention)"
-    | Page_unread -> Some page_unread_note
+    | Page_empty -> Some "(nothing needs attention)"
+    | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None
   in
   for i = 0 to row_budget.attention_rows - 1 do
@@ -4753,8 +4759,24 @@ let render_lanes_overview (state : state) =
   (* The standalone rows are drawn directly rather than through a row list
      because the selection band has to land on a lane row, not on the
      windowed/stale notes that follow them. *)
+  (* The row said "No Add-ons installed. Press A to inspect installed add-ons"
+     as a fixed string: it claimed a count it never read, named a second key
+     for the destination the heading above already names with [o], and
+     offered to inspect what it had just said was not there. Nothing on this
+     surface asks for Add-ons, so before the operator opens them the answer
+     is the one every other unread reading gives. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Lane Add-ons: No Add-ons installed. Press A to inspect installed add-ons";
+    ("  Lane Add-ons: "
+    ^
+    let view =
+      Option.value ~default:state.lane_addons_cached state.lane_addons
+    in
+    match Masc_tui_lane_addons.installed view with
+    | Masc_tui_lane_addons.Not_read ->
+        title_missing_reading ~error:view.Masc_tui_lane_addons.error
+    | Masc_tui_lane_addons.Nothing_installed -> "none installed"
+    | Masc_tui_lane_addons.Installed count ->
+        Message_layout.count_noun count "installed");
   (match state.standalone_lanes with
    | Some snapshot ->
        let label_cells, slots_cells =
@@ -5496,11 +5518,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
+          (screen_title " MASC Config / Runtime / Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") shown timestamp
+          (screen_title " MASC Config / Runtime / Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -7239,9 +7261,13 @@ let render_verification_list (state : state) =
       16 requests
     |> min 26
   in
+  let title_width =
+    Render_schedule.verification_title_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+      ~submitter_width
+  in
   let col_hdr =
-    Printf.sprintf "  %-14s %-*s %-9s %s" "Task" submitter_width
-      "Submitted by" "Evidence" "What it asks for"
+    "  " ^ Render_schedule.verification_header_row ~submitter_width ~title_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -7310,12 +7336,15 @@ let render_verification_list (state : state) =
              that this task be verified, so the title is what it asks for. *)
           let asks = r.vr_task_title in
           let line =
-            Printf.sprintf "  %-14s %s %-9s %s"
-              (Terminal_text.single_line r.vr_task_id)
-              (fit_width (Terminal_text.single_line r.vr_submitted_by)
-                 submitter_width)
-              evidence
-              (Terminal_text.single_line asks)
+            "  "
+            ^ Render_schedule.verification_row ~submitter_width ~title_width
+                { Render_schedule.vrow_task =
+                    Terminal_text.single_line r.vr_task_id
+                ; vrow_submitted_by =
+                    Terminal_text.single_line r.vr_submitted_by
+                ; vrow_evidence = evidence
+                ; vrow_title = Terminal_text.single_line asks
+                }
           in
           let style =
             (* Evidence that cannot be read is the one row that cannot be
@@ -10623,11 +10652,19 @@ let render_runtime (state : state) =
           let lane_fact =
             match candidate.rcr_preferred_at_ts with
             | Some at ->
+                (* One timestamp, said once. [rcr_preferred_at_ts] carries
+                   [Runtime_lane_preference.preferred_of_lane]'s [noted_at],
+                   which {!Runtime_lane_preference.note_success} re-stamps on
+                   every successful attempt -- so it is when the candidate
+                   last answered, and never a point the stickiness has run
+                   from. The row said both, printing the same value twice,
+                   and the "sticky since" half was the one that was not true.
+
+                   It also cost the width that made the rest of this cell
+                   disappear: 53 columns of detail in the 18 a 100-column
+                   terminal leaves it (#36131). *)
                 [ (Theme.ok ())
-                  ^ "\xe2\x98\x85 active (sticky since "
-                  ^ Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds at)
-                  ^ ", last success "
+                  ^ "\xe2\x98\x85 active (last success "
                   ^ Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds at)
                   ^ ")"

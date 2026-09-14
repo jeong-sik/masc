@@ -564,7 +564,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        that reaches [claim]. *)
     let* native_posture =
       Host.resolve_native_posture
-        ~required:required_native_posture
+        ~posture_source:
+          (Runtime_native_tools.posture_source_of_required required_native_posture)
         ~base_path
         ~keeper_name
         ~client_label:"Codex"

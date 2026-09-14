@@ -20,6 +20,12 @@ val start :
   config:Workspace_utils_backend_setup.config ->
   unit
 
+val scan_skipped_log_prefix : string
+(** [goal verifier scan skipped] — the first words of the one WARN line each
+    scan the goal store refused writes (RFC-0444 §2.3 row 7, criterion 3:
+    line count = skipped scan count). The same scan appends one
+    {!Goal_verification_run_registry.Scan_skipped} row. *)
+
 module For_testing : sig
   val scan_active_once : unit -> bool
   (** Consume one pending scan on the real active runtime for deterministic
@@ -33,11 +39,27 @@ module For_testing : sig
     | Superseded
     | Deferred of string
 
+  (** Why a scan produced no work. [Scan_skipped] is the goal store this
+      build cannot read; [Ledger_reconcile_failed] names the one goal whose
+      ledger the scan could read but not reconcile. Only the first is
+      recorded as a durable row and a WARN line. *)
+  type scan_failure =
+    | Scan_skipped of Goal_store.unavailable
+    | Ledger_reconcile_failed of
+        { goal_id : string
+        ; detail : string
+        }
+
+  val scan_failure_to_string : scan_failure -> string
+  (** For a test's failure message; nothing branches on it. *)
+
   val collect_pending :
     Workspace_utils_backend_setup.config ->
-    (pending_work list, string) result
+    (pending_work list, scan_failure) result
   (** Reconciles or re-arms only currently-Verifying Goals through
-      authoritative, locked reads. *)
+      authoritative, locked reads. Pure read: the row and the WARN line for
+      a skipped scan are written by the scan that calls it ({!drain_once},
+      the daemon). *)
 
   val process_pending_work :
     ?sw:Eio.Switch.t option ->
@@ -48,7 +70,9 @@ module For_testing : sig
   val drain_once :
     ?sw:Eio.Switch.t option ->
     Workspace_utils_backend_setup.config ->
-    (unit, string) result
+    (unit, scan_failure) result
   (** Synchronous single scan + process of every pending row. Tests use this
-      instead of booting the daemon. *)
+      instead of booting the daemon. A scan the store refused is recorded
+      exactly as the daemon records it — one WARN line, one row — and is
+      still returned as [Error (Scan_skipped _)]. *)
 end

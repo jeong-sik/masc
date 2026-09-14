@@ -218,16 +218,23 @@ module KeeperKeepalive : sig
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)
 
+  val body_timeout_min_sec : float
+  val body_timeout_max_sec : float
+  (** The declared range of {!body_timeout_sec_override}, in seconds. The
+      settings registry projects and validates against these; the reader
+      refuses a value outside them. *)
+
   val body_timeout_sec_override : unit -> float option
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE
-      completion calls, read on every call (env, then the runtime.toml boot
-      override). [None] (unset) leaves the runtime builder wire untouched.
-      [Some s] forwards to [Builder.with_body_timeout] for sync completion
-      paths. Streaming paths ignore it and rely on {!stream_idle_timeout_sec}
-      plus attempt liveness observation. A declared value that is not a
-      finite positive number of seconds raises {!Env_config_core.Config_error}.
+      completion calls, read on every call from the environment (the setting
+      has no runtime.toml key). [None] (unset) leaves the runtime builder wire
+      untouched. [Some s] forwards to [Builder.with_body_timeout] for sync
+      completion paths. Streaming paths ignore it and rely on
+      {!stream_idle_timeout_sec} plus attempt liveness observation. A declared
+      value that is not a finite positive number of seconds within the
+      declared range raises {!Env_config_core.Config_error}.
 
-      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
+      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. *)
 
   val provider_call_deadline_failsafe_floor_sec : float
   (** Resolved runtime fallback for the provider-call no-progress threshold
@@ -235,15 +242,22 @@ module KeeperKeepalive : sig
       stream floors so runtime execution and operator projection share one
       value. *)
 
+  val provider_call_deadline_min_sec : float
+  val provider_call_deadline_max_sec : float
+  (** The declared range of {!provider_call_deadline_sec_override}, in
+      seconds. The settings registry projects and validates against these;
+      the reader refuses a value outside them, so the environment and
+      runtime.toml give one answer. *)
+
   val provider_call_deadline_sec_override : unit -> float option
   (** The keeper's no-progress threshold for a provider call attempt
       (#27349, #28417), read on every call (env, then the runtime.toml boot
       override). [None] (unset) means no explicit value; the resolved layer
       substitutes {!provider_call_deadline_failsafe_floor_sec}. A declared
-      value that is not a finite positive number of seconds raises
-      {!Env_config_core.Config_error}.
+      value that is not a finite positive number of seconds within the
+      declared range raises {!Env_config_core.Config_error}.
 
-      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Clamp range: [30, 3600] s. *)
+      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. *)
 
 end
 

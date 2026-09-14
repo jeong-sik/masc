@@ -589,7 +589,7 @@ module KeeperKeepalive = struct
      declared value that is not a finite positive number of seconds is an
      operator configuration error, never a fallback: an unparsable string
      read as unset would switch a deadline off, and NaN would pass every
-     clamp and every comparison against it. *)
+     comparison against it. *)
   let declared_timeout_seconds env_key =
     match Env_config_core.raw_value_opt env_key with
     | None -> None
@@ -600,6 +600,25 @@ module KeeperKeepalive = struct
          raise
            (Env_config_core.Config_error
               (Printf.sprintf "invalid %s=%S (%s)" env_key raw detail)))
+  ;;
+
+  (* [declared_timeout_seconds] for a setting with a declared range: a value
+     outside it is refused the way an unparsable one is, and the way the
+     runtime.toml validator refuses it, instead of being moved to the nearest
+     bound behind the operator's back. *)
+  let declared_timeout_seconds_within ~min_sec ~max_sec env_key =
+    match declared_timeout_seconds env_key with
+    | Some seconds
+      when Float.compare seconds min_sec < 0 || Float.compare seconds max_sec > 0 ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "invalid %s=%g (expected a value within [%g, %g] seconds)"
+              env_key
+              seconds
+              min_sec
+              max_sec))
+    | declared -> declared
   ;;
 
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
@@ -658,11 +677,16 @@ module KeeperKeepalive = struct
       of seconds raises {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset -> [None].
-      Range when set: [10, 600]. *)
+      Declared range: [{!body_timeout_min_sec}, {!body_timeout_max_sec}]; a
+      value outside it raises {!Env_config_core.Config_error}. *)
+  let body_timeout_min_sec = 10.0
+  let body_timeout_max_sec = 600.0
+
   let body_timeout_sec_override () =
-    Option.map
-      (fun seconds -> Float.max 10.0 (Float.min 600.0 seconds))
-      (declared_timeout_seconds "MASC_KEEPER_BODY_TIMEOUT_SEC")
+    declared_timeout_seconds_within
+      ~min_sec:body_timeout_min_sec
+      ~max_sec:body_timeout_max_sec
+      "MASC_KEEPER_BODY_TIMEOUT_SEC"
   ;;
 
   (* Fail-safe no-progress threshold for a provider call attempt (seconds),
@@ -698,15 +722,21 @@ module KeeperKeepalive = struct
       not a finite positive number of seconds raises
       {!Env_config_core.Config_error}.
 
-      Range when set: [30, 3600].
+      Declared range: [{!provider_call_deadline_min_sec},
+      {!provider_call_deadline_max_sec}]; a value outside it raises
+      {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
+  let provider_call_deadline_min_sec = 30.0
+  let provider_call_deadline_max_sec = 3600.0
+
   let provider_call_deadline_sec_override () =
-    Option.map
-      (fun seconds -> Float.max 30.0 (Float.min 3600.0 seconds))
-      (declared_timeout_seconds "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC")
+    declared_timeout_seconds_within
+      ~min_sec:provider_call_deadline_min_sec
+      ~max_sec:provider_call_deadline_max_sec
+      "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
   ;;
 
 end

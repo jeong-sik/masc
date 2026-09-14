@@ -299,7 +299,11 @@ let all =
       ~category:"turn"
       "Streaming provider first-event (TTFT/prefill) timeout"
   ; setting
-      ~range:(float_range ~min:30.0 ~max:3600.0 ())
+      ~range:
+        (float_range
+           ~min:Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
       ~env_name:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
       ~value_kind:Float
@@ -316,7 +320,11 @@ let all =
       ~category:"turn"
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
   ; setting
-      ~range:(float_range ~min:10.0 ~max:600.0 ())
+      ~range:
+        (float_range
+           ~min:Env_config_keeper.KeeperKeepalive.body_timeout_min_sec
+           ~max:Env_config_keeper.KeeperKeepalive.body_timeout_max_sec
+           ())
       ~env_name:"MASC_KEEPER_BODY_TIMEOUT_SEC"
       ~exposure:Env_only
       ~value_kind:Float

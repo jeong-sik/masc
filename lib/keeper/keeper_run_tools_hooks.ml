@@ -832,9 +832,20 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
+                (* The Librarian publishes this small index in its own lane.
+                   Never scan a growing queue or serialize all pockets while
+                   the user is waiting for the first model request. Only offer
+                   a reference when its in-process reader is on this surface. *)
+                let working_context_recall = if not post_tool_round
+                    && List.mem Keeper_runtime_schemas_toml.artifact_read.name schema_filter
+                 then
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Keeper_librarian_context_recall.render
+                       ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name)
+                 else None in
                 (if not post_tool_round
                  then
-                   match
+                   let ordinary_recall =
                      (* Memory OS recall — advisory block rendered from every
                         persisted current fact in stored order. Source-bound
                         facts are revalidated here; a changed source atomically
@@ -854,10 +865,11 @@ let assemble_hooks
                          ~keepers_dir:memory_os_keepers_dir
                          ~keeper_id:meta.name
                          ~now:(Time_compat.now ())
-                         ())
-                   with
-                   | None -> ()
-                   | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                         ()) in
+                   match List.filter_map Fun.id [ordinary_recall; working_context_recall] with
+                   | [] -> ()
+                   | blocks -> record_block Prompt_block_id.Memory_os_recall
+                       (String.concat "\n\n" blocks));
                 (* RFC-0366: last in assembly order. It is the most recent fact
                    the keeper has, and when it disagrees with an earlier block
                    the later text is the one that reads as current. Stamped

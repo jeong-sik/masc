@@ -35,6 +35,7 @@ let input () : Librarian.input =
           [ Agent_core.Types.Text "new conversation" ]
       ]
   ; tool_observations = []
+  ; working_context = Masc.Keeper_librarian_context.empty
   ; counterpart_observations = []
   }
 ;;
@@ -43,7 +44,8 @@ let input () : Librarian.input =
    — the totality contract the parser enforces for this input. *)
 let valid_selection_json =
   `Assoc
-    [ Librarian.wire_field_retained_memory_ids, `List [ `String "m1" ]
+    [ "working_contexts", `List []
+    ; Librarian.wire_field_retained_memory_ids, `List [ `String "m1" ]
     ; Librarian.wire_field_new_claims, `List []
     ; ( Librarian.wire_field_dropped
       , `List

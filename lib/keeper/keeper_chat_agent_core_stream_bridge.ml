@@ -1336,20 +1336,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
            else quarantined.chat_events)
           @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete ]
       }
-  | StreamRepeating { paragraph; occurrences; bytes_seen } ->
+  | StreamRepeating { repeated; occurrences; bytes_seen; shape } ->
       (* Same shape as an incomplete stream: the open tool blocks are
          quarantined, the text already streamed stays deliverable, and the
          operator is told why. The reason names the repeat rather than a
          truncation, because the bytes arrived fine and the answer did not. *)
       let reason =
         redact_text
-          (Printf.sprintf
-             "generation repeated one paragraph %d times after %d bytes: %S"
-             occurrences
-             bytes_seen
-             (if String.length paragraph <= 120
-              then paragraph
-              else String.sub paragraph 0 120))
+          (Agent_core.Types.repeating_generation_message
+             ~repeated
+             ~occurrences
+             ~bytes_seen
+             shape)
       in
       let quarantined =
         poison_scope bridge_state ~kind:Sse_stream_repeating ~reason

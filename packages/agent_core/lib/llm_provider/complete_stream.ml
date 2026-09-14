@@ -26,8 +26,8 @@ let stream_error_event = function
   | Types.Stream_ndjson_parse_failed { reason; raw } ->
     Types.NDJSONParseFailed { reason; raw }
   | Types.Stream_incomplete { reason } -> Types.StreamIncomplete { reason }
-  | Types.Stream_repeating { paragraph; occurrences; bytes_seen } ->
-    Types.StreamRepeating { paragraph; occurrences; bytes_seen }
+  | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
+    Types.StreamRepeating { repeated; occurrences; bytes_seen; shape }
   | Types.Stream_unknown_event { event_type; raw } ->
     Types.SSEUnknownEventType { event_type; raw }
   | Types.Stream_unsupported_part { provider_kind; part; raw } ->

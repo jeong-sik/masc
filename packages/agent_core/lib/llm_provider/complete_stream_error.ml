@@ -200,20 +200,12 @@ let http_error_of_stream_error
             { format = wire_format; kind = Http_client.Incomplete_stream }
       ; message = Printf.sprintf "%s stream incomplete: %s" wire_label reason
       }
-  | Types.Stream_repeating { paragraph; occurrences; bytes_seen } ->
+  | Types.Stream_repeating { repeated; occurrences; bytes_seen; shape } ->
     Http_client.ProviderFailure
       { kind =
           Http_client.Provider_wire_error
             { format = wire_format; kind = Http_client.Repeating_generation }
-      ; message =
-          Printf.sprintf
-            "generation repeated one paragraph %d times after %d bytes; ended \
-             here rather than at the token ceiling: %S"
-            occurrences
-            bytes_seen
-            (if String.length paragraph <= 120
-             then paragraph
-             else String.sub paragraph 0 120)
+      ; message = Types.repeating_generation_message ~repeated ~occurrences ~bytes_seen shape
       }
   | Types.Stream_unknown_event { event_type; _ } ->
     Http_client.ProviderFailure

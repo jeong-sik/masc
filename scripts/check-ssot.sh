@@ -545,6 +545,23 @@ check_rule "R19-tui-lowercase-hint-key" 0 \
   '' \
   bin
 
+# SSOT-R20 — a labelled field says the failed reading in the words it is given.
+#
+# The twin of R15. A title has no label to hang the words on, so it brackets
+# them and R15 keeps that spelling in one place. A labelled field has its
+# label, so it carries the same words without the brackets -- and the unread
+# half of that pair already had a name here ([field_unread]) while the failed
+# half did not. The Memory header spelled it itself, which made it the one
+# place in the TUI deciding what a field says after a failed read.
+#
+# The pattern is the bare words, because that is what a field draws. The
+# bracketed form R15 owns is a different string and does not match.
+check_rule "R20-tui-field-load-failed-literal" 0 \
+  "Masc_tui_types.field_failed" \
+  '"load failed"' \
+  'bin/masc_tui_types\.ml:' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

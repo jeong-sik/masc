@@ -4840,7 +4840,8 @@ let render_lanes_overview (state : state) =
               (* The loader already names the subject and the verdict --
                  "standalone lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
-                 "unavailable" beside "load failed", and pushed the reason
+                 put an unavailable verdict beside the loader's own, and
+                 pushed the reason
                  twenty-two cells right, past the pane edge. Fourteen other
                  surfaces draw the loader's message and nothing in front of
                  it; the one row that does add words, "lane write refused",

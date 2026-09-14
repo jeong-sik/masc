@@ -12,7 +12,7 @@ let run clock seconds f =
     ~combine:(fun first later ->
       match first with
       | Ok _ -> first
-      | Error `Timeout -> later)
+      | Error _ -> later)
     (fun () ->
        Eio.Time.sleep clock seconds;
        Error `Timeout)

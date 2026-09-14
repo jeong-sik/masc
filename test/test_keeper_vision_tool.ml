@@ -140,7 +140,7 @@ let artifact_args ?media_type artifact =
 let complete_should_not_run
     ~sw:_
     ~net:_
-    ?clock:_
+    ~clock:_
     ~config:_
     ~messages:_
     ?tools:_
@@ -617,7 +617,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
 let test_uncapped_vision_fallback_reaches_provider () =
   with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->
     let provider_calls = ref 0 in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
       assert (config.Llm_provider.Provider_config.max_request_body_bytes = None);
       incr provider_calls;
       Ok (ok_response "uncapped vision reached provider")
@@ -682,7 +682,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
     with_temp_base (fun _ ->
       let meta = make_meta "vision-invalid-structured-response" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         Ok (text_response "not-json")
       in
       let outcome =
@@ -709,7 +709,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
 
 let test_run_vision_invalid_structured_response_is_typed () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
       Ok (text_response "not-json")
     in
     let outcome =
@@ -738,7 +738,7 @@ let test_explicit_vision_runtime_selection () =
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         let run selected response =
           let calls = ref [] in
-          let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+          let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
             calls := config.Llm_provider.Provider_config.model_id :: !calls;
             response
           in
@@ -792,7 +792,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
@@ -861,7 +861,7 @@ let test_invalid_structured_response_tries_next_runtime () =
         metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
       in
       let calls = ref 0 in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         incr calls;
         if !calls = 1 then Ok (text_response "not-json")
         else Ok (ok_response "second runtime answered")
@@ -922,7 +922,7 @@ let test_candidate_policy_error_tries_next_runtime () =
       in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
@@ -996,7 +996,7 @@ let test_vision_402_marks_the_account_exhausted_and_moves_on () =
         in
         let calls = ref 0 in
         let models = ref [] in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
           incr calls;
           models := config.Llm_provider.Provider_config.model_id :: !models;
           if !calls = 1 then
@@ -1037,7 +1037,7 @@ let test_policy_error_on_every_candidate_is_reported () =
       let meta = make_meta "vision-policy-exhausted" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         incr calls;
         Error
           (Llm_provider.Http_client.HttpError
@@ -1070,7 +1070,7 @@ let test_policy_error_then_transient_reports_the_last_candidate () =
       let meta = make_meta "vision-policy-then-transient" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         incr calls;
         if !calls = 1 then
           Error
@@ -1116,7 +1116,7 @@ let test_capacity_failover_preserves_image_and_declared_caps () =
       with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
         let calls = ref [] in
         let first_messages = ref None in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages ?tools:_ () =
           assert (config.Llm_provider.Provider_config.max_request_body_bytes = Some 65_536);
           calls := config.model_id :: !calls;
           match !first_messages with
@@ -1151,7 +1151,7 @@ let test_capacity_failover_preserves_image_and_declared_caps () =
 let test_capacity_exhaustion_retains_size_failure () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     let calls = ref 0 in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
       incr calls;
       Error
         (Llm_provider.Http_client.HttpError
@@ -1178,7 +1178,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
@@ -1221,7 +1221,7 @@ let test_credential_error_tries_next_runtime () =
       in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
@@ -1347,7 +1347,7 @@ let test_image_over_a_candidates_cap_skips_to_the_next_without_a_call () =
         in
         let calls = ref 0 in
         let models = ref [] in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
           incr calls;
           models := config.Llm_provider.Provider_config.model_id :: !models;
           Ok (ok_response "second runtime answered")
@@ -1383,7 +1383,7 @@ let test_image_over_every_cap_is_a_size_failure_without_a_call () =
     (vision_failover_runtime_toml_with_caps ~p1_cap:tight_cap ~p2_cap:tight_cap)
     (fun () ->
       let calls = ref 0 in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         incr calls;
         Ok (ok_response "must not be reached")
       in
@@ -1408,7 +1408,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
@@ -1649,7 +1649,7 @@ let test_vision_candidate_cancellation_does_not_failover () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     let calls = ref 0 in
     let cancelled = Eio.Cancel.Cancelled (Failure "cancel vision candidate") in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
       incr calls;
       raise cancelled
     in
@@ -1964,7 +1964,7 @@ let test_max_tokens_failover_preserves_image_and_candidate_wire_limits () =
         let before_limit =
           metric_value Keeper_metrics.VisionCandidateAttempts ~labels:limit_labels
         in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages ?tools:_ () =
           let requested, ceiling =
             match config.Llm_provider.Provider_config.model_id with
             | "vision-a" -> 65536, 32768
@@ -2012,7 +2012,7 @@ let test_max_tokens_exhaustion_remains_visible_tool_failure () =
       let meta = make_meta "vision-output-exhausted" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
         calls := config.Llm_provider.Provider_config.model_id :: !calls;
         Ok (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
       in
@@ -2034,7 +2034,7 @@ let test_non_length_response_does_not_trigger_vision_failover () =
     (fun stop_reason ->
       with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
         let calls = ref 0 in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
           incr calls;
           Ok (truncated_json_response ~stop_reason)
         in
@@ -2057,7 +2057,7 @@ let test_non_length_response_does_not_trigger_vision_failover () =
 let test_end_turn_broken_json_walks_and_exhaustion_reports_typed_failure () =
   with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
     let calls = ref 0 in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
       incr calls;
       Ok (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
     in
@@ -2081,7 +2081,7 @@ let test_length_failover_preserves_candidate_http_recovery () =
       with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
         with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "0" (fun () ->
           let calls = ref 0 in
-          let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
             incr calls;
             if !calls = 1 then
               Error (Llm_provider.Http_client.HttpError
@@ -2165,7 +2165,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (observed.scroll_y = 120.)
         | _ -> failwith "persisted screenshot cannot address its observed viewport" in
       let seen_image = ref false in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+      let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
         seen_image := List.exists (fun (message : Agent_core.Types.message) ->
           List.exists (function
             | Agent_core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
@@ -2272,7 +2272,7 @@ let test_artifact_failures_are_classified () =
       (fun oc -> output_string oc "tampered image");
     let unreadable = String.make 64 'b' in
     Unix.mkdir (Filename.concat dir unreadable) 0o700;
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+    let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
       failwith "artifact errors must not invoke a vision provider" in
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       List.iter (fun (artifact, expected_code, expected_class) ->
@@ -2315,7 +2315,7 @@ let test_generated_sandbox_image_reaches_vision () =
       with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         let calls = ref 0 in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages ?tools:_ () =
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
           incr calls;
           let expected = Vt.message_of_request
               { Va.query = "read generated image"; image_media_type = "image/png"; image_bytes = bytes } in

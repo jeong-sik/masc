@@ -146,6 +146,7 @@ let probe_offline ~runtime_id ~tool =
       Probe.probe_invocation
         ~sw
         ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
         ~now:dummy_now
         ~runtime_id
         ~tool

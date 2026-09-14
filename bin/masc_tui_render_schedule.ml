@@ -264,9 +264,9 @@ type board_read_allocation = {
 let board_comment_share = 3
 let board_comment_floor_rows = 5
 
-(* The box the pane draws: its top and bottom, the title, the actions line,
-   two dividers, the heading and the author. *)
-let board_read_box_rows = 8
+(* The box the pane draws: its top and bottom, the title, two dividers, the
+   heading and the author. *)
+let board_read_box_rows = 7
 
 (* The key footer the surface writes under that box. It was not counted here,
    so the box filled the surface on its own and the footer landed on the row

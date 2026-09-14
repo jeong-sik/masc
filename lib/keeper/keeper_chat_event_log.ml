@@ -149,6 +149,9 @@ let stream_protocol_error_of_json json =
 
 let keeper_chat_event_to_json event =
   match event with
+  | Batch_bound { operation_id; execution_id } ->
+    type_tag "batch_bound" ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
+      "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]
   | Run_started { run_id; thread_id } ->
     type_tag "run_started" [ "run_id", `String run_id; "thread_id", `String thread_id ]
   | Text_message_start { message_id; role } ->
@@ -351,6 +354,10 @@ let keeper_chat_event_of_json json =
       Ok
         (Reply_details
            { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref })
+    | "batch_bound" ->
+      let* operation_id = Keeper_chat_operation.Operation_id.of_string (json |> member "operation_id" |> to_string) in
+      let* execution_id = Keeper_chat_operation.Operation_id.of_string (json |> member "execution_id" |> to_string) in
+      Ok (Batch_bound {operation_id; execution_id})
     | "continuation_checkpoint" ->
       Ok
         (Continuation_checkpoint
@@ -717,9 +724,12 @@ let log_settlement_failure ~path cleanup_failure =
    failure shapes stay apart: a missing journal is the normal state of a
    queued operation, an unreadable one is an operator problem, a corrupt one
    is a codec problem. *)
-let read_journal_path_result path =
+let read_journal_path ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows_end; end_offset; _ }
+      when rows_end < end_offset && not allow_torn_tail ->
+      Error (Journal_corrupt "cannot resume a journal with an incomplete final row")
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
       if rows_end < end_offset
       then
@@ -743,7 +753,34 @@ let read_journal_path_result path =
     Error (Journal_unreadable (Printexc.to_string exn))
 ;;
 
+let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
 let read_journal journal = read_journal_path_result journal.path
+
+let next_sequence ?(require_existing = false) journal =
+  match read_journal_path ~allow_torn_tail:false journal.path with
+  | Error Journal_missing when not require_existing -> Ok 0
+  | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
+  | Ok entries ->
+    let rec last previous = function
+      | [] -> Ok previous
+      | entry :: rest ->
+        (match previous with
+         | Some prior when entry.seq <= prior.seq ->
+           Error (Journal_corrupt "operation journal sequences are not increasing")
+         | Some _ | None -> last (Some entry) rest) in
+    (match last None entries with
+     | Error _ as error -> error
+     | Ok latest ->
+       let complete = match latest with
+         | Some { event = (Keeper_chat_events.Run_finished _ | Event_error _); _ } -> true
+         | Some _ | None -> false in
+       if require_existing && not complete then
+         Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
+       else
+         let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
+         if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
+         else Ok (highest + 1))
+;;
 
 (** {1 Replay position} *)
 

@@ -37,6 +37,8 @@ type operation_interrupt_result =
     never signal a newer operation: the expected id is compared by the Owner
     before its exact child cancel capability is invoked. *)
 
+type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
+
 type interrupt_target =
   | Observed_turn of
       { current : Keeper_registry_types.turn_switch option Atomic.t
@@ -47,6 +49,12 @@ type interrupt_target =
 type run_next_result =
   | Run_next_paused
   | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
+
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt =
+  { outcome : interactive_outcome; chat_control_token : string
+  ; signalled : bool; resumed : bool; interrupt_error : string option }
+type interactive_intent = { control_token : string; target : interrupt_target option }
 
 type turn_lane =
   | Autonomous
@@ -290,6 +298,13 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
+
 val direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.runtime_retry option, error) result
 val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
@@ -298,9 +313,16 @@ val defer_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t
 val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
-val pause_and_interrupt : t -> interrupt_target -> (operation_interrupt_result, error) result
-(** Validate the exact current execution, persist the operator pause, then signal.
-    No queued or autonomous successor can start after this command. *)
+val pause_and_interrupt : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
+(** Persist pause before signalling an exact current target. An unknown or
+    queued direct request can instead pause admission when the supplied control
+    token is current and no other child is active; this never cancels a child.
+    Refused stale targets change neither pause nor token. *)
+val chat_control_token : t -> string
+val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
+(** Admit and prioritize compatible queued context in one SQLite transaction,
+    then apply the supplied exact control intent within the same mailbox command.
+    Replayed admissions and stale control tokens perform no control effects. *)
 val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
 (** Prioritize before releasing a chat-interrupt pause. Other pauses remain closed. *)
@@ -343,6 +365,7 @@ val cancel_queued_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t, error) result
 
+val batch_operations : t -> Chat_operation.Operation_id.t -> (Chat_operation.t list, error) result
 val claim_next_operation : t -> (Chat_operation.t option, error) result
 
 val succeed_running_operation

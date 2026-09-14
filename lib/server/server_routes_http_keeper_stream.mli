@@ -88,7 +88,11 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
     MASC request-boundary type, intentionally distinct from dashboard
     rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
+type admission_intent = Queue_only | Interactive of {
+  control_token : string; target : Keeper_owner_registry.interactive_target option }
+
 type keeper_chat_stream_request = {
+  admission_intent : admission_intent;
   request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
@@ -265,6 +269,7 @@ type turn_submission =
       }
 
 val process_single_turn :
+  batch_binding:(Keeper_chat_operation.Operation_id.t * Keeper_chat_operation.Operation_id.t) option ->
   user_row_origin:Keeper_chat_store.user_row_origin ->
   submission:turn_submission ->
   state:Mcp_server.server_state ->
@@ -350,6 +355,8 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
     settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
+  val persist_batch_user_rows : base_dir:string -> keeper_name:string ->
+    Keeper_chat_operation.t list -> (unit, string) result
   val operation_execution_of_outcome :
     operation_state:(unit -> (Keeper_chat_operation.state, string) result) ->
     pending_continuation:(unit -> (Keeper_direct_gate_continuation.pending option, string) result) ->

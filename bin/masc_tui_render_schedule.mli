@@ -86,6 +86,10 @@ type board_read_allocation = {
   comment_rows : int;
 }
 
+val board_read_box_rows : int
+(** The rows the read pane's box spends before any body or comment row: its
+    top and bottom, the title, two dividers, the heading and the author. *)
+
 val allocate_board_read :
   terminal_rows:int ->
   body_line_count:int ->

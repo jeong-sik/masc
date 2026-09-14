@@ -49,10 +49,13 @@ let protocol_error_sparse : E.stream_protocol_error =
   ; raw_bytes = None
   }
 
-(* One instance per [keeper_chat_event] constructor (33 total), covering both
+(* One instance per [keeper_chat_event] constructor, covering both
    population variants of every option field. *)
 let all_events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
+  ; E.Batch_bound {
+      operation_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-member" with Ok id -> id | Error detail -> Alcotest.fail detail);
+      execution_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> Alcotest.fail detail) }
   ; E.Text_message_start { message_id = "msg-1"; role = E.User }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
   ; E.Text_delta "hello"
@@ -533,6 +536,50 @@ let test_close_ends_the_read_after_every_earlier_event () =
     true
     (Option.is_none (Masc.Keeper_chat_events.take_nonblocking bus))
 
+(* A close that is cancelled while the bus is full must leave the bus
+   closable. The flag used to be set before the sentinel was added, so the
+   cancelled attempt left [closed = true] with no sentinel: every later close
+   was a no-op and a reader would park in [take] for good. *)
+let test_close_cancelled_on_a_full_bus_is_retried () =
+  Eio_main.run @@ fun _env ->
+  let bus = Masc.Keeper_chat_events.create () in
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
+    Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
+  done;
+  (* The close suspends on the full bus; the sibling wins and cancels it. *)
+  let attempt =
+    Eio.Fiber.first
+      (fun () ->
+         Masc.Keeper_chat_events.close bus;
+         `Delivered)
+      (fun () ->
+         Eio.Fiber.yield ();
+         `Cancelled)
+  in
+  Alcotest.(check bool)
+    "the first close was cancelled while the bus was full"
+    true
+    (attempt = `Cancelled);
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
+    ignore (Masc.Keeper_chat_events.take_nonblocking bus)
+  done;
+  Masc.Keeper_chat_events.close bus;
+  let read =
+    Eio.Fiber.first
+      (fun () ->
+         match Masc.Keeper_chat_events.subscribe bus with
+         | Masc.Keeper_chat_events.Closed -> `Closed
+         | Masc.Keeper_chat_events.Next _ -> `Event)
+      (fun () ->
+         Eio.Fiber.yield ();
+         Eio.Fiber.yield ();
+         `Parked)
+  in
+  Alcotest.(check bool)
+    "the retried close delivers the sentinel and the read ends"
+    true
+    (read = `Closed)
+
 let test_publish_after_close_is_a_publisher_defect () =
   let bus = Masc.Keeper_chat_events.create () in
   Masc.Keeper_chat_events.close bus;
@@ -550,11 +597,14 @@ let test_full_bus_hook_runs_before_add () =
         last_seq := seq)
       ()
   in
-  for _ = 1 to 512 do
+  for _ = 1 to Masc.Keeper_chat_events.bus_capacity do
     Masc.Keeper_chat_events.publish bus (E.Text_delta "filler")
   done;
-  Alcotest.(check int) "512 publishes reached the hook" 512 !hook_calls;
-  (* The 513th publish cannot complete normally: Eio.Stream.add on a full
+  Alcotest.(check int)
+    "every publish up to the capacity reached the hook"
+    Masc.Keeper_chat_events.bus_capacity
+    !hook_calls;
+  (* The publish past the capacity cannot complete normally: Eio.Stream.add on a full
      stream suspends the writer, and with no scheduler running (this test is
      a plain Alcotest function) the Suspend effect raises unhandled. Either
      way the hook has already run by then — that hook-before-add ordering is
@@ -562,8 +612,10 @@ let test_full_bus_hook_runs_before_add () =
   (match Masc.Keeper_chat_events.publish bus (E.Text_delta "overflow") with
    | () -> Alcotest.fail "publish on a full bus must not silently succeed"
    | exception _ -> ());
-  Alcotest.(check int) "hook observed the overflowing publish" 513 !hook_calls;
-  Alcotest.(check int) "hook saw seq = 512 for the overflowing publish" 512 !last_seq
+  Alcotest.(check int) "hook observed the overflowing publish"
+    (Masc.Keeper_chat_events.bus_capacity + 1) !hook_calls;
+  Alcotest.(check int) "hook saw seq = capacity for the overflowing publish"
+    Masc.Keeper_chat_events.bus_capacity !last_seq
 
 let test_bus_journal_integration_records_all_events () =
   let base_dir = temp_base_path "keeper-chat-event-log-bus" in
@@ -799,11 +851,61 @@ let test_golden_replay_matches_live_stream_bytes () =
          5
          (List.length adapter_blocks))
 
+let test_continued_short_reply_uses_monotonic_journal_ids () =
+  let base_dir = temp_base_path "keeper-chat-continued-seq" in
+  Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ()) (fun () ->
+    let journal = L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"continued" () in
+    (match L.next_sequence ~require_existing:true journal with
+     | Error L.Journal_missing -> () | _ -> Alcotest.fail "missing retained journal must not reset the cursor");
+    let cursor () = match L.next_sequence journal with
+      | Ok seq -> seq | Error _ -> Alcotest.fail "journal cursor unavailable" in
+    let first = E.create ~first_seq:(cursor ()) ~on_publish:(L.append journal) () in
+    let first_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
+      E.Text_message_start {message_id="message"; role=E.Assistant}]
+      @ List.init 20 (fun _ -> E.Text_delta "working")
+      @ [E.Continuation_checkpoint {message=""; request_id=Some "continued"};
+         E.Text_message_end; E.Run_finished {run_id="run"}] in
+    let before_terminal = List.filter (function E.Run_finished _ -> false | _ -> true) first_events in
+    List.iter (E.publish first) before_terminal;
+    (match L.next_sequence ~require_existing:true journal with
+     | Error (L.Journal_corrupt _) -> ()
+     | _ -> Alcotest.fail "missing terminal append must not reuse a possibly delivered cursor");
+    E.publish first (E.Run_finished {run_id="run"});
+    let after = L.After_seq (cursor () - 1) in
+    let live = ref [] in
+    let resumed = E.create ~first_seq:(cursor ()) ~on_publish:(fun ~seq ~ts event ->
+      L.append journal ~seq ~ts event;
+      live := {L.seq; ts; event} :: !live) () in
+    let final_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
+      E.Text_message_start {message_id="message"; role=E.Assistant};
+      E.Text_delta "actual answer"; E.Text_message_end; E.Run_finished {run_id="run"}] in
+    List.iter (E.publish resumed) final_events;
+    E.close resumed;
+    let rec read_closed_bus entries = match E.subscribe_published resumed with
+      | E.Closed -> List.rev entries
+      | E.Next {seq; ts; event} -> read_closed_bus ({L.seq; ts; event} :: entries) in
+    let delivered = read_closed_bus [] in
+    let replay = read_ok (L.read_journal journal)
+      |> List.filter (fun (entry : L.journaled_event) -> L.seq_is_after after entry.seq) in
+    Alcotest.(check int) "short final answer survives old cursor" (List.length final_events) (List.length replay);
+    let frames entries =
+      let _, frames = List.fold_left (fun (state, frames) (entry : L.journaled_event) ->
+        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id ~redact_json:Fun.id state entry.event in
+        state, (match event with None -> frames | Some event -> Ag_ui.event_to_sse ~id:entry.seq event :: frames))
+        (Projection.initial, []) entries in
+      String.concat "" (List.rev frames) in
+    Alcotest.(check string) "closed resumed bus delivers every journal-stamped frame"
+      (frames (List.rev !live)) (frames delivered);
+    Alcotest.(check string) "live and replay carry identical durable frame IDs"
+      (frames (List.rev !live)) (frames replay))
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
     [ ( "codec"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "continued short reply keeps monotonic journal IDs" `Quick test_continued_short_reply_uses_monotonic_journal_ids
+        ; Alcotest.test_case
             "round trip all constructors"
             `Quick
             test_codec_round_trip_all_constructors
@@ -871,6 +973,10 @@ let () =
             "publish after close is a publisher defect"
             `Quick
             test_publish_after_close_is_a_publisher_defect
+        ; Alcotest.test_case
+            "a close cancelled on a full bus is retried"
+            `Quick
+            test_close_cancelled_on_a_full_bus_is_retried
         ] )
     ; ( "integration"
       , [ Alcotest.test_case

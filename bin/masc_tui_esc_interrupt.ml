@@ -25,12 +25,16 @@ type action =
 (* 2 s, in the nanoseconds [Mtime_clock.elapsed_ns] answers in. *)
 let grace_window_ns = 2_000_000_000L
 
+let pending_action ~now_ns ~requested_at_ns =
+  if Int64.sub now_ns requested_at_ns <= grace_window_ns then Swallow else Leave
+;;
+
 let action ~now_ns (interrupt : Masc_tui_keeper_chat_transcript.interrupt) =
   match interrupt with
   | Not_requested -> Launch_interrupt
   | Signal_sent { signalled_at_ns; _ } ->
     if Int64.sub now_ns signalled_at_ns <= grace_window_ns then Swallow else Leave
-  | Signal_declined _ | Signal_error _ -> Leave
+  | Admission_paused | Signal_declined _ | Signal_error _ -> Leave
 ;;
 
 (* A duplicate key belongs to the action just sent, even if its switch token

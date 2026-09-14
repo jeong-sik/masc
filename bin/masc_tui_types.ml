@@ -2449,6 +2449,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   match delta with
   | Masc_tui_keeper_chat_live.Accepted _ ->
       Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+  | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
@@ -2482,6 +2483,7 @@ let turn_log_add_journaled turn_log
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
+let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
 (* Which loaded turns a refresh fetches journals for: every operation the
@@ -2556,6 +2558,7 @@ type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
+  ; control_generation : int
   ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; log : turn_log
@@ -2614,6 +2617,20 @@ type config_pane =
           it answers what is declared rather than what loaded — a config that
           fails to parse looks identical to one that was never written. That
           distinction cost six days once. *)
+
+(* The panes in the order the Config title lists them, with the names it
+   gives them. One list for the two places a pane is named: the strip on the
+   Config title, and the palette, which offered only "settings" and so could
+   not reach runtime.toml, models, prompts, presets, themes or voice at all. *)
+let config_panes =
+  [ (Config_runtime, "runtime.toml")
+  ; (Config_models, "models")
+  ; (Config_params, "params")
+  ; (Config_prompts, "prompts")
+  ; (Config_presets, "presets")
+  ; (Config_themes, "themes")
+  ; (Config_voice, "voice")
+  ]
 
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
@@ -4149,43 +4166,39 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
                left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
            | _ -> false)
       | _ -> false in
+    (* A group is the block fragment that opened it and the fragments joined
+       after it, newest first. The row closes at the block's last observed
+       fragment: everything up to it is one paragraph by the observed id, and
+       an inline fragment after it may belong to the next paragraph, so each of
+       those keeps its own row instead of being guessed into this one. A
+       paragraph with several inline elements repeats its id between each of
+       them, so the group keeps joining until a fragment cannot join. *)
     let flush current acc = match current with
       | None -> acc
-      | Some (members, (anchor : Masc.Browser_scene.node), texts) ->
-          let ordered_members = List.rev members in
-          let anchor_repeated = match ordered_members with
-            | [] -> false
-            | _ :: rest -> List.exists
-                (fun (node : Masc.Browser_scene.node) ->
-                   node.node_id = anchor.node_id) rest in
-          if anchor_repeated then
-            (ordered_members, anchor, String.concat "" (List.rev texts)) :: acc
-          else
-            (* Without a repeated observed container id, an inline node may
-               belong to the next paragraph. Keep this run as separate rows
-               instead of guessing its block ancestry. *)
-            List.rev_append
-              (List.map (fun (node : Masc.Browser_scene.node) ->
-                 ([node], node, node.text)) ordered_members)
-              acc in
+      | Some ((anchor : Masc.Browser_scene.node), later) ->
+          let rec close trailing = function
+            | [] -> [anchor], trailing
+            | (node : Masc.Browser_scene.node) :: older
+              when node.node_id = anchor.node_id ->
+                anchor :: List.rev (node :: older), trailing
+            | node :: older -> close (node :: trailing) older in
+          let joined, trailing = close [] later in
+          let row =
+            ( joined, anchor
+            , String.concat ""
+                (List.map (fun (node : Masc.Browser_scene.node) -> node.text) joined) ) in
+          List.rev_append
+            (List.map (fun (node : Masc.Browser_scene.node) ->
+               ([node], node, node.text)) trailing)
+            (row :: acc) in
     let rec loop current acc = function
       | [] -> List.rev (flush current acc)
-      | node :: rest ->
+      | (node : Masc.Browser_scene.node) :: rest ->
           (match current with
-           | Some (members, anchor, texts) when can_join anchor node ->
-               let anchor_count = List.fold_left
-                   (fun count (member : Masc.Browser_scene.node) ->
-                      if member.node_id = anchor.node_id then count + 1 else count)
-                   0 members in
-               let anchor_repeated = anchor_count > 1 in
-               if anchor_repeated then
-                 let acc = flush current acc in
-                 loop (Some ([node], node, [node.text])) acc rest
-               else
-                 loop (Some (node :: members, anchor, node.text :: texts)) acc rest
-           | _ ->
-               let acc = flush current acc in
-               loop (Some ([node], node, [node.text])) acc rest) in
+           | Some (anchor, later) when can_join anchor node ->
+               loop (Some (anchor, node :: later)) acc rest
+           | Some _ | None ->
+               loop (Some (node, [])) (flush current acc) rest) in
     loop None [] nodes in
   match view.scene with
   | Some scene ->
@@ -4367,6 +4380,10 @@ type board_list_reading =
   | Board_list_unread
   | Board_list_read
 
+type local_intervention =
+  | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
+  | Retained_after_stop
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -4405,6 +4422,12 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable keeper_chat_control_generations : (string * int) list;
+  mutable keeper_chat_control_tokens : (string * string) list;
+  mutable keeper_chat_control_pending : (string * int64) list;
+  mutable keeper_interactive_waiting : (string * string * local_intervention) list;
+  mutable keeper_queue_inflight : string list;
+  mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5646,6 +5669,15 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
+(* A live subscription can outlast one checkpoint segment. Such a watcher
+   keeps its identity and log while fresh input may enter the server queue. *)
+let blocking_inflight_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript))
+    state.msg_inflight
+;;
+
 let live_for_keeper state keeper_name =
   Option.map (fun entry -> entry.log) (inflight_for_keeper state keeper_name)
 ;;
@@ -5662,9 +5694,15 @@ let settled_log_for_request state ~keeper_name request_id =
 ;;
 
 let settled_logs_for_keeper state keeper_name =
-  List.filter
-    (fun turn_log -> String.equal (turn_log_keeper_name turn_log) keeper_name)
-    state.msg_settled_logs
+  state.msg_settled_logs
+  |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
+  |> List.fold_left (fun selected log ->
+    let execution_id = turn_log_execution_id log in
+    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
+    | None -> selected @ [log]
+    | Some _ when turn_log_request_id log = execution_id ->
+      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
+    | Some _ -> selected) []
 ;;
 
 (* A settled log takes its place among the others by when its turn started,
@@ -5769,7 +5807,7 @@ type held_turn =
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_request_id turn_log
+  { ht_request_id = turn_log_execution_id turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -5813,7 +5851,7 @@ let rows_the_logs_do_not_draw ~held rows =
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_request_id turn_log in
+      let request_id = turn_log_execution_id turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with
@@ -5885,12 +5923,84 @@ let promoted_inflight_for_keeper state keeper_name =
   | Some { origin = Direct_submission; _ } | None -> None
 ;;
 
+let working_chat_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && entry.phase = Turn_streaming
+    && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
+    state.msg_inflight
+
+let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name (entry : inflight) =
+  let held_input = List.exists (fun (name, _, intervention) -> name = keeper_name
+    && match intervention with Awaiting_control _ -> true | Retained_after_stop -> false)
+    state.keeper_interactive_waiting in
+  let newer_input = held_input
+    || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
+       | Some latest -> latest.sent_request.request_id <> entry.sent_request.request_id
+         && latest.control_generation = Option.value ~default:0
+              (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+       | None -> false in
+  match List.assoc_opt keeper_name state.keeper_chat_control_pending, held_input with
+  | Some requested_at_ns, false -> Masc_tui_esc_interrupt.pending_action ~now_ns ~requested_at_ns
+  | (Some _ | None), _ ->
+    if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
+    else Masc_tui_esc_interrupt.action ~now_ns
+      (Masc_tui_keeper_chat_transcript.interrupt entry.log.tl_transcript)
+
+let keeper_chat_control_generation state keeper_name =
+  Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+
+let advance_keeper_chat_control state keeper_name =
+  let generation = keeper_chat_control_generation state keeper_name + 1 in
+  state.keeper_chat_control_generations <- (keeper_name, generation) ::
+    List.remove_assoc keeper_name state.keeper_chat_control_generations;
+  generation
+
+let begin_keeper_chat_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    name, id, (if name = keeper_name then Retained_after_stop else intervention))
+    state.keeper_interactive_waiting;
+  generation
+
+let finish_keeper_chat_control state keeper_name ~generation =
+  if generation <> keeper_chat_control_generation state keeper_name
+     || not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then false
+  else begin
+    let next = advance_keeper_chat_control state keeper_name in
+    state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
+    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+      let intervention = match intervention with
+        | Awaiting_control held when name = keeper_name && held.generation = generation ->
+          Awaiting_control {held with generation = next}
+        | Awaiting_control _ | Retained_after_stop -> intervention in
+      name, id, intervention) state.keeper_interactive_waiting;
+    true
+  end
+
+let release_retained_keeper_input state keeper_name =
+  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
+    name <> keeper_name || match intervention with
+    | Retained_after_stop -> false | Awaiting_control _ -> true)
+    state.keeper_interactive_waiting
+
+(* A receipt callback finishes control before its outcome arrives, advancing
+   once. A later control advances again; old outcomes cannot mark a resumed
+   request as stopped. Pending distinguishes that later control's first step. *)
+let keeper_chat_control_result_current state keeper_name ~generation =
+  let current = keeper_chat_control_generation state keeper_name in
+  current = generation
+  || (current = generation + 1
+      && not (List.mem_assoc keeper_name state.keeper_chat_control_pending))
+
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
     ~inflight:
       (Option.map
          (fun entry -> entry.sent_request)
-         (inflight_for_keeper state keeper_name))
+         (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
       (* The line a new one for this keeper would join (last waiting [Next], never
          a steer). Present it as "the keeper is spoken for" so Enter queues onto
@@ -6239,6 +6349,12 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  keeper_chat_control_generations = [];
+  keeper_chat_control_tokens = [];
+  keeper_chat_control_pending = [];
+  keeper_interactive_waiting = [];
+  keeper_queue_inflight = [];
+  keeper_run_next_pending = None;
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8493,52 +8609,6 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
-let keeper_message_activity_rows (state : state) =
-  match state.msg_target_keeper_name with
-  | None -> []
-  | Some keeper_name ->
-    let own_live_turn = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
-      | Some _ | None -> false in
-    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
-      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-      state.keeper_turns in
-    let submitted = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        let transcript = live.tl_transcript in
-        (match Masc_tui_keeper_chat_transcript.phase transcript,
-               Masc_tui_keeper_chat_transcript.admission transcript with
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = state.keeper_turns_error = None
-             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
-               String.equal row.ktr_keeper_name keeper_name
-               && match row.ktr_state with
-                 | Tui_decode.Keeper_turn_running
-                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
-                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
-                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns in
-           [if other_turn_observed then
-              "Your message is queued behind this Keeper's current turn; start time unknown"
-            else "Your message is queued at the server; start time unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, None ->
-           ["Your request is awaiting server acceptance; queue position unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
-           ["Your request was accepted; waiting for its first event"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
-           ["Your request already settled; replaying its result"]
-         | _ -> [])
-      | Some _ | None -> []
-    in
-    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
-      state.msg_queued ~keeper_name in
-    activity @ submitted @ (if local_count > 0 then
-      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
-        local_count (if local_count = 1 then "message" else "messages")]
-      else [])
-;;
-
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
   else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
@@ -8566,6 +8636,7 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
+  | Some keeper_name when Option.is_some (working_chat_for_keeper state keeper_name) -> []
   | Some keeper_name ->
     List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
       if row.ktr_keeper_name <> keeper_name then None else
@@ -8578,7 +8649,7 @@ let keeper_observed_interrupt_rows (state : state) =
            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
          | None when Option.is_some interrupt_token ->
-           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+           Some "Esc: stop and pause queue · Enter:send update · /queue: manage"
          | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
       | _ -> None) state.keeper_turns
 ;;
@@ -8587,20 +8658,23 @@ let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
-    let own_live_turn = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
-      | Some _ | None -> false in
-    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
-      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-      state.keeper_turns in
+    let working = working_chat_for_keeper state keeper_name in
+    let activity = match working with
+      | Some entry ->
+        ["Current direct conversation · "
+         ^ Masc_tui_keeper_chat_projection.terminal_safe_text
+             (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
+         ^ " · in progress"]
+      | None -> Masc_tui_answering.chat_activity
+          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          state.keeper_turns in
     let submitted = match state.msg_live with
       | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
         let transcript = live.tl_transcript in
         (match Masc_tui_keeper_chat_transcript.phase transcript,
                Masc_tui_keeper_chat_transcript.admission transcript with
          | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = state.keeper_turns_error = None
+           let other_turn_observed = Option.is_some working || (state.keeper_turns_error = None
              && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
                String.equal row.ktr_keeper_name keeper_name
                && match row.ktr_state with
@@ -8608,7 +8682,7 @@ let keeper_message_activity_rows (state : state) =
                      { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
                  | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
                  | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns in
+               state.keeper_turns) in
            [if other_turn_observed then
               "Your message is queued behind this Keeper's current turn; start time unknown"
             else "Your message is queued at the server; start time unknown"]
@@ -8623,7 +8697,13 @@ let keeper_message_activity_rows (state : state) =
     in
     let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
       state.msg_queued ~keeper_name in
-    activity @ submitted @ (if local_count > 0 then
+    let retained = List.exists (fun (name, _, intervention) ->
+      name = keeper_name && match intervention with
+      | Retained_after_stop -> true | Awaiting_control _ -> false)
+      state.keeper_interactive_waiting in
+    activity @ submitted @ (if retained then
+      ["Input retained after Esc; /queue resume sends it"]
+      else []) @ (if local_count > 0 then
       [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
         local_count (if local_count = 1 then "message" else "messages")]
       else [])
@@ -8818,6 +8898,12 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
+     under Keepers behind [f], and the palette is where a destination is
+     reached by name when the key path to it is not known. Changes follows the
+     keeper selected on Keepers and says so when there is none. *)
+  @ [ "go Runtime", Palette_goto Runtime ]
+  @ [ "go Changes", Palette_goto Changes ]
   @ (match browser_lane_on_screen state with
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
@@ -8829,6 +8915,12 @@ let palette_entries (state : state) =
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
+  (* After the ring, so "go config" still leads with the Config surface: the
+     ranks tie on a label that starts with the query, and a tie keeps entry
+     order. *)
+  @ List.map
+      (fun (pane, label) -> ("go Config / " ^ label, Palette_config pane))
+      config_panes
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))

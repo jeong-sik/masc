@@ -12,6 +12,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_MEDIA_DELTA',
   'KEEPER_STREAM_PROTOCOL_ERROR',
   'KEEPER_CHAT_OPERATION_ACCEPTED',
+  'KEEPER_CHAT_BATCH_BOUND',
   'KEEPER_CONTINUATION_CHECKPOINT',
   'KEEPER_EXTERNAL_EFFECT_COMPLETED',
   'KEEPER_REPLY_DETAILS',
@@ -27,6 +28,14 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   // makes the contract array longer than the OCaml codec's vocabulary and
   // fails the cross-language parity test the other way.
 ] as const
+
+export interface KeeperInteractiveReceipt {
+  outcome: 'applied' | 'stale_control' | 'paused' | 'replayed'
+  chat_control_token: string
+  signalled: boolean
+  resumed: boolean
+  interrupt_error: string | null
+}
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]
 
@@ -48,30 +57,44 @@ export type KeeperStreamDeltaUsage = {
   cache_read_input_tokens?: number
 }
 
-export type KeeperStreamProtocolErrorKind =
-  | 'tool_start_duplicate_index'
-  | 'tool_start_missing_identity'
-  | 'tool_args_without_start'
-  | 'tool_stop_without_start'
-  | 'tool_replay_mismatch'
-  | 'tool_delta_invalid_kind'
-  | 'tool_attempt_superseded'
-  | 'tool_message_start_conflict'
-  | 'stream_event_after_terminal'
-  | 'tool_occurrence_mapping_invalid'
-  | 'media_delta_invalid_block'
-  | 'media_source_unsupported'
-  | 'media_decode_failed'
-  | 'media_payload_too_large'
-  | 'media_persist_failed'
-  | 'sse_error'
-  | 'ndjson_error'
-  | 'sse_parse_failed'
-  | 'ndjson_parse_failed'
-  | 'sse_unknown_event_type'
-  | 'sse_unsupported_part'
-  | 'sse_unsupported_response'
-  | 'sse_stream_incomplete'
+// One list for the wire kinds of KEEPER_STREAM_PROTOCOL_ERROR. The decoder in
+// schemas/sse.ts builds its accept set from it, and
+// keeper-stream-protocol-error-kind-parity.test.ts holds it equal to the
+// OCaml emitter (Keeper_chat_events.stream_protocol_error_kind_to_string). A
+// kind missing here is not "unknown": the decoder rejects the frame, and on
+// the operation-projection path (keeper_chat_operation_event frames) that
+// rejection is synthesised into a terminal RUN_ERROR, so a mid-turn attempt
+// failure would end the bubble and drop the answer that follows on the next
+// attempt. The direct fetch stream in api/keeper.ts does not decode at all.
+export const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = [
+  'tool_start_duplicate_index',
+  'tool_start_missing_identity',
+  'tool_args_without_start',
+  'tool_stop_without_start',
+  'tool_replay_mismatch',
+  'tool_delta_invalid_kind',
+  'tool_attempt_superseded',
+  'tool_message_start_conflict',
+  'stream_event_after_terminal',
+  'tool_occurrence_mapping_invalid',
+  'media_delta_invalid_block',
+  'media_source_unsupported',
+  'media_decode_failed',
+  'media_payload_too_large',
+  'media_persist_failed',
+  'sse_error',
+  'ndjson_error',
+  'sse_parse_failed',
+  'ndjson_parse_failed',
+  'sse_unknown_event_type',
+  'sse_unsupported_part',
+  'sse_unsupported_response',
+  'sse_stream_incomplete',
+  'sse_stream_repeating',
+  'sse_timeout',
+] as const
+
+export type KeeperStreamProtocolErrorKind = (typeof KEEPER_STREAM_PROTOCOL_ERROR_KINDS)[number]
 
 export type KeeperTurnOutcome =
   | 'visible_reply'
@@ -124,11 +147,17 @@ type KeeperChatCustomEvent =
     }
   | {
       type: 'CUSTOM'
+      name: 'KEEPER_CHAT_BATCH_BOUND'
+      value: { operation_id: string; execution_id: string }
+    }
+  | {
+      type: 'CUSTOM'
       name: 'KEEPER_CHAT_OPERATION_ACCEPTED'
       value: {
         operation_id: string
         state: 'Queued' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
         queued_count: number
+        interactive?: KeeperInteractiveReceipt
       }
     }
   | {

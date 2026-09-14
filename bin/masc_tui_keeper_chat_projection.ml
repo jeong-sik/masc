@@ -36,7 +36,14 @@ type acceptance_state =
   | Failed
   | Cancelled
 
+type interactive_target = Observed_turn_token of string | Direct_operation_id of string
+type admission_intent = Queue_only | Interactive of {control_token : string; target : interactive_target option}
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
+  signalled : bool; resumed : bool; interrupt_error : string option}
+
 type acceptance = {
+  interactive : interactive_receipt option;
   state : acceptance_state;
   queued_count : int;
 }
@@ -190,8 +197,16 @@ let image_reference_block_to_yojson = function
    beside the record. On the wire the whole turn is the field's absence
    ([Masc.Keeper_chat_event_log.replay_position_to_wire]), which is what a
    first submit sends too, so a first submit's body is what it always was. *)
-let request_to_yojson ~since_seq request =
-  let base =
+let request_to_yojson ?(admission_intent = Queue_only) ~since_seq request =
+  let intent = match admission_intent with
+    | Queue_only -> []
+    | Interactive {control_token; target} ->
+      let turn, operation = match target with None -> `Null, `Null
+        | Some (Observed_turn_token token) -> `String token, `Null
+        | Some (Direct_operation_id id) -> `Null, `String id in
+      ["admission_intent", `Assoc ["kind", `String "interactive"; "control_token", `String control_token;
+        "interrupt_token", turn; "operation_id", operation]] in
+  let base = intent @
     [ "request_id", `String request.request_id
     ; "name", `String request.keeper_name
     ; "message", `String request.message
@@ -217,8 +232,8 @@ let request_to_yojson ~since_seq request =
     in
     `Assoc (base @ attachment_field @ [ ("user_blocks", `List blocks) ] @ resume)
 
-let request_body ~since_seq request =
-  Yojson.Safe.to_string (request_to_yojson ~since_seq request)
+let request_body ?admission_intent ~since_seq request =
+  Yojson.Safe.to_string (request_to_yojson ?admission_intent ~since_seq request)
 
 let same_request_identity left right =
   String.equal left.request_id right.request_id
@@ -233,8 +248,6 @@ let request_operation_input request =
     ~surface_context:None
     ~attachments:[]
 
-let request_execution_digest request =
-  Keeper_chat_operation.execution_digest (request_operation_input request)
 
 let compact_request_id value =
   let length = String.length value in
@@ -538,11 +551,33 @@ let acceptance_state_of_string = function
   | "Cancelled" -> Ok Cancelled
   | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
 
+let decode_interactive_receipt json =
+  let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value.interactive" in
+  let* fields = exact_object_fields ~surface
+    ~allowed:["outcome"; "chat_control_token"; "signalled"; "resumed"; "interrupt_error"] json in
+  let* raw = required_string ~surface "outcome" fields in
+  let* outcome = match raw with "applied" -> Ok Applied | "stale_control" -> Ok Stale_control
+    | "paused" -> Ok Paused | "replayed" -> Ok Replayed | _ -> Error (surface ^ ": unknown outcome") in
+  let* chat_control_token = required_string ~surface "chat_control_token" fields in
+  let* () = if String.trim chat_control_token = "" then Error (surface ^ ": empty control token") else Ok () in
+  let boolean key = match List.assoc_opt key fields with Some (`Bool value) -> Ok value
+    | None | Some _ -> Error (surface ^ "." ^ key ^ " must be boolean") in
+  let* signalled = boolean "signalled" in
+  let* resumed = boolean "resumed" in
+  let* interrupt_error = match List.assoc_opt "interrupt_error" fields with
+    | Some `Null -> Ok None | Some (`String detail) -> Ok (Some detail)
+    | None | Some _ -> Error (surface ^ ".interrupt_error must be string or null") in
+  let* () = match outcome with
+    | Applied -> Ok ()
+    | Stale_control | Paused | Replayed ->
+      if signalled || resumed || Option.is_some interrupt_error then Error (surface ^ ": inactive admission reports control effects") else Ok () in
+  Ok {outcome;chat_control_token;signalled;resumed;interrupt_error}
+
 let decode_acceptance ?expected_request_id json =
   let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value" in
   let* fields =
     exact_object_fields ~surface
-      ~allowed:[ "operation_id"; "state"; "queued_count" ] json
+      ~allowed:[ "operation_id"; "state"; "queued_count"; "interactive" ] json
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let* operation_id =
@@ -561,10 +596,30 @@ let decode_acceptance ?expected_request_id json =
     required_nonnegative_int ~surface "queued_count" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
+  let* interactive = match List.assoc_opt "interactive" fields with
+    | None -> Ok None
+    | Some json -> decode_interactive_receipt json |> Result.map Option.some
+        |> Result.map_error (fun detail -> Malformed_event detail) in
   match expected_request_id with
   | Some expected when not (String.equal operation_id expected) ->
       Error (Request_id_mismatch { expected; received = operation_id })
-  | None | Some _ -> Ok { state; queued_count }
+  | None | Some _ -> Ok { state; queued_count; interactive }
+
+type batch_binding = { operation_id : string; execution_id : string }
+
+let decode_batch_binding ?expected_request_id json =
+  let surface = "KEEPER_CHAT_BATCH_BOUND.value" in
+  let* fields = exact_object_fields ~surface ~allowed:["operation_id"; "execution_id"] json
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let read_id field =
+    let* value = required_string ~surface field fields |> Result.map_error (fun detail -> Malformed_event detail) in
+    let* _ = Keeper_chat_operation.Operation_id.of_string value |> Result.map_error (fun detail -> Malformed_event detail) in
+    Ok value in
+  let* operation_id = read_id "operation_id" in
+  let* execution_id = read_id "execution_id" in
+  match expected_request_id with
+  | Some expected when operation_id <> expected -> Error (Request_id_mismatch {expected; received=operation_id})
+  | Some _ | None -> Ok {operation_id; execution_id}
 
 type reply_details = {
   reply : string;
@@ -682,7 +737,7 @@ let current_custom_names =
   ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
   ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
-  ; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
+  ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ]
 
@@ -932,7 +987,9 @@ let decode_custom_event ~request state fields =
           [ "type"; "threadId"; "timestamp"; "runId"; "name"; "value" ]
         fields
     in
-    if String.equal name "KEEPER_REPLY_DETAILS" then
+    if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
+      let* _ = decode_batch_binding ~expected_request_id:request.request_id value in Ok state
+    else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with
       | Some _ -> Error Duplicate_reply_details
       | None ->
@@ -986,6 +1043,13 @@ let decode_data_event ~request state json =
     required_string ~surface:"Keeper chat event" "type" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
+  let state = match state.terminal, state.reply_details, event_type with
+    | Some Run_finished, Some { turn_outcome = Continuation_checkpoint; _ }, ("RUN_STARTED" | "RUN_ERROR")
+      when state.text_ended ->
+      (* A reconnect can replay several complete checkpoint segments. Only a
+         validated checkpoint boundary admits another run for this request. *)
+      { initial_decode_state with acceptance = state.acceptance }
+    | _ -> state in
   match state.terminal with
   | Some _ -> Error Duplicate_terminal
   | None -> (
@@ -1398,13 +1462,20 @@ let decode_operation_reconciliation ~request json =
              (Printf.sprintf "%s.state is unknown: %S" surface unknown))
   in
   let* state_fields = state_fields in
+  let* batch_fields = match List.assoc_opt "batch_execution_id" fields, List.assoc_opt "batch_input_digest" fields with
+    | None, None -> Ok []
+    | Some (`String id), Some (`String _) ->
+      (match Keeper_chat_operation.Operation_id.of_string id with
+       | Ok _ -> Ok ["batch_execution_id"; "batch_input_digest"]
+       | Error detail -> Error (Malformed_event (surface ^ ".batch_execution_id: " ^ detail)))
+    | _ -> Error (Malformed_event (surface ^ ".batch execution identity and input digest must be supplied together")) in
   let* () =
     validate_exact_fields ~surface
       ~allowed:
         ([ "schema"; "operation_id"; "sequence"; "created_at"
-         ; "execution_digest"; "source"; "input"; "state"
+         ; "admission_digest"; "execution_digest"; "source"; "input"; "state"
          ]
-         @ state_fields)
+         @ batch_fields @ state_fields)
       fields
   in
   let* () =
@@ -1429,15 +1500,24 @@ let decode_operation_reconciliation ~request json =
     required_finite_nonnegative_number ~surface "created_at" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
-  let* expected_execution_digest =
-    request_execution_digest request
-    |> Result.map_error (fun detail ->
-      Malformed_event (surface ^ ".expected input is not canonical: " ^ detail))
-  in
-  let* () =
-    validate_expected_string ~surface ~field:"execution_digest"
-      ~expected:expected_execution_digest fields
-  in
+  let* source = match List.assoc_opt "source" fields with
+    | Some (`Assoc _ as source) -> Ok source
+    | _ -> Error (Malformed_event (surface ^ ".source must be an object")) in
+  let* expected_admission_digest =
+    Keeper_chat_operation.admission_digest ~source ~input:(request_operation_input request)
+    |> Result.map_error (fun detail -> Malformed_event (surface ^ ".expected admission is not canonical: " ^ detail)) in
+  let* () = validate_expected_string ~surface ~field:"admission_digest"
+    ~expected:expected_admission_digest fields in
+  let* () = match List.assoc_opt "batch_input_digest" fields with
+    | None -> Ok ()
+    | Some (`String digest) when String.length digest = 64
+        && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) digest -> Ok ()
+    | _ -> Error (Malformed_event (surface ^ ".batch_input_digest must be lowercase SHA-256 hex")) in
+  let* stored_execution_digest = required_string ~surface "execution_digest" fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let* () = if String.length stored_execution_digest = 64
+    && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) stored_execution_digest
+    then Ok () else Error (Malformed_event (surface ^ ".execution_digest must be lowercase SHA-256 hex")) in
   let* () =
     match List.assoc_opt "source" fields with
     | Some (`Assoc _) -> Ok ()
@@ -1457,13 +1537,13 @@ let decode_operation_reconciliation ~request json =
           |> Result.map_error (fun detail ->
             Malformed_event (surface ^ ".input is not canonical: " ^ detail))
         in
-        if String.equal observed_execution_digest expected_execution_digest
+        if String.equal observed_execution_digest stored_execution_digest
         then Ok ()
         else
           Error
             (Event_identity_mismatch
                { field = "input"
-               ; expected = expected_execution_digest
+               ; expected = stored_execution_digest
                ; received = observed_execution_digest
                })
     | Some other ->

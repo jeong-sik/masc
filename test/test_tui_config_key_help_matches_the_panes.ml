@@ -3,16 +3,22 @@
    reader who trusts the help does not know the voice pane exists, which is the
    pane the setup wizard opens from.
 
-   So the count is taken from the strip itself rather than restated here: the
-   strip calls its [name] helper once per pane, and the help row lists them
-   separated by "/". A new pane moves the first number and this fails until the
-   help row moves too. *)
+   So the count is taken from the pane list rather than restated here: the
+   strip draws [Masc_tui_types.config_panes], the one list that names the
+   panes, and the help row lists them separated by "/". A new pane moves the
+   first number and this fails until the help row moves too. *)
 
 let render = "bin/masc_tui_render_prim.ml"
 
-let panes_the_strip_draws () =
-  Ast_grep.count_calls_in_value_binding ~module_path:render
-    ~binding_name:"config_pane_strip" ~callee:"name"
+let panes_the_strip_draws () = List.length Masc_tui_types.config_panes
+
+(* The number above is only the strip's if the strip draws that list. *)
+let test_the_strip_draws_the_pane_list () =
+  Alcotest.(check bool) "config_pane_strip reads config_panes" true
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"config_pane_strip" ~callees:[]
+       ~identifiers:[ "config_panes" ]
+     > 0)
 
 let config_bindings = Masc_tui_keys.for_surface Masc_tui_types.Config
 
@@ -67,6 +73,8 @@ let () =
             test_the_help_names_every_pane_the_strip_draws
         ; Alcotest.test_case "the voice pane is named" `Quick
             test_the_voice_pane_is_named
+        ; Alcotest.test_case "the strip draws the pane list" `Quick
+            test_the_strip_draws_the_pane_list
         ] )
     ; ( "what e does"
       , [ Alcotest.test_case "e says what it does on the voice pane" `Quick

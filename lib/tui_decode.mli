@@ -1613,9 +1613,11 @@ val decode_runtime_params :
     and purpose before an operator changes it. *)
 
 val decode_tool_approval_mode_overrides :
-  Yojson.Safe.t -> ((string * string) list, string) result
+  Yojson.Safe.t -> ((string * Keeper_tool_approval_mode.mode) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
-    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. The mode is
+    read through {!Keeper_tool_approval_mode.mode_of_string}; a word it does
+    not know fails the read. *)
 
 type gate_pending_phase =
   | Gate_queued
@@ -1712,6 +1714,7 @@ type keeper_turn_lane =
 
 type keeper_turn_preview = {
   ktp_status_text : string;
+  ktp_updated_at_unix : float;
   ktp_text_tail : string;
       (** Tail of the newest response text this turn has produced. *)
   ktp_last_tool : string option;
@@ -1735,6 +1738,7 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 

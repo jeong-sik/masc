@@ -77,8 +77,10 @@ val reconcile_committed_proof :
     model call or ledger rewrite. *)
 
 val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
-  (Goal_store.goal * Goal_verification.record, string) result
-(** Bind a proof request and Verifying phase to the same current criterion. *)
+  (Goal_store.goal * Goal_verification.record, Goal_store.write_error) result
+(** Bind a proof request and Verifying phase to the same current criterion.
+    [Store_unavailable] carries the store's own value so the caller can
+    answer the RFC-0444 envelope; a callback refusal is [Rejected]. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, string) result
@@ -88,6 +90,8 @@ val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:stri
 
 val confirm_completion : Workspace_utils_backend_setup.config -> goal_id:string ->
   operator_id:string -> request_id:string -> verification_run_id:string ->
-  criterion_revision:string -> (Yojson.Safe.t, string) result
+  criterion_revision:string -> (Yojson.Safe.t, Goal_store.write_error) result
 (** HTTP-only operator authority. Identity comes from token-bound CanAdmin,
-    never the request body or agent tool surface. Exact current proof required. *)
+    never the request body or agent tool surface. Exact current proof
+    required; a binding that does not name it is [Rejected], and a store
+    this build cannot read is [Store_unavailable] with its own value. *)

@@ -342,6 +342,23 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ reason_display
 
+(* One label column for the three detail blocks. They take turns in the same
+   rows as the cursor moves down the list, and each line padded its own label
+   by hand -- "Reason:" and five spaces, "Source Path:" and one -- so a dropped
+   fact put its values a cell right of an ordinary fact's, and its own Reason
+   a cell left of the Source Path under it. The column is sized by the
+   longest label any block draws, so stepping from one kind of row to another
+   leaves the values where they were. A longer label still gets its space. *)
+let detail_label_cells = Message_layout.display_width "Source Path:" + 1
+
+let detail_label label =
+  Printf.sprintf "%s%s%s%s" (Theme.recede ()) label Ansi.reset
+    (String.make
+       (max 1 (detail_label_cells - Message_layout.display_width label))
+       ' ')
+
+let detail_field label value = "    " ^ detail_label label ^ value
+
 let memory_fact_detail_lines ~cols (row : memory_fact_row) =
   let inner_width = max 30 (cols - 6) in
   match row with
@@ -352,24 +369,23 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ Printf.sprintf "    %sCategory:%s   %-15s" (Theme.recede ()) Ansi.reset fact.mf_category
-        ; Printf.sprintf "    %sOrigin:%s     %-15s %sTimeline:%s   First: %s · Last: %s"
-            (Theme.recede ()) Ansi.reset fact.mf_origin
-            (Theme.recede ()) Ansi.reset
-            (memory_fact_age_label fact.mf_first_seen)
-            (memory_fact_age_label fact.mf_last_seen)
-        ; Printf.sprintf
-            "    %sUse:%s        Retrieved %d · %d day(s) · last %s · Cited %d · Revised from %d"
-            (Theme.recede ()) Ansi.reset
-            fact.mf_events.mfe_retrieved_count
-            fact.mf_events.mfe_retrieved_distinct_days
-            (match fact.mf_events.mfe_last_retrieved_at with
-             | None -> "never"
-             | Some at -> memory_fact_age_label at)
-            fact.mf_events.mfe_cited_count
-            (List.length fact.mf_events.mfe_revised_from)
-        ; Printf.sprintf "    %sMemory ID:%s  %s"
-            (Theme.recede ()) Ansi.reset fact.mf_memory_id
+      @ [ detail_field "Category:" fact.mf_category
+        ; detail_field "Origin:"
+            (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
+               fact.mf_origin (Theme.recede ()) Ansi.reset
+               (memory_fact_age_label fact.mf_first_seen)
+               (memory_fact_age_label fact.mf_last_seen))
+        ; detail_field "Use:"
+            (Printf.sprintf "Retrieved %d · %s · last %s · Cited %d · Revised from %d"
+               fact.mf_events.mfe_retrieved_count
+               (Message_layout.count_noun
+                  fact.mf_events.mfe_retrieved_distinct_days "day")
+               (match fact.mf_events.mfe_last_retrieved_at with
+                | None -> "never"
+                | Some at -> memory_fact_age_label at)
+               fact.mf_events.mfe_cited_count
+               (List.length fact.mf_events.mfe_revised_from))
+        ; detail_field "Memory ID:" fact.mf_memory_id
         ]
   | Memory_row_source_fact fact ->
       let claim_lines =
@@ -378,17 +394,18 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ Printf.sprintf "    %sBound Path:%s %s" (Theme.recede ()) Ansi.reset fact.msf_path
-        ; Printf.sprintf "    %sFile SHA:%s   %s · %sFirst Seen:%s %s"
-            (Theme.recede ()) Ansi.reset fact.msf_sha256
-            (Theme.recede ()) Ansi.reset (memory_fact_age_label fact.msf_first_seen)
+      @ [ detail_field "Bound Path:" fact.msf_path
+        ; detail_field "File SHA:"
+            (Printf.sprintf "%s · %sFirst Seen:%s %s" fact.msf_sha256
+               (Theme.recede ()) Ansi.reset
+               (memory_fact_age_label fact.msf_first_seen))
         ]
   | Memory_row_invalidation row ->
       [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
-      ; Printf.sprintf "    %sReason:%s     %s" (Theme.recede ()) Ansi.reset row.mi_reason
-      ; Printf.sprintf "    %sSource Path:%s %s" (Theme.recede ()) Ansi.reset row.mi_source_path
-      ; Printf.sprintf "    %sDropped At:%s  %s ago"
-          (Theme.recede ()) Ansi.reset (memory_fact_age_label row.mi_invalidated_at)
+      ; detail_field "Reason:" row.mi_reason
+      ; detail_field "Source Path:" row.mi_source_path
+      ; detail_field "Dropped At:"
+          (memory_fact_age_label row.mi_invalidated_at ^ " ago")
       ]
 
 let render_memory_body ~cols ~budget (state : state)
@@ -616,35 +633,34 @@ let render_memory_facts_body ~cols ~budget (state : state)
             ~dropped:dropped_count ~sort_label
         in
         let all_categories = memory_fact_categories state in
-        let pill_of_filter filt count is_active =
-          let marker = if is_active then "\xe2\x97\x8f" else "\xe2\x97\x8b" in
-          let style = if is_active then Ansi.bold ^ Theme.info () else Theme.recede () in
-          let label = memory_category_filter_label filt in
-          Printf.sprintf "%s[%s %s: %d]%s" style marker label count Ansi.reset
+        (* Through [tab_strip], the one drawing every in-screen strip shares,
+           the way the Themes filter draws its chips: the key that walks the
+           entries first, then the entries with the one being read marked.
+           This row drew its own "[● All: 4] [○ blocker: 1]" -- a third
+           shape for a strip, with the key in brackets the footer spells as
+           "c / C:category". *)
+        let count_of = function
+          | Category_all -> grand_total
+          | Category_source -> store_source
+          | Category_dropped -> store_dropped
+          | Category_ordinary cat ->
+              List.length
+                (List.filter
+                   (fun (f : memory_fact) -> f.mf_category = cat)
+                   store_ordinary_facts)
         in
-        let all_pill =
-          pill_of_filter Category_all grand_total
-            (state.memory_facts_category = Category_all)
+        let keys = "  c/C:category  " in
+        let pills =
+          Ansi.dim ^ keys ^ Ansi.reset
+          ^ tab_strip
+              ~width:(tab_strip_width ~cols ~before:keys)
+              (List.map
+                 (fun filt ->
+                   ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
+                       (count_of filt)
+                   , state.memory_facts_category = filt ))
+                 (Category_all :: all_categories))
         in
-        let cat_pills =
-          List.map
-            (fun filt ->
-              let count =
-                match filt with
-                | Category_all -> grand_total
-                | Category_source -> store_source
-                | Category_dropped -> store_dropped
-                | Category_ordinary cat ->
-                    List.length
-                      (List.filter
-                         (fun (f : memory_fact) -> f.mf_category = cat)
-                         store_ordinary_facts)
-              in
-              let is_active = state.memory_facts_category = filt in
-              pill_of_filter filt count is_active)
-            all_categories
-        in
-        let pills = "  Categories [c/C]: " ^ String.concat " " (all_pill :: cat_pills) in
         (stats, pills)
   in
   push stats_line;

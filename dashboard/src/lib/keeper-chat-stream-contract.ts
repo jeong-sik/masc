@@ -12,6 +12,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_MEDIA_DELTA',
   'KEEPER_STREAM_PROTOCOL_ERROR',
   'KEEPER_CHAT_OPERATION_ACCEPTED',
+  'KEEPER_CHAT_BATCH_BOUND',
   'KEEPER_CONTINUATION_CHECKPOINT',
   'KEEPER_EXTERNAL_EFFECT_COMPLETED',
   'KEEPER_REPLY_DETAILS',
@@ -27,6 +28,14 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   // makes the contract array longer than the OCaml codec's vocabulary and
   // fails the cross-language parity test the other way.
 ] as const
+
+export interface KeeperInteractiveReceipt {
+  outcome: 'applied' | 'stale_control' | 'paused' | 'replayed'
+  chat_control_token: string
+  signalled: boolean
+  resumed: boolean
+  interrupt_error: string | null
+}
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]
 
@@ -138,11 +147,17 @@ type KeeperChatCustomEvent =
     }
   | {
       type: 'CUSTOM'
+      name: 'KEEPER_CHAT_BATCH_BOUND'
+      value: { operation_id: string; execution_id: string }
+    }
+  | {
+      type: 'CUSTOM'
       name: 'KEEPER_CHAT_OPERATION_ACCEPTED'
       value: {
         operation_id: string
         state: 'Queued' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
         queued_count: number
+        interactive?: KeeperInteractiveReceipt
       }
     }
   | {

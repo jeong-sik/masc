@@ -262,9 +262,9 @@ let with_exec_fixture
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
-          Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
           Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
         (fun () ->
+          Masc_test_deps.with_fixture_sandbox ~config ~meta @@ fun () ->
           Masc_test_deps.with_publication_recovery_registry
             ~sw
             ~fs:(Eio.Stdenv.fs env)

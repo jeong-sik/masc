@@ -176,36 +176,43 @@ let test_visible_context_percentage_rounding () =
   check_projection "79.94% stays warning" 0.7994 799 Layout.Pressure
 
 let test_context_header_item_is_measured_and_atomic () =
-  let measured = observed ~ratio:0.5 ~maximum:200 () in
+  (* 2,000 rather than 200: with a six-cell key the figure-with-key is 25
+     cells, and the full measurement over 200 tokens is also 25, so the full
+     one would always win the cell the test below is about. *)
+  let measured = observed ~ratio:0.5 ~tokens:1000 ~maximum:2000 () in
+  (* The key's name comes from the caller, spelled by the key table; this
+     layout cannot see the table. Six cells here, the way the footer spells
+     every control key. *)
+  let item ~max_cells = Layout.context_header_item ~max_cells ~inspect_key:"Ctrl-X" in
   check (option string) "exact fit" (Some "Context 50% used")
-    (Layout.context_header_item ~max_cells:16 measured);
+    (item ~max_cells:16 measured);
   (* The key travels with the figure where there is room for it: this line was
      the only place the pane said how full the context is, and there was no
      way in from it. *)
   check (option string) "wide enough carries the way in"
-    (Some "Context 50% \xc2\xb7 100/200 tok \xc2\xb7 ^X")
-    (Layout.context_header_item ~max_cells:40 measured);
-  check (option string) "exactly wide enough" (Some "Context 50% used \xc2\xb7 ^X")
-    (Layout.context_header_item ~max_cells:21 measured);
+    (Some "Context 50% \xc2\xb7 1,000/2,000 tok \xc2\xb7 Ctrl-X")
+    (item ~max_cells:40 measured);
+  (* "Context 50% used" is 16 cells, the dot and its spaces 3, the key 6. *)
+  check (option string) "exactly wide enough" (Some "Context 50% used \xc2\xb7 Ctrl-X")
+    (item ~max_cells:25 measured);
   (* The figure is what the line is for. One cell short of the key it drops
      the key, not the number. *)
   check (option string) "one cell short of the key keeps the figure"
     (Some "Context 50% used")
-    (Layout.context_header_item ~max_cells:20 measured);
+    (item ~max_cells:24 measured);
   let large = observed ~ratio:0.089 ~maximum:1_048_576 ~tokens:93_213 () in
+  (* 32 cells of figure, 3 of dot, 6 of key. *)
   check (option string) "large token counts are grouped"
-    (Some "Context 9% \xc2\xb7 93,213/1,048,576 tok \xc2\xb7 ^X")
-    (Layout.context_header_item ~max_cells:38 large);
+    (Some "Context 9% \xc2\xb7 93,213/1,048,576 tok \xc2\xb7 Ctrl-X")
+    (item ~max_cells:42 large);
   check (option string) "one cell short omits the whole item" None
-    (Layout.context_header_item ~max_cells:15 measured);
+    (item ~max_cells:15 measured);
   check (option string) "partial measurement is omitted" None
-    (Layout.context_header_item ~max_cells:40 (observed ()));
+    (item ~max_cells:40 (observed ()));
   check (option string) "non-positive maximum is omitted" None
-    (Layout.context_header_item ~max_cells:40
-       (observed ~ratio:0.5 ~maximum:0 ()));
+    (item ~max_cells:40 (observed ~ratio:0.5 ~maximum:0 ()));
   check (option string) "unavailable measurement is omitted" None
-    (Layout.context_header_item ~max_cells:40
-       (Decode.Context_unavailable Decode.Context_measurement_missing))
+    (item ~max_cells:40 (Decode.Context_unavailable Decode.Context_measurement_missing))
 
 let () =
   run "tui_observation_layout"

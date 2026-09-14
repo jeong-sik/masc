@@ -424,7 +424,7 @@ let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, 
 ;;
 
 
-let post_keeper_chat ~(host : string) ~(port : int)
+let post_keeper_chat ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.response
     , Masc_tui_keeper_chat_projection.error )
@@ -436,7 +436,7 @@ let post_keeper_chat ~(host : string) ~(port : int)
   in
   (* Whole body, no live view, nothing held to resume after. *)
   let body =
-    Masc_tui_keeper_chat_projection.request_body
+    Masc_tui_keeper_chat_projection.request_body ~admission_intent
       ~since_seq:Masc.Keeper_chat_event_log.Whole_turn request
   in
   match
@@ -471,7 +471,7 @@ let post_keeper_chat ~(host : string) ~(port : int)
 (* [since_seq] is the whole turn on the first POST and the log's resume
    position on a re-POST after the stream was cut, so the server replays only
    what the pane missed before switching to live frames. *)
-let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
+let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_only) ~clock ~(host : string) ~(port : int)
     ~(on_chunk : string -> unit)
     ~(since_seq : Masc.Keeper_chat_event_log.replay_position)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -483,7 +483,7 @@ let post_keeper_chat_streaming ~clock ~(host : string) ~(port : int)
     json_headers (("Accept", "text/event-stream") :: auth_headers ())
   in
   let body =
-    Masc_tui_keeper_chat_projection.request_body ~since_seq request
+    Masc_tui_keeper_chat_projection.request_body ~admission_intent ~since_seq request
   in
   match
     Masc_http_client.post_stream ~clock
@@ -1226,23 +1226,29 @@ let post_keeper_tool_approval ~(host : string) ~(port : int)
           | _ -> Error "approval response has no settled/remembered flags")
       | _ -> Error "approval response was not a JSON object")
 
-let post_keeper_turn_interrupt ~(host : string) ~(port : int)
+let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(request_id : string) :
     (Masc_tui_interrupt_signal.interrupt_signal, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("name", `String keeper_name)
+         ([ ("name", `String keeper_name)
          ; ("request_id", `String request_id)
-         ])
+         ] @ Option.fold ~none:[] ~some:(fun token -> ["expected_control_token", `String token]) expected_control_token))
   in
   match
     post_json ~host ~port ~path:keeper_turn_interrupt_path ~body
   with
   | Error detail -> Error detail
   | Ok json ->
-    Masc_tui_interrupt_signal.decode_interrupt_signal
-      ~expected_request_id:request_id json
+    let result = Masc_tui_interrupt_signal.decode_interrupt_signal
+      ~expected_request_id:request_id json in
+    (match result, json with
+     | Ok _, `Assoc fields -> (match List.assoc_opt "chat_control_token" fields with
+         | Some (`String token) when token <> "" -> on_control_token token
+         | Some _ | None -> ())
+     | Error _, _ | Ok _, _ -> ());
+    result
 
 let post_keeper_run_next ~host ~port ~keeper_name ~request_id ~interrupt_token =
   let body = Yojson.Safe.to_string (`Assoc
@@ -1259,13 +1265,20 @@ let post_keeper_run_next ~host ~port ~keeper_name ~request_id ~interrupt_token =
   | Ok _ -> Error "run-next response must be an object"
 ;;
 
-let post_keeper_observed_turn_interrupt ~host ~port ~keeper_name ~interrupt_token =
+let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_name ~interrupt_token =
   let body = Yojson.Safe.to_string (`Assoc
     ["name", `String keeper_name; "interrupt_token", `String interrupt_token]) in
   match post_json ~host ~port ~path:keeper_turn_interrupt_path ~body with
   | Error detail -> Error detail
-  | Ok json -> Masc_tui_interrupt_signal.decode_observed_interrupt_signal
-      ~expected_token:interrupt_token json
+  | Ok json ->
+    let result = Masc_tui_interrupt_signal.decode_observed_interrupt_signal
+      ~expected_token:interrupt_token json in
+    (match result, json with
+     | Ok _, `Assoc fields -> (match List.assoc_opt "chat_control_token" fields with
+         | Some (`String token) when token <> "" -> on_control_token token
+         | Some _ | None -> ())
+     | Error _, _ | Ok _, _ -> ());
+    result
 ;;
 
 let fetch_keeper_chat_operation ~(host : string) ~(port : int)
@@ -1587,10 +1600,14 @@ let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
 
 (** POST /api/v1/keepers/tool-approval-mode — set one keeper's gate stance. *)
 let post_keeper_tool_approval_mode ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(mode : string) : (unit, string) result =
+    ~(keeper_name : string) ~(mode : Masc.Keeper_tool_approval_mode.mode) :
+    (unit, string) result =
   let body =
     Yojson.Safe.to_string
-      (`Assoc [ ("name", `String keeper_name); ("mode", `String mode) ])
+      (`Assoc
+        [ ("name", `String keeper_name)
+        ; ("mode", `String (Masc.Keeper_tool_approval_mode.mode_to_string mode))
+        ])
   in
   match
     post_json ~host ~port ~path:"/api/v1/keepers/tool-approval-mode" ~body

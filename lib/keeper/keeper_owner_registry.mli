@@ -142,11 +142,22 @@ val create_meta
     already-open exact-name intake transaction is reused instead of reacquiring
     the same fence. *)
 
+val batch_operations : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t ->
+  (Keeper_chat_operation.t list, command_error) result
+
 val exact_operation
   :  base_path:string
   -> keeper_name:string
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
+
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
+val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
+val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
 
 val direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->
@@ -160,9 +171,9 @@ val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
   (unit, command_error) result
 
 val pause_observed_turn : base_path:string -> keeper_name:string -> interrupt_token:string ->
-  (Keeper_owner.operation_interrupt_result, command_error) result
-val pause_running_operation : base_path:string -> keeper_name:string ->
-  Keeper_chat_operation.Operation_id.t -> (Keeper_owner.operation_interrupt_result, command_error) result
+  (Keeper_owner.pause_result * string, command_error) result
+val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
 val run_next_operation : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> interrupt_token:string option ->
   (Keeper_owner.run_next_result, command_error) result
@@ -174,6 +185,9 @@ val interrupt_running_operation
   -> (Keeper_owner.operation_interrupt_result, command_error) result
 (** Mailbox-linearized exact-operation interrupt. A request naming an older
     operation cannot cancel a newer child for the same Keeper. *)
+
+type interactive_target = Observed_turn_token of string | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
+val submit_interactive_operation : base_path:string -> keeper_name:string -> operation_id:Keeper_owner.Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> control_token:string -> target:interactive_target option -> (Keeper_owner.operation_acceptance * Keeper_owner.interactive_receipt, command_error) result
 
 val submit_operation
   :  base_path:string

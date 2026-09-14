@@ -476,7 +476,8 @@ function validateKeeperCustomPayload(
     KEEPER_STREAM_MESSAGE_STOP: [],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
-    KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count'],
+    KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count', 'interactive'],
+    KEEPER_CHAT_BATCH_BOUND: ['operation_id', 'execution_id'],
     KEEPER_TOOL_APPROVAL_REQUESTED: [
       'tool_call_id',
       'tool_call_name',
@@ -557,12 +558,35 @@ function validateKeeperCustomPayload(
       if (!toolCallId.success) return toolCallId
       return requiredString(value, 'outcome')
     }
+    case 'KEEPER_CHAT_BATCH_BOUND': {
+      const operationId = requiredString(value, 'operation_id')
+      return operationId.success ? requiredString(value, 'execution_id') : operationId
+    }
     case 'KEEPER_CHAT_OPERATION_ACCEPTED': {
       const operationId = requiredString(value, 'operation_id')
       if (!operationId.success) return operationId
       const state = requiredString(value, 'state')
       if (!state.success) return state
-      return requiredInteger(value, 'queued_count')
+      const count = requiredInteger(value, 'queued_count')
+      if (!count.success || value.interactive === undefined) return count
+      const receipt = exactCustomObject(value.interactive, 'interactive', [
+        'outcome', 'chat_control_token', 'signalled', 'resumed', 'interrupt_error',
+      ])
+      if (!receipt.success) return receipt
+      const token = requiredString(receipt.data, 'chat_control_token')
+      if (!token.success) return token
+      const { outcome, signalled, resumed, interrupt_error } = receipt.data
+      if (outcome !== 'applied' && outcome !== 'stale_control' && outcome !== 'paused' && outcome !== 'replayed') {
+        return fail('ag_ui_event.value.interactive.outcome', 'Unknown interactive admission outcome')
+      }
+      if (typeof signalled !== 'boolean' || typeof resumed !== 'boolean'
+          || (interrupt_error !== null && typeof interrupt_error !== 'string')) {
+        return fail('ag_ui_event.value.interactive', 'Invalid interactive control receipt')
+      }
+      if (outcome !== 'applied' && (signalled || resumed || interrupt_error !== null)) {
+        return fail('ag_ui_event.value.interactive', 'Inactive admission cannot report control effects')
+      }
+      return ok(true)
     }
     case 'KEEPER_CONNECTED':
     case 'KEEPER_STREAM_MESSAGE_STOP':

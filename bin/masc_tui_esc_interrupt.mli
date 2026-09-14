@@ -21,6 +21,10 @@ val grace_window_ns : int64
 (** How long after the signal a second Esc is still read as the accidental
     double press: 2 s, in nanoseconds. *)
 
+val pending_action : now_ns:int64 -> requested_at_ns:int64 -> action
+(** A pending HTTP acknowledgement protects the same accidental-double-press
+    grace, then permits navigation without sending another interrupt. *)
+
 val action :
   now_ns:int64 -> Masc_tui_keeper_chat_transcript.interrupt -> action
 (** [now_ns] and the state's [signalled_at_ns] are monotonic nanoseconds

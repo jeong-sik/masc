@@ -100,7 +100,7 @@ let test_detail_names_the_use_record () =
   match List.find_opt (fun line -> contains "Use:" line) lines with
   | None -> fail "the detail has no Use line"
   | Some line ->
-    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 day(s)" line);
+    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
     check bool "citations and predecessors" true (contains "Cited 1 · Revised from 1" line)
 ;;
@@ -153,6 +153,73 @@ let test_detail_lines_source_and_invalidation () =
     (fun line ->
       check bool "invalidation detail line bounded" true (Layout.display_width line <= 80))
     lines_inv
+;;
+
+(* The three detail blocks take turns in the same rows as the cursor moves
+   down the list. Each padded its own labels by hand, and a dropped fact put
+   its values a cell right of an ordinary fact's -- with its Reason a cell
+   left of the Source Path under it. Every first-column value, in every
+   block, starts at the one column. Read as the cell after the label's
+   padding: the first non-space after the colon that ends the label. *)
+let test_every_detail_block_starts_its_values_in_one_column () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "the deploy needs assets"
+    ; mf_category = "lesson"
+    ; mf_origin = "authored"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-1"
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let source : Decode.memory_source_fact =
+    { msf_claim = "the config floor is masc.core"
+    ; msf_first_seen = 100.0
+    ; msf_path = "docs/config.md"
+    ; msf_sha256 = "abc123"
+    }
+  in
+  let dropped : Decode.memory_invalidation =
+    { mi_source_path = "docs/old.md"
+    ; mi_invalidated_at = 200.0
+    ; mi_reason = "source_changed"
+    }
+  in
+  let value_column line =
+    (* The label is the text up to its first colon; the value is where the
+       padding after it ends. *)
+    match String.index_opt line ':' with
+    | None -> None
+    | Some colon ->
+      let rec skip i =
+        if i < String.length line && line.[i] = ' ' then skip (i + 1) else i
+      in
+      Some (skip (colon + 1))
+  in
+  let columns =
+    [ Types.Memory_row_fact fact
+    ; Types.Memory_row_source_fact source
+    ; Types.Memory_row_invalidation dropped
+    ]
+    |> List.concat_map (fun row ->
+           Render_memory.memory_fact_detail_lines ~cols:120 row
+           |> List.map Masc_tui_theme.strip_sgr
+           (* The labelled rows, not the heading or the claim. *)
+           |> List.filter (fun line ->
+                  String.length line > 4 && String.sub line 0 4 = "    "
+                  && String.contains line ':'
+                  && not (contains "the deploy" line || contains "masc.core" line)))
+    |> List.filter_map (fun line ->
+           Option.map (fun column -> (line, column)) (value_column line))
+  in
+  check int "nine labelled rows across the three blocks" 9 (List.length columns);
+  match columns with
+  | [] -> fail "no labelled detail rows"
+  | (_, first) :: _ ->
+    List.iter
+      (fun (line, column) ->
+        check int (Printf.sprintf "value column of %S" line) first column)
+      columns
 ;;
 
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_health =
@@ -482,6 +549,24 @@ let three_kinds_state ?(keeper = "alpha") () =
        };
   state.memory_facts_cursor <- 0;
   state
+
+(* The category row is the shared strip: the key first, then the entries
+   with the one being read marked, two cells apart. It drew its own bracketed
+   pills before, a third shape for a strip on one screen. *)
+let test_the_category_row_is_the_shared_strip () =
+  let state = three_kinds_state () in
+  state.view <- Types.Memory;
+  state.memory_facts_keeper <- Some "alpha";
+  let lines = facts_body_lines state in
+  match List.filter (contains "c/C:category") lines with
+  | [ row ] ->
+      check bool "All is read, with its count" true
+        (contains "c/C:category  \xe2\x96\xb8All 4" row);
+      check bool "the other categories follow two cells apart, unmarked" true
+        (contains "  source 1  " row || contains "  source 1" row);
+      check bool "no bracketed pill" false (contains "[" row)
+  | [] -> fail "no row on the facts body walks the categories"
+  | _ :: _ -> fail "the categories are walked on more than one row"
 
 let stats_row lines =
   match List.filter (contains "Sort [s]:") lines with
@@ -867,6 +952,8 @@ let () =
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
+        ; test_case "every detail block starts its values in one column" `Quick
+            test_every_detail_block_starts_its_values_in_one_column
         ] )
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
@@ -893,6 +980,8 @@ let () =
             test_the_breakdown_and_the_sort_sit_on_one_row
         ; test_case "the breakdown counts the rows the screen lists" `Quick
             test_the_breakdown_counts_the_rows_the_screen_lists
+        ; test_case "the category row is the shared strip" `Quick
+            test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
         ] )

@@ -373,8 +373,26 @@ let gate_mode_word_of_wire raw =
    change what can happen after that send. A Keeper-level [workspace] value is
    inheritance, so resolve it through the workspace observation rather than
    printing a setting that is not itself a mode. *)
+(* The stance's one word, the wire's own: the chat header, the Keeper Info
+   row, the footer's [g:auto] and the event line all name it, and they named it
+   four ways -- AUTO, "asked", auto, "(auto)" -- so a reader had to know that
+   the header's AUTO and the Info row's "asked" were one fact. *)
+let tool_mode_word = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "auto"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "yolo"
+
+(* What the stance does to a tool call, beside its word. *)
+let tool_mode_effect = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
+
 let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
-  let chat_mode = if yolo then "YOLO" else "AUTO" in
+  let chat_mode =
+    String.uppercase_ascii
+      (tool_mode_word
+         (if yolo then Masc.Keeper_tool_approval_mode.Yolo
+          else Masc.Keeper_tool_approval_mode.Auto))
+  in
   let gate_mode =
     match keeper_gate_mode with
     | Some mode when not (String.equal mode "workspace") -> Some mode
@@ -2191,6 +2209,20 @@ type surface =
   | Tools
   | System_logs
 
+(** The Activity screen is two surfaces under one tab strip: the event
+    feed and the system logs, reached from each other with 1 and 2. A
+    rule about "the Activity screen" reads this rather than [Acting]
+    alone -- the pane that stays off that screen was keyed to the one
+    constructor, so pressing 2 opened it and narrowed the table by 56
+    cells, and 1 closed it again. *)
+let on_activity_screen = function
+  | Acting | System_logs -> true
+  | Overview | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Connectors | Runtime | Config
+  | Resources | Tools ->
+      false
+
 type browser_lane_visibility =
   | Browser_lane_hidden
   | Browser_lane_shown of {
@@ -2417,6 +2449,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   match delta with
   | Masc_tui_keeper_chat_live.Accepted _ ->
       Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+  | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
@@ -2450,6 +2483,7 @@ let turn_log_add_journaled turn_log
 
 let turn_log_keeper_name turn_log = Masc_tui_keeper_chat_log.keeper_name turn_log.tl_log
 let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.tl_log
+let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
 (* Which loaded turns a refresh fetches journals for: every operation the
@@ -2524,6 +2558,7 @@ type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; submitted_at : float
   ; sent_at : float
+  ; control_generation : int
   ; origin : inflight_origin
   ; mutable phase : inflight_phase
   ; log : turn_log
@@ -2582,6 +2617,20 @@ type config_pane =
           it answers what is declared rather than what loaded — a config that
           fails to parse looks identical to one that was never written. That
           distinction cost six days once. *)
+
+(* The panes in the order the Config title lists them, with the names it
+   gives them. One list for the two places a pane is named: the strip on the
+   Config title, and the palette, which offered only "settings" and so could
+   not reach runtime.toml, models, prompts, presets, themes or voice at all. *)
+let config_panes =
+  [ (Config_runtime, "runtime.toml")
+  ; (Config_models, "models")
+  ; (Config_params, "params")
+  ; (Config_prompts, "prompts")
+  ; (Config_presets, "presets")
+  ; (Config_themes, "themes")
+  ; (Config_voice, "voice")
+  ]
 
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
@@ -3189,6 +3238,30 @@ module Browser_lane_view = struct
   }
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
+  type scene_scope_context = {
+    target : Browser_lane.node_ref;
+    role : Masc.Browser_scene.region_role;
+    label : string;
+  }
+  type scene_counts = {
+    article_count : int;
+    region_count : int;
+    link_count : int;
+    control_count : int;
+    raster_count : int;
+  }
+  (* A delta compares two observations only after [publish_scene] has proved
+     that they describe the same source, tab, document, view and scope.  The
+     counts describe observed node IDs, not the completeness or lifecycle of
+     the underlying page.  In particular, [removed] means absent from this
+     observation; a virtualized or truncated page can make a node disappear
+     without deleting it remotely. *)
+  type scene_delta = {
+    added : int;
+    removed : int;
+    unchanged : int;
+    changed : int;
+  }
   type navigation_guard = {
     expected_url : string;
     navigation_source : Masc.Browser_scene.navigation_source;
@@ -3228,8 +3301,9 @@ module Browser_lane_view = struct
     clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
-    scene : scene option; scene_cursor : int;
+    scene : scene option; scene_cursor : int; scene_scope : scene_scope_context option;
     scene_guard : navigation_guard option;
+    scene_delta : scene_delta option;
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
@@ -3255,15 +3329,15 @@ module Browser_lane_view = struct
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0;
-      scene_guard = None; read_view = Text_view; refresh_pending = None;
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
+      scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0;
-    scene_guard = None; read_view = Text_view }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
+    scene_guard = None; scene_delta = None; read_view = Text_view }
   let after_action t =
-    { t with reading = None; scene = None; scene_cursor = 0;
-      scene_guard = None; selected_tab = None; scroll = 0; load = Idle;
+    { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
+      scene_guard = None; scene_delta = None; selected_tab = None; scroll = 0; load = Idle;
       read_continuation = No_read_continuation }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
@@ -3348,13 +3422,13 @@ module Browser_lane_view = struct
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scene_guard = None;
+      reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
       scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_guard = None;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
@@ -3369,7 +3443,7 @@ module Browser_lane_view = struct
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
                    | None, _ -> Idle
                  in
-                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_guard = None; scroll = 0;
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; scroll = 0;
                    client_picker = Some 0; load }, false)
     | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
@@ -3498,7 +3572,100 @@ module Browser_lane_view = struct
              else (Hashtbl.add seen node.node_id (); true))
           scene.content.nodes
 
+  let scene_counts (scene : scene) =
+    let seen = Hashtbl.create 64 in
+    List.fold_left (fun counts (node : Masc.Browser_scene.node) ->
+      if Hashtbl.mem seen node.node_id then counts
+      else (
+        Hashtbl.add seen node.node_id ();
+        match node.kind with
+        | Region Masc.Browser_scene.Article ->
+            {counts with article_count = counts.article_count + 1}
+        | Region _ -> {counts with region_count = counts.region_count + 1}
+        | Control {href = Some _; _} -> {counts with link_count = counts.link_count + 1}
+        | Control _ -> {counts with control_count = counts.control_count + 1}
+        | Raster -> {counts with raster_count = counts.raster_count + 1}
+        | Text -> counts))
+      {article_count = 0; region_count = 0; link_count = 0;
+       control_count = 0; raster_count = 0}
+      scene.content.nodes
+
+  let scene_node_table (scene : scene) =
+    let table = Hashtbl.create 64 in
+    List.iter (fun (node : Masc.Browser_scene.node) ->
+      (* A projected scene can repeat an ID for inline fragments. Keep every
+         fragment in DOM order while the delta still counts one identity. *)
+      let fragments = match Hashtbl.find_opt table node.node_id with
+        | None -> []
+        | Some fragments -> fragments in
+      Hashtbl.replace table node.node_id (node :: fragments))
+      scene.content.nodes;
+    let ids = Hashtbl.fold (fun node_id _ ids -> node_id :: ids) table [] in
+    List.iter (fun node_id ->
+      match Hashtbl.find_opt table node_id with
+      | None -> ()
+      | Some fragments -> Hashtbl.replace table node_id (List.rev fragments)) ids;
+    table
+
+  let scene_node_changed (before : Masc.Browser_scene.node) (after : Masc.Browser_scene.node) =
+    before.kind <> after.kind || before.tag <> after.tag || before.text <> after.text
+    || before.heading_level <> after.heading_level
+    || before.ancestor_region <> after.ancestor_region
+
+  let scene_fragments_changed before after =
+    let rec compare = function
+      | [], [] -> false
+      | before :: before_rest, after :: after_rest ->
+          scene_node_changed before after || compare (before_rest, after_rest)
+      | _ -> true
+    in
+    compare (before, after)
+
+  let scene_delta (before : scene) (after : scene) =
+    let old_nodes = scene_node_table before in
+    let new_nodes = scene_node_table after in
+    let added = ref 0 and unchanged = ref 0 and changed = ref 0 in
+    Hashtbl.iter (fun node_id fragments ->
+      match Hashtbl.find_opt old_nodes node_id with
+      | None -> incr added
+      | Some old_fragments ->
+          if scene_fragments_changed old_fragments fragments then incr changed else incr unchanged)
+      new_nodes;
+    let removed = ref 0 in
+    Hashtbl.iter (fun node_id _ ->
+      if not (Hashtbl.mem new_nodes node_id) then incr removed) old_nodes;
+    {added = !added; removed = !removed; unchanged = !unchanged; changed = !changed}
+
+  let scene_summary scene =
+    let counts = scene_counts scene in
+    let add count noun parts =
+      if count = 0 then parts
+      else parts @ [Masc_tui_message_layout.count_noun count noun]
+    in
+    let parts = [] in
+    let parts = add counts.article_count "article" parts in
+    let parts = add counts.region_count "region" parts in
+    let parts = add counts.link_count "link" parts in
+    let parts = add counts.control_count "control" parts in
+    let parts = add counts.raster_count "image" parts in
+    match parts with
+    | [] -> None
+    | _ -> Some (String.concat " · " parts)
+
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+  let scene_scope_context_for_node t (node : Masc.Browser_scene.node) =
+    match t.scene with
+    | Some scene ->
+        (match node.kind with
+         | Region role -> Some {target = {Browser_lane.document_id=scene.content.document_id;
+                                          node_id=node.node_id}; role; label=node.text}
+         | Text | Raster | Control _ -> None)
+    | None -> None
+
+  let scene_scope_context_for_index t index =
+    Option.bind (List.nth_opt (scene_targets t) index)
+      (scene_scope_context_for_node t)
 
   (** The page's primary reading surface, when its semantic landmarks make
       that choice unambiguous.  This is deliberately a closed, exact-role
@@ -3571,6 +3738,9 @@ module Browser_lane_view = struct
         && previous.content.url = scene.content.url
         && previous.content.view = scene.content.view && previous.content.scope = scene.content.scope
       | None -> false in
+    let scene_delta = if same_observation then
+      Option.map (fun previous -> scene_delta previous scene) t.scene
+      else None in
     let selected_id = if same_observation then
       Option.map (fun (node : Masc.Browser_scene.node) -> node.node_id)
         (selected_scene_target t)
@@ -3588,7 +3758,10 @@ module Browser_lane_view = struct
           if tab.id = scene.tab_id then
             {tab with title = scene.content.title; url = scene.content.url}
           else tab) reading.tabs }) t.reading in
-    {t with scene = Some scene; scene_guard = None; reading; load = Idle;
+    let scene_scope = match scene.content.scope, t.scene_scope with
+      | Some target, Some context when target = context.target -> Some context
+      | (Some _ | None), _ -> None in
+    {t with scene = Some scene; scene_scope; scene_guard = None; scene_delta; reading; load = Idle;
       read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
       scene_cursor = Option.value ~default:0 selected_index;
       scroll = if Option.is_some selected_index then t.scroll else 0}
@@ -3607,8 +3780,8 @@ module Browser_lane_view = struct
                              || (scene.content.view = Browser_lane.Regions && scene.content.scope = None
                                  && match scope with Some target -> not (region_observed target scene) | None -> false)) ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
+         | Ok _ -> {t with scene = None; scene_scope = None; scene_delta = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; load = Failed detail})
     | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_scroll {tab_id;_} | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
@@ -3630,12 +3803,12 @@ module Browser_lane_view = struct
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
                | _ -> t.scene_guard in
-             {t with scene = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
+             {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
          | Error detail ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
                | _ -> t.scene_guard in
-             {t with scene = None; scene_guard; load = Failed detail})
+             {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed detail})
     | _ -> t
 
   let accept_follow ~generation ~(guard : navigation_guard)
@@ -3648,9 +3821,9 @@ module Browser_lane_view = struct
                          && scene.content.view = Browser_lane.Content
                          && scene.content.scope = None ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; scene_guard = Some guard;
+         | Ok _ -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed "follow destination source, client, tab or scope mismatch"}
-         | Error detail -> {t with scene = None; scene_guard = Some guard;
+         | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed detail})
     | _ -> t
 
@@ -3676,6 +3849,47 @@ module Browser_lane_view = struct
           (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
           ordered in
         { t with scene_cursor = Option.value ~default:first next }
+
+  (* The first observed node for each article is enough for a fast jump. In a
+     regions scene the node itself is the article landmark; in a content scene
+     the browser observation carries the article's typed ancestor reference on
+     each text/control node. Unnamed or untyped nodes never become guesses. *)
+  let scene_article_target_indices t =
+    match t.scene with
+    | None -> []
+    | Some scene ->
+        let targets = scene_targets t |> List.mapi
+          (fun index (node : Masc.Browser_scene.node) -> index, node) in
+        match scene.content.view with
+         | Browser_lane.Regions ->
+             List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+               match node.kind with
+               | Region Masc.Browser_scene.Article -> Some index
+               | Region _ | Text | Raster | Control _ -> None) targets
+         | Browser_lane.Content ->
+             let seen = Hashtbl.create 16 in
+             List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
+               match node.ancestor_region with
+               | Some {role = Masc.Browser_scene.Article; node_id; _}
+                 when not (Hashtbl.mem seen node_id) ->
+                   Hashtbl.add seen node_id ();
+                   Some index
+               | Some _ | None -> None) targets
+
+  let scene_has_articles t = scene_article_target_indices t <> []
+
+  (** Move between exact observed [article] landmarks or article ancestors. *)
+  let move_scene_article ~backwards t =
+    let articles = scene_article_target_indices t in
+    match articles with
+    | [] -> t
+    | first :: _ ->
+        let ordered = if backwards then List.rev articles else articles in
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        let fallback = if backwards then List.hd (List.rev articles) else first in
+        { t with scene_cursor = Option.value ~default:fallback next }
 
   let scene_context t =
     match t.scene, selected_scene_target t with
@@ -3721,10 +3935,24 @@ module Browser_lane_view = struct
             | None -> `Null
             | Some target -> `Assoc ["documentId",`String target.document_id;
                 "nodeId",`String target.node_id]);
+          "scopeContext",(match scene.content.scope, t.scene_scope with
+            | Some target, Some context when target = context.target ->
+                `Assoc ["documentId",`String context.target.document_id;
+                  "nodeId",`String context.target.node_id;
+                  "role",`String (Masc.Browser_scene.region_role_to_string context.role);
+                  "label",`String context.label]
+            | (Some _ | None), _ -> `Null);
           "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
             "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
           "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;
+          "headingLevel",(match node.heading_level with None -> `Null | Some level -> `Int level);
+          "ancestorRegion",(match node.ancestor_region with
+            | None -> `Null
+            | Some region -> `Assoc ["documentId",`String scene.content.document_id;
+                "nodeId",`String region.node_id;
+                "role",`String (Masc.Browser_scene.region_role_to_string region.role);
+                "label",`String region.label]);
           "href",(match node.kind with
             | Control {href = Some href; _} -> `String href
             | Region _ | Control _ | Text | Raster -> `Null);
@@ -3774,7 +4002,7 @@ module Browser_lane_view = struct
                        | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
                        | None -> false)
                | _ -> false in
-             { t with reading = Some reading; scene_guard = None; load = Idle; read_view = Text_view;
+             { t with reading = Some reading; scene_guard = None; scene_delta = None; load = Idle; read_view = Text_view;
                scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
@@ -3797,7 +4025,19 @@ module Browser_lane_view = struct
         match List.nth_opt reading.tabs index with
         | None -> t
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0;
-            scene_guard = None; load = Idle; read_view = Text_view }
+            scene_scope = None; scene_guard = None; scene_delta = None; load = Idle; read_view = Text_view }
+
+  let select_tab_index index t =
+    match t.reading, index with
+    | None, _ -> t
+    | Some _, index when index < 0 -> t
+    | Some reading, _ ->
+        (match List.nth_opt reading.tabs index with
+         | None -> t
+         | Some tab when Some tab.id = t.selected_tab -> t
+         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None;
+             scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; load = Idle;
+             read_view = Text_view })
 end
 
 module Browser_history = struct
@@ -3881,6 +4121,85 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
     |> List.concat_map (fun line -> if line = "" then [""] else
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+  let block_tag = function
+    | "article" | "blockquote" | "dd" | "div" | "dt" | "figcaption"
+    | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    | "header" | "li" | "main" | "p" | "pre" | "section" | "summary" -> true
+    | _ -> false in
+  let block_geometry (nodes : Masc.Browser_scene.node list)
+      (node : Masc.Browser_scene.node) =
+    let semantic_block = match Masc.Browser_scene.text_role node with
+      | Masc.Browser_scene.Heading _ -> true
+      | Masc.Browser_scene.Plain_text -> block_tag node.tag in
+    if not semantic_block then None
+    else match List.concat_map (fun (node : Masc.Browser_scene.node) -> node.rects) nodes with
+      | [] -> None
+      | first :: rest ->
+          let top, bottom = List.fold_left
+            (fun (top, bottom) (rect : Masc.Browser_scene.rect) ->
+               (min top rect.y, max bottom (rect.y +. rect.height)))
+            (first.y, first.y +. first.height) rest in
+          Some (top, bottom) in
+  let region_id (region : Masc.Browser_scene.region_ref) = region.node_id in
+  let same_region left right = match left, right with
+    | None, None -> true
+    | Some left, Some right -> region_id left = region_id right
+    | Some _, None | None, Some _ -> false in
+  (* A DOM paragraph may arrive as several adjacent text nodes when inline
+     spans or emphasis elements sit inside it. Keep the observed node ids in
+     each group for selection, while presenting their exact text as one read
+     row. Block boundaries and semantic regions still force a new group. *)
+  let coalesce_text_nodes (nodes : Masc.Browser_scene.node list) =
+    let can_join (anchor : Masc.Browser_scene.node) (node : Masc.Browser_scene.node) =
+      match anchor.kind, node.kind with
+      | Masc.Browser_scene.Text, Masc.Browser_scene.Text
+        when same_region anchor.ancestor_region node.ancestor_region
+          && (block_tag anchor.tag
+              || match Masc.Browser_scene.text_role anchor with
+                 | Masc.Browser_scene.Heading _ -> true
+                 | Masc.Browser_scene.Plain_text -> false) ->
+          (match Masc.Browser_scene.text_role anchor,
+                 Masc.Browser_scene.text_role node with
+           | Masc.Browser_scene.Plain_text, Masc.Browser_scene.Plain_text ->
+               not (block_tag node.tag) || node.node_id = anchor.node_id
+           | Masc.Browser_scene.Heading left, Masc.Browser_scene.Heading right ->
+               left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
+           | _ -> false)
+      | _ -> false in
+    (* A group is the block fragment that opened it and the fragments joined
+       after it, newest first. The row closes at the block's last observed
+       fragment: everything up to it is one paragraph by the observed id, and
+       an inline fragment after it may belong to the next paragraph, so each of
+       those keeps its own row instead of being guessed into this one. A
+       paragraph with several inline elements repeats its id between each of
+       them, so the group keeps joining until a fragment cannot join. *)
+    let flush current acc = match current with
+      | None -> acc
+      | Some ((anchor : Masc.Browser_scene.node), later) ->
+          let rec close trailing = function
+            | [] -> [anchor], trailing
+            | (node : Masc.Browser_scene.node) :: older
+              when node.node_id = anchor.node_id ->
+                anchor :: List.rev (node :: older), trailing
+            | node :: older -> close (node :: trailing) older in
+          let joined, trailing = close [] later in
+          let row =
+            ( joined, anchor
+            , String.concat ""
+                (List.map (fun (node : Masc.Browser_scene.node) -> node.text) joined) ) in
+          List.rev_append
+            (List.map (fun (node : Masc.Browser_scene.node) ->
+               ([node], node, node.text)) trailing)
+            (row :: acc) in
+    let rec loop current acc = function
+      | [] -> List.rev (flush current acc)
+      | (node : Masc.Browser_scene.node) :: rest ->
+          (match current with
+           | Some (anchor, later) when can_join anchor node ->
+               loop (Some (anchor, node :: later)) acc rest
+           | Some _ | None ->
+               loop (Some (node, [])) (flush current acc) rest) in
+    loop None [] nodes in
   match view.scene with
   | Some scene ->
     (* The target index came from re-scanning [scene_targets] for every node,
@@ -3893,14 +4212,37 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    let reversed, _, selected = List.fold_left
-      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
-      let index = Hashtbl.find_opt target_index node.node_id in
+    let article_positions = Hashtbl.create 16 in
+    let article_count = ref 0 in
+    let register_article node_id =
+      if not (Hashtbl.mem article_positions node_id) then begin
+        incr article_count;
+        Hashtbl.add article_positions node_id !article_count
+      end
+    in
+    List.iter (fun (node : Masc.Browser_scene.node) ->
+      match node.kind, node.ancestor_region with
+      | Region Masc.Browser_scene.Article, _ -> register_article node.node_id
+      | _, Some {role = Masc.Browser_scene.Article; node_id; _} ->
+          register_article node_id
+      | _ -> ()) scene.content.nodes;
+    let article_total = !article_count in
+    let reversed, _, selected, _, _ = List.fold_left
+      (fun (reversed, offset, selected, previous_block_bottom, previous_region)
+        (nodes, (anchor : Masc.Browser_scene.node), text) ->
+      let group_indices = List.filter_map
+          (fun (node : Masc.Browser_scene.node) ->
+             Hashtbl.find_opt target_index node.node_id) nodes
+        |> List.sort_uniq Int.compare in
+      let index = match group_indices with
+        | [] -> None
+        | first :: _ -> Some first in
+      let selected_index = List.find_opt (fun i -> i = view.scene_cursor) group_indices in
       (* Text is the reading surface. DOM tags do not help read a paragraph,
          author or timestamp; the selected text still has its observed index
          for n/p and context copying. Controls and regions retain their action
          labels and the same indices as the interaction model. *)
-      let label = match node.kind with
+      let label = match anchor.kind with
         | Text -> None
         | Raster -> Some "image · Ctrl-O"
         | Region role ->
@@ -3911,17 +4253,49 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Control _ -> Some "button/link" in
       let prefix = match label, index with
         | _, None -> ""
-        | None, Some i ->
-            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | None, Some _ ->
+            (match selected_index with
+             | Some selected -> Printf.sprintf "[>%d] " (selected + 1)
+             | None -> "")
         | Some label, Some i ->
             Printf.sprintf "[%s%d %s] "
-              (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      let lines = wrap (prefix ^ node.text) in
-      let selected = match selected, index with
-        | None, Some i when i = view.scene_cursor -> Some offset
+              (match selected_index with Some _ -> ">" | None -> "")
+              (match selected_index with Some selected -> selected + 1 | None -> i + 1)
+              label in
+      let text = match Masc.Browser_scene.text_role anchor with
+        | Masc.Browser_scene.Heading level -> String.make level '#' ^ " " ^ text
+        | Masc.Browser_scene.Plain_text -> text in
+      let geometry = block_geometry nodes anchor in
+      let separator = match geometry, previous_block_bottom with
+        | Some (top, _), Some bottom when top > bottom -> [""]
+        | _ -> [] in
+      let region_header = match anchor.ancestor_region, previous_region with
+        | Some region, Some previous when region_id region = region_id previous -> []
+        | Some region, _ ->
+            (match scene.content.scope with
+             | Some target when target.node_id = region.node_id -> []
+             | Some _ | None ->
+                 let role = Masc.Browser_scene.region_role_to_string region.role in
+                 let heading = match Hashtbl.find_opt article_positions region.node_id with
+                   | Some position when article_total > 1 ->
+                       Printf.sprintf "[%s %d/%d] %s" role position article_total region.label
+                   | _ -> "[" ^ role ^ "] " ^ region.label in
+                 wrap heading)
+        | None, _ -> [] in
+      let boundary = separator @ region_header in
+      let lines = wrap (prefix ^ text) in
+      let selected = match selected, selected_index with
+        | None, Some _ ->
+            Some (offset + List.length boundary)
         | _ -> selected in
-      List.rev_append lines reversed, offset + List.length lines, selected)
-      ([], 0, None) scene.content.nodes in
+      let previous_block_bottom = match geometry with
+        | Some (_, bottom) -> Some bottom
+        | None -> None in
+      List.rev_append lines (List.rev_append boundary reversed),
+      offset + List.length boundary + List.length lines, selected,
+      previous_block_bottom, anchor.ancestor_region)
+      ([], 0, None, None, None)
+      (coalesce_text_nodes scene.content.nodes) in
     List.rev reversed, selected
   | None -> match view.reading with
   | None -> [], None
@@ -4006,6 +4380,10 @@ type board_list_reading =
   | Board_list_unread
   | Board_list_read
 
+type local_intervention =
+  | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
+  | Retained_after_stop
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -4044,6 +4422,12 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable keeper_chat_control_generations : (string * int) list;
+  mutable keeper_chat_control_tokens : (string * string) list;
+  mutable keeper_chat_control_pending : (string * int64) list;
+  mutable keeper_interactive_waiting : (string * string * local_intervention) list;
+  mutable keeper_queue_inflight : string list;
+  mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -5285,6 +5669,15 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
+(* A live subscription can outlast one checkpoint segment. Such a watcher
+   keeps its identity and log while fresh input may enter the server queue. *)
+let blocking_inflight_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript))
+    state.msg_inflight
+;;
+
 let live_for_keeper state keeper_name =
   Option.map (fun entry -> entry.log) (inflight_for_keeper state keeper_name)
 ;;
@@ -5301,9 +5694,15 @@ let settled_log_for_request state ~keeper_name request_id =
 ;;
 
 let settled_logs_for_keeper state keeper_name =
-  List.filter
-    (fun turn_log -> String.equal (turn_log_keeper_name turn_log) keeper_name)
-    state.msg_settled_logs
+  state.msg_settled_logs
+  |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
+  |> List.fold_left (fun selected log ->
+    let execution_id = turn_log_execution_id log in
+    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
+    | None -> selected @ [log]
+    | Some _ when turn_log_request_id log = execution_id ->
+      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
+    | Some _ -> selected) []
 ;;
 
 (* A settled log takes its place among the others by when its turn started,
@@ -5408,7 +5807,7 @@ type held_turn =
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_request_id turn_log
+  { ht_request_id = turn_log_execution_id turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -5452,7 +5851,7 @@ let rows_the_logs_do_not_draw ~held rows =
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_request_id turn_log in
+      let request_id = turn_log_execution_id turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with
@@ -5524,12 +5923,84 @@ let promoted_inflight_for_keeper state keeper_name =
   | Some { origin = Direct_submission; _ } | None -> None
 ;;
 
+let working_chat_for_keeper state keeper_name =
+  List.find_opt (fun entry ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && entry.phase = Turn_streaming
+    && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
+    state.msg_inflight
+
+let working_chat_interrupt_action ?(explicit = false) ~now_ns state keeper_name (entry : inflight) =
+  let held_input = List.exists (fun (name, _, intervention) -> name = keeper_name
+    && match intervention with Awaiting_control _ -> true | Retained_after_stop -> false)
+    state.keeper_interactive_waiting in
+  let newer_input = held_input
+    || match List.find_opt (fun item -> item.sent_request.keeper_name = keeper_name) state.msg_inflight with
+       | Some latest -> latest.sent_request.request_id <> entry.sent_request.request_id
+         && latest.control_generation = Option.value ~default:0
+              (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+       | None -> false in
+  match List.assoc_opt keeper_name state.keeper_chat_control_pending, held_input with
+  | Some requested_at_ns, false -> Masc_tui_esc_interrupt.pending_action ~now_ns ~requested_at_ns
+  | (Some _ | None), _ ->
+    if explicit || newer_input then Masc_tui_esc_interrupt.Launch_interrupt
+    else Masc_tui_esc_interrupt.action ~now_ns
+      (Masc_tui_keeper_chat_transcript.interrupt entry.log.tl_transcript)
+
+let keeper_chat_control_generation state keeper_name =
+  Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
+
+let advance_keeper_chat_control state keeper_name =
+  let generation = keeper_chat_control_generation state keeper_name + 1 in
+  state.keeper_chat_control_generations <- (keeper_name, generation) ::
+    List.remove_assoc keeper_name state.keeper_chat_control_generations;
+  generation
+
+let begin_keeper_chat_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    name, id, (if name = keeper_name then Retained_after_stop else intervention))
+    state.keeper_interactive_waiting;
+  generation
+
+let finish_keeper_chat_control state keeper_name ~generation =
+  if generation <> keeper_chat_control_generation state keeper_name
+     || not (List.mem_assoc keeper_name state.keeper_chat_control_pending) then false
+  else begin
+    let next = advance_keeper_chat_control state keeper_name in
+    state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
+    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+      let intervention = match intervention with
+        | Awaiting_control held when name = keeper_name && held.generation = generation ->
+          Awaiting_control {held with generation = next}
+        | Awaiting_control _ | Retained_after_stop -> intervention in
+      name, id, intervention) state.keeper_interactive_waiting;
+    true
+  end
+
+let release_retained_keeper_input state keeper_name =
+  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
+    name <> keeper_name || match intervention with
+    | Retained_after_stop -> false | Awaiting_control _ -> true)
+    state.keeper_interactive_waiting
+
+(* A receipt callback finishes control before its outcome arrives, advancing
+   once. A later control advances again; old outcomes cannot mark a resumed
+   request as stopped. Pending distinguishes that later control's first step. *)
+let keeper_chat_control_result_current state keeper_name ~generation =
+  let current = keeper_chat_control_generation state keeper_name in
+  current = generation
+  || (current = generation + 1
+      && not (List.mem_assoc keeper_name state.keeper_chat_control_pending))
+
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
     ~inflight:
       (Option.map
          (fun entry -> entry.sent_request)
-         (inflight_for_keeper state keeper_name))
+         (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
       (* The line a new one for this keeper would join (last waiting [Next], never
          a steer). Present it as "the keeper is spoken for" so Enter queues onto
@@ -5878,6 +6349,12 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  keeper_chat_control_generations = [];
+  keeper_chat_control_tokens = [];
+  keeper_chat_control_pending = [];
+  keeper_interactive_waiting = [];
+  keeper_queue_inflight = [];
+  keeper_run_next_pending = None;
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;
@@ -8132,52 +8609,6 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
-let keeper_message_activity_rows (state : state) =
-  match state.msg_target_keeper_name with
-  | None -> []
-  | Some keeper_name ->
-    let own_live_turn = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
-      | Some _ | None -> false in
-    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
-      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-      state.keeper_turns in
-    let submitted = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        let transcript = live.tl_transcript in
-        (match Masc_tui_keeper_chat_transcript.phase transcript,
-               Masc_tui_keeper_chat_transcript.admission transcript with
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = state.keeper_turns_error = None
-             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
-               String.equal row.ktr_keeper_name keeper_name
-               && match row.ktr_state with
-                 | Tui_decode.Keeper_turn_running
-                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
-                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
-                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns in
-           [if other_turn_observed then
-              "Your message is queued behind this Keeper's current turn; start time unknown"
-            else "Your message is queued at the server; start time unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, None ->
-           ["Your request is awaiting server acceptance; queue position unknown"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
-           ["Your request was accepted; waiting for its first event"]
-         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
-           ["Your request already settled; replaying its result"]
-         | _ -> [])
-      | Some _ | None -> []
-    in
-    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
-      state.msg_queued ~keeper_name in
-    activity @ submitted @ (if local_count > 0 then
-      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
-        local_count (if local_count = 1 then "message" else "messages")]
-      else [])
-;;
-
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
   else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
@@ -8205,6 +8636,7 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
+  | Some keeper_name when Option.is_some (working_chat_for_keeper state keeper_name) -> []
   | Some keeper_name ->
     List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
       if row.ktr_keeper_name <> keeper_name then None else
@@ -8217,7 +8649,7 @@ let keeper_observed_interrupt_rows (state : state) =
            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
          | None when Option.is_some interrupt_token ->
-           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
+           Some "Esc: stop and pause queue · Enter:send update · /queue: manage"
          | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
       | _ -> None) state.keeper_turns
 ;;
@@ -8226,20 +8658,23 @@ let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
-    let own_live_turn = match state.msg_live with
-      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
-      | Some _ | None -> false in
-    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
-      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
-      state.keeper_turns in
+    let working = working_chat_for_keeper state keeper_name in
+    let activity = match working with
+      | Some entry ->
+        ["Current direct conversation · "
+         ^ Masc_tui_keeper_chat_projection.terminal_safe_text
+             (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
+         ^ " · in progress"]
+      | None -> Masc_tui_answering.chat_activity
+          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          state.keeper_turns in
     let submitted = match state.msg_live with
       | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
         let transcript = live.tl_transcript in
         (match Masc_tui_keeper_chat_transcript.phase transcript,
                Masc_tui_keeper_chat_transcript.admission transcript with
          | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
-           let other_turn_observed = state.keeper_turns_error = None
+           let other_turn_observed = Option.is_some working || (state.keeper_turns_error = None
              && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
                String.equal row.ktr_keeper_name keeper_name
                && match row.ktr_state with
@@ -8247,7 +8682,7 @@ let keeper_message_activity_rows (state : state) =
                      { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
                  | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
                  | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
-               state.keeper_turns in
+               state.keeper_turns) in
            [if other_turn_observed then
               "Your message is queued behind this Keeper's current turn; start time unknown"
             else "Your message is queued at the server; start time unknown"]
@@ -8262,7 +8697,13 @@ let keeper_message_activity_rows (state : state) =
     in
     let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
       state.msg_queued ~keeper_name in
-    activity @ submitted @ (if local_count > 0 then
+    let retained = List.exists (fun (name, _, intervention) ->
+      name = keeper_name && match intervention with
+      | Retained_after_stop -> true | Awaiting_control _ -> false)
+      state.keeper_interactive_waiting in
+    activity @ submitted @ (if retained then
+      ["Input retained after Esc; /queue resume sends it"]
+      else []) @ (if local_count > 0 then
       [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
         local_count (if local_count = 1 then "message" else "messages")]
       else [])
@@ -8457,6 +8898,12 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
+     under Keepers behind [f], and the palette is where a destination is
+     reached by name when the key path to it is not known. Changes follows the
+     keeper selected on Keepers and says so when there is none. *)
+  @ [ "go Runtime", Palette_goto Runtime ]
+  @ [ "go Changes", Palette_goto Changes ]
   @ (match browser_lane_on_screen state with
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
@@ -8468,6 +8915,12 @@ let palette_entries (state : state) =
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
+  (* After the ring, so "go config" still leads with the Config surface: the
+     ranks tie on a label that starts with the query, and a tie keeps entry
+     order. *)
+  @ List.map
+      (fun (pane, label) -> ("go Config / " ^ label, Palette_config pane))
+      config_panes
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))

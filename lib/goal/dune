@@ -17,6 +17,9 @@
   masc.masc_random_id
   masc_log
   masc_workspace
+  ; RFC-0444 PR-2: Goal_unavailable_envelope spells the error code through
+  ; Tool_args.error_code and wraps the envelope in a Tool_result.
+  masc.tool_types
   time_compat
   fs_compat
   yojson

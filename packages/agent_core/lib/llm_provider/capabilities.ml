@@ -1227,7 +1227,7 @@ let%test "reasoning_replay_override_of_catalog_string parses vocabulary" =
   && reasoning_replay_override_of_catalog_string "latest_user_turn_tool_calls"
      = Some Force_latest_user_turn_tool_calls
   && reasoning_replay_override_of_catalog_string "no_replay" = Some Force_no_replay
-  && reasoning_replay_override_of_catalog_string "" = Some Default_reasoning_replay
+  && reasoning_replay_override_of_catalog_string "" = None
   && reasoning_replay_override_of_catalog_string "bogus" = None
 ;;
 

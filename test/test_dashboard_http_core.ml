@@ -1889,6 +1889,21 @@ let execution_trust_keeper_row_keys =
   ; "trust"
   ]
 
+(* #36066 refuses a keeper nothing declares (audit F386): the profile loader
+   answers [Declaration_not_found] and both dashboard projections row it as
+   [invalid_profile_dashboard_row], which carries no [trace_id]. A meta
+   snapshot alone therefore no longer reaches the enrich path; a fixture
+   keeper is declared the way a real one is, with keepers/<name>.toml. *)
+let declare_fixture_keeper config name =
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:config.Workspace.base_path
+      name
+  in
+  mkdir_p (Filename.dirname path);
+  write_file path
+    (Printf.sprintf "[keeper]\ninstructions = \"%s fixture instructions\"\n" name)
+
 let test_execution_trust_uses_narrow_keeper_projection () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1909,6 +1924,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
+  declare_fixture_keeper config name;
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> failf "write meta: %s" error);
@@ -2269,7 +2285,8 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending = get_ok (Lib.Workspace_goals.request_current_proof config ~goal_id) in
+  let _, pending = get_ok (Result.map_error Goal_store.write_error_to_string
+    (Lib.Workspace_goals.request_current_proof config ~goal_id)) in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
     | _ -> fail "request did not persist pending proof"
@@ -2281,10 +2298,11 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
   ignore (check_surfaces ~phase:"awaiting_confirmation" ~proof_state:"proof_proven");
-  ignore (get_ok (Lib.Workspace_goals.confirm_completion config ~goal_id
-    ~operator_id:"dashboard-operator" ~request_id
-    ~verification_run_id:"dashboard-proof-run"
-    ~criterion_revision:goal.criterion_revision));
+  ignore (get_ok (Result.map_error Goal_store.write_error_to_string
+    (Lib.Workspace_goals.confirm_completion config ~goal_id
+      ~operator_id:"dashboard-operator" ~request_id
+      ~verification_run_id:"dashboard-proof-run"
+      ~criterion_revision:goal.criterion_revision)));
   let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
   ignore (get_ok (Result.map_error Goal_store.write_error_to_string
     (Goal_store.upsert_goal config ~id:goal_id
@@ -5336,6 +5354,7 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
             | Ok meta -> meta
             | Error error -> fail ("meta fixture: " ^ error)
           in
+          declare_fixture_keeper config name;
           (match Masc.Keeper_meta_store.replace_snapshot config meta with
            | Ok () -> ()
            | Error error -> fail ("write meta: " ^ error));
@@ -5356,6 +5375,16 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
       check (list string) "fiber pool collects every registered keeper"
         (List.sort String.compare names)
         row_names;
+      (* Since #36066 an undeclared keeper also yields a row that carries its
+         name, so the name check alone would pass on the refusal path. The
+         trace_id is written only by the per-keeper enrich this test pins. *)
+      List.iter
+        (fun row ->
+          let name = row |> member "name" |> to_string in
+          check string (name ^ " row came through the meta enrich")
+            (name ^ "-trace")
+            (row |> member "trace_id" |> to_string))
+        keeper_rows;
       check int "total mirrors collected keeper count"
         (List.length names)
         (json |> member "total" |> to_int))

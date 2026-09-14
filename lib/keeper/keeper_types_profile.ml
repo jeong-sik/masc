@@ -120,8 +120,25 @@ let keeper_toml_path_opt name =
   Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
   Config_dir_resolver.keeper_toml_path_opt name
 
+let keeper_toml_path name =
+  Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+  Config_dir_resolver.keeper_toml_path name
+
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
+
+(* A keeper nothing declares is not configured. This used to load as
+   [empty_keeper_profile_defaults], so every reader downstream -- turn
+   dispatch, effective meta, autoboot, the fleet scan -- proceeded on a
+   profile no file had written (audit F386). *)
+let declaration_not_found ~expected_path name =
+  Error
+    { keeper_path = expected_path
+    ; failing_path = expected_path
+    ; kind = Declaration_not_found name
+    ; detail =
+        Printf.sprintf "keeper %s has no declaration at %s" name expected_path
+    }
 
 let load_keeper_instructions ~toml_path _name defaults =
   let reject detail =
@@ -158,65 +175,128 @@ let materialization_defaults_of_content ~path bytes =
     load_keeper_instructions ~toml_path:path name defaults)
 
 let load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path_opt
+    ~keeper_toml_path
     name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
-  match keeper_toml_path_opt with
-  | None -> Ok empty_keeper_profile_defaults
-  | Some toml_path ->
-    (match load_keeper_toml toml_path with
-     | Error _ as error -> error
-     | Ok (loaded_name, defaults) ->
-       load_keeper_instructions ~toml_path loaded_name defaults)
+  if not (Env_config_core.existing_file keeper_toml_path)
+  then declaration_not_found ~expected_path:keeper_toml_path name
+  else
+    match load_keeper_toml keeper_toml_path with
+    | Error _ as error -> error
+    | Ok (loaded_name, defaults) ->
+      load_keeper_instructions ~toml_path:keeper_toml_path loaded_name defaults
 
 let load_keeper_profile_defaults_result_uncached name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path_opt:(keeper_toml_path_opt name)
+    ~keeper_toml_path:(keeper_toml_path name)
     name
 
 let load_keeper_profile_defaults_result_for_base_path ~base_path name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
   load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
+    ~keeper_toml_path:
+      (Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name)
     name
 
 type keeper_profile_snapshot =
-  { configured_names : string list
-  ; profiles_by_file_name :
+  { base_path : string
+  ; configured_names : string list
+  ; profiles_by_name :
       (string * (keeper_profile_defaults, keeper_toml_load_error) result) list
   }
+
+(* Runtime lookup is by filename, while discovery uses keeper.name. A
+   declaration whose two names disagree is indexed under both and refused
+   under both: the roster asks by keeper.name and the runtime by filename,
+   and each used to get an answer the other could not see (audit F386). A
+   name claimed by more than one file is refused the same way rather than
+   letting directory order pick a winner. *)
+let name_mismatch_error ~path ~file_name ~keeper_name =
+  Error
+    { keeper_path = path
+    ; failing_path = path
+    ; kind = Invalid_name
+    ; detail =
+        Printf.sprintf
+          "keeper.name %S does not match the file name %S"
+          keeper_name
+          file_name
+    }
+
+let duplicate_claim_error ~name ~first ~others =
+  Error
+    { keeper_path = first
+    ; failing_path = first
+    ; kind = Invalid_name
+    ; detail =
+        Printf.sprintf
+          "keeper %S is declared by more than one file: %s"
+          name
+          (String.concat ", " (first :: others))
+    }
+
+let index_keeper_profile_declarations declarations =
+  let claims =
+    List.concat_map
+      (fun (path, discovery) ->
+        let file_name = Filename.remove_extension (Filename.basename path) in
+        match discovery with
+        | Loaded { keeper_name; defaults } when String.equal keeper_name file_name
+          ->
+          [ file_name, path, load_keeper_instructions ~toml_path:path keeper_name defaults ]
+        | Loaded { keeper_name; _ } ->
+          let refused = name_mismatch_error ~path ~file_name ~keeper_name in
+          [ file_name, path, refused; keeper_name, path, refused ]
+        | Invalid { error; _ } -> [ file_name, path, Error error ])
+      declarations
+  in
+  let rec index decided = function
+    | [] -> List.rev decided
+    | (name, path, result) :: rest ->
+      if List.mem_assoc name decided
+      then index decided rest
+      else (
+        match
+          List.filter_map
+            (fun (claimed, other_path, _) ->
+              if String.equal claimed name then Some other_path else None)
+            rest
+        with
+        | [] -> index ((name, result) :: decided) rest
+        | others ->
+          index
+            ((name, duplicate_claim_error ~name ~first:path ~others) :: decided)
+            rest)
+  in
+  index [] claims
+;;
 
 let read_keeper_profile_snapshot ~base_path =
   let declarations =
     Keeper_types_profile_toml.discover_keepers_toml_with_paths
       (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
   in
-  { configured_names =
+  { base_path
+  ; configured_names =
       declarations
       |> List.map (fun (_, discovery) -> keeper_toml_discovery_name discovery)
       |> List.sort_uniq String.compare
-  ; profiles_by_file_name =
-      List.map
-        (fun (path, discovery) ->
-          let defaults =
-            match discovery with
-            | Loaded { keeper_name; defaults } ->
-              load_keeper_instructions ~toml_path:path keeper_name defaults
-            | Invalid { error; _ } -> Error error
-          in
-          (* Runtime lookup is by filename, while discovery uses keeper.name.
-             Keeping both avoids silently changing a mismatched declaration. *)
-          Filename.remove_extension (Filename.basename path), defaults)
-        declarations
+  ; profiles_by_name = index_keeper_profile_declarations declarations
   }
 ;;
 
 let snapshot_configured_keeper_names snapshot = snapshot.configured_names
 let snapshot_profile_defaults snapshot name =
-  match List.assoc_opt name snapshot.profiles_by_file_name with
+  match List.assoc_opt name snapshot.profiles_by_name with
   | Some result -> result
-  | None -> Ok empty_keeper_profile_defaults
+  | None ->
+    declaration_not_found
+      ~expected_path:
+        (Config_dir_resolver.keeper_toml_path_for_base_path
+           ~base_path:snapshot.base_path
+           name)
+      name
 ;;
 
 type declarative_manifest_snapshot =

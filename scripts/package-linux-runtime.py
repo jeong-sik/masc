@@ -39,7 +39,7 @@ def package(dist, stage, platform, commit, lock_path):
     clean.pop('PYTHONHOME', None)
     clean.pop('PYTHONPATH', None)
     subprocess.run([str(stage.resolve() / 'python/bin/python3'), '-I', '-c',
-                    'import json,tarfile,ssl,urllib.request; assert urllib.request.urlopen("https://example.com",timeout=30).status == 200'],
+                    portable.PYTHON_HTTPS_PROBE],
                    env=clean, check=True)
     portable.freeze_python_bytecode(stage)
     provenance = dict(schema='masc.linux-runtime.v1', source_commit=commit, platform=platform,

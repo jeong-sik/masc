@@ -6530,7 +6530,17 @@ let decode_tool_approval_mode_overrides json =
     | [] -> Ok (List.rev acc)
     | item :: rest ->
         let* keeper = required_string_field item "keeper" in
-        let* mode = required_string_field item "mode" in
+        let* word = required_string_field item "mode" in
+        (* The server writes this through [mode_to_string]; a word its reader
+           does not know is a wire error, and it says which keeper sent it. *)
+        let* mode =
+          match Keeper_tool_approval_mode.mode_of_string word with
+          | Some mode -> Ok mode
+          | None ->
+              Error
+                (Printf.sprintf "tool approval mode for %s is not auto or yolo: %s"
+                   keeper word)
+        in
         loop ((keeper, mode) :: acc) rest
   in
   loop [] items
@@ -7106,6 +7116,7 @@ let keeper_turn_lane_of_string = function
 
 type keeper_turn_preview = {
   ktp_status_text : string;
+  ktp_updated_at_unix : float;
   ktp_text_tail : string;
   ktp_last_tool : string option;
 }
@@ -7122,20 +7133,25 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 
 let decode_keeper_turn_row json =
   let* ktr_keeper_name = required_string_field json "keeper_name" in
+  let* ktr_chat_control_token = match Json_util.assoc_member_opt "chat_control_token" json with
+    | Some (`String token) when token <> "" -> Ok (Some token)
+    | Some `Null | None -> Ok None
+    | Some _ -> Error "keeper chat_control_token must be nonempty text or null" in
   let* status = required_string_field json "status" in
   match status with
   | "unavailable" ->
       let* detail = required_string_field json "detail" in
-      Ok { ktr_keeper_name; ktr_state = Keeper_turn_unavailable detail }
+      Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_unavailable detail }
   | "ok" -> (
       match Json_util.assoc_member_opt "turn" json with
       | None -> Error "keeper turn row is missing required field 'turn'"
-      | Some `Null -> Ok { ktr_keeper_name; ktr_state = Keeper_turn_idle }
+      | Some `Null -> Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_idle }
       | Some (`Assoc _ as turn_json) ->
           let* lane_raw = required_string_field turn_json "lane" in
           let* lane =
@@ -7168,7 +7184,13 @@ let decode_keeper_turn_row json =
                   required_nullable_string_field preview_json "last_tool"
                 in
                 let* ktp_status_text = required_string_field preview_json "status_text" in
-                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text })
+                let* ktp_updated_at_unix =
+                  match Json_util.assoc_member_opt "updated_at_unix" preview_json with
+                  | Some (`Float value) when Float.is_finite value -> Ok value
+                  | Some (`Int value) -> Ok (Float.of_int value)
+                  | _ -> Error "turn preview updated_at_unix must be a finite number"
+                in
+                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
             | Some other ->
                 Error
                   (Printf.sprintf
@@ -7178,6 +7200,7 @@ let decode_keeper_turn_row json =
           Ok
             {
               ktr_keeper_name;
+              ktr_chat_control_token;
               ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
             }
       | Some other ->

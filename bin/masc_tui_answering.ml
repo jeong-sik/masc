@@ -90,7 +90,10 @@ let chat_activity ~now ~keeper_name ~error rows =
   | Some { ktr_state = Tui_decode.Keeper_turn_running { lane; started_at_unix; preview }; _ } ->
     let status = match preview with
       | None -> "progress has not been reported"
-      | Some preview -> preview.Tui_decode.ktp_status_text
+      | Some preview ->
+        Printf.sprintf "%s · last activity %s ago"
+          preview.Tui_decode.ktp_status_text
+          (elapsed_text ~now preview.ktp_updated_at_unix)
     in
     let text = match preview with
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
@@ -100,7 +103,7 @@ let chat_activity ~now ~keeper_name ~error rows =
     let observed = match error with None -> "Current" | Some _ -> "Last observed" in
     stale @ [Printf.sprintf "%s %s turn · %s · %s"
       observed (lane_word lane) (elapsed_text ~now started_at_unix)
-      (Tui_decode.sanitize_terminal_text status)] @ text
+      (Tui_decode.sanitize_terminal_text status ^ " · /queue")] @ text
 ;;
 
 let is_running (row : Tui_decode.keeper_turn_row) =

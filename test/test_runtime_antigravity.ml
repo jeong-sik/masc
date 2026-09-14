@@ -62,6 +62,8 @@ let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
 
+(* [line_delays]: seconds the fixture sleeps before printing the line at that
+   index, so one gap can be placed inside or after a chosen step. *)
 let fixture_script
     ?(require_resume = false)
     ?required_home
@@ -69,8 +71,8 @@ let fixture_script
     ?capture_prompt
     ?(close_stdin = false)
     ?line_delay_s
-    ?after_first_line_delay_s
-    ?stdout_holder_s
+    ?(line_delays = [])
+    ?pipe_holder_s
     ?exit_delay_s
     ?(exit_code = 0)
     lines
@@ -114,20 +116,23 @@ let fixture_script
          (fun seconds ->
             output_string output (Printf.sprintf "sleep %.3f\n" seconds))
          line_delay_s;
-       if index = 1
+       Option.iter
+         (fun seconds ->
+            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+         (List.assoc_opt index line_delays);
+       (* The first #28912 shutdown shape: a background child inheriting
+          stdout and stderr, so EOF never arrives on either pipe even though
+          the CLI exits. It starts before the last line so the race with the
+          runtime's termination cannot skip it. *)
+       if index = List.length lines - 1
        then
          Option.iter
            (fun seconds ->
-              output_string output (Printf.sprintf "sleep %.3f\n" seconds))
-           after_first_line_delay_s;
+              output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
+           pipe_holder_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
-  (* The two #28912 shutdown shapes: a background child inheriting stdout
-     (so EOF never arrives even though the CLI exits), and the CLI itself
-     stalling before exit. *)
-  Option.iter
-    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
-    stdout_holder_s;
+  (* The second #28912 shutdown shape: the CLI itself stalling before exit. *)
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     exit_delay_s;
@@ -138,7 +143,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_stdin ?line_delay_s
-    ?after_first_line_delay_s ?stdout_holder_s ?exit_delay_s ?exit_code lines f =
+    ?line_delays ?pipe_holder_s ?exit_delay_s ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -147,8 +152,8 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_
       ?capture_prompt
       ?close_stdin
       ?line_delay_s
-      ?after_first_line_delay_s
-      ?stdout_holder_s
+      ?line_delays
+      ?pipe_holder_s
       ?exit_delay_s
       ?exit_code
       lines
@@ -769,7 +774,7 @@ let test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline () =
   (* [no_turn_deadline] leaves the idle timeout at [None]; the ceiling is
      still a deadline, so a silently held stdout cannot outlive it. *)
   with_fixture
-    ~stdout_holder_s:5.0
+    ~pipe_holder_s:5.0
     [ init () ]
     (fun path ->
        match
@@ -829,7 +834,7 @@ let test_wall_clock_ceiling_hang_duration_distribution () =
   (* silent, no idle deadline: the ceiling is the only deadline *)
   let silent = Array.init runs (fun _ ->
       with_fixture
-        ~stdout_holder_s:5.0
+        ~pipe_holder_s:5.0
         [ init () ]
         (fun path ->
            measure_one ~no_turn_deadline:true ~timeout_s:2.0 ~ceiling_s:0.3 path)) in
@@ -875,9 +880,110 @@ let test_no_deadline_keeps_init_bounded () =
        | Ok _ -> fail "an unbounded turn disabled the Antigravity init bound")
 ;;
 
+(* A tool step that outlasts the idle window. The window is short and the gap
+   several times longer, so a window that stayed armed through the step would
+   fire long before the DONE update. Admission keeps a wide bound because the
+   fixture's first line is not what is under test (#28919). *)
+let tool_step_idle_window_s = 0.3
+let tool_step_gap_s = 1.0
+let tool_step_admission_s = 5.0
+
+let test_tool_step_outlasting_the_idle_window_completes () =
+  with_fixture
+    ~line_delays:[ 2, tool_step_gap_s ]
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; step ~index:1 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; result ()
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~timeout_s:tool_step_idle_window_s
+           ~admission_timeout_s:tool_step_admission_s
+           path
+       with
+       | Ok turn ->
+         check string "tool step completed" "MASC_ANTIGRAVITY_OK\n" turn.text
+       | Error error -> fail (Runtime_antigravity.error_to_string error))
+;;
+
+(* The same gap after the tool step has ended, whichever way it ended, is
+   silence from the model turn again and the idle window ends it. *)
+let test_idle_window_rearms_when_the_tool_step_ends () =
+  List.iter
+    (fun final_state ->
+       with_fixture
+         ~line_delays:[ 3, tool_step_gap_s ]
+         [ init ()
+         ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
+         ; step ~index:1 ~state:final_state ~step_type:"tool" ()
+         ; result ()
+         ]
+         (fun path ->
+            match
+              run_fixture
+                ~timeout_s:tool_step_idle_window_s
+                ~admission_timeout_s:tool_step_admission_s
+                path
+            with
+            | Error (Runtime_antigravity.Timeout seconds) ->
+              check
+                (float 0.001)
+                (final_state ^ ": the idle window fired")
+                tool_step_idle_window_s
+                seconds
+            | Error error ->
+              fail (final_state ^ ": " ^ Runtime_antigravity.error_to_string error)
+            | Ok _ ->
+              fail
+                (final_state
+                 ^ ": silence after a finished tool step was not bounded")))
+    [ "DONE"; "ERROR" ]
+;;
+
+(* A tool step with no end is bounded by the ceiling alone: the fixture goes
+   silent inside the step and exits long after the ceiling. The ceiling sits
+   above the idle window, so the budget the timeout reports tells which of the
+   two ended the turn: an armed idle window reports exactly
+   [tool_step_idle_window_s], the ceiling reports its larger remainder. *)
+let test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends () =
+  let fixture_exit_delay_s = 10.0 in
+  let ceiling_s = 1.0 in
+  with_fixture
+    ~exit_delay_s:fixture_exit_delay_s
+    [ init (); step ~index:1 ~state:"ACTIVE" ~step_type:"tool" () ]
+    (fun path ->
+       let started = Unix.gettimeofday () in
+       let outcome =
+         run_fixture
+           ~timeout_s:tool_step_idle_window_s
+           ~admission_timeout_s:tool_step_admission_s
+           ~wall_clock_ceiling_s:ceiling_s
+           path
+       in
+       let elapsed = Unix.gettimeofday () -. started in
+       match outcome with
+       | Error (Runtime_antigravity.Timeout seconds) ->
+         check bool
+           "ceiling bounds the reported timeout"
+           true
+           (seconds > 0.0 && seconds <= ceiling_s);
+         check bool
+           "the ceiling, not the idle window, ended the turn"
+           true
+           (seconds > tool_step_idle_window_s);
+         check bool
+           "the turn ended at the ceiling, not when the fixture exited"
+           true
+           (elapsed < fixture_exit_delay_s)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a tool step with no end outlived the wall-clock ceiling")
+;;
+
 let test_no_deadline_starts_after_init () =
   with_fixture
-    ~after_first_line_delay_s:0.2
+    ~line_delays:[ 1, 0.2 ]
     [ init (); result () ]
     (fun path ->
        match
@@ -965,11 +1071,35 @@ let test_live_start_and_resume () =
    child inherited stdout, so EOF never arrives. Completion must come from
    the parsed result event, not from EOF. *)
 let test_result_completes_even_when_stdout_stays_open () =
-  with_fixture ~stdout_holder_s:10.0 [ init (); result () ] (fun path ->
+  with_fixture ~pipe_holder_s:10.0 [ init (); result () ] (fun path ->
     match run_fixture ~timeout_s:2.0 path with
     | Error error -> fail (Runtime_antigravity.error_to_string error)
     | Ok turn ->
       check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
+;;
+
+(* The first shape, measured. The stderr drain used to be an ordinary fiber
+   of the process switch, so a served turn waited for the background child to
+   release stderr: 10 s in the test above, unbounded for an orphaned MCP
+   server in production. [turn_return_window_s] bounds the whole measured
+   run (Eio_main start, spawn, protocol, exit): spawning the shell measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, and the
+   regression it guards against takes the holder's full 20 s. *)
+let turn_return_window_s = 5.0
+let pipe_holder_outliving_the_turn_s = 20.0
+
+let test_result_returns_before_a_background_child_releases_the_pipes () =
+  with_fixture ~pipe_holder_s:pipe_holder_outliving_the_turn_s [ init (); result () ] (fun path ->
+    let started = Unix.gettimeofday () in
+    match run_fixture ~timeout_s:2.0 path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      let elapsed = Unix.gettimeofday () -. started in
+      check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text;
+      check bool
+        (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
+        true
+        (elapsed < turn_return_window_s))
 ;;
 
 (* #28912 second shape: the CLI itself never exits after the result
@@ -1072,6 +1202,10 @@ let () =
             `Quick
             test_result_completes_even_when_stdout_stays_open
         ; test_case
+            "result returns before a background child releases the pipes"
+            `Quick
+            test_result_returns_before_a_background_child_releases_the_pipes
+        ; test_case
             "result completes despite a shutdown hang"
             `Quick
             test_result_completes_when_the_cli_hangs_in_shutdown
@@ -1087,6 +1221,18 @@ let () =
             "wall-clock ceiling bounds a turn without idle deadline"
             `Quick
             test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline
+        ; test_case
+            "tool step outlasting the idle window completes"
+            `Quick
+            test_tool_step_outlasting_the_idle_window_completes
+        ; test_case
+            "idle window re-arms when the tool step ends"
+            `Quick
+            test_idle_window_rearms_when_the_tool_step_ends
+        ; test_case
+            "wall-clock ceiling bounds a tool step that never ends"
+            `Quick
+            test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends
         ; test_case
             "wall-clock ceiling hang-duration distribution"
             `Quick

@@ -239,15 +239,17 @@ let on_event ?(stream_scope = 0) t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.NDJSONParseFailed _
   | Agent_core.Types.SSEUnknownEventType _
   | Agent_core.Types.SSEUnsupportedPart _
-  | Agent_core.Types.SSEUnsupportedResponse _ -> discard_current_scope t
+  | Agent_core.Types.SSEUnsupportedResponse _
+  (* A liveness timeout ends the attempt like a provider failure; the media
+     block it left open never completes. *)
+  | Agent_core.Types.Timeout _ -> discard_current_scope t
   | Agent_core.Types.StreamIncomplete _
   | Agent_core.Types.StreamRepeating _
   | Agent_core.Types.MessageStart _
   | Agent_core.Types.ContentBlockStart _
   | Agent_core.Types.ContentBlockDelta _
   | Agent_core.Types.Connected
-  | Agent_core.Types.Ping
-  | Agent_core.Types.Timeout _ -> ()
+  | Agent_core.Types.Ping -> ()
 
 (* Reload placeholder for an oversize drop: no payload to serve (src = None),
    but the reader sees what was generated, its type, and how large it was

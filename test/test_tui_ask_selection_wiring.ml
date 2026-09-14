@@ -62,12 +62,23 @@ let test_the_two_modes_give_the_walk_one_name () =
    retained browser observations. Count the declared vocabulary so a new
    reader does not look like a second spelling of an existing container. *)
 let test_the_bracket_keys_keep_one_vocabulary () =
-  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:post"; "[/]:observation" ] in
+  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:observation" ] in
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
          (literals_in_the_drawing ~needle:name))
     names;
+  (* The Board read footer is built from the key table, so its walk is named
+     there as a key and a label rather than as one "[/]:post" literal. *)
+  List.iter
+    (fun needle ->
+       Alcotest.(check int)
+         (Printf.sprintf "the Board read footer names its walk with %S once" needle)
+         1
+         (Ast_grep.count_exact_string_literals_in_value_binding
+            ~module_path:"bin/masc_tui_keys.ml"
+            ~binding_name:"footer_hints_board_read" ~needle))
+    [ "[/]"; "post" ];
   Alcotest.(check int) "the question reader explains the same ask walk" 1
     (literals_in_the_drawing ~needle:"[/]: previous/next ask");
   Alcotest.(check int) "declared footer labels and one reader explanation"

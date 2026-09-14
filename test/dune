@@ -2667,6 +2667,8 @@
 
 (include stanzas/test_masc_error_is_retryable.inc)
 
+(include stanzas/test_masc_test_deps_fixture_sandbox.inc)
+
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 
 
@@ -3264,6 +3266,8 @@
   masc.masc_types
   masc_tui_footer
   masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
+  masc_tui_send_disposition
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -3351,6 +3355,7 @@
   fmt
   masc
   masc.masc_types
+  masc.keeper_chat_operations
   masc.ag_ui
   masc.server
   masc_tui_credential
@@ -3398,7 +3403,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc masc_tui_keeper_chat_live yojson))
+ (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_command)
@@ -3534,6 +3539,11 @@
   base64
   masc_tui_attachment
   masc
+  masc.server
+  masc.masc_types
+  masc.ag_ui
+  masc.keeper_runtime
+  masc.keeper_chat_delivery_identity
   masc.keeper_chat_operations
   masc.string_util
   masc_tui_keeper_chat_projection
@@ -5953,7 +5963,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries alcotest yojson unix eio eio_main masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -6087,4 +6097,11 @@
 
 (include stanzas/test_browser_bidi_peer.inc)
 
+
+
 (include stanzas/test_operator_media_inspection.inc)
+
+(test
+ (name test_tui_queue_inspection)
+ (modules test_tui_queue_inspection)
+ (libraries alcotest astring masc masc.keeper_runtime masc_tui_queue_inspection yojson))

@@ -30,6 +30,24 @@ val expand_turn_label : string
 (** How that key is printed on the folded line. Beside the byte so the name
     and the binding cannot drift apart. *)
 
+val voice_speak_key : string
+val voice_listen_key : string
+(** Ctrl-Y and Ctrl-A as the table spells them, for the rows that name them
+    beside a draft or a capture. *)
+
+val voice_keys_hint : string
+(** The two voice keys named for a reader looking at an empty draft; the
+    composer row and the chat pane draw this one string. *)
+
+val roster_toggle_key : string
+(** Ctrl-B, as the roster pane's title names it. *)
+
+val context_inspector_key : string
+val context_inspector_label : string
+(** Ctrl-X: the byte the chat matches and the name the context header prints
+    beside the figure it explains. The table lists no footer binding for it;
+    its home is that row. *)
+
 val global : binding list
 (** Shared bindings shown once in Help. Text input and modal panels can own a
     printable key before its cross-surface fallback runs; each such binding's
@@ -66,6 +84,14 @@ val footer_hints : Masc_tui_types.surface -> string
 val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
+
+val footer_hints_board_compose_writing : string
+(** The Board draft while it takes letters: a literal "type to write" and the
+    keys that are not letters. *)
+
+val footer_hints_board_compose_armed : reply:bool -> string
+(** The Board draft's send menu after Esc. [reply] drops the hearth cycle a
+    comment has no use for. *)
 
 val footer_hints_approval_detail : string
 (** The keys an open approval answers to. The decision keys are one item
@@ -104,6 +130,12 @@ val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
+
+val footer_hints_board_read : focus_posts:bool -> split:bool -> string
+(** The Board read footer. [focus_posts] is whether j/k moves the post list
+    beside the open post rather than scrolling it; [split] is whether that
+    list is on screen, which is when h/l and Ctrl-W have a pane to reach. The
+    vote, reply and copy keys are the Board surface list's own bindings. *)
 
 val footer_hints_fusion_detail : position:string -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends

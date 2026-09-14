@@ -1,5 +1,6 @@
 type unavailable =
-  | Missing_credential
+  | Missing_credential of string
+  | Invalid_credential of string
   | Unsupported_runtime
   | Tools_not_declared
   | Invalid_configuration of string
@@ -31,7 +32,8 @@ type result =
   }
 
 let failure_code = function
-  | Unavailable Missing_credential -> "missing_credential"
+  | Unavailable (Missing_credential _) -> "missing_credential"
+  | Unavailable (Invalid_credential _) -> "invalid_credential"
   | Unavailable Unsupported_runtime -> "unsupported_runtime"
   | Unavailable Tools_not_declared -> "tools_not_declared"
   | Unavailable (Invalid_configuration _) -> "invalid_configuration"
@@ -46,8 +48,10 @@ let failure_code = function
 ;;
 
 let failure_message = function
-  | Unavailable Missing_credential ->
+  | Unavailable (Missing_credential _) ->
     "The selected runtime's configured credential is unavailable."
+  | Unavailable (Invalid_credential _) ->
+    "The selected runtime's declared credential could not be used."
   | Unavailable Unsupported_runtime ->
     "This transport has no readiness tool roundtrip yet."
   | Unavailable Tools_not_declared -> "This model binding does not declare tool calling."
@@ -70,11 +74,13 @@ let failure_message = function
 (* The client already wrote an account of what it looked for and did not find;
    without this it is discarded and every unavailable client reads the same. *)
 let failure_detail = function
+  | Unavailable (Missing_credential detail)
+  | Unavailable (Invalid_credential detail)
   | Unavailable (Invalid_configuration detail)
   | Unavailable (Client_not_authenticated detail)
   | Unavailable (Client_not_started detail)
   | Provider_rejected detail -> Some detail
-  | Unavailable (Missing_credential | Unsupported_runtime | Tools_not_declared)
+  | Unavailable (Unsupported_runtime | Tools_not_declared)
   | Timed_out
   | Tool_not_called
   | Tool_result_not_consumed
@@ -111,21 +117,27 @@ let unfinished_run_reason (stop_reason : Runtime_agent.stop_reason) =
       request.Agent_core.Error.question
 ;;
 
+let schema = "masc.runtime_verification.v1"
+let unavailable_status = "unavailable"
+
+let status_of_failure = function
+  | None -> "verified"
+  | Some (Unavailable _) -> unavailable_status
+  | Some
+      ( Provider_rejected _ | Timed_out | Tool_not_called | Tool_result_not_consumed
+      | Empty_response | Model_unreported ) -> "failed"
+;;
+
 let to_json result =
   `Assoc
-    [ "schema", `String "masc.runtime_verification.v1"
+    [ "schema", `String schema
     ; "runtime_id", `String result.runtime_id
     ; "model", `String result.selected_model
     ; ( "observed_model"
       , match result.observed_model with
         | None -> `Null
         | Some model -> `String model )
-    ; ( "status"
-      , `String
-          (match result.failure with
-           | None -> "verified"
-           | Some (Unavailable _) -> "unavailable"
-           | Some _ -> "failed") )
+    ; "status", `String (status_of_failure result.failure)
     ; ( "checks"
       , `Assoc
           [ "response", `Bool result.response
@@ -149,11 +161,11 @@ let to_json result =
 
 let unavailable_to_json ?detail ~runtime_id ~code ~message () =
   `Assoc
-    [ "schema", `String "masc.runtime_verification.v1"
+    [ "schema", `String schema
     ; "runtime_id", `String runtime_id
     ; "model", `Null
     ; "observed_model", `Null
-    ; "status", `String "unavailable"
+    ; "status", `String unavailable_status
     ; ( "checks"
       , `Assoc
           [ "response", `Bool false
@@ -177,6 +189,169 @@ let exit_code result =
   | None -> 0
   | Some (Unavailable _) -> 2
   | Some _ -> 1
+;;
+
+type unmeasured =
+  { runtime_id : string
+  ; code : string
+  ; message : string
+  ; detail : string option
+  }
+
+type report =
+  | Measured of result
+  | Unmeasured of unmeasured
+
+(* The inverse of [failure_code] and [failure_detail]: a code that carries an
+   account must arrive with one, and a code that carries none must arrive
+   without, so a document cannot claim a detail the producer never wrote. *)
+let failure_of_code ~code ~detail =
+  match code, detail with
+  | "missing_credential", Some detail -> Ok (Unavailable (Missing_credential detail))
+  | "invalid_credential", Some detail -> Ok (Unavailable (Invalid_credential detail))
+  | "unsupported_runtime", None -> Ok (Unavailable Unsupported_runtime)
+  | "tools_not_declared", None -> Ok (Unavailable Tools_not_declared)
+  | "invalid_configuration", Some detail -> Ok (Unavailable (Invalid_configuration detail))
+  | "client_not_authenticated", Some detail ->
+    Ok (Unavailable (Client_not_authenticated detail))
+  | "client_not_started", Some detail -> Ok (Unavailable (Client_not_started detail))
+  | "provider_rejected", Some detail -> Ok (Provider_rejected detail)
+  | "timed_out", None -> Ok Timed_out
+  | "tool_not_called", None -> Ok Tool_not_called
+  | "tool_result_not_consumed", None -> Ok Tool_result_not_consumed
+  | "empty_response", None -> Ok Empty_response
+  | "model_unreported", None -> Ok Model_unreported
+  | ( ( "missing_credential" | "invalid_credential" | "invalid_configuration"
+      | "client_not_authenticated" | "client_not_started" | "provider_rejected" )
+    , None ) -> Error (Printf.sprintf "failure code %S arrived without its detail" code)
+  | ( ( "unsupported_runtime" | "tools_not_declared" | "timed_out" | "tool_not_called"
+      | "tool_result_not_consumed" | "empty_response" | "model_unreported" )
+    , Some _ ) -> Error (Printf.sprintf "failure code %S carries no detail" code)
+  | code, (None | Some _) -> Error (Printf.sprintf "unknown failure code %S" code)
+;;
+
+let ( let* ) = Result.bind
+
+let of_json json =
+  let object_fields ~name = function
+    | `Assoc fields ->
+      let rec unique = function
+        | [] -> true
+        | (key, _) :: rest -> (not (List.mem_assoc key rest)) && unique rest
+      in
+      if unique fields then Ok fields else Error (name ^ " repeats a key")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Tuple _
+    | `Variant _ -> Error (name ^ " is not an object")
+  in
+  let exact_keys ~name expected fields =
+    let actual = List.sort String.compare (List.map fst fields) in
+    if actual = List.sort String.compare expected
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "%s has keys %s, expected %s"
+           name
+           (String.concat "," actual)
+           (String.concat "," expected))
+  in
+  let string ~name = function
+    | `String value -> Ok value
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Tuple _ | `Variant _
+    | `Assoc _ -> Error (name ^ " is not a string")
+  in
+  let string_or_null ~name = function
+    | `Null -> Ok None
+    | `String value -> Ok (Some value)
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Tuple _ | `Variant _ | `Assoc _ ->
+      Error (name ^ " is neither a string nor null")
+  in
+  let bool ~name = function
+    | `Bool value -> Ok value
+    | `Null | `String _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Tuple _ | `Variant _
+    | `Assoc _ -> Error (name ^ " is not a boolean")
+  in
+  let* fields = object_fields ~name:"report" json in
+  let* () =
+    exact_keys
+      ~name:"report"
+      [ "schema"; "runtime_id"; "model"; "observed_model"; "status"; "checks"; "failure" ]
+      fields
+  in
+  let field key = List.assoc key fields in
+  let* found_schema = string ~name:"schema" (field "schema") in
+  let* () =
+    if String.equal found_schema schema
+    then Ok ()
+    else Error (Printf.sprintf "schema %S is not %S" found_schema schema)
+  in
+  let* runtime_id = string ~name:"runtime_id" (field "runtime_id") in
+  let* selected_model = string_or_null ~name:"model" (field "model") in
+  let* observed_model = string_or_null ~name:"observed_model" (field "observed_model") in
+  let* status = string ~name:"status" (field "status") in
+  let* checks = object_fields ~name:"checks" (field "checks") in
+  let* () = exact_keys ~name:"checks" [ "response"; "tool_called"; "tool_roundtrip" ] checks in
+  let* response = bool ~name:"checks.response" (List.assoc "response" checks) in
+  let* tool_called = bool ~name:"checks.tool_called" (List.assoc "tool_called" checks) in
+  let* tool_roundtrip =
+    bool ~name:"checks.tool_roundtrip" (List.assoc "tool_roundtrip" checks)
+  in
+  let* failure =
+    match field "failure" with
+    | `Null -> Ok None
+    | ( `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Tuple _
+      | `Variant _ | `Assoc _ ) as other ->
+      let* failure = object_fields ~name:"failure" other in
+      let* () = exact_keys ~name:"failure" [ "code"; "message"; "detail" ] failure in
+      let* code = string ~name:"failure.code" (List.assoc "code" failure) in
+      let* message = string ~name:"failure.message" (List.assoc "message" failure) in
+      let* detail = string_or_null ~name:"failure.detail" (List.assoc "detail" failure) in
+      Ok (Some (code, message, detail))
+  in
+  match selected_model, failure with
+  | Some selected_model, (None | Some _) ->
+    let* failure =
+      match failure with
+      | None -> Ok None
+      | Some (code, _, detail) ->
+        let* failure = failure_of_code ~code ~detail in
+        Ok (Some failure)
+    in
+    let derived = status_of_failure failure in
+    let* () =
+      if String.equal status derived
+      then Ok ()
+      else Error (Printf.sprintf "status %S disagrees with the failure (%s)" status derived)
+    in
+    let* () =
+      if tool_roundtrip = (failure = None)
+      then Ok ()
+      else Error "checks.tool_roundtrip disagrees with the failure"
+    in
+    Ok
+      (Measured
+         { runtime_id
+         ; selected_model
+         ; observed_model
+         ; response
+         ; tool_called
+         ; tool_roundtrip
+         ; failure
+         })
+  | None, None -> Error "a report without a model must carry a failure"
+  | None, Some (code, message, detail) ->
+    let* () =
+      if String.equal status unavailable_status
+      then Ok ()
+      else Error (Printf.sprintf "status %S on a report without a model" status)
+    in
+    let* () =
+      match observed_model, response, tool_called, tool_roundtrip with
+      | None, false, false, false -> Ok ()
+      | (None | Some _), (true | false), (true | false), (true | false) ->
+        Error "a report without a model claims an observation or a check"
+    in
+    Ok (Unmeasured { runtime_id; code; message; detail })
 ;;
 
 let input_schema =
@@ -300,7 +475,14 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         (match
            Runtime.validate_dispatch_credential ~provider_config:provider_cfg runtime
          with
-         | Error _ -> Error (Unavailable Missing_credential)
+         | Error (Runtime.Required_env_credential_missing _ as error) ->
+           Error
+             (Unavailable
+                (Missing_credential (Runtime.dispatch_credential_error_to_string error)))
+         | Error (Runtime.Declared_credential_unavailable _ as error) ->
+           Error
+             (Unavailable
+                (Invalid_credential (Runtime.dispatch_credential_error_to_string error)))
          | Ok () ->
            let seed =
              Runtime_inference.seed_of_thinking_support

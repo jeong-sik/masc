@@ -940,7 +940,7 @@ let test_remembered_turn_uses_current_policy () =
   Alcotest.(check bool) "first evidence handled" true (attempt meta);
   let changed = {meta with instructions = "explain only; do not execute"} in
   Alcotest.(check bool) "same trace policy change handled" true (attempt changed);
-  let task_id = Masc.Keeper_id.Task_id.of_string "task-42" |> Result.get_ok in
+  let task_id = Keeper_id.Task_id.of_string "task-42" |> Result.get_ok in
   let changed = {changed with current_task_id = Some task_id} in
   Alcotest.(check bool) "same trace task change handled" true (attempt changed);
   Alcotest.(check bool) "unchanged policy handled" true (attempt changed);
@@ -948,7 +948,7 @@ let test_remembered_turn_uses_current_policy () =
   match !seen with
   | (instructions, Some task, evidence) :: _ ->
     Alcotest.(check string) "current instructions" changed.instructions instructions;
-    Alcotest.(check bool) "current task" true (Masc.Keeper_id.Task_id.equal task_id task);
+    Alcotest.(check bool) "current task" true (Keeper_id.Task_id.equal task_id task);
     Alcotest.(check (list string)) "completed evidence survives policy refresh"
       completed_evidence evidence
   | _ -> Alcotest.fail "current policy was not delivered with completed evidence"

@@ -2900,12 +2900,26 @@ let help_lines ~width (state : state) =
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           let padding = Masc_tui_command.help_summary_padding text in
-           help_entry_rows ~width
-             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
-             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
-             ~column:(2 + Masc_tui_command.help_summary_column)
-             cmd.summary)
+           let column = 2 + Masc_tui_command.help_summary_column in
+           let summary_rows lead lead_cells =
+             help_entry_rows ~width ~lead ~lead_cells ~column cmd.summary
+           in
+           if 2 + Message_layout.display_width text > width then
+             (* The usage alone is wider than the panel, so it wrapped rather
+                than being cut. What the frame's ellipsis took was the tail of
+                the option list -- the part that says what the command
+                accepts: at a hundred columns [/addons] lost three of its six
+                subcommands and [/queue] two of its five, on the one screen
+                whose whole job is to say what can be typed. *)
+             List.map
+               (fun piece -> "  " ^ (Theme.warn ()) ^ piece ^ Ansi.reset)
+               (Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) text)
+             @ summary_rows (String.make column ' ') column
+           else
+             let padding = Masc_tui_command.help_summary_padding text in
+             summary_rows
+               (Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+               (2 + Message_layout.display_width (text ^ padding)))
          Masc_tui_command.catalog
     @ [ "" ]
   in

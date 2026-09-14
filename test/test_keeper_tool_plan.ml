@@ -455,6 +455,8 @@ let test_tasks_list_output_schema_admits_the_page_cursor () =
       ; "snapshot", `List []
       ; "matching_count", `Int 120
       ; "returned_count", `Int 20
+      ; "new_tasks", `List []
+      ; "new_tasks_count", `Int 0
       ; "truncated", `Bool true
       ; "next_cursor", `String "opaque-keyset-cursor"
       ]

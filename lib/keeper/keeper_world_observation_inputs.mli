@@ -21,7 +21,10 @@ type current_task_observation =
       }
 
 type claimable_task_identity =
-  { task_id : Keeper_id.Task_id.t }
+  { task_id : Keeper_id.Task_id.t
+  ; priority : int
+  ; created_at : string
+  }
 
 (** One task this keeper holds that declares exact Skill references.
     [held_task_id] is the task id; [held_skills] preserves source, package,

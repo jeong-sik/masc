@@ -35,6 +35,8 @@ let test_task_signals_reach_the_keeper_without_local_tool_semantics () =
       claimable_tasks =
         [ { Keeper_world_observation_inputs.task_id =
               Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
+          ; priority = 2
+          ; created_at = "2026-08-08T00:00:00Z"
           }
         ]
     };

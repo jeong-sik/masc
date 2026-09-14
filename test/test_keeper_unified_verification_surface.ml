@@ -366,6 +366,8 @@ let test_task_claim_present_for_claimable_backlog () =
       claimable_tasks =
         [ { Masc.Keeper_world_observation_inputs.task_id =
               Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
+          ; priority = 2
+          ; created_at = "2026-08-08T00:00:00Z"
           }
         ];
     }
@@ -381,6 +383,8 @@ let test_backlog_trigger_split () =
       claimable_tasks =
         [ { Masc.Keeper_world_observation_inputs.task_id =
               Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
+          ; priority = 2
+          ; created_at = "2026-08-08T00:00:00Z"
           }
         ];
     }

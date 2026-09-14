@@ -1612,7 +1612,9 @@ let tasks_list_task_item_schema =
    shape that was served. [snapshot] and the row statistics
    ([matching_count]/[returned_count]/[truncated]) are absent on the
    [unchanged] variant: it carries no rows, so row statistics would
-   contradict it. *)
+   contradict it. [new_tasks]/[new_tasks_count] name the newest visible
+   rows beside the claim-order page, so a task that sorts behind the page
+   is still reported; they are likewise absent on [unchanged]. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
@@ -1626,6 +1628,10 @@ let tasks_list_output_schema =
             [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
       ; "matching_count", `Assoc [ "type", `String "integer" ]
       ; "returned_count", `Assoc [ "type", `String "integer" ]
+      ; ( "new_tasks"
+        , `Assoc
+            [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
+      ; "new_tasks_count", `Assoc [ "type", `String "integer" ]
       ; "truncated", `Assoc [ "type", `String "boolean" ]
         (* Emitted by [Keeper_tool_task_runtime] only when a page is cut
            short; the last page carries none, so it stays optional. Absent

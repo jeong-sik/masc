@@ -62,6 +62,14 @@ let add config ~title ~created_by =
   | Error error -> failwith (Workspace.add_task_error_to_string error)
 ;;
 
+let add_with_priority config ~title ~created_by ~priority =
+  match
+    Workspace.add_task_with_result ~created_by config ~title ~priority ~description:""
+  with
+  | Ok created -> Keeper_id.Task_id.of_string created.task_id |> Result.get_ok
+  | Error error -> failwith (Workspace.add_task_error_to_string error)
+;;
+
 let snapshot config meta =
   Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
 ;;
@@ -79,7 +87,7 @@ let test_a_claimable_task_is_named () =
       add config ~title:"Wire the timeline panel" ~created_by:"someone-else"
     in
     match (snapshot config meta).claimable_tasks with
-    | [ { task_id } ] ->
+    | [ { task_id; _ } ] ->
       check string
         "the typed task id is carried"
         (Keeper_id.Task_id.to_string expected)
@@ -213,6 +221,12 @@ let revision_line_of frame =
     String.length line > 20 && String.equal (String.sub line 0 20) "- Backlog revision: ")
 ;;
 
+let contains haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.equal (String.sub haystack i n) needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
 let test_the_frame_states_the_backlog_revision () =
   with_config (fun config meta ->
     let _ = add config ~title:"Something to claim" ~created_by:"someone-else" in
@@ -244,6 +258,66 @@ let test_the_stated_revision_moves_with_the_backlog () =
       (Option.equal String.equal before after))
 ;;
 
+(* #29101: the claim-order rows are oldest-first within a priority, so a task
+   created minutes ago sorts behind every older sibling and past the render
+   budget. The frame must name it anyway, or the keeper never sees the work a
+   turn just added. *)
+let test_a_new_task_reaches_the_frame () =
+  with_config (fun config meta ->
+    (* More claimable rows than the claim window, so the newest window is
+       active and the fresh task would otherwise fall past the budget. *)
+    for index = 1 to 15 do
+      ignore
+        (add config ~title:(Printf.sprintf "Older %d" index) ~created_by:"someone-else")
+    done;
+    let fresh = add config ~title:"Fresh" ~created_by:"someone-else" in
+    (* Pin created_at so "newest" is unambiguous regardless of clock
+       resolution: every older task is strictly earlier than the fresh one. *)
+    let backlog = Workspace.read_backlog config in
+    let fresh_id = Keeper_id.Task_id.to_string fresh in
+    let tasks =
+      List.mapi
+        (fun index (task : Masc_domain.task) ->
+          let created_at =
+            if String.equal task.id fresh_id
+            then "2026-08-08T00:01:00Z"
+            else Printf.sprintf "2026-08-08T00:00:%02dZ" (index mod 60)
+          in
+          { task with created_at })
+        backlog.tasks
+    in
+    Workspace.write_backlog config { backlog with tasks };
+    let rendered = frame config meta in
+    check bool
+      "the frame names the newest task"
+      true
+      (contains rendered fresh_id);
+    check bool "the frame labels the newest window" true (contains rendered "Newly added"))
+;;
+
+(* The frame's "next to claim" rows are the head of [claimable_tasks], so that
+   list must be in the scheduler's own order -- priority, then created_at, then
+   id -- not the backlog's insertion order. *)
+let test_claimable_rows_are_in_claim_order () =
+  with_config (fun config meta ->
+    let low = add_with_priority config ~title:"Low" ~created_by:"someone-else" ~priority:3 in
+    let high = add_with_priority config ~title:"High" ~created_by:"someone-else" ~priority:1 in
+    let mid = add_with_priority config ~title:"Mid" ~created_by:"someone-else" ~priority:2 in
+    let ids =
+      (snapshot config meta).claimable_tasks
+      |> List.map (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
+        Keeper_id.Task_id.to_string row.task_id)
+    in
+    check
+      (list string)
+      "priority orders the rows, not insertion order"
+      [ Keeper_id.Task_id.to_string high
+      ; Keeper_id.Task_id.to_string mid
+      ; Keeper_id.Task_id.to_string low
+      ]
+      ids)
+;;
+
 let () =
   run "claimable_task_summaries"
     [ ( "revision"
@@ -264,6 +338,10 @@ let () =
             test_recovery_snapshot_is_not_claimable
         ; test_case "invalid stored task id makes snapshot non-authoritative" `Quick
             test_invalid_stored_task_id_makes_snapshot_non_authoritative
+        ; test_case "claimable rows are in claim order" `Quick
+            test_claimable_rows_are_in_claim_order
+        ; test_case "a new task reaches the frame" `Quick
+            test_a_new_task_reaches_the_frame
         ] )
     ]
 ;;

@@ -317,6 +317,61 @@ let test_tasks_list_reports_truncation () =
          U.(grown |> member "snapshot" |> to_list |> List.length))
 ;;
 
+(* #29101: the page is claim order -- oldest-first within a priority -- so the
+   newest task falls off [limit] first. The response must name it anyway, or a
+   caller reading the first page never learns the task exists. *)
+let test_tasks_list_names_the_newest_tasks () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       for index = 1 to 4 do
+         ignore
+           (Task.handle_keeper_task_tool
+              ~config
+              ~meta
+              ~name:"keeper_task_create"
+              ~args:
+                (`Assoc
+                  [ "title", `String (Printf.sprintf "task %d" index)
+                  ; "description", `String "newest fixture"
+                  ; "priority", `Int 3
+                  ]))
+       done;
+       let data =
+         match
+           (Task.handle_keeper_task_tool_with_outcome
+              ~config
+              ~meta
+              ~name:"keeper_tasks_list"
+              ~args:(`Assoc [ "limit", `Int 2 ]))
+             .data
+         with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let ids_of field =
+         U.(data |> member field |> to_list
+            |> List.map (fun row -> U.(row |> member "id" |> to_string)))
+       in
+       let page = ids_of "snapshot" in
+       let newest = ids_of "new_tasks" in
+       check int "the page holds the limit" 2 (List.length page);
+       check int "the newest window names every visible task" 4 (List.length newest);
+       check int "new_tasks_count agrees" 4 U.(data |> member "new_tasks_count" |> to_int);
+       (* The page is the two oldest; the newest window leads with a task the
+          page does not carry. *)
+       check bool "the newest row is off the page" false (List.mem (List.hd newest) page);
+       (* Both windows describe the same four tasks. *)
+       check int
+         "both windows describe the same backlog"
+         4
+         (List.length (List.sort_uniq String.compare (page @ newest))))
+;;
+
 (* Paging walks the whole backlog in a fixed order without a row repeating or
    vanishing between pages, the last page says so by carrying no cursor, and a
    cursor is refused -- never silently reset to page one -- when it is not one
@@ -476,6 +531,8 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
          ; "degraded"
          ; "kind"
          ; "matching_count"
+         ; "new_tasks"
+         ; "new_tasks_count"
          ; "projection"
          ; "returned_count"
          ; "revision"
@@ -1327,6 +1384,10 @@ let () =
             "keeper_tasks_list reports a truncated page"
             `Quick
             test_tasks_list_reports_truncation
+        ; test_case
+            "keeper_tasks_list names the newest tasks"
+            `Quick
+            test_tasks_list_names_the_newest_tasks
         ; test_case
             "keeper_tasks_list pages with a cursor"
             `Quick

@@ -408,6 +408,29 @@ let handle_keeper_task_tool_with_outcome
            Keeper_tasks_list_cursor.compare_key (page_key left) (page_key right))
        in
        let matching_count = List.length matching in
+       let row_to_yojson =
+         match projection with
+         | Compact -> Masc_domain.task_compact_to_yojson
+         | Full -> Masc_domain.task_to_yojson
+       in
+       (* New tasks are the ones a caller most needs to see and the ones the
+          claim-order page pushes furthest back: within a priority the page is
+          oldest-first, so a task created minutes ago sorts behind every older
+          sibling and falls past [limit]. The page order stays the claim order
+          (#29101); this section names the newest visible rows beside it so a
+          fresh task is never invisible on the first call. *)
+       let new_task_window = 10 in
+       let newest_first (left : Masc_domain.task) (right : Masc_domain.task) =
+         match String.compare right.created_at left.created_at with
+         | 0 -> String.compare right.id left.id
+         | order -> order
+       in
+       let new_tasks =
+         matching
+         |> List.sort newest_first
+         |> List.filteri (fun index _ -> index < new_task_window)
+       in
+       let new_tasks_json = `List (List.map row_to_yojson new_tasks) in
        (* The order is total -- priority, then created_at, then id -- so a page
           is "the first [limit] rows after the cursor's key" and the same row
           never appears on two pages nor vanishes between them. Eight tasks
@@ -431,11 +454,6 @@ let handle_keeper_task_tool_with_outcome
              (Keeper_tasks_list_cursor.to_string
                 { Keeper_tasks_list_cursor.after = page_key last; filter = call_filter })
          | true, [] | false, _ -> None
-       in
-       let row_to_yojson =
-         match projection with
-         | Compact -> Masc_domain.task_compact_to_yojson
-         | Full -> Masc_domain.task_to_yojson
        in
        let tasks_json = `List (List.map row_to_yojson tasks) in
        let revision =
@@ -468,6 +486,10 @@ let handle_keeper_task_tool_with_outcome
                  | None -> `Null
                  | Some cursor -> Keeper_tasks_list_cursor.to_yojson cursor )
              ; "snapshot", tasks_json
+               (* A fresh task changes this section even when the page rows do
+                  not, so an if_revision caller is not told `unchanged` while a
+                  new task sits outside its page. *)
+             ; "new_tasks", new_tasks_json
              ])
        in
        let response =
@@ -503,6 +525,8 @@ let handle_keeper_task_tool_with_outcome
                [ "matching_count", `Int matching_count
                ; "returned_count", `Int (List.length tasks)
                ; "truncated", `Bool (remaining > 0)
+               ; "new_tasks_count", `Int (List.length new_tasks)
+               ; "new_tasks", new_tasks_json
                ]
                @ (match next_cursor with
                   | Some next_cursor -> [ "next_cursor", `String next_cursor ]

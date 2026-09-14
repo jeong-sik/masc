@@ -1159,6 +1159,9 @@ let combine_prompt_sections sections =
    completion, so hiding any admitted row would claim the Keeper saw input that
    never reached its prompt. *)
 let claimable_task_render_budget_rows = 10
+let claimable_task_newly_added_rows = 3
+let claimable_task_next_to_claim_rows =
+  claimable_task_render_budget_rows - claimable_task_newly_added_rows
 
 let take n xs = List.filteri (fun i _ -> i < n) xs
 
@@ -1751,24 +1754,19 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
            match observation.claimable_tasks with
            | [] -> ()
            | summaries ->
-             let shown = take claimable_task_render_budget_rows summaries in
-             Buffer.add_string
-               ubuf
-               (String.concat
-                  ""
-                  (List.map
-                     (fun (summary :
-                            Keeper_world_observation_inputs.claimable_task_identity) ->
-                        Printf.sprintf
-                          "  - %s\n"
-                          (Yojson.Safe.to_string
-                             (`Assoc
-                                 [ ( "task_id"
-                                   , `String (Keeper_id.Task_id.to_string summary.task_id)
-                                   )
-                                 ])))
-                     shown));
-             if List.length summaries > List.length shown
+             let row (summary : Keeper_world_observation_inputs.claimable_task_identity) =
+               Printf.sprintf
+                 "  - %s\n"
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                        [ ( "task_id"
+                          , `String (Keeper_id.Task_id.to_string summary.task_id)
+                          )
+                        ]))
+             in
+             let next_to_claim = take claimable_task_next_to_claim_rows summaries in
+             Buffer.add_string ubuf (String.concat "" (List.map row next_to_claim));
+             if List.length summaries > List.length next_to_claim
              then
                Buffer.add_string
                  ubuf
@@ -1777,9 +1775,35 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                  ("  "
                   ^ render_fragment
                       Prompt_names.keeper_world_namespace_state_claimable_more
-                      [ "count", string_of_int (List.length summaries - List.length shown)
+                      [ "count", string_of_int (List.length summaries - List.length next_to_claim)
                       ]
-                  ^ "\n"));
+                  ^ "\n");
+             (* The rows above are claim order -- oldest-first within a
+                priority -- so a task created minutes ago sits behind every
+                older sibling and past the budget. Name the newest rows too, or
+                the keeper never sees the work this turn just added (#29101).
+                Only when the backlog is larger than the claim window: a short
+                backlog already shows every row above. *)
+             if List.length summaries > claimable_task_next_to_claim_rows
+             then (
+               let newest_first
+                     (left : Keeper_world_observation_inputs.claimable_task_identity)
+                     (right : Keeper_world_observation_inputs.claimable_task_identity)
+                 =
+                 match String.compare right.created_at left.created_at with
+                 | 0 ->
+                   String.compare
+                     (Keeper_id.Task_id.to_string right.task_id)
+                     (Keeper_id.Task_id.to_string left.task_id)
+                 | order -> order
+               in
+               let newly_added =
+                 summaries
+                 |> List.sort newest_first
+                 |> take claimable_task_newly_added_rows
+               in
+               Buffer.add_string ubuf "  Newly added (most recent):\n";
+               Buffer.add_string ubuf (String.concat "" (List.map row newly_added))));
          if observation.unclaimed_task_count > 0 && claimable_task_count = 0
          then
            Buffer.add_string

@@ -2770,6 +2770,83 @@ let test_complete_stream_idle_timeout_still_fires () =
   | Exit -> ()
 ;;
 
+let responses_sse_frame_created =
+  "event: response.created\n\
+   data: \
+   {\"type\":\"response.created\",\"response\":{\"id\":\"resp-prelude-1\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\",\"usage\":null}}\n\n"
+;;
+
+let responses_sse_frame_text_delta text =
+  Printf.sprintf
+    "event: response.output_text.delta\n\
+     data: \
+     {\"type\":\"response.output_text.delta\",\"output_index\":0,\"item_id\":\"msg_1\",\"delta\":%S}\n\n"
+    text
+;;
+
+let responses_sse_frame_completed text =
+  Printf.sprintf
+    "event: response.completed\n\
+     data: \
+     {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-prelude-1\",\"model\":\"gpt-5.5\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":%S}]}],\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n"
+    text
+;;
+
+(* The Responses surface opens with [response.created] before prefill. On
+   2026-09-10 a gpt-5.6-luna turn was cut 164 s in with "stream_idle_timeout_s
+   deadline exceeded while awaiting_first_delta": the opening frame had ended
+   the first-event wait, so the silent prefill sat under the 120 s inter-token
+   idle. Here the opening frame arrives at once, the first token 0.12 s later
+   (> idle 0.03, < first-event 1.0), and the turn must complete. *)
+let test_complete_stream_responses_prelude_keeps_first_event_budget () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, responses_sse_frame_created
+        ; 0.12, responses_sse_frame_text_delta "late"
+        ; 0.0, responses_sse_frame_completed "late"
+        ]
+    in
+    let config =
+      Provider_config.make
+        ~kind:Provider_config.OpenAI_compat
+        ~model_id:"gpt-5.5"
+        ~base_url:url
+        ~request_path:"/v1/responses"
+        ~temperature:0.0
+        ~max_tokens:100
+        ()
+    in
+    match
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.03
+        ~first_event_timeout_s:1.0
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()
+    with
+    | Ok resp ->
+      check string "text" "late" (text_of_response resp);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { message; _ }) ->
+      fail
+        (Printf.sprintf "the opening frame ended the first-event wait: %s" message)
+    | Error _ -> fail "expected the Responses stream to complete"
+  with
+  | Exit -> ()
+;;
+
 (* Bug #10 regression (38-bug campaign): actively streaming reasoning
    deltas are stream LIVENESS, not idleness. Each hidden-reasoning delta
    advances the injected mock clock by 6s, so the cumulative
@@ -4261,6 +4338,10 @@ let () =
             "stream idle timeout still fires"
             `Quick
             test_complete_stream_idle_timeout_still_fires
+        ; test_case
+            "Responses opening frame keeps the first-event budget"
+            `Quick
+            test_complete_stream_responses_prelude_keeps_first_event_budget
         ; test_case "streaming metrics" `Quick test_complete_stream_metrics
         ; test_case
             "OpenAI-compat stream captures llama-server timings"

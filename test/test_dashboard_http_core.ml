@@ -2223,6 +2223,7 @@ let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
         | Ok meta -> meta
         | Error error -> fail ("meta fixture: " ^ error)
       in
+      declare_fixture_keeper config name;
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error error -> fail ("write meta: " ^ error));

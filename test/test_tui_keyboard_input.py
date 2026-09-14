@@ -7545,6 +7545,16 @@ def context_inspector_interaction() -> Interaction:
             raise AssertionError(f"Cheat sheet title spells footer keys: {cheat_sheet!r}")
         if b"Esc:close" not in cheat_sheet:
             raise AssertionError(f"Cheat sheet footer lost its way out: {cheat_sheet!r}")
+        # A usage wider than its panel wrapped rather than being cut. At this
+        # terminal's hundred columns the sheet used to end /addons at
+        # "detach" with an ellipsis, so three of its six subcommands were off
+        # the one screen whose whole job is to say what can be typed. The
+        # needle is the tail, because that is the half that went missing.
+        for needle in (b"/addons [inspect|attach JSON|observe", b"evidence JSON]"):
+            if needle not in cheat_sheet:
+                raise AssertionError(
+                    f"Cheat sheet cut a slash usage, missing {needle!r}: {cheat_sheet!r}"
+                )
         # The /context disclosure this step used to assert is not here any
         # more: the cheat sheet lists keys, and the slash commands announce
         # themselves in the composer's hint line as the word is typed

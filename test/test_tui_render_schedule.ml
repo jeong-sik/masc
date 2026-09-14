@@ -291,7 +291,7 @@ let board_read_frame_rows ~body_line_count ~comment_count
     then 1
     else 0
   in
-  8
+  Schedule.board_read_box_rows
   + (if comment_count > 0 then 2 else 0)
   + 1
   + position_rows
@@ -357,7 +357,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
       ~comment_count:5
   in
   check int "14-row board keeps one body row" 1 crowded.body_rows;
-  check int "14-row board fits one comment" 1 crowded.comment_rows;
+  check int "14-row board fits two comments" 2 crowded.comment_rows;
   check int "14-row board frame is exact" 14
     (board_read_frame_rows ~body_line_count:10 ~comment_count:5 crowded);
   let comments_only =
@@ -365,19 +365,19 @@ let test_board_read_rows_reserve_comments_and_footer () =
       ~comment_count:5
   in
   check int "empty body consumes no semantic row" 0 comments_only.body_rows;
-  check int "empty body frees a second comment row" 2
+  check int "empty body frees a third comment row" 3
     comments_only.comment_rows;
   let no_comments =
     Schedule.allocate_board_read ~terminal_rows:14 ~body_line_count:10
       ~comment_count:0
   in
-  check int "comment-free board uses the full body viewport" 4
+  check int "comment-free board uses the full body viewport" 5
     no_comments.body_rows;
   let full_comments =
     Schedule.allocate_board_read ~terminal_rows:16 ~body_line_count:10
       ~comment_count:5
   in
-  check int "16-row board widens the thread" 3 full_comments.comment_rows;
+  check int "16-row board widens the thread" 4 full_comments.comment_rows;
   (* A tall terminal is where the old flat five hurt: a forty-reply thread got
      the same five rows on an eighty-row screen as on a twenty-row one. The
      share grows with the height, and the post still keeps the larger half. *)
@@ -401,7 +401,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
     Schedule.allocate_board_read ~terminal_rows:60 ~body_line_count:10
       ~comment_count:40
   in
-  check int "a short post hands its unused rows to the thread" 38
+  check int "a short post hands its unused rows to the thread" 40
     short_post.comment_rows;
   check int "the body keeps exactly the rows it has" 10 short_post.body_rows;
   for terminal_rows = 14 to 40 do
@@ -423,7 +423,9 @@ let test_board_read_rows_reserve_comments_and_footer () =
             terminal_rows comment_count;
         let ceiling =
           let chrome = if comment_count > 0 then 2 else 0 in
-          let available = max 0 (terminal_rows - 8 - 1 - chrome) in
+          let available =
+            max 0 (terminal_rows - Schedule.board_read_box_rows - 1 - chrome)
+          in
           max 5 (max (available - body_line_count) (available / 3))
         in
         if
@@ -466,10 +468,10 @@ let test_board_read_scroll_reaches_hidden_comments () =
       ~body_rows:allocation.body_rows ~comment_count:5
       ~comment_rows:allocation.comment_rows 99
   in
-  check int "overscroll normalizes to the combined maximum" 4
+  check int "overscroll normalizes to the combined maximum" 3
     last.normalized_scroll;
   check int "one-line body remains visible" 0 last.body_offset;
-  check int "last comment becomes visible" 4 last.comment_offset;
+  check int "last comment becomes visible" 3 last.comment_offset;
   let long_body =
     Schedule.project_board_read_scroll ~body_line_count:10 ~body_rows:1
       ~comment_count:5 ~comment_rows:3 10

@@ -350,16 +350,17 @@ def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
     What follows the number inside the parens is where those asks came from --
-    held calls, Gate rows, operator entries -- and the renderer writes that
-    breakdown whenever the count is above zero. Spelling the header as
-    "(3)" asserted the parenthesis closes right after the number, which is a
-    fact about that breakdown rather than about how many asks are waiting.
+    held calls, Gate rows, operator entries, only the ones with rows. With one
+    kind the number is that kind's, painted in its colour ("(3 op)"); with
+    more the total leads ("(5: 2 gate · 3 op)"). Spelling the header as "(3)"
+    asserted the parenthesis closes right after the number, which is a fact
+    about that breakdown rather than about how many asks are waiting.
     """
     return re.compile(
         re.escape(b"MASC Approvals")
-        + rb"(?:\x1b\[[0-9;]*m)* \("
+        + rb"(?:\x1b\[[0-9;]*m)* \((?:\x1b\[[0-9;]*m)*"
         + str(count).encode()
-        + rb"[ )]"
+        + rb"[ ):]"
     )
 
 
@@ -3216,22 +3217,25 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # One comment row at this height. The surface spends the rest on its box,
+    # Two comment rows at this height. The surface spends the rest on its box,
     # on the key footer, and on the "post rows" line it writes because the
     # thread does not fit -- so the budget the thread is left with is the
-    # smallest one this pane hands out.
-    for expected in (BOARD_CELL_BODY.encode(), b"comment-1", b"j/k:scroll"):
+    # smallest one this pane hands out. The box no longer spends a row on a
+    # list of keys the footer carries.
+    for expected in (
+        BOARD_CELL_BODY.encode(), b"comment-1", b"comment-2", b"j/k:scroll"
+    ):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
     if b"**comment-1**" in board:
         raise AssertionError(f"Board comment leaked Markdown source markers: {board!r}")
-    for hidden in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+    for hidden in (b"comment-3", b"comment-4", b"comment-5"):
         if hidden in board:
             raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
 
-    # With one comment row, each press moves the thread by one, and the whole
+    # With two comment rows, each press moves the thread by one, and the whole
     # thread is still reachable.
-    for comment in (b"comment-2", b"comment-3", b"comment-4", b"comment-5"):
+    for comment in (b"comment-3", b"comment-4", b"comment-5"):
         send_and_wait(process, master_fd, output, b"j", comment)
     os.write(master_fd, b"q")
 
@@ -3945,12 +3949,19 @@ def approval_selection_identity_interaction(
             timeout=3.0,
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(
+        landed = tab_until(
             process,
             master_fd,
             output,
             approvals_header(3),
         )
+        # Three operator entries, no held call, no Gate row: the title names
+        # the one kind that has rows and says no zero for the two that do not.
+        landed_plain = CSI_RE.sub(b"", frame_containing(landed, approvals_header(3)))
+        if b"MASC Approvals (3 op)" not in landed_plain or b"0 held" in landed_plain:
+            raise AssertionError(
+                f"Approvals title did not read its count by kind: {landed_plain!r}"
+            )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
         if not re.search(
@@ -4939,6 +4950,35 @@ def screen_row_of(rows: dict[int, bytes], needle: bytes) -> int:
 def screen_text(drawn: bytes) -> bytes:
     """The plain text of the screen, rows joined top to bottom."""
     return b"\n".join(text for _, text in sorted(screen_rows(drawn).items()))
+
+
+def assert_pane_surface_title_over_gap(
+    drawn: bytes, title: bytes, heading: bytes
+) -> None:
+    """A pane surface puts its gap row above its title, as every screen does.
+
+    Code and Resources drew the title straight under the strip and left the
+    gap to the pane, so alone on the surface the blank row fell between the
+    title and the pane's own heading. On the screen that reads as the title
+    one row higher than everywhere else and the heading as a detached block.
+    """
+    rows = screen_rows(drawn)
+    title_row = screen_row_of(rows, title)
+    if title_row < 3:
+        raise AssertionError(
+            f"{title!r} is at row {title_row}, not under the strip and a gap: "
+            f"{rows!r}"
+        )
+    if rows.get(title_row - 1, b"").strip():
+        raise AssertionError(
+            f"the row above {title!r} is not the gap: {rows.get(title_row - 1)!r}"
+        )
+    heading_row = screen_row_of(rows, heading)
+    if heading_row != title_row + 1:
+        raise AssertionError(
+            f"{heading!r} is at row {heading_row}, not under {title!r} at "
+            f"{title_row}: {rows!r}"
+        )
 
 
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
@@ -9140,6 +9180,22 @@ def planning_review_hierarchy_interaction() -> Interaction:
             raise AssertionError(
                 f"the Task Review title repeats the badge's count: {title!r}"
             )
+        # The request's detail: Created in the terminal's zone, not the
+        # server's RFC 3339 text with its offset, and the reading note whole
+        # rather than cut at the row's end.
+        send_and_wait(process, master_fd, output, b"\r", b"VERIFICATION REQUEST")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        created = rows.get(screen_row_of(rows, b"Created"), b"")
+        if b"+09:00" in created or not re.search(rb"Created\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", created):
+            raise AssertionError(
+                f"the request's Created is not the terminal's clock: {created!r}"
+            )
+        if screen_row_of(rows, b"inspect now.") < 0:
+            raise AssertionError(
+                f"the reading note was cut instead of wrapped: {screen_text(bytes(output))!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Task Review")
         verdicts = send_and_wait(
             process,
             master_fd,
@@ -10103,6 +10159,61 @@ def keeper_lanes_ia_interaction(
                     f"{lanes_plain!r}"
                 )
 
+        # The list is a table under one header, not five rows each carrying
+        # its own labels: the labels cost some forty cells a row, so beside
+        # the roster pane every row was cut at "runs 12", and the name column
+        # was a literal fifteen that "Workspace Curator" overran, pushing its
+        # whole row two cells right of the others. The header's words and the
+        # column each begins at are read in cells (one code point each here),
+        # and the lane whose name overran must start its status, its counts
+        # and its slots where the running lane and the header do.
+        lane_rows = {
+            row: text.decode("utf-8")
+            for row, text in screen_rows(bytes(output)).items()
+        }
+        header_row = screen_row_of(
+            screen_rows(bytes(output)), b"OK/FAIL/CANCEL"
+        )
+        if header_row < 0:
+            raise AssertionError(f"Lanes drew no column header: {lanes_plain!r}")
+        header = lane_rows[header_row]
+        column_words = (
+            "LANE", "STATUS", "ACTIVE", "RUNS", "OK/FAIL/CANCEL", "P50",
+            "SLOTS", "OBSERVED",
+        )
+        word_columns = [header.find(word) for word in column_words]
+        if word_columns != sorted(word_columns) or -1 in word_columns:
+            raise AssertionError(
+                f"Lanes header does not carry {column_words} in order: "
+                f"{header!r}"
+            )
+        status_column = header.index("STATUS")
+        counts_column = header.index("OK/FAIL/CANCEL")
+        slots_column = header.index("SLOTS")
+        for lane_name, status_word in (
+            ("Board Attention", "running "),
+            ("Workspace Curator", "idle "),
+        ):
+            row = lane_rows[
+                screen_row_of(screen_rows(bytes(output)), lane_name.encode())
+            ]
+            for column, cell in (
+                (status_column, status_word),
+                (counts_column, "12/0/0 "),
+                (slots_column, "glm-coding.glm-5-turbo "),
+            ):
+                if row.find(cell) != column:
+                    raise AssertionError(
+                        f"{lane_name} row puts {cell!r} at {row.find(cell)}, "
+                        f"header column is {column}: {row!r}"
+                    )
+        for own_label in ("slots glm", "runs 12", "ok/fail/cancel"):
+            if own_label in lanes_plain:
+                raise AssertionError(
+                    f"a lane row still carries its own label {own_label!r}: "
+                    f"{lanes_plain!r}"
+                )
+
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
         banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
@@ -10964,6 +11075,10 @@ def code_lane_interaction(
     for needle in ("lib", "README.md"):
         if needle not in plain:
             raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
+    drain_until_quiet(process, master_fd, output)
+    assert_pane_surface_title_over_gap(
+        bytes(output), b"MASC Workspace / Code", b"\xe2\x96\xb8 / (2)"
+    )
     send_and_wait(process, master_fd, output, b"\r", b"a.ml")
     # Which colour a keyword wears belongs to the theme, and the theme moves:
     # #30723 turned it bright magenta and this waited out its timeout on the
@@ -15626,6 +15741,12 @@ def resources_detail_interaction() -> Interaction:
         # the surface arrived loaded through the hop.
         tab_until(process, master_fd, output, b"MASC Config")
         send_and_wait(process, master_fd, output, b"s", b"Event Log (JSON)")
+        drain_until_quiet(process, master_fd, output)
+        assert_pane_surface_title_over_gap(
+            bytes(output),
+            b"MASC Config / Resources",
+            b"\xe2\x96\xb8 Resources",
+        )
         detail = send_and_wait(
             process, master_fd, output, b"\r", b'"status"'
         )

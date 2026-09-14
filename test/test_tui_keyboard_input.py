@@ -5781,12 +5781,13 @@ class AtomicChatFixture:
             raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
         if intent.get("control_token") != self.token:
             raise AssertionError(f"Enter used stale control authority: {request!r}")
-        if self.first_working and self.submitted:
-            expected = self.submitted[0]["request_id"]
-            if intent.get("operation_id") != expected or intent.get("interrupt_token") is not None:
-                raise AssertionError(f"working direct execution {expected} lost to stale autonomous observation: {request!r}")
-        elif intent.get("interrupt_token") != self.turn_token or intent.get("operation_id") is not None:
-            raise AssertionError(f"Enter did not bind the exact observed turn: {request!r}")
+        # Enter admits the line to run next and names nothing to stop. Until
+        # 2026-09-14 it bound the working direct execution, else the observed
+        # autonomous turn, as the interrupt target, so every line typed while
+        # the Keeper worked cancelled that work. Esc still targets the exact
+        # turn (see [interrupt] below); Enter must not.
+        if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to run next: {request!r}")
         with self.admitted:
             self.submitted.append(request)
             sequence = len(self.submitted)
@@ -5974,7 +5975,7 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
 
 
 def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
-    """A locally running direct turn outranks a stale autonomous poll for Enter and Esc."""
+    """Esc targets the locally running direct turn over a stale autonomous poll; Enter names nothing."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             open_atomic_chat(process, master_fd, output)

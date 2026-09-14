@@ -1,0 +1,44 @@
+Testing `exec shim'.
+This run has ID `M5OZHR9J'.
+
+  [OK]          env                  0   minimal base env.
+  [OK]          env                  1   base env defaults.
+  [OK]          env                  2   allowlist overlay survives.
+  [OK]          env                  3   runtime identity env survives an emp...
+  [OK]          env                  4   denylist beats allowlist.
+  [OK]          env                  5   denylist names.
+  [OK]          env                  6   denylist predicate.
+  [OK]          kill policy          0   on eof.
+  [OK]          kill policy          1   on timeout.
+  [OK]          kill policy          2   on child exit.
+  [OK]          trailer              0   exit status.
+  [OK]          trailer              1   signal + timeout.
+  [OK]          trailer              2   host signal numbers.
+  [OK]          config               0   ok.
+  [OK]          config               1   requires remote_root.
+  [OK]          config               2   rejects relative root.
+  [OK]          config               3   rejects unknown key.
+  [OK]          config               4   path entries.
+  [OK]          config               5   rejects a bad path.
+  [OK]          config               6   synthesize_env takes the config path.
+  [OK]          jail                 0   allows root itself.
+  [OK]          jail                 1   allows descendant.
+  [OK]          jail                 2   rejects escape.
+  [OK]          jail                 3   rejects dotdot escape.
+  [OK]          jail                 4   request root inside the host root is...
+  [OK]          jail                 5   a sibling endpoint root is not an es...
+  [OK]          jail                 6   request root outside the host root i...
+  [OK]          jail                 7   dispatch uses the request root.
+  [OK]          jail                 8   dispatch rejects a cwd outside the r...
+  [OK]          jail                 9   dispatch rejects a request root outs...
+  [OK]          jail                10   rejects missing cwd.
+  [OK]          io                   0   drain_fd.
+  [OK]          probe                0   identity.
+  [OK]          box                  0   child-owned boundary acknowledgement.
+  [OK]          box                  1   plan for mode.
+  [OK]          box                  2   scratch env.
+  [OK]          box                  3   scratch_root config.
+  [OK]          box                  4   support is consistent.
+
+Full test results in `/masc-work/goo-yang-bong/masc/_build/.sandbox/82a6a894bc04058360dc12949d2d636c/default/test/_build/_tests/exec shim'.
+Test Successful in 0.006s. 38 tests run.

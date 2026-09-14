@@ -224,7 +224,12 @@ type refusal_kind =
 
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
-    decides when to ask, and what each answer means. *)
+    decides when to ask, and what each answer means. Since review
+    5192723206 no refusal answer allows on its own: the box's ack channel
+    can only report the box failing to apply, never the payload being
+    blocked after "A", so every {!Observed_refused} keeps the judge under
+    every network mode until a path can observe attempts (a separate
+    observation channel). *)
 type observation =
   | Observed_result of boxed_execution
       (** Any payload result with an acknowledged enforced box. The result
@@ -273,11 +278,12 @@ val observed_refusal :
     [intent=Request_effect] bypasses static/Observe shortcuts in Auto Judge
     mode, but never bypasses permission or grants permission itself.
     [Observed_result] is returned through source {!Observed_in_box}.
-    [Observed_refused] defers to the judge unless [request.network_mode] is
-    [Network_none] and the refusal is {!Socket_denied} — a write refusal, or
-    a refusal whose cause the receipt does not name, keeps the judge even
-    under [Network_none], in which case it is returned through
-    {!Network_isolated} instead. [Observation_unavailable] always defers —
+    [Observed_refused] always defers to the judge under every network mode
+    (review 5192723206): the box's ack channel can only report the box
+    failing to apply, never the payload being blocked after "A", so no
+    refusal kind stands in for the route the keeper's own boundary
+    forecloses — until a path can observe attempts, a shortcut here would
+    key on the box not applying. [Observation_unavailable] always defers —
     no box could be built at all, which says nothing about what the request
     would have reached, network isolation included. *)
 val decide :

@@ -847,16 +847,20 @@ let run () =
                           from the syscall that failed -- the parent never
                           guesses it back out of stderr. The name crosses
                           the boundary pipe as the acknowledgement byte's
-                          companion: "R" + rule. *)
+                          companion: "R" + rule. [Bytes.sub] trims the NUL
+                          padding before matching: the C stub writes the
+                          rule name into a fixed 8-byte buffer and leaves
+                          the rest zeroed, so the raw bytes are never
+                          equal to the bare tag. *)
                        if restrict_self scratch deny_fs deny_net refusing_rule = 0
                        then ()
                        else begin
-                         match Bytes.to_string refusing_rule with
+                         match Bytes.sub_string refusing_rule 0 6 with
                          | "socket" -> raise Sandbox_refused_socket
                          | "write" -> raise Sandbox_refused_write
-                         | rule ->
+                         | padded ->
                            failwith
-                             ("box setup refused by unknown rule: " ^ rule)
+                             ("box setup refused by unknown rule: " ^ padded)
                        end)
                  , (fun () -> remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =

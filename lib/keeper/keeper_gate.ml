@@ -2078,41 +2078,15 @@ let decide_after_observation request ~observe =
            source
        in
        allow request source [ audit_receipt ]
-     | Observed_refused { status; stderr; refusal_kind } -> (
-       match (refusal_kind, request.network_mode) with
-       | Socket_denied, Some Keeper_types_profile_sandbox.Network_none ->
-         (* The box's socket rule refused the attempt, and this keeper's
-            own sandbox already cuts every network route at its boundary
-            (RFC-0415): that boundary is the proof, and the judge — whose
-            job is to weigh reachable effect — is not asked. A write
-            refusal would NOT be this: Network_none does not license a
-            write, and the owner's review conditions the shortcut on the
-            socket rule exactly. The refusal is not silently dropped: it
-            travels as the {!Network_isolated} audit source, and the caller
-            still dispatches the call for real (RFC-0422 §3.4's "no second
-            dispatch" applies only to {!Observed_in_box}, which this is
-            not — nothing ran yet). *)
-         Log.Keeper.info
-           ~keeper_name:request.keeper_name
-           "observe run refused operation=%s %s stderr_bytes=%d \
-            refusal_kind=socket_denied; network_mode=none reconfirmed, \
-            allowing without the judge"
-           request.operation
-           (status_label status)
-           (String.length stderr);
-         let source = Network_isolated { status; stderr } in
-         let audit_receipt =
-           audit_allow
-             request
-             ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-             source
-         in
-         allow request source [ audit_receipt ]
-       | _ ->
-         (* A write refusal (or an unnamed one) keeps the judge under any
-            network mode: Network_none forecloses the network route only.
-            The judge is shown what the box refused rather than left to
-            guess what the request would have done (RFC-0422 §3.3). *)
+     | Observed_refused { status; stderr; refusal_kind } ->
+       (* Review 5192723206: no refusal the box's own setup channel can
+          report justifies allowing without the judge — a setup failure is
+          the box NOT applying, and the ack channel cannot see attempts
+          after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
+          logs, a separate observation path). Until that path exists the
+          main-line rule holds: every refused observe keeps the judge, and
+          the refusal travels to the judge for weighing (RFC-0422 §3.3). *)
+       let () =
          Log.Keeper.info
            ~keeper_name:request.keeper_name
            "observe run refused operation=%s %s stderr_bytes=%d \
@@ -2120,8 +2094,9 @@ let decide_after_observation request ~observe =
            request.operation
            (status_label status)
            (String.length stderr)
-           (refusal_kind_tag refusal_kind);
-         defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested)
+           (refusal_kind_tag refusal_kind)
+       in
+       defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested
      | Observation_unavailable reason ->
        (* Unlike Observed_refused, no box could be built at all here — a
           missing shim, an unadvertised box, a dispatch the typed gate

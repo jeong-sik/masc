@@ -74,14 +74,18 @@ let observe t () : Keeper_gate.observation =
               ; stderr = result.stderr
               ; refusal_kind = Keeper_gate.Write_denied
               }
-          | Refused | Unavailable ->
-            (* Unattributed refusals (older shims) and absent evidence both
-               refuse towards the judge. *)
+          | Refused ->
+            (* An unattributed refusal (older shims) still refuses. *)
             Keeper_gate.Observed_refused
               { status = result.status
               ; stderr = result.stderr
               ; refusal_kind = Keeper_gate.Unspecified
-              })
+              }
+          | Unavailable ->
+            (* No acknowledgement: the box may or may not have applied.
+               That says nothing about a refusal -- say exactly that,
+               never dress an unknown up as an observed refusal. *)
+            Keeper_gate.Observation_unavailable "enforced_box_not_acknowledged")
        | Error error -> Keeper_gate.Observation_unavailable (unavailable_tag error))
   in
   t.outcome := Some outcome;

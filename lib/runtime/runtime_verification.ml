@@ -523,14 +523,32 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     (Agent_core.Tool.ignoring_execution_env handler)
                 ]
               in
+              (* The same [timeout_s] the CLI arms above install. The
+                 readiness run is synchronous, so the body deadline is the
+                 whole round trip, connection and response headers included
+                 (Http_client's sync path arms it in front of the headers when
+                 no connect budget is declared). Without it this arm had no
+                 bound at all: a binding whose endpoint accepted the request
+                 and never answered held `masc runtime verify` and the imp
+                 start-up check for as long as the socket stayed open, while
+                 the same command ended an official client at [timeout_s]. *)
               let config =
-                Runtime_agent.default_config
-                  ~name:"runtime-verification"
-                  ~provider_cfg
-                  ~system_prompt:prompt
-                  ~tools
+                { (Runtime_agent.default_config
+                     ~name:"runtime-verification"
+                     ~provider_cfg
+                     ~system_prompt:prompt
+                     ~tools)
+                  with
+                  body_timeout_s = Some timeout_s
+                }
               in
               (match Runtime_agent.run ~sw ~net ~config prompt with
+               | Error
+                   ( Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+                   | Agent_core.Error.Api (Agent_core.Retry.Timeout _) ) ->
+                 (* The deadline above, or the transport's own: the same
+                    verdict the CLI arms give their client's timeout. *)
+                 Error Timed_out
                | Error error ->
                  Error (Provider_rejected (Agent_core.Error.to_string error))
                | Ok result ->

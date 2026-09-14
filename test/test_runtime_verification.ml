@@ -254,6 +254,119 @@ streaming = true
     (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key)
 ;;
 
+(* The HTTP arm ran the readiness turn with no bound: [timeout_s] reached
+   the three CLI arms and not this one, so a binding whose endpoint accepted
+   the request and never answered held `masc runtime verify` and the imp
+   start-up check open. A loopback listener that accepts and stays silent
+   stands in for that endpoint; the verdict must be [Timed_out] inside the
+   window the command declared, not the outer guard this test holds. *)
+let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
+  let declared_timeout_s = 0.5 in
+  let slack_s = 2.5 in
+  let outer_guard_s = 10.0 in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let net = env#net in
+      let listening =
+        Eio.Net.listen
+          ~sw
+          ~backlog:5
+          ~reuse_addr:true
+          net
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+          let buf = Cstruct.create 4096 in
+          try
+            while true do
+              ignore (Eio.Flow.single_read flow buf)
+            done
+          with
+          | End_of_file | Eio.Io _ -> ()));
+      let port =
+        match Eio.Net.listening_addr listening with
+        | `Tcp (_, port) -> port
+        | `Unix _ -> fail "expected a TCP listening socket"
+      in
+      let config =
+        match
+          Runtime_toml.parse_string
+            (Printf.sprintf
+               {|
+[runtime]
+default = "silent.first"
+[providers.silent]
+display-name = "Silent endpoint"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+[providers.silent.credentials]
+type = "inline"
+value = "placeholder"
+[models.first]
+api-name = "first-model"
+max-context = 4096
+tools-support = true
+streaming = true
+[silent.first]
+|}
+               port)
+        with
+        | Ok config -> config
+        | Error _ -> fail "silent endpoint fixture parses"
+      in
+      let runtime =
+        match config.Runtime_schema.bindings with
+        | [ binding ] ->
+          (match Runtime.of_binding config binding with
+           | Ok runtime -> runtime
+           | Error reason -> fail (Runtime.string_of_drop_reason reason))
+        | [] | _ :: _ :: _ -> fail "silent endpoint fixture declares one binding"
+      in
+      let directory = Filename.temp_dir "runtime-verification-silent-" "" in
+      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+      let clock = env#clock in
+      let started = Eio.Time.now clock in
+      let result =
+        try
+          Some
+            (Eio.Time.with_timeout_exn clock outer_guard_s (fun () ->
+               Verify.verify
+                 ~secure_random:env#secure_random
+                 ~sw
+                 ~net
+                 ~mgr:env#process_mgr
+                 ~clock
+                 ~cwd:Eio.Path.(env#fs / directory)
+                 ~cwd_path:directory
+                 ~timeout_s:declared_timeout_s
+                 runtime))
+        with
+        | Eio.Time.Timeout -> None
+      in
+      let elapsed = Eio.Time.now clock -. started in
+      (match result with
+       | None ->
+         failf
+           "verify did not return inside the %.0fs guard: the HTTP arm has no bound"
+           outer_guard_s
+       | Some result ->
+         check
+           string
+           "a silent endpoint is a timed-out verification"
+           "timed_out"
+           (Yojson.Safe.Util.to_string (failure_field result "code")));
+      if elapsed < declared_timeout_s || elapsed >= declared_timeout_s +. slack_s
+      then
+        failf
+          "verify returned at %.2fs; the declared %.1fs timeout should have ended it \
+           inside [%.1f, %.1f)"
+          elapsed
+          declared_timeout_s
+          declared_timeout_s
+          (declared_timeout_s +. slack_s)))
+;;
+
 let test_inventory_keeps_all_models_and_no_secrets () =
   let config =
     {|
@@ -668,6 +781,10 @@ let () =
             "all configured model inventory"
             `Quick
             test_inventory_keeps_all_models_and_no_secrets
+        ; test_case
+            "a silent http endpoint ends at the declared timeout"
+            `Quick
+            test_a_silent_http_endpoint_ends_at_the_declared_timeout
         ] )
     ]
 ;;

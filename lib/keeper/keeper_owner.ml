@@ -33,15 +33,14 @@ type operation_interrupt_result =
   | Operation_interrupt_signalled
   | Operation_not_current of
       { running_operation_id : Operation_id.t option }
+  | Operation_settling
+  | Operation_maintenance_running
   | Operation_interrupt_failed of string
 
 type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
 
 type interrupt_target =
-  | Observed_turn of
-      { current : Keeper_registry_types.turn_switch option Atomic.t
-      ; interrupt_token : string
-      }
+  | Observed_turn of { interrupt_token : Keeper_interrupt_token.t }
   | Direct_operation of Chat_operation.Operation_id.t
 
 type run_next_result =
@@ -62,6 +61,7 @@ type turn_lane =
 type turn_in_flight =
   { lane : turn_lane
   ; started_at : float
+  ; interrupt_token : Keeper_interrupt_token.t
   }
 
 type autonomous_block =
@@ -277,6 +277,13 @@ type child_cancel =
   ; interrupt : unit -> unit
   }
 
+(* What a stop finds when it names the slot's occupant. *)
+type interrupt_resolution =
+  | Interrupt_now of (unit -> unit)
+  | Interrupt_settling
+  | Interrupt_maintenance_running
+  | Interrupt_not_current
+
 type t =
   { keeper_name : string
   ; mailbox : packed_command Eio.Stream.t
@@ -343,7 +350,9 @@ let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight 
   match left, right with
   | None, None -> true
   | Some left, Some right ->
-    left.lane = right.lane && Float.equal left.started_at right.started_at
+    left.lane = right.lane
+    && Float.equal left.started_at right.started_at
+    && Keeper_interrupt_token.equal left.interrupt_token right.interrupt_token
   | None, Some _ | Some _, None -> false
 ;;
 
@@ -916,7 +925,8 @@ let start
           t.child_active := true;
           publish_turn_in_flight
             t
-            (Some { lane = Chat_operation; started_at = t.now () });
+            (Some { lane = Chat_operation; started_at = t.now ()
+                  ; interrupt_token = Keeper_interrupt_token.fresh () });
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
             let claim () =
@@ -1003,18 +1013,41 @@ let start
           ))
     and loop state shutdown_operation_id =
         let exact_interrupt target =
+          (* Both names are compared against Owner state only. The token is the
+             one minted with the slot, so it lives exactly as long as the child
+             does; the inner agent switch a turn registers in [Keeper_registry]
+             ends earlier and cannot serve as a stop handle. The cancel
+             capability is the child's own switch: failing it reaches every
+             request and delivery fiber the child forked, and the child's real
+             teardown releases the slot.
+
+             [Fiber.fork] runs the child body before this loop resumes (Eio 1.3:
+             "fn runs immediately, without switching to any other fiber first")
+             and that body publishes [child_cancel] first. So a held slot with
+             an empty [child_cancel] means the execution has already returned
+             and only its durable settle is pending. Both names are checked
+             against the slot itself, so a durable projection that outlives a
+             released slot (a failed settle) cannot keep answering "settling".
+
+             A maintenance run holds the slot for an internal transaction
+             whose caller expects a value or a typed error, not an operator
+             cancellation; a chat stop names it and cancels nothing. *)
+          let resolve_held holds =
+            match Atomic.get t.turn_in_flight with
+            | None -> Interrupt_not_current
+            | Some _ when not holds -> Interrupt_not_current
+            | Some { lane = Maintenance; _ } -> Interrupt_maintenance_running
+            | Some _ ->
+              (match Atomic.get t.child_cancel with
+               | Some cancel -> Interrupt_now cancel.interrupt
+               | None -> Interrupt_settling)
+          in
           match target with
-          | Observed_turn { current; interrupt_token } ->
-            Ok (match Atomic.get current with
-             | Some turn when String.equal turn.interrupt_token interrupt_token ->
-               (* The token identifies the observed execution, but its inner
-                  agent switch does not own all request/delivery fibers. The
-                  stream boundary can catch that inner interruption as a typed
-                  result while an HTTP sibling still belongs to the Owner child.
-                  Cancel the owning child, exactly as request-id interruption
-                  does, and let its real teardown release the slot. *)
-               Option.map (fun cancel -> cancel.interrupt) (Atomic.get t.child_cancel)
-             | Some _ | None -> None)
+          | Observed_turn { interrupt_token } ->
+            Ok (resolve_held
+              (match Atomic.get t.turn_in_flight with
+               | Some turn -> Keeper_interrupt_token.equal turn.interrupt_token interrupt_token
+               | None -> false))
           | Direct_operation expected ->
             (* A member can observe Run_started before Batch_bound reaches its
                socket. Resolve only its immutable durable membership, never
@@ -1022,21 +1055,22 @@ let start
             (match run_operation_read t ~label:"resolve exact interrupt execution" (fun () ->
                Chat_operation_store.get t.operation_store expected) with
              | Error _ as error -> error
-             | Ok None -> Ok None
+             | Ok None -> Ok Interrupt_not_current
              | Ok (Some operation) ->
                let expected = match operation.Chat_operation.batch_membership with
                  | Some member -> member.execution_id
                  | None -> operation.operation_id in
-               Ok (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
-                 | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
-                 | _ -> None))
+               Ok (resolve_held
+                 (match (Atomic.get t.operation_projection).running_operation_id with
+                  | Some running -> Operation_id.equal running expected
+                  | None -> false)))
         in
         let signal_exact target =
-          let resolved = match target with None -> Ok None | Some target -> exact_interrupt target in
+          let resolved = match target with None -> Ok Interrupt_not_current | Some target -> exact_interrupt target in
           match resolved with
           | Error error -> false, Some (error_to_string error)
-          | Ok None -> false, None
-          | Ok (Some interrupt) ->
+          | Ok (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running) -> false, None
+          | Ok (Interrupt_now interrupt) ->
             (try interrupt (); true, None with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn -> false, Some (Printexc.to_string exn))
@@ -1189,7 +1223,7 @@ let start
             let ( let* ) = Result.bind in
             let* interrupt = exact_interrupt target in
             let* pending = match interrupt, target, expected_control_token with
-            | None, Direct_operation operation_id, Some token
+            | Interrupt_not_current, Direct_operation operation_id, Some token
               when String.equal token (chat_control_token t)
                 && not !(t.child_active)
                 && Option.is_none (Atomic.get t.turn_in_flight)
@@ -1199,19 +1233,22 @@ let start
               |> Result.map (function
                 | None | Some {Chat_operation.state = Queued; _} -> true
                 | Some {Chat_operation.state = (Running _ | Succeeded _ | Failed _ | Cancelled _); _} -> false)
-            | (Some _ | None), (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
+            | (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running | Interrupt_now _),
+              (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
             Ok (interrupt, pending) in
           (match authorization with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
-           | Ok (None, false) ->
+           | Ok (Interrupt_not_current, false) ->
              Eio.Promise.resolve resolve (Ok
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
            | Ok (interrupt, _) ->
              Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
              let result = match interrupt with
-               | None -> Pending_admission_paused
-               | Some interrupt -> Interrupt_result
+               | Interrupt_not_current -> Pending_admission_paused
+               | Interrupt_settling -> Interrupt_result Operation_settling
+               | Interrupt_maintenance_running -> Interrupt_result Operation_maintenance_running
+               | Interrupt_now interrupt -> Interrupt_result
                    (try interrupt (); Operation_interrupt_signalled with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
@@ -1237,9 +1274,12 @@ let start
         | Command (Interrupt_running_operation expected, resolve) ->
           let response = match exact_interrupt (Direct_operation expected) with
             | Error _ as error -> error
-            | Ok None -> Ok (Operation_not_current
+            | Ok Interrupt_not_current ->
+              Ok (Operation_not_current
                 {running_operation_id = (Atomic.get t.operation_projection).running_operation_id})
-            | Ok (Some interrupt) ->
+            | Ok Interrupt_settling -> Ok Operation_settling
+            | Ok Interrupt_maintenance_running -> Ok Operation_maintenance_running
+            | Ok (Interrupt_now interrupt) ->
               Ok (try interrupt (); Operation_interrupt_signalled with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
@@ -1507,7 +1547,8 @@ let start
                    t.child_active := true;
                    publish_turn_in_flight
                      t
-                     (Some { lane; started_at = t.now () });
+                     (Some { lane; started_at = t.now ()
+                           ; interrupt_token = Keeper_interrupt_token.fresh () });
                    Eio.Fiber.fork ~sw (fun () ->
                      let outcome =
                        try

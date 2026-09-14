@@ -1648,11 +1648,15 @@ let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
        fail "stale interrupt signalled the replacement operation"
    | Ok (Owner.Operation_not_current { running_operation_id = None }) ->
        fail "replacement lost its running identity"
+   | Ok Owner.Operation_settling -> fail "a finished operation was reported as settling"
+   | Ok Owner.Operation_maintenance_running -> fail "a finished operation was reported as maintenance running"
    | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
    | Error error -> fail (Owner.error_to_string error));
   (match Owner.interrupt_running_operation owner second_id with
    | Ok Owner.Operation_interrupt_signalled -> ()
    | Ok (Owner.Operation_not_current _) -> fail "exact replacement was not current"
+   | Ok Owner.Operation_settling -> fail "the running replacement was reported as settling"
+   | Ok Owner.Operation_maintenance_running -> fail "the running replacement was reported as maintenance running"
    | Ok (Owner.Operation_interrupt_failed detail) -> fail detail
    | Error error -> fail (Owner.error_to_string error));
   let terminal = await_terminal owner second_id 1_000 in
@@ -1669,10 +1673,37 @@ let test_exact_operation_interrupt_cannot_cancel_its_replacement () =
    crosses systhreads (store reads and writes) that a yield loop spins past;
    CI expired 1_000 yields before the second input had claimed. *)
 let fixture_start_deadline_s = 5.0
+let slot_release_poll_s = 0.01
 
 let next_started ~clock stream =
   try Eio.Time.with_timeout_exn clock fixture_start_deadline_s (fun () -> Eio.Stream.take stream)
   with Eio.Time.Timeout -> fail "no queued input started within the fixture deadline"
+;;
+
+let observed_token owner =
+  match Owner.turn_in_flight owner with
+  | Some (turn : Owner.turn_in_flight) -> turn.interrupt_token
+  | None -> fail "no turn in flight to observe"
+;;
+
+let interrupt_turn ?expected_control_token owner target =
+  match fst (owner_ok (Owner.interrupt_turn ?expected_control_token owner target)) with
+  | Owner.Interrupt_result result -> result
+  | Owner.Pending_admission_paused -> fail "expected interrupt result, got pending admission paused"
+;;
+
+(* The Owner loop releases the slot after a settle whose store commit runs in
+   a systhread, so the wait has to let real time pass: a yield loop over an
+   atomic spends its budget in microseconds, before that commit returns. *)
+let await_slot_released ~clock owner =
+  let rec loop () =
+    if Option.is_some (Owner.turn_in_flight owner)
+    then (
+      Eio.Time.sleep clock slot_release_poll_s;
+      loop ())
+  in
+  try Eio.Time.with_timeout_exn clock fixture_start_deadline_s loop with
+  | Eio.Time.Timeout -> fail "the turn slot was not released within the fixture deadline"
 ;;
 
 let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
@@ -1699,8 +1730,9 @@ let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
     [first; second; third; fourth];
   check bool "first started" true
     (Chat_operation.Operation_id.equal first (next_started ~clock started));
-  (match fst (owner_ok (Owner.interrupt_turn owner (Direct_operation first))) with
-   | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
+  let first_token = observed_token owner in
+  (match interrupt_turn owner (Observed_turn { interrupt_token = first_token }) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
   let terminal = await_terminal owner first 1_000 in
   (match terminal.state with
    | Chat_operation.Failed { failure = { kind; _ }; _ } ->
@@ -1711,16 +1743,22 @@ let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
     (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
   check bool "the next queued input starts on its own" true
     (Chat_operation.Operation_id.equal second (next_started ~clock started));
-  (match fst (owner_ok (Owner.interrupt_turn owner (Direct_operation first))) with
-   | Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "settled execution was signalled");
-  (* [third] is queued ahead of [fourth]; run-next puts [fourth] first. *)
-  (match owner_ok (Owner.run_next_operation owner ~operation_id:fourth ~observed:None) with
-   | Owner.Run_next_applied { signalled = false; interrupt_error = None } -> ()
-   | Owner.Run_next_applied _ -> fail "run-next without an observed turn signalled something"
+  check bool "the successor carries its own token" false
+    (Keeper_interrupt_token.equal first_token (observed_token owner));
+  (match interrupt_turn owner (Observed_turn { interrupt_token = first_token }) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "a finished turn's token named its successor");
+  (match interrupt_turn owner (Direct_operation first) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "settled execution was signalled");
+  (* [third] is queued ahead of [fourth]; run-next puts [fourth] first and,
+     given the observed turn's token, stops [second] in the same command. *)
+  (match owner_ok (Owner.run_next_operation owner ~operation_id:fourth
+                     ~observed:(Some (Observed_turn { interrupt_token = observed_token owner }))) with
+   | Owner.Run_next_applied { signalled = true; interrupt_error = None } -> ()
+   | Owner.Run_next_applied _ -> fail "run-next did not signal the observed turn"
    | Owner.Run_next_paused -> fail "run-next was refused without an operator pause");
-  (match fst (owner_ok (Owner.interrupt_turn owner (Direct_operation second))) with
-   | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "second stop was not signalled");
-  ignore (await_terminal owner second 1_000);
+  (match (await_terminal owner second 1_000).state with
+   | Chat_operation.Failed { failure = { kind = Chat_operation.Turn_cancelled; _ }; _ } -> ()
+   | _ -> fail "run-next did not settle the observed turn as cancelled");
   check bool "the prioritized input starts before the one queued ahead of it" true
     (Chat_operation.Operation_id.equal fourth (next_started ~clock started));
   (* Only an operator's explicit pause closes admission. *)
@@ -1735,8 +1773,8 @@ let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
   (* Wind the fixture down. The fourth input still executes under the test
      switch, which cannot close around it; the operator pause keeps the third
      and fifth queued once it settles. *)
-  (match fst (owner_ok (Owner.interrupt_turn owner (Direct_operation fourth))) with
-   | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "fourth stop was not signalled");
+  (match interrupt_turn owner (Direct_operation fourth) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "fourth stop was not signalled");
   ignore (await_terminal owner fourth 1_000);
   for _ = 1 to 10 do Eio.Fiber.yield () done;
   check bool "the operator pause keeps the queue closed after the stop" true
@@ -1831,18 +1869,224 @@ let test_pending_stop_cannot_pause_different_active_child () =
 ;;
 
 let test_stale_chat_interrupt_cannot_cancel_a_successor () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 4 in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel ()
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some operation_executor) ~keeper_name:"stale-chat-stop"
+    ~initial_meta:(Some (make_meta "stale-chat-stop")) ()) in
+  let first = operation_id "stale-first" and second = operation_id "stale-second" in
+  List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first; second];
+  check bool "first started" true
+    (Chat_operation.Operation_id.equal first (next_started ~clock started));
+  let stale = observed_token owner in
+  (match interrupt_turn owner (Direct_operation first) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "first stop was not signalled");
+  ignore (await_terminal owner first 1_000);
+  check bool "second started" true
+    (Chat_operation.Operation_id.equal second (next_started ~clock started));
+  (match interrupt_turn owner (Observed_turn { interrupt_token = stale }) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "stale token cancelled the successor");
+  ignore (interrupt_turn owner (Direct_operation second));
+  ignore (await_terminal owner second 1_000)
+;;
+
+(* When a turn has already returned, its child switch has ended and only the
+   durable settle (and any settle hooks) is pending. A chat stop at that point
+   has nothing left to cancel: the Owner reports Operation_settling without
+   cancelling the durable settle, and the slot is released when that settle
+   completes. *)
+let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 1 in
+  let settling, mark_settling = Eio.Promise.create () in
+  let release, allow_release = Eio.Promise.create () in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Owner.Operation_succeeded { outcome_ref = "ok" }
+  in
+  let runner =
+    let base = default_runner sw in
+    { base with
+      execute = operation_executor
+    ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ ->
+        Eio.Promise.resolve mark_settling ();
+        Eio.Promise.await release)
+    }
+  in
+  let owner = owner_ok (Owner.start ~sw
+    ~keeper_name:"settle-stop"
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~runner ~initial_meta:(Some (make_meta "settle-stop")) ()) in
+  let only = operation_id "settle-only" in
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:only ~source:operation_source ~input:(operation_input "wait")));
+  check bool "started" true
+    (Chat_operation.Operation_id.equal only (next_started ~clock started));
+  let token = observed_token owner in
+  Eio.Promise.await settling;
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_settling -> () | _ -> fail "a returned execution was reported as cancellable");
+  (match interrupt_turn owner (Direct_operation only) with
+   | Owner.Operation_settling -> () | _ -> fail "a returned operation was reported as cancellable");
+  Eio.Promise.resolve allow_release ();
+  ignore (await_terminal owner only 1_000);
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "a released slot reported settling");
+  (match interrupt_turn owner (Direct_operation only) with
+   | Owner.Operation_not_current _ -> () | _ -> fail "a settled operation reported settling")
+;;
+
+(* When the durable settle fails (a broken store), the slot is still released
+   by the child's real teardown, even though the durable projection may still
+   name the operation as running. A stop naming that operation id or the slot's
+   former token must not report Operation_settling forever: both names are
+   resolved against the slot itself, which is empty. *)
+let test_chat_stop_after_a_failed_settle_names_nothing_current () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 1 in
+  let owner_cell = ref None in
+  let token_cell = ref None in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    (* The slot and its token are published before the child is forked, so
+       the executor sees the token the client would have read. *)
+    (match !owner_cell with
+     | Some owner -> token_cell := Some (observed_token owner)
+     | None -> fail "the executor ran before the owner was published");
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    (* The claim has committed; the next commit is this execution's settle. *)
+    Keeper_chat_operation_store.For_testing.fail_next_commit
+      Keeper_chat_operation_store.For_testing.Fail_before_commit;
+    Owner.Operation_succeeded { outcome_ref = "never durable" }
+  in
+  Fun.protect
+    ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+    (fun () ->
+       let owner = owner_ok (start_owner_with_executor ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor) ~keeper_name:"failed-settle"
+         ~initial_meta:(Some (make_meta "failed-settle")) ()) in
+       owner_cell := Some owner;
+       let only = operation_id "failed-settle-only" in
+       ignore (owner_ok (Owner.submit_operation owner
+         ~operation_id:only ~source:operation_source ~input:(operation_input "settle fails")));
+       check bool "started" true
+         (Chat_operation.Operation_id.equal only (next_started ~clock started));
+       await_slot_released ~clock owner;
+       let token = match !token_cell with
+         | Some token -> token | None -> fail "the executor observed no token" in
+       (match interrupt_turn owner (Direct_operation only) with
+        | Owner.Operation_not_current { running_operation_id = Some running }
+          when Chat_operation.Operation_id.equal running only -> ()
+        | Owner.Operation_settling ->
+          fail "a released slot was reported as settling from the durable projection alone"
+        | _ -> fail "a failed settle's operation was not reported as not current");
+       match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+       | Owner.Operation_not_current { running_operation_id = Some running }
+         when Chat_operation.Operation_id.equal running only -> ()
+       | _ -> fail "a released slot's token still named something")
+;;
+
+(* A maintenance run is an internal transaction (paused-work transfer,
+   operator queue execute); its caller matches a value or a typed error, not
+   an operator cancellation. The slot it holds carries a token like any other
+   running turn, so the TUI offers Esc for it; the Owner answers and cancels
+   nothing. *)
+let test_chat_stop_leaves_a_maintenance_run_alone () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let owner = owner_ok (start_owner_with_executor ~sw
-    ~store:{ replace = (fun _ -> fail "a stale token wrote metadata"); remove = (fun _ -> Ok ()) }
-    ~operation_executor:None ~keeper_name:"stale-chat-stop"
-    ~initial_meta:(Some (make_meta "stale-chat-stop")) ()) in
-  Eio.Switch.run @@ fun successor ->
-  let current = Atomic.make (Some { Keeper_registry_types.interrupt_token = "successor"; switch = successor }) in
-  (match fst (owner_ok (Owner.interrupt_turn owner (Observed_turn { current; interrupt_token = "old" }))) with
-   | Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "stale token was accepted");
-  check bool "the successor's switch is untouched" true
-    (Option.is_none (Eio.Switch.get_error successor))
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:None ~keeper_name:"maintenance-stop"
+    ~initial_meta:(Some (make_meta "maintenance-stop")) ()) in
+  let started, mark_started = Eio.Promise.create () in
+  let release, allow_release = Eio.Promise.create () in
+  let outcome = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add outcome
+      (Owner.run_maintenance_if_idle owner (fun () ->
+         Eio.Promise.resolve mark_started ();
+         Eio.Promise.await release;
+         "transaction committed")));
+  Eio.Promise.await started;
+  (match Owner.turn_in_flight owner with
+   | Some { lane = Owner.Maintenance; _ } -> ()
+   | _ -> fail "the maintenance run does not hold the slot");
+  let token = observed_token owner in
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_maintenance_running -> ()
+   | _ -> fail "a chat stop reached a maintenance run");
+  (match interrupt_turn owner (Direct_operation (operation_id "maintenance-stop-op")) with
+   | Owner.Operation_not_current _ -> ()
+   | _ -> fail "an operation id named a maintenance slot");
+  Eio.Promise.resolve allow_release ();
+  (match Eio.Stream.take outcome with
+   | Ok (`Ran "transaction committed") -> ()
+   | Ok (`Ran _) | Ok (`Busy _) -> fail "the maintenance run did not complete as it would have"
+   | Error error -> fail (Owner.error_to_string error));
+  check bool "the slot is released after the run" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
+(* Esc pressed again while the first stop is still tearing the child down
+   signals again: the handle is published until the execution returns, and
+   failing an already failed switch is not an error. *)
+let test_second_stop_during_teardown_still_signals () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 1 in
+  let tearing_down, mark_tearing_down = Eio.Promise.create () in
+  let release, allow_release = Eio.Promise.create () in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation | None -> fail "expected claim" in
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    (try Eio.Fiber.await_cancel () with
+     | Eio.Cancel.Cancelled _ ->
+       Eio.Cancel.protect (fun () ->
+         Eio.Promise.resolve mark_tearing_down ();
+         Eio.Promise.await release));
+    Owner.Operation_failed
+      { kind = Chat_operation.Turn_cancelled
+      ; detail = Keeper_registry_types.operator_interrupt_detail
+      ; outcome_ref = None
+      }
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some operation_executor) ~keeper_name:"second-stop"
+    ~initial_meta:(Some (make_meta "second-stop")) ()) in
+  let only = operation_id "second-stop-only" in
+  ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:only ~source:operation_source ~input:(operation_input "wait")));
+  check bool "started" true (Chat_operation.Operation_id.equal only (next_started ~clock started));
+  let token = observed_token owner in
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "first stop was not signalled");
+  Eio.Promise.await tearing_down;
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "second stop during teardown was refused");
+  Eio.Promise.resolve allow_release ();
+  (match (await_terminal owner only 1_000).state with
+   | Chat_operation.Failed { failure = { kind = Chat_operation.Turn_cancelled; _ }; _ } -> ()
+   | _ -> fail "the twice-stopped turn did not settle as cancelled")
 ;;
 
 let run_observed_control_with_request_owned_stalled_http ~interactive =
@@ -1868,7 +2112,6 @@ let run_observed_control_with_request_owned_stalled_http ~interactive =
   let http_cancelled, mark_http_cancelled = Eio.Promise.create () in
   let turn_ready, mark_turn_ready = Eio.Promise.create () in
   let successor_started = ref false in
-  let current = Atomic.make None in
   let first = operation_id "observed-stop-http" in
   let queued = operation_id "observed-stop-queued" in
   let operation_executor ~sw ~keeper_name:_ ~claim =
@@ -1891,9 +2134,8 @@ let run_observed_control_with_request_owned_stalled_http ~interactive =
       with Eio.Cancel.Cancelled _ as exn ->
         Eio.Promise.resolve mark_http_cancelled ();
         raise exn);
-    (try Eio.Switch.run (fun inner ->
-      Atomic.set current (Some {Keeper_registry_types.interrupt_token="observed";switch=inner});
-      Eio.Switch.on_release inner (fun () -> Atomic.set current None);
+    (* The inner agent switch is not a stop handle; the Owner's token is. *)
+    (try Eio.Switch.run (fun _inner ->
       Eio.Promise.resolve mark_turn_ready ();
       Eio.Fiber.await_cancel ())
      with exn when Keeper_registry_types.is_operator_interrupt exn -> ());
@@ -1914,13 +2156,13 @@ let run_observed_control_with_request_owned_stalled_http ~interactive =
     let acceptance, receipt = owner_ok (Owner.submit_interactive_operation owner
       ~operation_id:queued ~source:operation_source ~input:(operation_input "new question")
       ~intent:{control_token=Owner.chat_control_token owner;
-        target=Some (Observed_turn {current;interrupt_token="observed"})}) in
+        target=Some (Observed_turn { interrupt_token = observed_token owner })}) in
     check bool "Enter persists a new operation" false acceptance.existing;
     check bool "Enter signals the exact running owner" true
       (receipt.outcome=Owner.Applied && receipt.signalled && not receipt.resumed);
     check bool "Enter leaves consumption open" false (Option.get (Owner.projection owner).meta).paused)
   else
-    (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"}))) with
+    (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn { interrupt_token = observed_token owner }))) with
      | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
   let cancelled = Eio.Fiber.first
     (fun () -> Eio.Promise.await http_cancelled; true)
@@ -3628,6 +3870,14 @@ let () =
             test_chat_interrupt_cancels_the_turn_and_the_queue_continues
         ; test_case "stale chat stop cannot cancel a successor" `Quick
             test_stale_chat_interrupt_cannot_cancel_a_successor
+        ; test_case "chat stop during the settle has nothing to cancel" `Quick
+            test_chat_interrupt_during_settle_has_nothing_to_cancel
+        ; test_case "chat stop leaves a maintenance run alone" `Quick
+            test_chat_stop_leaves_a_maintenance_run_alone
+        ; test_case "chat stop after a failed settle names nothing current" `Quick
+            test_chat_stop_after_a_failed_settle_names_nothing_current
+        ; test_case "second stop during teardown still signals" `Quick
+            test_second_stop_during_teardown_still_signals
         ; test_case "observed Esc cancels request-owned stalled HTTP" `Quick
             test_observed_stop_cancels_request_owned_stalled_http
         ; test_case "interactive Enter consumes input after cancelling stalled HTTP" `Quick

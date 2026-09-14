@@ -410,8 +410,6 @@ let handle_keeper_turns_list state request reqd =
          ])
   | keeper_names ->
     let row keeper_name =
-      let interrupt_token = Keeper_registry.current_turn_interrupt_token
-        ~base_path:config.base_path keeper_name in
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
       with
@@ -449,11 +447,7 @@ let handle_keeper_turns_list state request reqd =
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
               ; ("started_at_unix", `Float turn.started_at)
-              ; ("interrupt_token",
-                  if interrupt_token = Keeper_registry.current_turn_interrupt_token
-                    ~base_path:config.base_path keeper_name then
-                    Option.fold ~none:`Null ~some:(fun token -> `String token) interrupt_token
-                  else `Null)
+              ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
               ; ("preview", preview_json)
               ]
         in
@@ -553,14 +547,14 @@ let handle_keeper_run_next state ~actor request reqd =
       | `Assoc fields ->
         (match List.assoc_opt "name" fields, List.assoc_opt "request_id" fields,
           List.assoc_opt "interrupt_token" fields with
-         | Some (`String name), Some (`String id), token when String.trim name <> "" ->
-           let token = match token with
-             | None | Some `Null -> Ok None
-             | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Option.map Uuidm.to_string (Uuidm.of_string token))
-             | _ -> Error "interrupt_token must be a UUID or null" in
-           (match Keeper_chat_operation.Operation_id.of_string id, token with
-            | Ok operation_id, Ok token -> Ok (name, id, operation_id, token)
-            | Error error, _ | _, Error error -> Error error)
+          | Some (`String name), Some (`String id), token when String.trim name <> "" ->
+            let token = match token with
+              | None | Some `Null -> Ok None
+              | Some (`String token) -> Result.map Option.some (Keeper_interrupt_token.of_string token)
+              | Some _ -> Error "interrupt_token must be a UUID or null" in
+            (match Keeper_chat_operation.Operation_id.of_string id, token with
+             | Ok operation_id, Ok token -> Ok (name, id, operation_id, token)
+             | Error error, _ | _, Error error -> Error error)
          | _ -> Error "name and request_id are required")
       | _ -> Error "JSON object required"
       with Yojson.Json_error error -> Error error
@@ -612,10 +606,7 @@ let handle_keeper_turn_interrupt state request reqd =
              let interrupt_token_result =
                match List.assoc_opt "interrupt_token" fields with
                | None -> Ok None
-               | Some (`String token) ->
-                 (match Uuidm.of_string token with
-                  | Some token -> Ok (Some (Uuidm.to_string token))
-                  | None -> Error "interrupt_token must be a UUID")
+               | Some (`String token) -> Result.map Option.some (Keeper_interrupt_token.of_string token)
                | Some _ -> Error "interrupt_token must be a UUID"
              in
              let control_result = match List.assoc_opt "expected_control_token" fields with
@@ -654,10 +645,13 @@ let handle_keeper_turn_interrupt state request reqd =
              | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
              | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true]
              | Interrupt_result (Operation_not_current _) -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
+             | Interrupt_result Operation_settling -> ["signalled", `Bool false; "reason", `String "settling"]
+             | Interrupt_result Operation_maintenance_running ->
+               ["signalled", `Bool false; "reason", `String "maintenance_running"]
              | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
           | Error error -> ["signalled", `Bool false; "reason", `String "interrupt_failed";
               "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
-        respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("interrupt_token", `String token) :: fields))
+        respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("interrupt_token", `String (Keeper_interrupt_token.to_string token)) :: fields))
       | None ->
         match request_id with
         | Some request_id ->
@@ -673,6 +667,9 @@ let handle_keeper_turn_interrupt state request reqd =
                   | Interrupt_result (Operation_not_current {running_operation_id}) ->
                     ["signalled", `Bool false; "reason", `String "operation_not_current"] @
                     Option.fold ~none:[] ~some:(fun id -> ["current_request_id", `String (Keeper_chat_operation.Operation_id.to_string id)]) running_operation_id
+                  | Interrupt_result Operation_settling -> ["signalled", `Bool false; "reason", `String "settling"]
+                  | Interrupt_result Operation_maintenance_running ->
+                    ["signalled", `Bool false; "reason", `String "maintenance_running"]
                   | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
                | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable";
                    "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
@@ -824,7 +821,10 @@ let parse_keeper_chat_stream_request body_str =
         let* control_token = match List.assoc_opt "kind" values, List.assoc_opt "control_token" values with
           | Some (`String "interactive"), Some (`String token) when String.trim token <> "" -> Ok token
           | _ -> Error "invalid interactive admission kind or control_token" in
-        let* turn = optional "interrupt_token" in
+        let* turn = match optional "interrupt_token" with
+          | Ok None -> Ok None
+          | Ok (Some token) -> Result.map Option.some (Keeper_interrupt_token.of_string token)
+          | Error error -> Error error in
         let* operation = optional "operation_id" in
         let* target = match turn, operation with
           | None, None -> Ok None

@@ -192,8 +192,13 @@ module KeeperKeepalive : sig
 
 
   val stream_idle_timeout_env_key : string
-  (** Env name of {!stream_idle_timeout_sec}; a suite that must not run under
-      an ambient operator value checks this name, not a re-spelled literal. *)
+  val first_event_timeout_env_key : string
+  val body_timeout_env_key : string
+  val provider_call_deadline_env_key : string
+  (** Env names of the four turn budgets, each spelled once: the readers
+      below, the resolved layer's source attribution, and a suite that must
+      not run under an ambient operator value all use these, never a
+      re-spelled literal. *)
 
   val stream_idle_timeout_sec : unit -> float option
   (** Explicit streaming-provider idle-gap timeout as the operator wrote it.

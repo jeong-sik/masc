@@ -16,18 +16,23 @@ let shortest_declared_threshold_s =
   Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
 let threshold_slack_s = 5.0
 
+(* The process environment outranks the boot override, so an ambient
+   operator value would replace the threshold this installs. *)
 let with_declared_provider_call_deadline seconds f =
-  Config_boot_overrides.reset_for_tests ();
-  Keeper_runtime_resolved.reset_for_tests ();
-  Config_boot_overrides.set
-    "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
-    (Printf.sprintf "%.0f" seconds);
-  Keeper_runtime_resolved.reset_for_tests ();
-  Fun.protect
-    ~finally:(fun () ->
-      Config_boot_overrides.reset_for_tests ();
-      Keeper_runtime_resolved.reset_for_tests ())
-    f
+  match Sys.getenv_opt Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key with
+  | Some _ -> skip ()
+  | None ->
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    Config_boot_overrides.set
+      Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
+      (Printf.sprintf "%.0f" seconds);
+    Keeper_runtime_resolved.reset_for_tests ();
+    Fun.protect
+      ~finally:(fun () ->
+        Config_boot_overrides.reset_for_tests ();
+        Keeper_runtime_resolved.reset_for_tests ())
+      f
 ;;
 
 (* Accepts the connection and never writes: a provider that hangs after

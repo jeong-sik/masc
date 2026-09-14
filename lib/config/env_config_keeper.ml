@@ -668,8 +668,8 @@ module KeeperKeepalive = struct
       calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
       body read; streaming calls deliberately ignore the knob so active
       long streams are not killed by total duration. Streaming liveness is
-      handled by an explicitly configured [stream_idle_timeout_sec] and the
-      attempt liveness observer.
+      always bounded: the operator's [stream_idle_timeout_sec] or its floor,
+      and the attempt watchdog.
 
       Opt-in: unset leaves [None] so {!Runtime_agent_context} skips the
       builder wiring. Set only for sync completion callers that need a
@@ -683,11 +683,13 @@ module KeeperKeepalive = struct
   let body_timeout_min_sec = 10.0
   let body_timeout_max_sec = 600.0
 
+  let body_timeout_env_key = "MASC_KEEPER_BODY_TIMEOUT_SEC"
+
   let body_timeout_sec_override () =
     declared_timeout_seconds_within
       ~min_sec:body_timeout_min_sec
       ~max_sec:body_timeout_max_sec
-      "MASC_KEEPER_BODY_TIMEOUT_SEC"
+      body_timeout_env_key
   ;;
 
   (* Fail-safe no-progress threshold for a provider call attempt (seconds),
@@ -733,11 +735,13 @@ module KeeperKeepalive = struct
   let provider_call_deadline_min_sec = 30.0
   let provider_call_deadline_max_sec = 3600.0
 
+  let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+
   let provider_call_deadline_sec_override () =
     declared_timeout_seconds_within
       ~min_sec:provider_call_deadline_min_sec
       ~max_sec:provider_call_deadline_max_sec
-      "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+      provider_call_deadline_env_key
   ;;
 
 end

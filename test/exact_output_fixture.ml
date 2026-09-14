@@ -63,9 +63,11 @@ module Stalling_source = struct
   ;;
 end
 
+(* Nothing to hand over is a stall from the first read: a source may not
+   answer a read with zero bytes. *)
 let stalling_source bytes =
-  Eio.Resource.T
-    ({ Stalling_source.pending = Some bytes }, Eio.Flow.Pi.source (module Stalling_source))
+  let pending = if String.length bytes = 0 then None else Some bytes in
+  Eio.Resource.T ({ Stalling_source.pending }, Eio.Flow.Pi.source (module Stalling_source))
 ;;
 
 let add_request requests body =

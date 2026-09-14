@@ -181,7 +181,7 @@ let test_data_fields_do_renew_the_idle_budget () =
       "every event delivered"
       [ None, "one"; None, "two"; None, "three" ]
       events
-  | Error `Timed_out -> fail "payload-bearing lines must renew the inter-token budget"
+  | Error (`Timed_out _) -> fail "payload-bearing lines must renew the inter-token budget"
 ;;
 
 let () =

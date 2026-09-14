@@ -4168,7 +4168,21 @@ def planning_resize_budget_interaction(
     # Four cells belong to the frame margins. At this width the title and
     # modes exactly fill the content area, before the timestamp is appended.
     boundary_cols = fixture_cell_width(mode_prefix.group().decode("utf-8")) + 4
-    for columns in (80, boundary_cols):
+    # A boundary that stops at the modes describes a row Planning has never
+    # drawn: the clock and the badge follow them on the same row. The widths
+    # between the two boundaries are where the row overflowed -- at a hundred
+    # columns it ran to 112 cells of the 96 it had, and the frame cut off
+    # "HTTP [connected]" and the seconds of the clock. Both sides of the real
+    # boundary are exercised below.
+    chrome_re = re.compile(rb"\d\d:\d\d:\d\d  HTTP \[[^\]\r\n]+\]")
+    chrome = chrome_re.search(CSI_RE.sub(b"", frame))
+    if chrome is None:
+        raise AssertionError(f"Planning wide header omitted its badge: {frame!r}")
+    # Two more cells for the gap the row puts in front of the clock.
+    riding_cols = (
+        boundary_cols + fixture_cell_width(chrome.group().decode("utf-8")) + 2
+    )
+    for columns in (80, boundary_cols, riding_cols - 1, riding_cols):
         narrow = resize_and_wait(
             process,
             master_fd,
@@ -4182,6 +4196,25 @@ def planning_resize_budget_interaction(
         plain_narrow = CSI_RE.sub(b"", narrow)
         if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
             raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
+        # Whichever row the modes took, the title row keeps what has nowhere
+        # else to go. On Planning the clock and the badge are the only things
+        # that say whether the screen is a live reading, and the modes have a
+        # row of their own to fall to.
+        title_row = next(
+            (
+                text
+                for _, text in sorted(screen_rows(narrow).items())
+                if b"MASC Planning" in text
+            ),
+            None,
+        )
+        if title_row is None:
+            raise AssertionError(f"Planning drew no title row: {narrow!r}")
+        if chrome_re.search(title_row) is None:
+            raise AssertionError(
+                f"Planning title row lost its clock and badge at {columns} "
+                f"columns: {title_row!r}"
+            )
     terminal_rows = 24
 
     # One press, not two. The pane opens on Planning_filter_active, so the

@@ -9,8 +9,6 @@ open Alcotest
 open Masc
 module Subcall = Keeper_provider_subcall
 
-let deadline = option (float 0.0)
-
 (* [turn.provider_call_deadline_sec] is clamped to [30, 3600] where it is
    read, so thirty seconds is the shortest deadline a declared threshold can
    produce. This case pays it once. *)
@@ -74,9 +72,9 @@ let fixture_messages =
 let test_the_declared_threshold_bounds_the_wait_for_an_admission_permit () =
   with_declared_provider_call_deadline shortest_declared_threshold_s (fun () ->
     check
-      deadline
+      (float 0.0)
       "the resolver saw the declared threshold"
-      (Some shortest_declared_threshold_s)
+      shortest_declared_threshold_s
       (Keeper_runtime_resolved.provider_call_deadline_sec ());
     Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in

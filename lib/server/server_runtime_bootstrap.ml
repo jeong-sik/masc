@@ -659,50 +659,31 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      posture should the floor ever be removed. *)
   Keeper_runtime_resolved.(
     let idle = (current ()).stream_idle_timeout_sec in
-    match idle.value with
-    | Some seconds ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper stream idle timeout resolved: %.1fs (source: %s)"
-        seconds
-        (source_to_string idle.source)
-    | None ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper stream idle timeout resolved: %.1fs (source: %s)"
+      idle.value
+      (source_to_string idle.source));
   (* RFC-AC-037: same boot observability for the first-event (TTFT/prefill)
      budget — configured-vs-effective must stay distinguishable at runtime,
      the exact ambiguity #25128 hit for the idle knob. *)
   Keeper_runtime_resolved.(
     let first_event = (current ()).first_event_timeout_sec in
-    match first_event.value with
-    | Some seconds ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper first-event (TTFT/prefill) timeout resolved: %.1fs (source: %s)"
-        seconds
-        (source_to_string first_event.source)
-    | None ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper first-event timeout resolved: disabled (no first-event bound)");
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper first-event (TTFT/prefill) timeout resolved: %.1fs (source: %s)"
+      first_event.value
+      (source_to_string first_event.source));
   (* The provider-call no-progress threshold: the attempt watchdog's bound and
      the only bound on a tool's provider sub-call. Stated with its source for
      the same reason as the two lines above. *)
   Keeper_runtime_resolved.(
     let threshold = (current ()).provider_call_deadline_sec in
-    match threshold.value with
-    | Some seconds ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
-        seconds
-        (source_to_string threshold.source)
-    | None ->
-      Log.Runtime.info
-        ~category:Log.Boundary
-        "keeper provider-call no-progress threshold resolved: disabled (no attempt \
-         watchdog, unbounded sub-calls)");
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
+      threshold.value
+      (source_to_string threshold.source));
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
     ~invalidate_full_health_snapshot:

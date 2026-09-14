@@ -15,8 +15,9 @@ type complete_fn =
    threshold bounds the whole call, the wait for the binding's admission
    permit included: a call queued behind another keeper's stream makes no
    progress either. A declared body deadline bounds the round trip inside
-   it, so the narrower of the two fires and names its own setting. With
-   neither declared the call has no bound (#36020). *)
+   it, so the narrower of the two fires and names its own setting. The
+   threshold is always set (the operator's value or the failsafe floor), so
+   every sub-call has a bound. *)
 let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
   match override with
   | Some complete -> complete ~sw ~net ~clock ~config ~messages ?tools ()
@@ -26,7 +27,7 @@ let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
       ~net
       ~clock
       ?body_timeout_s:(Keeper_runtime_resolved.body_timeout_override_sec ())
-      ?call_timeout_s:(Keeper_runtime_resolved.provider_call_deadline_sec ())
+      ~call_timeout_s:(Keeper_runtime_resolved.provider_call_deadline_sec ())
       ~config
       ~messages
       ?tools

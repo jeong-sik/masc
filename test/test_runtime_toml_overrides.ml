@@ -235,8 +235,8 @@ let test_load_and_apply_records_boot_override () =
         (Some "42")
         (Config_boot_overrides.get_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC");
       Keeper_runtime_resolved.reset_for_tests ();
-      check (option (float 0.0001)) "runtime resolver sees boot override"
-        (Some 42.0)
+      check (float 0.0001) "runtime resolver sees boot override"
+        42.0
         (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 
@@ -298,8 +298,8 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   Keeper_runtime_resolved.init ();
   Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "90";
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "stream idle timeout frozen from toml"
-    (Some 50.0) runtime.stream_idle_timeout_sec.value;
+  check (float 0.0001) "stream idle timeout frozen from toml"
+    50.0 runtime.stream_idle_timeout_sec.value;
   check string "stream idle timeout source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
@@ -312,11 +312,11 @@ let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "stream idle timeout defaults to fail-safe floor"
-    (Some Keeper_runtime_resolved.stream_idle_failsafe_floor_sec)
+  check (float 0.0001) "stream idle timeout defaults to fail-safe floor"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
     runtime.stream_idle_timeout_sec.value;
-  check (option (float 0.0001)) "accessor returns the floor when unset"
-    (Some Keeper_runtime_resolved.stream_idle_failsafe_floor_sec)
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.stream_idle_failsafe_floor_sec
     (Keeper_runtime_resolved.stream_idle_timeout_sec ());
   check string "stream idle timeout floor source"
     "failsafe_floor"
@@ -331,11 +331,11 @@ let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "first-event timeout defaults to fail-safe floor"
-    (Some Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+  check (float 0.0001) "first-event timeout defaults to fail-safe floor"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
     runtime.first_event_timeout_sec.value;
-  check (option (float 0.0001)) "accessor returns the floor when unset"
-    (Some Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
     (Keeper_runtime_resolved.first_event_timeout_sec ());
   check string "first-event timeout floor source"
     "failsafe_floor"
@@ -351,11 +351,11 @@ let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "provider-call threshold defaults to fail-safe floor"
-    (Some Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec)
+  check (float 0.0001) "provider-call threshold defaults to fail-safe floor"
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
     runtime.provider_call_deadline_sec.value;
-  check (option (float 0.0001)) "accessor returns the floor when unset"
-    (Some Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec)
+  check (float 0.0001) "accessor returns the floor when unset"
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
     (Keeper_runtime_resolved.provider_call_deadline_sec ());
   check string "provider-call threshold floor source"
     "failsafe_floor"
@@ -377,8 +377,8 @@ let test_resolved_first_event_timeout_uses_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "first-event timeout from toml"
-    (Some 480.0) runtime.first_event_timeout_sec.value;
+  check (float 0.0001) "first-event timeout from toml"
+    480.0 runtime.first_event_timeout_sec.value;
   check string "first-event timeout source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
@@ -392,8 +392,8 @@ let test_resolved_stream_idle_timeout_uses_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "stream idle timeout from toml"
-    (Some 75.0) runtime.stream_idle_timeout_sec.value;
+  check (float 0.0001) "stream idle timeout from toml"
+    75.0 runtime.stream_idle_timeout_sec.value;
   check string "stream idle timeout source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
@@ -408,8 +408,8 @@ let test_resolved_runtime_prefers_env_over_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "env stream idle timeout wins"
-    (Some 55.0) runtime.stream_idle_timeout_sec.value;
+  check (float 0.0001) "env stream idle timeout wins"
+    55.0 runtime.stream_idle_timeout_sec.value;
   check string "env source"
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
@@ -450,8 +450,8 @@ let test_resolved_provider_call_deadline_uses_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "provider call deadline from toml"
-    (Some 900.0) runtime.provider_call_deadline_sec.value;
+  check (float 0.0001) "provider call deadline from toml"
+    900.0 runtime.provider_call_deadline_sec.value;
   check string "provider call deadline source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
@@ -466,8 +466,8 @@ let test_resolved_provider_call_deadline_prefers_env () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "env provider call deadline wins"
-    (Some 1200.0) runtime.provider_call_deadline_sec.value;
+  check (float 0.0001) "env provider call deadline wins"
+    1200.0 runtime.provider_call_deadline_sec.value;
   check string "env source"
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
@@ -476,8 +476,8 @@ let test_resolved_stream_idle_timeout_does_not_clamp () =
   with_clean_boot_overrides @@ fun () ->
   with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "3600") @@ fun () ->
   Keeper_runtime_resolved.init ();
-  check (option (float 0.0001)) "explicit value is preserved"
-    (Some 3600.0)
+  check (float 0.0001) "explicit value is preserved"
+    3600.0
     (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 let test_resolved_stream_idle_timeout_env_below_floor_preserved () =
@@ -487,8 +487,8 @@ let test_resolved_stream_idle_timeout_env_below_floor_preserved () =
   with_clean_boot_overrides @@ fun () ->
   with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "30") @@ fun () ->
   Keeper_runtime_resolved.init ();
-  check (option (float 0.0001)) "explicit sub-floor value preserved (no clamp-up)"
-    (Some 30.0)
+  check (float 0.0001) "explicit sub-floor value preserved (no clamp-up)"
+    30.0
     (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 let expect_stream_idle_timeout_env_config_error raw =
@@ -668,8 +668,8 @@ let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
     (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "and the frozen snapshot carries it"
-    (Some 45.0) runtime.provider_call_deadline_sec.value;
+  check (float 0.0001) "and the frozen snapshot carries it"
+    45.0 runtime.provider_call_deadline_sec.value;
   check string "sourced from toml"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)

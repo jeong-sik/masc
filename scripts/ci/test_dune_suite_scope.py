@@ -65,6 +65,24 @@ check(
     "test_x",
     "run",
 )
+# (run %{test} ...) inside a plain action still executes the executable
+# itself, so the step may reproduce it: setenv gets reconstructed by the
+# stanza reader, and this form has no wrapper to hide.
+check(
+    "a plain action running the executable itself",
+    "(test (name test_x) (action (run %{test})))",
+    "test_x",
+    "run",
+)
+# The #36032 shape: a wrapper program owns the command line, so the
+# executable alone cannot answer (its argv check dies with the harness's
+# arguments missing). The wrapper spelling here is the one test/dune uses.
+check(
+    "a wrapper-driven action is not faithful to run by hand",
+    "(test (name test_x) (deps test_x.py) (action (run python3 %{dep:test_x.py} %{exe:test_x})))",
+    "test_x",
+    "skip",
+)
 check(
     "a group's deps reach every name in it",
     "(tests (names test_a test_b) (deps ../config/runtime.toml))",

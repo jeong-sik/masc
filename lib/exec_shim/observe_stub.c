@@ -240,20 +240,40 @@ CAMLprim value ocaml_shim_observe_support(value vunit)
 #endif
 }
 
-CAMLprim value ocaml_shim_restrict_self(value vscratch, value vdeny_fs, value vdeny_net)
+/* Applies the box and reports which rule refused the setup, so the refusal
+   can travel typed instead of being guessed back out of stderr. Returns 0
+   when every requested rule applied, or -1 with *rule set to the refusing
+   rule's tag ("socket" for the seccomp filter, "write" for the Landlock
+   ruleset, "" when no rule was reached). */
+CAMLprim value ocaml_shim_restrict_self(value vscratch, value vdeny_fs,
+                                        value vdeny_net, value vrule_out)
 {
-  CAMLparam3(vscratch, vdeny_fs, vdeny_net);
+  CAMLparam4(vscratch, vdeny_fs, vdeny_net, vrule_out);
+  const char *refusing_rule = "";
 #ifdef __linux__
-  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
-    uerror("prctl(PR_SET_NO_NEW_PRIVS)", Nothing);
-  if (Bool_val(vdeny_fs) && deny_filesystem_writes(String_val(vscratch)) != 0)
-    uerror("landlock", Nothing);
-  if (Bool_val(vdeny_net) && deny_sockets() != 0)
-    uerror("prctl(PR_SET_SECCOMP)", Nothing);
-  CAMLreturn(Val_unit);
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
+    refusing_rule = "";
+    goto report;
+  }
+  if (Bool_val(vdeny_fs) && deny_filesystem_writes(String_val(vscratch)) != 0) {
+    refusing_rule = "write";
+    goto report;
+  }
+  if (Bool_val(vdeny_net) && deny_sockets() != 0) {
+    refusing_rule = "socket";
+    goto report;
+  }
+  CAMLreturn(Val_int(0));
 #else
   (void) vdeny_fs; (void) vdeny_net;
   unix_error(ENOSYS, "restrict_self", Nothing);
   CAMLreturn(Val_unit);
 #endif
+report:
+  {
+    size_t len = strlen(refusing_rule);
+    memcpy((char *)String_val(vrule_out), refusing_rule, len);
+    memset((char *)String_val(vrule_out) + len, 0, 1);
+  }
+  CAMLreturn(Val_int(-1));
 }

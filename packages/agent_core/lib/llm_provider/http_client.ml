@@ -2764,7 +2764,7 @@ let require_clock_when_idle ~site ~clock ~idle_timeout =
 
 (* Agent Core contract: same fail-loud contract for the first-event (TTFT/prefill)
    deadline. Either an explicit [first_event_timeout] OR the [body_timeout]
-   fallback that now backs it (see [resolve_first_event_timeout]) would
+   fallback that now backs it (see [armed_budget]) would
    silently disarm without a clock, leaving the prefill wait unbounded. The
    all-[None] case configures no first-event deadline at all, so there is
    nothing to disarm and nothing to reject. *)
@@ -2831,12 +2831,6 @@ let resolve_first_event_bound ~first_event_timeout ~body_timeout ~idle_timeout =
   | None, None, None -> Unarmed
 ;;
 
-let resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout =
-  match resolve_first_event_bound ~first_event_timeout ~body_timeout ~idle_timeout with
-  | Bounded { seconds; _ } -> Some seconds
-  | Unarmed -> None
-;;
-
 (* Which budget the reader had armed when a deadline fired. The reader moves
    from the first one to the second when the consumer reports its first
    [Output]; the consumer that names the knob passes the phase it derived from
@@ -2858,6 +2852,73 @@ let governing_timeout_knob ~phase ~first_event_timeout ~body_timeout ~idle_timeo
      | Bounded { knob; _ } -> knob
      | Unarmed -> Stream_idle_timeout)
   | After_first_output -> Stream_idle_timeout
+;;
+
+(* What one read is bounded by. The inter-line idle budget is a gap: every
+   payload line starts it again. The first-event and body budgets are totals:
+   they run from the first body read and no line extends them, so an opening
+   frame or a keepalive payload cannot hold open a stream that never
+   produces. When [idle_timeout] is the only value supplied it also bounds
+   the first event, and it keeps its gap meaning there: that is the pre-RFC
+   bound those callers had. *)
+type armed_budget =
+  | Gap of float
+  | Total of float
+
+let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
+  match phase with
+  | After_first_output -> Option.map (fun seconds -> Gap seconds) idle_timeout
+  | Before_first_output ->
+    (match resolve_first_event_bound ~first_event_timeout ~body_timeout ~idle_timeout with
+     | Bounded { knob = First_event_timeout | Body_timeout; seconds } -> Some (Total seconds)
+     | Bounded { knob = Stream_idle_timeout; seconds } -> Some (Gap seconds)
+     | Unarmed -> None)
+;;
+
+(* Run [read] inside what is left of the budget measured from [anchor],
+   taking the anchor now when none is set. Already past the deadline: raise
+   what [with_timeout_exn] would, rather than arming a non-positive duration
+   and depending on a scheduler race to produce it. *)
+let read_within_budget ~clock ~anchor ~seconds read =
+  let anchored_at =
+    match !anchor with
+    | Some t -> t
+    | None ->
+      let t = Eio.Time.now clock in
+      anchor := Some t;
+      t
+  in
+  let remaining = anchored_at +. seconds -. Eio.Time.now clock in
+  if Float.compare remaining 0. <= 0
+  then raise Eio.Time.Timeout
+  else Eio.Time.with_timeout_exn clock remaining read
+;;
+
+(* A payload line was read under [budget]: a gap starts again, a total does
+   not move. *)
+let renew_after_payload ~anchor = function
+  | Some (Gap _) -> anchor := None
+  | Some (Total _) | None -> ()
+;;
+
+(* The consumer reported its first [Output]. Leaving a total budget, the gap
+   budget measures from this moment, not from the first body read the total
+   ran from; a gap budget before the first output is the same gap after it
+   and keeps its anchor. *)
+let enter_after_first_output ~phase ~anchor ~first_event_timeout ~body_timeout ~idle_timeout =
+  match !phase with
+  | After_first_output -> ()
+  | Before_first_output ->
+    phase := After_first_output;
+    (match
+       armed_budget
+         ~phase:Before_first_output
+         ~first_event_timeout
+         ~body_timeout
+         ~idle_timeout
+     with
+     | Some (Total _) -> anchor := None
+     | Some (Gap _) | None -> ())
 ;;
 
 exception
@@ -2896,21 +2957,22 @@ let read_sse
      [first_event_timeout] is [None] the first-event wait falls back to
      [body_timeout] (the total body budget already wired by the caller), then to [idle_timeout] — the
      pre-RFC bound, kept so callers that wired only an idle deadline keep
-     exactly their previous behaviour (see [resolve_first_event_timeout]).
+     exactly their previous behaviour (see [armed_budget]).
      With nothing wired the wait stays unarmed, as before. Inter-token idle
      still guards once the stream produces. *)
-  let first_output_seen = ref false in
-  (* The armed budget is anchored to the last PAYLOAD-bearing line, not to the
-     last line read. Comments are consumed inside one window for exactly this
-     reason; [id]/[retry]/unknown fields and bare dispatch delimiters carry no
-     payload either, and a per-read window lets a provider hold the stream open
-     forever by emitting one ignorable line just under each budget. A blank
-     delimiter cannot simply be swallowed inside the window — it must still
-     reach [loop] to dispatch and to reset the event type — so the anchor, not
-     the filter, is what closes that shape. A payload line renews whichever
-     budget is armed; the switch from the first-event budget to inter-token
-     idle happens at dispatch, when the consumer reports the first [Output],
-     and measures from the payload line that carried it. *)
+  let phase = ref Before_first_output in
+  (* The armed budget is anchored, never per read (see [armed_budget]). A
+     total budget (first-event or body) is anchored at the first body read
+     and nothing moves it, so an opening frame, a keepalive payload or any
+     other event the consumer reports as [Prelude] does not buy the provider
+     another full budget. A gap budget is anchored at the last PAYLOAD-bearing
+     line: comments are consumed inside one window, [id]/[retry]/unknown
+     fields and bare dispatch delimiters carry no payload either, and a
+     per-read window would let a provider hold the stream open forever by
+     emitting one ignorable line just under each budget. A blank delimiter
+     cannot simply be swallowed inside the window (it must still reach [loop]
+     to dispatch and to reset the event type), so the anchor, not the filter,
+     is what closes that shape. *)
   let budget_anchor = ref None in
   let first_line = ref true in
   let read_protocol_line () =
@@ -2928,29 +2990,13 @@ let read_sse
       | (Sse_blank | Sse_event_type _ | Sse_data _ | Sse_ignored_field) as parsed ->
         parsed
     in
-    let active_timeout =
-      if !first_output_seen
-      then idle_timeout
-      else resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
+    let budget =
+      armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout
     in
     let parsed =
-      match clock, active_timeout with
-      | Some c, Some budget ->
-        let anchored_at =
-          match !budget_anchor with
-          | Some t -> t
-          | None ->
-            let t = Eio.Time.now c in
-            budget_anchor := Some t;
-            t
-        in
-        let remaining = anchored_at +. budget -. Eio.Time.now c in
-        (* Already past the deadline: raise what [with_timeout_exn] would,
-           rather than arming a non-positive duration and depending on a
-           scheduler race to produce it. *)
-        if Float.compare remaining 0. <= 0
-        then raise Eio.Time.Timeout
-        else Eio.Time.with_timeout_exn c remaining inner
+      match clock, budget with
+      | Some c, Some (Gap seconds | Total seconds) ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -2958,15 +3004,16 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* Only a payload line renews the armed budget. The switch to the
-       inter-token idle budget is not made here: a data field is provider
-       bytes, not necessarily model output, and only the consumer can tell an
-       opening frame from a token. [dispatch_event] flips [first_output_seen]
-       when [on_data] reports [Output].
+    (* Only a payload line renews a gap budget; a total budget runs to the
+       first token whatever arrives in between. The switch to the inter-token
+       budget is not made here: a data field is provider bytes, not
+       necessarily model output, and only the consumer can tell an opening
+       frame from a token. [dispatch_event] moves [phase] when [on_data]
+       reports [Output].
        [Sse_comment] is already filtered inside [inner]; the only non-field
        line [inner] can return is [Sse_blank]. *)
     (match parsed with
-     | Sse_data _ -> budget_anchor := None
+     | Sse_data _ -> renew_after_payload ~anchor:budget_anchor budget
      | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
      | Sse_comment -> () (* unreachable: filtered in [inner] *));
     parsed
@@ -2984,7 +3031,13 @@ let read_sse
         Buffer.clear data_buffer;
         data_seen := false;
         (match continuation with
-         | Continue Output -> first_output_seen := true
+         | Continue Output ->
+           enter_after_first_output
+             ~phase
+             ~anchor:budget_anchor
+             ~first_event_timeout
+             ~body_timeout
+             ~idle_timeout
          | Continue Prelude | Stop -> ());
         continuation)
       else Continue Prelude
@@ -3003,7 +3056,7 @@ let read_sse
          consumer's decision and the socket's lifetime are the same event. *)
       (match dispatch_event () with
        | Stop -> ()
-       | Continue _ -> loop ())
+       | Continue (Output | Prelude) -> loop ())
     | Sse_comment ->
       (* Filtered inside [read_meaningful_line]. *)
       loop ()
@@ -3047,17 +3100,18 @@ let read_sse
     Skips blank lines so a trailing newline does not yield an empty payload.
     Returns normally on [End_of_file].
 
-    When [clock] and [idle_timeout] are both set, each line read is
-    wrapped in [Eio.Time.with_timeout_exn] so a stalled stream raises
-    [Eio.Time.Timeout] after [idle_timeout] seconds of silence.
+    When [clock] and [idle_timeout] are both set, a stalled stream raises
+    [Eio.Time.Timeout] after [idle_timeout] seconds of silence measured from
+    the last non-blank line; a blank line does not renew it.
 
-    Agent Core contract: the wait for the FIRST line is the time-to-first-event
-    (TTFT / prefill) window, bounded by [first_event_timeout] when set;
-    otherwise it falls back to [body_timeout], then to [idle_timeout] (the
-    pre-RFC bound), and stays unarmed when the caller wired none of them.
-    [idle_timeout] arms only after the first line the consumer reports as
-    [Output]; a blank line or an opening frame does not switch budgets (SSE
-    parity). *)
+    Agent Core contract: the wait for the first line the consumer reports as
+    [Output] is the time-to-first-event (TTFT / prefill) window. It is bounded
+    by [first_event_timeout] when set, otherwise by [body_timeout], and then
+    it is one window from the first body read that a blank line or a line
+    reported as [Prelude] neither ends nor extends. With neither set it falls
+    back to [idle_timeout] (the pre-RFC bound), which keeps its gap meaning,
+    and stays unarmed when the caller wired none of them. The idle budget
+    arms after that first [Output] (SSE parity, see [armed_budget]). *)
 let read_ndjson
       ?clock
       ?idle_timeout
@@ -3070,22 +3124,27 @@ let read_ndjson
   let site = "read_ndjson" in
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
-  let first_output_seen = ref false in
+  let phase = ref Before_first_output in
+  (* Anchored like [read_sse] (see [armed_budget]); a non-blank line is the
+     payload, so a blank line renews no budget. *)
+  let budget_anchor = ref None in
   let read_line () =
-    let active_timeout =
-      if !first_output_seen
-      then idle_timeout
-      else resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
+    let budget =
+      armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout
     in
     let line =
-      match clock, active_timeout with
-      | Some c, Some t ->
-        Eio.Time.with_timeout_exn c t (fun () -> Eio.Buf_read.line reader)
+      match clock, budget with
+      | Some c, Some (Gap seconds | Total seconds) ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
+          Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is
          best-effort rather than a loud failure here. *)
       | None, _ -> Eio.Buf_read.line reader
     in
+    (match line with
+     | "" -> ()
+     | _ -> renew_after_payload ~anchor:budget_anchor budget);
     line
   in
   let rec loop () =
@@ -3095,7 +3154,12 @@ let read_ndjson
       (match on_line line with
        | Stop -> ()
        | Continue Output ->
-         first_output_seen := true;
+         enter_after_first_output
+           ~phase
+           ~anchor:budget_anchor
+           ~first_event_timeout
+           ~body_timeout
+           ~idle_timeout;
          loop ()
        | Continue Prelude -> loop ())
     | exception End_of_file -> ()
@@ -3707,47 +3771,62 @@ let%test "read_ndjson: first_event_timeout admits a silent prefill past idle" =
 
 (* ── Agent Core contract review: effective first-event bound resolution ── *)
 
-(* The pure resolver is the deterministic seam for the fallback policy: one
-   test per arm of the precedence chain
-   [first_event > body > idle > unarmed], so a reordering or a re-introduced
-   built-in default fails here rather than in a timing-dependent I/O test. The
-   I/O tests below prove that a resolved bound actually arms the first-event
-   wait through [read_sse]/[read_ndjson]. *)
-let%test "resolve_first_event_timeout: explicit first_event wins over body and idle" =
-  resolve_first_event_timeout
+(* The pure resolver is the deterministic seam for the fallback policy and for
+   what each fallback means: one test per arm of the precedence chain
+   [first_event > body > idle > unarmed], so a reordering, a re-introduced
+   built-in default or an idle fallback that stops being a gap fails here
+   rather than in a timing-dependent I/O test. The I/O tests below prove that
+   a resolved bound actually arms the first-event wait through
+   [read_sse]/[read_ndjson]. *)
+let%test "armed_budget: explicit first_event wins over body and idle, as a total" =
+  armed_budget
+    ~phase:Before_first_output
     ~first_event_timeout:(Some 5.0)
     ~body_timeout:(Some 9.0)
     ~idle_timeout:(Some 0.5)
-  = Some 5.0
+  = Some (Total 5.0)
 ;;
 
-let%test "resolve_first_event_timeout: falls back to body_timeout over idle" =
-  resolve_first_event_timeout
+let%test "armed_budget: falls back to body_timeout over idle, as a total" =
+  armed_budget
+    ~phase:Before_first_output
     ~first_event_timeout:None
     ~body_timeout:(Some 3.0)
     ~idle_timeout:(Some 0.5)
-  = Some 3.0
+  = Some (Total 3.0)
 ;;
 
 (* Pre-RFC behaviour preservation: with only an idle deadline wired, that value
-   bounded the first event too. Widening it here would be an unrequested
-   behaviour change for every such caller. *)
-let%test "resolve_first_event_timeout: falls back to idle when it is the only bound" =
-  resolve_first_event_timeout
+   bounded the first event too, as a gap every payload line renews. Widening
+   it, or turning it into a total, would be an unrequested behaviour change
+   for every such caller. *)
+let%test "armed_budget: falls back to idle when it is the only bound, as a gap" =
+  armed_budget
+    ~phase:Before_first_output
     ~first_event_timeout:None
     ~body_timeout:None
     ~idle_timeout:(Some 0.5)
-  = Some 0.5
+  = Some (Gap 0.5)
 ;;
 
 (* Guards the removed provider idle defaults: with nothing wired the resolver
    must stay unarmed rather than invent a bound of its own. *)
-let%test "resolve_first_event_timeout: all-None stays unarmed" =
-  resolve_first_event_timeout
+let%test "armed_budget: all-None stays unarmed" =
+  armed_budget
+    ~phase:Before_first_output
     ~first_event_timeout:None
     ~body_timeout:None
     ~idle_timeout:None
   = None
+;;
+
+let%test "armed_budget: after the first output only the idle gap is armed" =
+  armed_budget
+    ~phase:After_first_output
+    ~first_event_timeout:(Some 5.0)
+    ~body_timeout:(Some 9.0)
+    ~idle_timeout:(Some 0.5)
+  = Some (Gap 0.5)
 ;;
 
 (* Agent Core contract attribution: a fired deadline must name the knob that supplied

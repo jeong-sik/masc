@@ -12,11 +12,20 @@ let render = "bin/masc_tui_render_prim.ml"
 
 let panes_the_strip_draws () = List.length Masc_tui_types.config_panes
 
-(* The number above is only the strip's if the strip draws that list. *)
+(* The number above is only the strip's if the strip draws that list. The
+   strip reaches it through one helper: [config_pane_strip] hands
+   [config_pane_tabs state] to [tab_strip], and that helper is where
+   [config_panes] is read. Asking the strip itself for the name went red when
+   the helper was split out of it (#36327), so the guard follows the hop --
+   both halves, because either one alone proves nothing about the count. *)
 let test_the_strip_draws_the_pane_list () =
-  Alcotest.(check bool) "config_pane_strip reads config_panes" true
+  Alcotest.(check bool) "config_pane_strip reads config_pane_tabs" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"config_pane_strip" ~callee:"config_pane_tabs"
+     > 0);
+  Alcotest.(check bool) "config_pane_tabs reads config_panes" true
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"config_pane_strip" ~callees:[]
+       ~module_path:render ~binding_name:"config_pane_tabs" ~callees:[]
        ~identifiers:[ "config_panes" ]
      > 0)
 

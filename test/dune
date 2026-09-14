@@ -2667,6 +2667,8 @@
 
 (include stanzas/test_masc_error_is_retryable.inc)
 
+(include stanzas/test_masc_test_deps_fixture_sandbox.inc)
+
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 
 
@@ -6060,6 +6062,11 @@
  (modules test_tui_lane_addons)
  (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout))
 
+(test
+ (name test_tui_lane_subscriptions)
+ (modules test_tui_lane_subscriptions)
+ (libraries alcotest yojson masc masc_tui_lane_subscriptions))
+
 (rule
  (alias runtest-test_tui_lane_package_pty)
  (deps test_tui_lane_package_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -6086,8 +6093,3 @@
  (alias runtest-test_tui_lane_visual_pty)
  (deps test_tui_lane_visual_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_lane_visual_pty.py} %{dep:../bin/masc_tui.exe})))
-
-(test
- (name test_tui_lane_subscriptions)
- (modules test_tui_lane_subscriptions)
- (libraries alcotest yojson masc masc_tui_lane_subscriptions))

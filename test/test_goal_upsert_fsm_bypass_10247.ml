@@ -130,9 +130,10 @@ let dispatch_transition_must_succeed (ctx : Tool_workspace.context) ~goal_id ~ac
 ;;
 
 let saved_phase config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some goal -> Goal_phase.to_string goal.phase
-  | None -> fail "goal missing"
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> Goal_phase.to_string goal.phase
+  | Goal_store.Goal_absent -> fail "goal missing"
+  | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
 ;;
 
 let check_lifecycle_error ~field body =

@@ -73,17 +73,17 @@ let test_kata_prerequisites () =
 let contents = "# preserve this comment\n[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
 let selected = function Ok value -> value | Error e -> fail e
 let test_staging () =
-  let selection = S.selection_of_contents ~host:mac ~path:"imp.toml" ~contents
+  let selection = S.selection_of_contents ~path:"imp.toml" ~contents
     ~profile:(Some Keeper_sandbox_config.Micro_vm)
     ~microvm_backend:(Some Masc.Keeper_microvm_backend.Apple_container)
     ~network_mode:None |> selected in
   check bool "preserve existing network decision" true (selection.network_mode=N.Network_inherit);
   let staged = S.stage_contents ~path:"imp.toml" ~contents selection |> selected in
   check bool "comment preserved" true (String.starts_with ~prefix:"# preserve this comment" staged);
-  let reparsed = S.selection_of_contents ~host:mac ~path:"imp.toml" ~contents:staged
+  let reparsed = S.selection_of_contents ~path:"imp.toml" ~contents:staged
     ~profile:None ~microvm_backend:None ~network_mode:None |> selected in
   check bool "backend roundtrip" true (reparsed.backend=S.Apple_container);
-  let invalid = S.selection_of_contents ~host:linux ~path:"imp.toml" ~contents
+  let invalid = S.selection_of_contents ~path:"imp.toml" ~contents
     ~profile:None ~microvm_backend:None ~network_mode:(Some N.Network_policy) in
   check bool "unsupported network rejected before write" true (Result.is_error invalid)
 let test_commit_conflict () =
@@ -98,6 +98,70 @@ let test_commit_conflict () =
         check bool "concurrent edit refused" true (Result.is_error result);
         check string "other editor bytes preserved" edited
           (In_channel.with_open_text path In_channel.input_all)))
+let microvm_without_backend = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
+let apple_ready = [["container";"list";"-a";"--format";"json"], Ok "[]"]
+(* F107. A microvm declaration that names no backend is refused by the
+   selection itself; on origin/main it silently became Apple Container on
+   macOS 26 arm64 while every other host was refused, so the written TOML on a
+   Mac never showed the choice. The wizard reaches Apple Container only through
+   the catalog row's setup_args, which name the backend outright. *)
+let test_no_host_default_backend () =
+  let implicit = S.selection_of_contents ~path:"imp.toml" ~contents:microvm_without_backend
+    ~profile:None ~microvm_backend:None ~network_mode:None in
+  check bool "unnamed microvm backend refused without a host default" true (Result.is_error implicit);
+  let explicit = S.selection_of_contents ~path:"imp.toml" ~contents:microvm_without_backend
+    ~profile:None ~microvm_backend:(Some Masc.Keeper_microvm_backend.Apple_container) ~network_mode:None |> selected in
+  check bool "named backend accepted" true (explicit.backend = S.Apple_container);
+  let staged = S.stage_contents ~path:"imp.toml" ~contents:microvm_without_backend explicit |> selected in
+  let reparsed = S.selection_of_contents ~path:"imp.toml" ~contents:staged
+    ~profile:None ~microvm_backend:None ~network_mode:None |> selected in
+  check bool "staged TOML names the backend on its own" true (reparsed.backend = S.Apple_container);
+  let catalog = S.catalog_json ~host:mac ~configured:None [probe mac apple_ready S.Apple_container] in
+  let row = Yojson.Safe.Util.member "candidates" catalog |> Yojson.Safe.Util.to_list |> List.hd in
+  let setup_args = Yojson.Safe.Util.member "setup_args" row |> Yojson.Safe.Util.to_list
+    |> List.map Yojson.Safe.Util.to_string in
+  check (list string) "recommended row pre-fills the backend for setup"
+    ["--sandbox-profile"; "microvm"; "--microvm-backend"; "apple_container"] setup_args
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then (mkdir_p (Filename.dirname dir); Sys.mkdir dir 0o700)
+let with_workspace f =
+  let base_path = Filename.temp_file "masc-sandbox-declaration-" "" in
+  Sys.remove base_path; Sys.mkdir base_path 0o700;
+  let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
+  let rec remove_tree entry =
+    if Sys.is_directory entry then (Array.iter (fun child -> remove_tree (Filename.concat entry child)) (Sys.readdir entry);
+      Sys.rmdir entry) else Sys.remove entry in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f ~base_path ~path)
+(* F030. inspect's configuration_error used to be one of two constant
+   sentences, so an operator could not tell a missing file from a permission
+   error, nor a broken TOML from a microvm profile without a backend. The
+   declaration now reports a closed kind plus the underlying reason, and the
+   JSON carries both. *)
+let test_declaration_reasons () =
+  with_workspace (fun ~base_path ~path ->
+    let unreadable = match S.declaration ~base_path with
+      | Ok _ -> fail "missing imp.toml produced a selection" | Error error -> error in
+    check bool "missing file is unreadable" true (unreadable.kind = S.Declaration_unreadable);
+    check bool "OS message names the file" true
+      (let open String in length unreadable.detail > length path
+        && starts_with ~prefix:path unreadable.detail);
+    (match S.configuration_error_json unreadable with
+     | `Assoc fields ->
+       check bool "kind serialized" true (List.assoc_opt "kind" fields = Some (`String "declaration_unreadable"));
+       check bool "detail serialized" true (List.assoc_opt "detail" fields = Some (`String unreadable.detail))
+     | _ -> fail "configuration_error is not an object");
+    mkdir_p (Filename.dirname path);
+    Out_channel.with_open_text path (fun out -> output_string out microvm_without_backend);
+    let invalid = match S.declaration ~base_path with
+      | Ok _ -> fail "backend-less microvm declaration produced a selection" | Error error -> error in
+    check bool "parsed but unselectable is invalid" true (invalid.kind = S.Declaration_invalid);
+    let expected = match S.selection_of_contents ~path ~contents:microvm_without_backend
+        ~profile:None ~microvm_backend:None ~network_mode:None with
+      | Error reason -> reason | Ok _ -> fail "fixture unexpectedly selectable" in
+    check string "detail is the selection reason" expected invalid.detail;
+    Out_channel.with_open_text path (fun out -> output_string out contents);
+    check bool "readable docker declaration selects" true
+      (match S.declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false))
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
@@ -105,4 +169,6 @@ let () = run "sandbox readiness" ["selection",[
   test_case "OS recommendation and configured preference" `Quick test_recommendation;
   test_case "Kata prerequisites" `Quick test_kata_prerequisites;
   test_case "stale setup cannot overwrite newer selection" `Quick test_commit_conflict;
-  test_case "validated staged selection preserves decisions" `Quick test_staging]]
+  test_case "validated staged selection preserves decisions" `Quick test_staging;
+  test_case "no host default for a microvm backend" `Quick test_no_host_default_backend;
+  test_case "declaration errors carry kind and reason" `Quick test_declaration_reasons]]

@@ -314,6 +314,19 @@ let split_on_double_space text =
    of those promises for the other. *)
 let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny" ]
 
+(* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
+   and [Left/Esc] all hold the Esc door. The pin used to recognise the
+   compound only by its " Esc" tail, so a row that spelled it [Left/Esc]
+   -- three renderer literals did -- held nothing the fitter would keep,
+   and at 60 cells the Board read pane had lost its way out while [z:wide]
+   stayed. The single-letter pins are read by atom too; the two-key pins
+   ([y / n], [/approve /deny]) name a pair and are matched whole, because
+   [n] on its own is the next-match key on the surfaces that search. *)
+let key_atoms key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.filter (fun atom -> not (String.equal atom ""))
+
 let item_is_pinned item =
   (* Items are [key:label]; the key is what the projection built the item
      from, and the first colon is where it ends. A label may hold colons of
@@ -323,14 +336,12 @@ let item_is_pinned item =
   | None -> false
   | Some i ->
     let key = String.trim (String.sub plain 0 i) in
+    let atoms = key_atoms key in
     List.exists
       (fun pinned ->
         String.equal key pinned
-        (* [Left / Esc] and [Right / Esc] are the same door under a compound
-           spelling; the surfaces that write it that way mean the same key. *)
-        || (String.equal pinned "Esc"
-            && String.length key > 4
-            && String.equal (String.sub key (String.length key - 4) 4) " Esc"))
+        || (List.length (key_atoms pinned) = 1
+            && List.exists (String.equal pinned) atoms))
       never_dropped_keys
 
 (* The last key this row may give up, by index. [None] once only pinned keys

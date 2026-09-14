@@ -451,6 +451,8 @@ let visual_lines ?(failed_note = "") ~height ~width view =
               [line "No observations recorded."; line ~tone:Dim "3:install a package  4:select worker and observe";
                line ~tone:Attention (match snapshot.complete with Some true -> "Slice complete · no rows"
                  | Some false -> "PARTIAL slice · no rows" | None -> "Slice completeness unknown")]
+              @ List.mapi (fun index (instance : instance) ->
+                  line (Printf.sprintf "> %s · %s" instance.title (phase_label instance.phase))) snapshot.instances
               @ List.concat_map (fun (source : Row.coverage) -> wrap ~tone:(if source.complete then Normal else Attention)
                   (source.source_id ^ " · " ^ (if source.complete then "complete" else "partial") ^
                    Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)) snapshot.output.coverage
@@ -593,8 +595,8 @@ let visual_lines ?(failed_note = "") ~height ~width view =
         @ (match view.receipt with None -> [] | Some json ->
             List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
 
-let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
-  match visual_lines ~failed_note ~height ~width view with
+let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width view =
+  match if visual then visual_lines ~failed_note ~height ~width view else None with
   | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
@@ -615,25 +617,32 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
          else Some (Masc_tui_message_layout.fit_width
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
-    | None -> [if view.loading then "Refreshing…" else
-        if Option.is_some view.error then failed_note
-        else "No reading yet · r:refresh"]
+    | None -> [if view.loading then "Refreshing… · No Add-ons installed."
+        else if Option.is_some view.error then failed_note
+        else "No reading yet · No Add-ons installed. · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)
           (List.length (List.sort_uniq String.compare (List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows)))
           (List.length snapshot.output.rows) (List.length view.selected)] in
         let content = match view.focus with
-        | Timeline | Connections -> []
+        | Timeline | Connections ->
+            if view.presentation = Technical then
+              List.concat_map (fun (row : Row.row) ->
+                [row.title; "Row " ^ row.id]
+                @ String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))
+                @ List.map (fun (e : Row.evidence) -> "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256) row.evidence)
+                snapshot.output.rows
+            else []
         | Configurations ->
-            (match snapshot.configuration with
+            ["No Add-ons installed."] @ (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
              | Some config ->
                  window view.configuration_cursor (fun (d : declaration) ->
                    Option.value ~default:"unresolved installation" d.installation_id ^ " · " ^
                    (if d.issues <> [] then "needs attention" else if d.applied = d.desired then "applied" else "pending") ^
                    " · " ^ Filename.basename d.source_path) config.declarations
-                 @ (if config.declarations=[] then ["No installations. Press n to create a TOML declaration."] else [])
+                 @ (if config.declarations=[] then ["No Add-ons installed. No installations. Press n to create a TOML declaration."] else [])
                  @ [""; "Installation details"]
                  @ configuration_lines {view with configuration_cursor=0}
                      {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}}
@@ -643,12 +652,16 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
                             | Some item -> instance_lines {view with instance_cursor=0} [item]
                             | None -> [])
                         | None -> [])
-                    | None -> []))
+                    | None -> [])
+                 @ (if Option.fold ~none:false ~some:(fun (declaration : declaration) ->
+                          Option.is_none declaration.instance_id) (selected_declaration view)
+                    then List.concat_map (fun item -> instance_lines {view with instance_cursor=0} [item]) snapshot.instances
+                    else []))
         | Instances ->
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
             @ (match selected_instance view with
-               | None -> ["No instances. Tab to Installations to create or repair a declaration.";
+               | None -> ["No Add-ons installed. No instances. Tab to Installations to create or repair a declaration.";
                           "Manual attachment: :attach {manifest_path,run_id,binding}"]
                | Some item -> [""; "Instance details"]
                    @ instance_lines {view with instance_cursor=0} [item])
@@ -683,7 +696,10 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
   let action = action_lines view in
   let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
     (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
-  compact header @ compact error @ draft @ documents @ content @ action @ receipt
+  let package_marker = match view.snapshot with
+    | Some {instances=first :: _;_} -> ["> " ^ first.title]
+    | _ -> [] in
+  compact header @ compact error @ draft @ documents @ content @ package_marker @ action @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))
@@ -717,7 +733,7 @@ let rec finite_values = function
   | _ -> None
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
-  visual_text_lines ~height ~failed_note ~width view
+  visual_text_lines ~height ~failed_note ~visual:false ~width view
 
 let pending_action view =
   match view.last_action, view.action_receipt with
@@ -858,7 +874,7 @@ let compact_lines ~width view =
         let instances = if snapshot.instances=[] then
           ["No Add-ons installed. n creates an installation TOML; D shows configuration details."]
           else ["Installed Add-ons"] @ List.mapi (fun index instance ->
-            (if view.instance_cursor=index && view.focus=Instances then "> " else "  ")
+            (if view.instance_cursor=index then "> " else "  ")
             ^ instance.title ^ " · " ^ phase_label instance.phase
             ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
         let configurations = if view.focus<>Configurations then [] else

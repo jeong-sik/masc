@@ -39,7 +39,9 @@ let pdf_result ~base_path ~name ~path ~bytes ~start_time ~max_image_bytes =
       | Verification_pdf_inspection.Image_policy_rejected _
       | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
-      | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+      (* A spent Poppler deadline does not establish that the submitted document
+         is invalid, the same reading the video decoder deadline gets above. *)
+      | Poppler_budget_spent _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_pdf_inspection.error_to_string error)
@@ -82,7 +84,8 @@ let presentation_result ~base_path ~name ~path ~bytes ~start_time ~max_image_byt
          error then has to be placed here by the compiler instead of landing
          in Runtime_failure because it was not a policy or dependency case. *)
       | Pdf_inspection_failed
-          ( Verification_pdf_inspection.Command_failed _
+          ( Verification_pdf_inspection.Poppler_budget_spent _
+          | Command_failed _
           | Invalid_output _ | Storage_failed _ ) -> Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_presentation_inspection.error_to_string error)

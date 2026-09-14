@@ -123,7 +123,126 @@ let judge_suite =
   ]
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* The coupling pass (task-1565): the same judge validate_shell_ir_paths *)
+(* itself uses, on the real allowlist, with workdir=None — the plain    *)
+(* argv path that was a total no-op before 644c0ea.  Before that       *)
+(* commit every one of the rejected cases below returned Ok () because  *)
+(* the match on workdir short-circuited to Ok before any operand was    *)
+(* named.  These tests pin the after side of that before/after table:   *)
+(* a closed-table argv operand outside the allowlist (/tmp, the         *)
+(* process cwd, the sandbox workspace root) is rejected by the same     *)
+(* judge and the same message vocabulary as cwd and redirects.          *)
+(* ------------------------------------------------------------------ *)
+
+let program bin =
+  match Masc_exec.Exec_program.of_string bin with
+  | Ok p -> p
+  | Error _ -> Alcotest.failf "literal %s executable must parse" bin
+;;
+
+let lit_arg value = Masc_exec.Shell_ir.Lit (value, Masc_exec.Shell_ir.default_meta) ;;
+
+let argv_ir bin args =
+  Masc_exec.Shell_ir.Simple
+    { bin = program bin
+    ; args = List.map lit_arg args
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+(* A real /tmp directory this suite creates, so the is_cd existence half
+   of the judge is exercised against ground truth rather than assumed. *)
+let with_tmp_scratch f =
+  let root = Filename.temp_dir "masc_t1565" "" in
+  Fun.protect ~finally:(fun () ->
+      let rec rm_rf path =
+        match Sys.is_directory path with
+        | true ->
+          Array.iter (fun e -> rm_rf (Filename.concat path e)) (Sys.readdir path);
+          (try Sys.rmdir path with Sys_error _ -> ())
+        | false -> (try Sys.remove path with Sys_error _ -> ())
+        | exception Sys_error _ -> ()
+      in
+      rm_rf root)
+    (fun () -> f root)
+;;
+
+let coupling_test name ?workdir ~expect_ok ir =
+  Alcotest.test_case name `Quick (fun () ->
+      match Exec_policy.validate_shell_ir_paths ?workdir ir with
+      | Ok () -> if not expect_ok then Alcotest.fail (name ^ ": expected a rejection, got Ok")
+      | Error msg ->
+        if expect_ok then Alcotest.failf "%s: expected Ok, got Error %s" name msg)
+;;
+
+let coupling_suite =
+  [ coupling_test "plain argv git -C outside allowlist is judged (workdir=None)"
+      ~expect_ok:false
+      (argv_ir "git" [ "-C"; "/etc"; "status" ])
+  ; coupling_test "plain argv mkdir outside allowlist is judged (workdir=None)"
+      ~expect_ok:false
+      (argv_ir "mkdir" [ "/etc/never" ])
+  ; coupling_test "plain argv cd outside allowlist is judged (workdir=None)"
+      ~expect_ok:false
+      (argv_ir "cd" [ "/etc" ])
+  ; coupling_test "plain argv cd to a missing /tmp directory is cwd_not_directory"
+      ~expect_ok:false
+      (argv_ir "cd" [ "/tmp/masc-t1565-must-not-exist" ])
+  ; coupling_test "plain argv cd to an existing /tmp directory passes (workdir=None)"
+      ~expect_ok:true
+      (argv_ir "cd" [ "/tmp" ])
+  ; (* The script lane answers the same judge through the re-opened
+       subscript — the cd_promote half of the coupling. *)
+    Alcotest.test_case
+      "sh -c cd outside allowlist is judged through the re-opened script (workdir=None)"
+      `Quick
+      (fun () ->
+        match
+          Exec_policy.validate_shell_ir_paths (argv_ir "sh" [ "-c"; "cd /etc && ls" ])
+        with
+        | Ok () -> Alcotest.fail "re-opened cd /etc must be rejected"
+        | Error _ -> ())
+  ; coupling_test "non-owning plain argv stays opaque (workdir=None)"
+      ~expect_ok:true
+      (argv_ir "cat" [ "/etc/passwd" ])
+  ; coupling_test "unnameable operand (variable) is left to the box (workdir=None)"
+      ~expect_ok:true
+      (argv_ir "mkdir" [ "/tmp/$x" ])
+  ]
+;;
+
+let scratch_suite =
+  [ Alcotest.test_case
+      "cd to a suite-created /tmp directory passes the existence half"
+      `Quick
+      (fun () ->
+        with_tmp_scratch (fun root ->
+            match Exec_policy.validate_shell_ir_paths (argv_ir "cd" [ root ]) with
+            | Ok () -> ()
+            | Error msg -> Alcotest.failf "cd %s must pass, got: %s" root msg))
+  ; Alcotest.test_case
+      "mkdir destination under a suite-created /tmp directory is named and allowed"
+      `Quick
+      (fun () ->
+        with_tmp_scratch (fun root ->
+            let target = Filename.concat root "wt" in
+            match
+              Exec_policy.validate_shell_ir_paths (argv_ir "mkdir" [ target ])
+            with
+            | Ok () -> ()
+            | Error msg -> Alcotest.failf "mkdir %s must pass, got: %s" target msg))
+  ]
+;;
+
 let () =
   Alcotest.run "keeper_tool_execute_script_paths"
-    [ "destinations", suite; "judge_operands", judge_suite ]
+    [ "destinations", suite
+    ; "judge_operands", judge_suite
+    ; "coupling", coupling_suite
+    ; "tmp scratch", scratch_suite
+    ]
 ;;

@@ -67,24 +67,158 @@ let expect_error (result : Tool_result.result option) =
   | None -> fail "tool not handled"
 ;;
 
+(* {1 RFC-0444 PR-2: the typed Unavailable envelope}
+
+   A store this build cannot read answers
+   [{ok:false, error_code:"goal_store_unavailable", reason, field, file,
+   mirror:{status, goal_count}, reset_step}] on every goal tool, with failure
+   class [Dependency_unavailable], and never a [goals] member. *)
+
+let confirmation_error_to_string =
+  Server_routes_http_routes_verification.For_testing.confirmation_error_to_string
+;;
+
+let expect_unavailable (result : Tool_result.result option) =
+  match result with
+  | Some (Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; data; message; _ }) ->
+    check string "message is the serialized envelope" (Yojson.Safe.to_string data) message;
+    data
+  | Some (Tool_result.Failed { class_; message; _ }) ->
+    fail (Printf.sprintf "expected Dependency_unavailable, got %s: %s"
+            (Tool_result.tool_failure_class_to_string class_) message)
+  | Some (Tool_result.Completed _ | Tool_result.Deferred _ as result) ->
+    fail ("expected tool error, got success: " ^ Tool_result.message result)
+  | None -> fail "tool not handled"
+;;
+
+let has_substring ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  at 0
+;;
+
+let check_unavailable_envelope config ~reason ~field ~mirror_status ~mirror_goal_count
+    ~reset_step (envelope : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let json_string json = Yojson.Safe.to_string json in
+  check string "ok" "false" (json_string (member "ok" envelope));
+  check string "error_code" "goal_store_unavailable" (get_string_field envelope "error_code");
+  check string "reason" reason (get_string_field envelope "reason");
+  check string "field" (json_string field) (json_string (member "field" envelope));
+  check string "file" (Goal_store.goals_path config) (get_string_field envelope "file");
+  check string "mirror.status" mirror_status
+    (get_string_field (member "mirror" envelope) "status");
+  check string "mirror.goal_count" (json_string mirror_goal_count)
+    (json_string (member "goal_count" (member "mirror" envelope)));
+  check string "reset_step" reset_step (get_string_field envelope "reset_step");
+  check string "no goals member" "null" (json_string (member "goals" envelope))
+;;
+
+let goal_files config =
+  let path = Goal_store.goals_path config in
+  Fs_compat.load_file path, Fs_compat.load_file (path ^ ".last-good")
+;;
+
+(* The #34459 shape: every row without [criterion_revision], in both the
+   primary and its mirror. Written raw so no writer of the store plants it.
+   Returns the id the rows carry. *)
+let seed_rows_without_criterion_revision config =
+  let goal, _ = match Goal_store.upsert_goal config ~title:"Goal before the hard cut"
+      ~metric:"goals" ~target_value:"1" () with
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
+  let row = match Goal_store.goal_to_yojson goal with
+    | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+    | _ -> fail "goal serializer returned non-object" in
+  let bytes = Yojson.Safe.to_string
+      (`Assoc [ "version", `Int 1; "updated_at", `String goal.updated_at; "goals", `List [ row ] ]) in
+  let path = Goal_store.goals_path config in
+  Fs_compat.save_file path bytes;
+  Fs_compat.save_file (path ^ ".last-good") bytes;
+  goal.id
+;;
+
 let test_goal_list_preserves_source_failure () =
   with_workspace @@ fun config ->
   let list () = Tool_workspace.dispatch (workspace_ctx config)
     ~name:"masc_goal_list" ~args:(`Assoc []) in
   let _goal, _ = match Goal_store.upsert_goal config ~title:"Visible source"
       ~metric:"goals" ~target_value:"1" () with
-    | Ok value -> value | Error detail -> fail detail
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let path = Goal_store.goals_path config in
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
   Fs_compat.save_file path "unreadable primary";
-  let error = expect_error (list ()) in
-  check string "source error is not an empty successful list" "internal_error"
-    (get_string_field error "error_code");
+  (* The mirror still decodes one goal: reported as evidence, never served. *)
+  check_unavailable_envelope config ~reason:"not_json" ~field:`Null
+    ~mirror_status:"mirror_decodes" ~mirror_goal_count:(`Int 1)
+    ~reset_step:"reset_goal_store" (expect_unavailable (list ()));
   check string "listing preserves the primary bytes" "unreadable primary"
     (Fs_compat.load_file path);
   check string "listing preserves recovery bytes" mirror
     (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
+(* RFC-0444 criterion 1. *)
+let test_goal_list_schema_rejected_envelope () =
+  with_workspace @@ fun config ->
+  ignore (seed_rows_without_criterion_revision config);
+  let before = goal_files config in
+  let listed = Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_list" ~args:(`Assoc []) in
+  check_unavailable_envelope config ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
+    ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable listed);
+  (match listed with
+   | Some result ->
+     let message = Tool_result.message result in
+     check bool "no response carries goals:[]" false
+       (has_substring ~needle:"\"goals\":[]" message)
+   | None -> fail "masc_goal_list not handled");
+  check bool "listing moves no bytes" true (before = goal_files config)
+;;
+
+(* RFC-0444 criterion 4, first half: a store this build cannot read is the
+   Unavailable code, never "goal not found". *)
+let test_goal_transition_unavailable_store () =
+  with_workspace @@ fun config ->
+  let goal_id = seed_rows_without_criterion_revision config in
+  let before = goal_files config in
+  let result = Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "drop" ]) in
+  check_unavailable_envelope config ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
+    ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result);
+  check bool "refused transition moves no bytes" true (before = goal_files config)
+;;
+
+(* RFC-0444 criterion 4, second half: a healthy store with no such id is
+   [not_found]. *)
+let test_goal_transition_unknown_goal_not_found () =
+  with_workspace @@ fun config ->
+  (match Goal_store.upsert_goal config ~title:"Present goal" ~metric:"goals"
+           ~target_value:"1" () with
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
+  let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist"; "action", `String "drop" ])) in
+  check string "unknown id on a readable store" "not_found" (get_string_field error "error_code");
+  check string "no envelope fields on not_found" "null"
+    (Yojson.Safe.to_string (Yojson.Safe.Util.member "reason" error))
+;;
+
+let test_goal_upsert_unavailable_store () =
+  with_workspace @@ fun config ->
+  ignore (seed_rows_without_criterion_revision config);
+  let before = goal_files config in
+  let result = Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_upsert"
+      ~args:(`Assoc [ "title", `String "New goal on a broken store"
+                    ; "metric", `String "goals"; "target_value", `String "1" ]) in
+  check_unavailable_envelope config ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
+    ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result);
+  check bool "refused upsert moves no bytes" true (before = goal_files config)
 ;;
 
 let test_goal_upsert_and_list () =
@@ -159,7 +293,7 @@ let test_goal_list_filters_by_phase () =
     match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
             ~phase () with
     | Ok _ -> ()
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   create ~title:"Executing goal" ~phase:"executing";
   create ~title:"Dropped goal" ~phase:"dropped";
@@ -188,11 +322,11 @@ let test_goal_list_includes_rollup () =
   (match Goal_store.upsert_goal config ~title:"Executing goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
            ~target_value:"1" ~phase:Goal_phase.Verifying () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -216,7 +350,7 @@ let test_goal_list_ignores_blank_optional_filters () =
   (match Goal_store.upsert_goal config ~title:"Blank filter goal" ~metric:"m"
            ~target_value:"1" () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -339,7 +473,7 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     match Goal_store.upsert_goal config ~title:"Existing goal" ~metric:"m"
             ~target_value:"1" () with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let rejected_status =
     Tool_workspace.dispatch
@@ -354,9 +488,10 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     "validation_error"
     (get_string_field status_error "error_code");
   let saved_goal =
-    match Goal_store.get_goal config ~goal_id:goal.id with
-    | Some goal -> goal
-    | None -> fail "goal missing after rejected upsert"
+    match Goal_store.find_goal config ~goal_id:goal.id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent -> fail "goal missing after rejected upsert"
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
   in
   check
     string
@@ -428,7 +563,7 @@ let test_goal_completion_accepts_goal_without_tasks () =
         ~target_value:"1" ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   check string "completion request enters verifying" "verifying"
     (transition_phase (request_complete config goal.id));
@@ -445,7 +580,7 @@ let test_goal_completion_ignores_open_task_count () =
         ~target_value:"1" ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   ignore
     (Workspace_task.add_task
@@ -473,7 +608,7 @@ let test_goal_completion_ignores_metric_text () =
         ()
     with
     | Ok payload -> payload
-    | Error msg -> fail msg
+    | Error error -> fail (Goal_store.write_error_to_string error)
   in
   check string "metric text does not gate the completion request" "verifying"
     (transition_phase (request_complete config goal.id));
@@ -503,7 +638,7 @@ let test_operator_confirmation_binds_current_proof () =
   with_workspace @@ fun config ->
   let goal, _ = match Goal_store.upsert_goal config ~title:"Human confirmed goal"
     ~metric:"observed artifacts" ~target_value:"1" () with
-    | Ok value -> value | Error detail -> fail detail in
+    | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
   check string "verifier cannot complete" "awaiting_confirmation"
     (transition_phase (prove_complete config goal.id));
@@ -525,7 +660,8 @@ let test_operator_confirmation_binds_current_proof () =
   (match Goal_verification.record_human_confirmation config ~goal_id:goal.id verdict
       ~operator_id:"authenticated-operator" with
    | Ok _ -> () | Error detail -> fail detail);
-  let first = match confirm ~operator_id:"another-operator" () with Ok json -> json | Error detail -> fail detail in
+  let first = match confirm ~operator_id:"another-operator" () with
+    | Ok json -> json | Error detail -> fail (confirmation_error_to_string detail) in
   check string "operator confirmation completes" "completed"
     Yojson.Safe.Util.(member "goal" first |> member "phase" |> to_string);
   let history_path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
@@ -542,11 +678,12 @@ let test_operator_confirmation_binds_current_proof () =
     ~request_id:verdict.request_id ~verification_run_id:verdict.verification_run_id in
   (match second_operator with
    | Ok json -> check bool "retry never rewrites original operator attribution" true (first = json)
-   | Error detail -> fail detail);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   (match Server_routes_http_routes_verification.For_testing.commit_goal_confirmation_json
     ~config ~operator_id:"credential-owner" (`Assoc ["actor", `String "human"] ) with
    | Error _ -> () | Ok _ -> fail "body actor impersonation accepted");
-  let second = match confirm () with Ok json -> json | Error detail -> fail detail in
+  let second = match confirm () with
+    | Ok json -> json | Error detail -> fail (confirmation_error_to_string detail) in
   check bool "exact confirmation replay preserves timestamp and identity" true (first = second);
   check string "retries emit no duplicate confirmation event" history (Fs_compat.load_file history_path);
   (match Goal_verification.reopen_goal config ~goal_id:goal.id ~actor:"operator" ~note:None with
@@ -557,7 +694,7 @@ let test_operator_confirmation_binds_current_proof () =
   (match confirm () with Error _ -> () | Ok _ -> fail "new request accepted old confirmation binding");
   (match Goal_store.upsert_goal config ~id:goal.id ~title:"Changed criterion"
      ~metric:"observed artifacts" ~target_value:"2" () with
-   | Ok _ -> () | Error detail -> fail detail);
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
 ;;
 
@@ -569,6 +706,14 @@ let () =
         ; test_case "operator confirms exact current proof" `Quick test_operator_confirmation_binds_current_proof
         ; test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list preserves source failure" `Quick test_goal_list_preserves_source_failure
+        ; test_case "list answers the Unavailable envelope on #34459 rows" `Quick
+            test_goal_list_schema_rejected_envelope
+        ; test_case "transition answers Unavailable on an unreadable store" `Quick
+            test_goal_transition_unavailable_store
+        ; test_case "transition answers not_found for an unknown id" `Quick
+            test_goal_transition_unknown_goal_not_found
+        ; test_case "upsert answers the Unavailable envelope" `Quick
+            test_goal_upsert_unavailable_store
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
         ; test_case "list includes rollup" `Quick test_goal_list_includes_rollup
         ; test_case

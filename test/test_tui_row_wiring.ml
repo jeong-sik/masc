@@ -568,6 +568,10 @@ let test_no_row_of_a_drawing_loop_walks_a_list () =
    glyph and lose the bold. So the glyph is the answer, and it has to come from
    the shared binding rather than a literal spelled twice.
 
+   The keeper detail tabs are drawn by [tab_strip], the one drawing every
+   in-screen strip shares, so the mark is read there: the pane calls the
+   strip, and the strip reads the glyph.
+
    Asserted here because the screen this draws has no other gate: the frame is
    pinned in test/test_tui_keyboard_input.py, which is Python, and no CI path
    runs Python. Re-inlining the literal in either strip typechecks and draws
@@ -578,8 +582,12 @@ let test_both_strips_mark_where_they_are_from_one_value () =
       ~binding_name:binding ~callees:[]
       ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ]
   in
-  Alcotest.(check bool) "the keeper detail tabs mark the tab they are on" true
-    (mark "keeper_detail_pane" render > 0);
+  Alcotest.(check bool) "the keeper detail tabs draw through the shared strip" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane" ~callee:"tab_strip"
+     >= 1);
+  Alcotest.(check bool) "the shared strip marks the entry it is on" true
+    (mark "tab_strip" "bin/masc_tui_ansi.ml" > 0);
   Alcotest.(check bool) "the surface strip reads the same mark" true
     (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
 

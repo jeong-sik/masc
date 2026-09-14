@@ -18,6 +18,7 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
+  | Poppler_budget_spent of { program : string; budget_sec : float }
   | Too_many_pages of { pages : int; limit : int }
   | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
   | Payload_budget_exceeded of { bytes : int; limit : int }
@@ -36,6 +37,10 @@ let error_to_string = function
   | Invalid_output detail -> "pdf_inspection_invalid_output: " ^ detail
   | Image_policy_rejected {page;bytes;limit} ->
     Printf.sprintf "PDF page %d image has %d bytes, exceeding configured image limit %d" page bytes limit
+  | Poppler_budget_spent {program;budget_sec} ->
+    Printf.sprintf
+      "pdf_inspection_budget_spent: %s did not finish within the %.0fs this inspection gets for every Poppler call together"
+      program budget_sec
   | Too_many_pages {pages;limit} ->
     Printf.sprintf
       "pdf_page_budget_exceeded: %d pages, over the %d this verifier renders"
@@ -86,13 +91,11 @@ let parsed_pages xml =
       Ok ((width_points,height_points,text) :: pages)) (Ok []) pages
     |> Result.map List.rev
 
-(* Submitted evidence is not trusted input. A malformed or deliberately
-   expensive PDF can leave either Poppler command sitting there, and the
-   completion verifier holds its review slot for as long as it waits, so one
-   document would wedge Task and Goal verification. The bound is generous
-   enough for a large scanned document on a loaded machine; a render that
-   needs longer is reported as a failure rather than waited on. *)
-let command_timeout_sec = 120.
+(* Wall clock for every Poppler call of one inspection together. A page of a
+   well-formed document renders in well under a second; this is the ceiling for
+   the whole document, so a review that hits it fails instead of holding its
+   slot. *)
+let poppler_budget_sec = 60.0
 
 (* Every page can sit under [max_image_bytes] and the document still be too
    large: the render loop holds each PNG and the result base64-encodes all of
@@ -104,7 +107,7 @@ let max_page_pixels = 2048
 let max_pages = 64
 let max_total_image_bytes = 24 * 1024 * 1024
 
-let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
       ?(max_extracted_bytes = max_extracted_bytes)
       ~base_path ~max_image_bytes ~bytes () =
   let* () = if String.length bytes > max_source_bytes then
@@ -124,17 +127,30 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
       let diagnostics = ref [] in
+      (* One budget for the whole inspection, not one per call. A corrupt or
+         adversarial document can hang either Poppler tool, and the page count
+         comes from the document, so a per-call budget multiplied by the pages
+         would bound nothing. A completion review holds one of the four global
+         review slots while this runs, so an unbounded child starves the other
+         three. *)
+      let deadline = Monotonic_deadline.after ~seconds:poppler_budget_sec in
       let run program arguments =
+        let remaining = Monotonic_deadline.remaining_seconds deadline in
+        if remaining <= 0.0 then
+          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
+        else
         let status, _stdout, stderr = Process_eio.run_argv_with_status_split
-            ~timeout_sec:command_timeout_sec
+            ~timeout_sec:remaining
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
             ~cwd:root (program :: arguments) in
         let detail = String.trim stderr in
-        match status with
-        | Unix.WEXITED 0 ->
+        match Process_eio.exit_reason_of_status status with
+        | Process_eio.Completed 0 ->
           if detail <> "" then diagnostics := (program ^ ": " ^ detail) :: !diagnostics;
           Ok ()
-        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        | Process_eio.Timed_out ->
+          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
+        | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
           Error (Command_failed {program;status;detail}) in
       let xml_path = Filename.concat root "pages.xhtml" in
       let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
@@ -176,3 +192,13 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
     | Sys_error detail -> Error (Storage_failed detail)
     | Unix.Unix_error (code,operation,_) ->
       Error (Storage_failed (operation ^ ": " ^ Unix.error_message code))
+
+let inspect ?max_pages ?max_total_image_bytes ?max_extracted_bytes
+    ~base_path ~max_image_bytes ~bytes () =
+  inspect_with_budget ~poppler_budget_sec ?max_pages ?max_total_image_bytes
+    ?max_extracted_bytes ~base_path ~max_image_bytes ~bytes ()
+
+module For_testing = struct
+  let inspect_with_budget ~budget_sec ~base_path ~max_image_bytes ~bytes () =
+    inspect_with_budget ~poppler_budget_sec:budget_sec ~base_path ~max_image_bytes ~bytes ()
+end

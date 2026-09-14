@@ -61,7 +61,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
     (match Goal_store.upsert_goal config ~id:"goal-a" ~title:"Goal A"
              ~metric:"m" ~target_value:"1" () with
      | Ok _ -> ()
-     | Error msg -> fail ("upsert_goal failed: " ^ msg));
+     | Error error -> fail ("upsert_goal failed: " ^ Goal_store.write_error_to_string error));
     make_path_unwritable (Workspace_goal_index.goal_task_links_path config);
     let meta = keeper_meta () in
     let execution =
@@ -118,6 +118,7 @@ let test_task_create_failure_route_splits_workflow_from_runtime () =
   in
   let runtime_failure_cases =
     [ "Backlog_read_failed", Workspace_task.Backlog_read_failed "disk error"
+    ; "Goal_lock_failed", Workspace_task.Goal_lock_failed "lock timeout"
     ; "Goal_link_write_failed", Workspace_task.Goal_link_write_failed "disk error"
     ; "Backlog_write_failed", Workspace_task.Backlog_write_failed "disk error"
     ; "Unexpected_error", Workspace_task.Unexpected_error "Failure(\"boom\")"
@@ -143,7 +144,7 @@ let test_unavailable_goal_is_runtime_failure_without_mutation () =
   List.iter (fun break_recovery -> with_test_env (fun config ->
     (match Goal_store.upsert_goal config ~id:"goal-a" ~title:"Goal A"
        ~metric:"m" ~target_value:"1" () with
-     | Ok _ -> () | Error message -> fail message);
+     | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
     let goal_path = Goal_store.goals_path config in
     let corrupt path = Out_channel.with_open_text path (fun oc -> output_string oc "{broken") in
     corrupt goal_path;

@@ -961,8 +961,14 @@ let add_delete_action_routes router =
               | Error (Task.Goal_assignment.Already_assigned _ as err) ->
                 respond_error ~status:`Conflict ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err)
+              (* RFC-0444 PR-2: a goal store this build cannot read is the
+                 typed envelope, with the status this file's siblings use
+                 for a dependency that is not there. *)
+              | Error (Task.Goal_assignment.Goal_source_unavailable unavailable) ->
+                Http.Response.json_value ~status:`Service_unavailable ~request:req
+                  (Goal_unavailable_envelope.to_yojson unavailable) reqd
               | Error
-                  (( Task.Goal_assignment.Goal_source_unavailable _
+                  (( Task.Goal_assignment.Goal_lock_failed _
                    | Task.Goal_assignment.Backlog_read_failed _
                    | Task.Goal_assignment.Link_write_failed _ ) as err) ->
                 respond_error ~status:`Internal_server_error ~request:req reqd
@@ -993,6 +999,9 @@ let add_delete_action_routes router =
              | Error (Goal_store.Persistence_failed _ as err) ->
                  respond_error ~status:`Internal_server_error ~request:req reqd
                    (Goal_store.delete_goal_error_to_string err)
+             | Error (Goal_store.Store_unavailable unavailable) ->
+                 Http.Response.json_value ~status:`Service_unavailable ~request:req
+                   (Goal_unavailable_envelope.to_yojson unavailable) reqd
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "goal_id")
          )

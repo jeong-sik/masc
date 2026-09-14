@@ -58,7 +58,8 @@ jobs:
             addons/msx-observer/skills/msx-observe/references/observations.md \
             addons/protocol.py addons/output-statistics/server.py \
             addons/msx-observer/server.py addons/tests/test_packages.py \
-            test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe test/test_tui_lane_subscriptions.exe 2>&1 | tee proof/build.log
+            test/test_tui_palette_matching.exe test/test_tui_lane_addons.exe \
+            test/test_tui_lane_subscriptions.exe 2>&1 | tee proof/build.log
           failed_tests=()
           run_proof_test() {
             local name="$1"

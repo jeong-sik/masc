@@ -137,9 +137,10 @@ let test_tree_kill_sigterm () =
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
 let test_tree_kill_escalates_to_sigkill () =
-  (* A shell that traps SIGTERM and refuses to die. Parent sends
-     SIGTERM, grace expires, tree_kill must escalate to SIGKILL. *)
-  let script = "trap '' TERM; sleep 30" in
+  (* Publish readiness after installing SIG_IGN, then retain it across exec.
+     There is one reapable PID, not an orphaned shell child whose zombie can
+     keep kill(-pgid, 0) true after successful SIGKILL delivery. *)
+  let script = "trap '' TERM; printf R; exec sleep 30" in
   match
     P.spawn_detached
       ~argv:[ "/bin/sh"; "-c"; script ]
@@ -147,23 +148,44 @@ let test_tree_kill_escalates_to_sigkill () =
   with
   | Error e -> failf "spawn failed: %s" e
   | Ok h ->
-      let alive =
-        wait_until ~timeout_s:1.0 (fun () ->
-          P.is_pgid_alive ~pgid:h.pgid)
+      let reaped = ref false in
+      let rec reap flags =
+        try Unix.waitpid flags h.pid
+        with Unix.Unix_error (Unix.EINTR, _, _) -> reap flags
       in
-      check bool "pgroup reaches alive state" true alive;
-      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:0.5;
-      let status = ref None in
-      let exited =
-        wait_until ~timeout_s:2.0 (fun () ->
-          match waitpid_nohang h.pid with
-          | Some s -> status := Some s; true
-          | None -> false)
-      in
-      check bool "child exited after escalation" true exited;
-      let dead = not (P.is_pgid_alive ~pgid:h.pgid) in
-      check bool "SIGKILL reached stubborn child" true dead;
-      Unix.close h.stdout_fd; Unix.close h.stderr_fd
+      Fun.protect
+        ~finally:(fun () ->
+          Fun.protect
+            ~finally:(fun () -> Unix.close h.stdout_fd; Unix.close h.stderr_fd)
+            (fun () ->
+              if not !reaped then begin
+                (try Unix.kill h.pid Sys.sigkill
+                 with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+                ignore (reap [])
+              end))
+        (fun () ->
+          let ready = wait_until ~timeout_s:1.0 (fun () ->
+            match Unix.select [h.stdout_fd] [] [] 0.0 with
+            | [], _, _ -> false
+            | _ -> true
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> false) in
+          check bool "TERM handler readiness published" true ready;
+          let marker = Bytes.create 1 in
+          let rec read_marker () =
+            try Unix.read h.stdout_fd marker 0 1
+            with Unix.Unix_error (Unix.EINTR, _, _) -> read_marker ()
+          in
+          check int "readiness byte received" 1 (read_marker ());
+          check string "TERM handler installed" "R" (Bytes.to_string marker);
+          P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:0.5;
+          let status = ref None in
+          let exited = wait_until ~timeout_s:2.0 (fun () ->
+            match reap [Unix.WNOHANG] with
+            | 0, _ -> false
+            | _, s -> reaped := true; status := Some s; true) in
+          check bool "child exited after escalation" true exited;
+          check bool "waitpid proves SIGKILL reached the TERM-ignoring process" true
+            (!status = Some (Unix.WSIGNALED Sys.sigkill)))
 
 (* TODO (Tick 7): grandchild reach test.  A naive
    [sh -c 'sleep 30 & wait'] keeps the shell as a zombie after

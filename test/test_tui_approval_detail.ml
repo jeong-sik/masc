@@ -49,8 +49,45 @@ let test_a_label_introduces_its_value () =
   let lines = Detail.of_fields ~width:60 [ "tool", "Edit"; "args", "x" ] in
   match lines with
   | first :: _ ->
-    check_string "the first row is the first label" "tool" first.Detail.text;
-    check_bool "and it is marked as one" true (first.Detail.label <> None)
+    (* A value that fits sits beside its name, and the row is still marked
+       with the name so the pane can weight it. *)
+    check_string "the first row carries the name and its value" "tool  Edit"
+      first.Detail.text;
+    check_bool "and it is marked as one" true
+      (first.Detail.label = Some "tool")
+  | [] -> Alcotest.fail "fields produced no rows"
+
+(* Two rows per field cost a screen the operator reads before pressing y. The
+   ask that filled it is the operator queue's five short fields. *)
+let test_short_fields_take_one_row_each () =
+  let fields =
+    [ "actor", "masc-tui"
+    ; "action", "namespace_pause"
+    ; "target", "workspace"
+    ; "summary", "namespace_pause on workspace (masc_pause)"
+    ]
+  in
+  check_int "one row per field" 4
+    (List.length (Detail.of_fields ~width:100 fields));
+  (* On a pane too narrow to hold a name and its value together, the name is
+     alone on its row and the value is wrapped under it, rather than cut. *)
+  List.iter
+    (fun (line : Detail.line) ->
+      match line.Detail.label with
+      | Some name -> check_string "the name is alone on its row" name line.Detail.text
+      | None -> ())
+    (Detail.of_fields ~width:12 fields);
+  check_bool "and every value is still on the pane" true
+    (let all = joined (Detail.of_fields ~width:12 fields) in
+     List.for_all (fun (_, value) -> contains all (String.sub value 0 4)) fields)
+
+(* A value with its own line breaks keeps its name a row of its own: the
+   wrapped lines start at the indent, not under the label column. *)
+let test_a_multi_line_value_keeps_its_own_rows () =
+  let lines = Detail.of_fields ~width:60 [ "args", "first\nsecond" ] in
+  match lines with
+  | first :: _ ->
+    check_string "the name is alone on its row" "args" first.Detail.text
   | [] -> Alcotest.fail "fields produced no rows"
 
 let test_a_blank_value_still_gets_a_row () =
@@ -88,6 +125,10 @@ let () =
             test_every_part_of_the_ask_is_on_the_pane
         ; Alcotest.test_case "a label introduces its value" `Quick
             test_a_label_introduces_its_value
+        ; Alcotest.test_case "short fields take one row each" `Quick
+            test_short_fields_take_one_row_each
+        ; Alcotest.test_case "a multi-line value keeps its own rows" `Quick
+            test_a_multi_line_value_keeps_its_own_rows
         ; Alcotest.test_case "a blank value still gets a row" `Quick
             test_a_blank_value_still_gets_a_row
         ; Alcotest.test_case "a blank line inside a value is kept" `Quick

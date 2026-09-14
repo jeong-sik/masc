@@ -5,12 +5,16 @@ server, lifecycle test run, or OCaml build.
 """
 
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -89,9 +93,18 @@ class ReleaseEvidenceReport(unittest.TestCase):
         sha = lifecycle.source_sha(ROOT)
         with tempfile.TemporaryDirectory(prefix="masc-lifecycle-import-") as tmp:
             output = Path(tmp)
-            with mock.patch.object(lifecycle.subprocess, "run", return_value=
-                                   subprocess.CompletedProcess([], 0, "synthetic fixture\n")):
+            progress = io.StringIO()
+
+            def synthetic_command(command, repo, log_path):
+                self.assertIn(f"log={log_path} command=", progress.getvalue(),
+                              "scenario identity is visible before execution")
+                log_path.write_bytes(b"synthetic fixture\n")
+                return 0
+
+            with contextlib.redirect_stdout(progress), mock.patch.object(
+                    lifecycle, "run_logged_command", side_effect=synthetic_command):
                 self.assertEqual(lifecycle.run_bundle(ROOT, output, sha), 0)
+            self.assertEqual(progress.getvalue().count("finished V"), len(lifecycle.SCENARIOS))
             self.assertEqual(lifecycle.verify_bundle(ROOT, output), 0)
             bundle_path = output / "bundle.json"
             original = bundle_path.read_text()
@@ -102,6 +115,55 @@ class ReleaseEvidenceReport(unittest.TestCase):
             bundle_path.write_text(original)
             (output / bundle["scenarios"][0]["log"]).write_text("tampered")
             self.assertEqual(lifecycle.verify_bundle(ROOT, output), 1)
+
+    def test_running_command_persists_private_log_before_exit(self):
+        spec = importlib.util.spec_from_file_location(
+            "lifecycle", ROOT / "scripts/keeper-full-lifecycle-evidence.py")
+        assert spec is not None and spec.loader is not None
+        lifecycle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lifecycle)
+        with tempfile.TemporaryDirectory(prefix="masc-lifecycle-stream-") as tmp:
+            root = Path(tmp)
+            log = root / "scenario.log"
+            ready = root / "continue"
+            secret = b"private fixture output\r\n"
+            command = [sys.executable, "-c",
+                       "import pathlib,sys,time; "
+                       "sys.stdout.buffer.write(b'private fixture output\\r\\n'); sys.stdout.flush(); "
+                       "deadline=time.monotonic()+5; "
+                       "exec('while not pathlib.Path(sys.argv[1]).exists() and time.monotonic()<deadline: time.sleep(.01)'); "
+                       "sys.exit(7)", str(ready)]
+            results = []
+            public = io.StringIO()
+            worker = threading.Thread(target=lambda: results.append(
+                lifecycle.run_logged_command(command, root, log)))
+            with contextlib.redirect_stdout(public):
+                worker.start()
+                try:
+                    deadline = time.monotonic() + 4
+                    while (not log.exists() or log.read_bytes() != secret) and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertEqual(log.read_bytes(), secret)
+                    self.assertTrue(worker.is_alive(), "log is persisted before process exits")
+                finally:
+                    ready.touch()
+                    worker.join(timeout=6)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(results, [7], "native nonzero exit is retained")
+            self.assertEqual(log.read_bytes(), secret, "original bytes are hashed unchanged")
+            self.assertEqual(public.getvalue(), "", "private raw captures are not progress output")
+
+    def test_unavailable_command_persists_launch_failure(self):
+        spec = importlib.util.spec_from_file_location(
+            "lifecycle", ROOT / "scripts/keeper-full-lifecycle-evidence.py")
+        assert spec is not None and spec.loader is not None
+        lifecycle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lifecycle)
+        with tempfile.TemporaryDirectory(prefix="masc-lifecycle-launch-") as tmp:
+            root = Path(tmp)
+            log = root / "scenario.log"
+            self.assertEqual(lifecycle.run_logged_command([str(root / "missing")], root, log), 127)
+            self.assertIn("could not execute", log.read_text())
 
     def test_verification_cannot_override_checkout_identity(self):
         result = subprocess.run(

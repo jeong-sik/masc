@@ -88,6 +88,11 @@ val mcp_dir : unit -> string
     ([Managed_asset_sync.Mcp]). Created on demand by the asset sync, like
     {!tools_dir}, and deliberately absent from the diagnostics record for the
     same reason. *)
+val keeper_toml_path : string -> string
+(** [keeper_toml_path name] is [keepers/<name>.toml] whether or not the file
+    exists: the one spelling of where a declaration is expected, so a
+    not-found error can name the path the loader looked at. *)
+
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 
@@ -120,6 +125,9 @@ val runtime_toml_path_for_base_path : base_path:string -> string
 (** Canonical [runtime.toml] path for an explicit workspace, honoring the same
     config-root override and base-path rules as {!resolve_for_base_path}. The
     file need not exist. *)
+
+val keeper_toml_path_for_base_path : base_path:string -> string -> string
+(** Base-path-scoped variant of {!keeper_toml_path}. The file need not exist. *)
 
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option

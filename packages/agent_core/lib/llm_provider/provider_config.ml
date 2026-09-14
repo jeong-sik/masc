@@ -243,18 +243,26 @@ let auth_headers_for_kind_and_secret ~(kind : provider_kind) ~(api_key : Secret.
       [ "Authorization", "Bearer " ^ Secret.header_value api_key ])
 ;;
 
+(** Place one secret according to the scheme: [Provider_default] uses the
+    kind's own header, [Bearer_token] always uses [Authorization]. Shared by
+    {!auth_headers_for_config} and {!auth_headers_for}. *)
+let auth_headers_for_scheme ~(kind : provider_kind) ~(auth_scheme : auth_scheme)
+  (secret : Secret.t) : (string * string) list
+  =
+  match auth_scheme with
+  | Provider_default -> auth_headers_for_kind_and_secret ~kind ~api_key:secret
+  | Bearer_token ->
+    if Secret.is_empty secret then []
+    else [ "Authorization", "Bearer " ^ Secret.header_value secret ]
+;;
+
 (** Return only the auth-specific headers for a config.
     Callers merge this into [config.headers] at HTTP request time so that
     [Provider_config.t.headers] never carries sensitive tokens like API keys.
     Gemini keys are sent in the [x-goog-api-key] header and are never placed
     in the URL query string. *)
 let auth_headers_for_config (config : t) : (string * string) list =
-  match config.auth_scheme with
-  | Provider_default ->
-    auth_headers_for_kind_and_secret ~kind:config.kind ~api_key:config.api_key
-  | Bearer_token ->
-    if Secret.is_empty config.api_key then []
-    else [ "Authorization", "Bearer " ^ Secret.header_value config.api_key ]
+  auth_headers_for_scheme ~kind:config.kind ~auth_scheme:config.auth_scheme config.api_key
 ;;
 
 (** Same as {!auth_headers_for_config} but takes the provider kind and raw key
@@ -264,6 +272,26 @@ let auth_headers_for_kind_and_key ~(kind : provider_kind) ~(api_key : string)
   : (string * string) list
   =
   auth_headers_for_kind_and_secret ~kind ~api_key:(Secret.of_string api_key)
+;;
+
+(** Resolve auth headers from the authentication fields alone. A caller that
+    only has a wire kind, a scheme and a credential source (Vertex model
+    discovery, which runs before any model is chosen) uses this instead of
+    building a [Provider_config.t] with placeholder identity fields.
+    [api_key] is the static secret and is consulted only for
+    [Static_credential]; a [Refreshable_credential] supplies its own token. *)
+let auth_headers_for ~(kind : provider_kind) ~(auth_scheme : auth_scheme)
+  ~(api_key : Secret.t) ~(credential_source : credential_source)
+  : ((string * string) list, string) result
+  =
+  match credential_source with
+  | Static_credential -> Ok (auth_headers_for_scheme ~kind ~auth_scheme api_key)
+  | Refreshable_credential refresh ->
+    (match refresh () with
+     | Error Credential_unavailable -> Error "Provider credential refresh is unavailable"
+     | Error Invalid_credential_response -> Error "Provider credential refresh returned an invalid response"
+     | Ok token when Secret.is_empty token -> Error "Provider credential refresh returned an empty token"
+     | Ok token -> Ok (auth_headers_for_scheme ~kind ~auth_scheme token))
 ;;
 
 type reasoning_effort = Reasoning_effort.t =
@@ -751,12 +779,9 @@ let is_local (config : t) =
 ;;
 
 let resolve_auth_headers config =
-  match config.credential_source with
-  | Static_credential -> Ok (auth_headers_for_config config)
-  | Refreshable_credential refresh ->
-    (match refresh () with
-     | Error Credential_unavailable -> Error "Provider credential refresh is unavailable"
-     | Error Invalid_credential_response -> Error "Provider credential refresh returned an invalid response"
-     | Ok token when Secret.is_empty token -> Error "Provider credential refresh returned an empty token"
-     | Ok api_key -> Ok (auth_headers_for_config { config with api_key }))
+  auth_headers_for
+    ~kind:config.kind
+    ~auth_scheme:config.auth_scheme
+    ~api_key:config.api_key
+    ~credential_source:config.credential_source
 ;;

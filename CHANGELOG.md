@@ -12,10 +12,14 @@
 - Lanes: the overview draws lanes as one header row and measured columns, so failure counts stay on screen beside the Activity pane (#36062).
 - TUI: the `:` palette reaches Runtime, Changes and every Config pane (#36095).
 - Lanes: the TUI guides subscribing a Keeper to retained output references and shows the output position each subscription has acknowledged (#36007).
-- Runtime and Lanes: both screens share one three-tab console of Keeper Lanes, All Runtimes and Standalone, matching the `p`-key cycle; lane rows draw their fallback tree with the sticky winner marked, keeper assignments and live telemetry lead the detail column, and the Keeper list and detail show the assigned runtime target, the model context and an inherited default (#36107).
+- Runtime and Lanes: both screens share one three-tab console of Keeper Lanes, All Runtimes and Standalone, matching the `p`-key cycle; lane rows draw their fallback tree with the sticky winner marked, keeper assignments and live telemetry lead the detail column, and the Keeper list and detail show the assigned runtime target, the model context and an inherited default (#36107, #36120).
 - TUI: the keeper runtime picker assigns a lane and a model (#36099).
 - Voice: the voice pane gives a keeper its own voice (#36109), and the setup wizard offers `say` and `whisper-cli` (#36115).
 - Dashboard: an unreadable goal store is parsed as its own type, shows as an alert and locks the creation form instead of rendering an empty list (RFC-0444) (#36089).
+- Lane workspace: the five-view workspace is promoted, and add-on inspection takes the focus pane (#35761).
+- TUI: user input is auto-promoted to the next turn, and a shortcut inspects the input queue (#36123).
+- Keeper: pending inputs are organized into Librarian working contexts (#36142).
+- Browser Lane: the lane host follows the workspace connection port (#36133).
 
 ### Fixed
 
@@ -48,6 +52,16 @@
 - Dashboard: the stream protocol's error kinds are one list held equal to the backend's (#36026).
 - TUI: the Fusion title leaves a running count of zero out; the Schedules count and the next wake share one row; and Planning names the goals that left the list with no outcome (#36111, #36104, #36118).
 - TUI: Clients, Connectors and the Activity feed name their columns in capitals, and the Activity pane waits for a row that uses its column names before drawing them (#36103, #36100).
+- Setup: a failed verification prints its own reason, the failure code and the client's account of what it looked for, and Ctrl-C leaves the wizard as a cancelled setup with existing connections preserved instead of a traceback (#36151).
+- Gate: a sandbox's refused rule is carried as a typed reason instead of stderr text (#36032).
+- Agent core: the first-event budget is one window to the first token (#36149), and the budget stays armed until the first token-bearing event (#36114).
+- Keeper: the interrupt token names the child that holds the turn slot (#36014); a chat stop cancels the turn and nothing else (#36005); and control yields only to ready queue successors (#36130).
+- Keeper chat: the quiet leave belongs to the chat surface (#36132), and a section the pane could not read is reported as unread rather than drawn as empty (#36135).
+- Voice: the setup wizard writes the voice where the section can read it (#36124).
+- Streaming: the parser reads only the reasoning members the catalog declares (#36139).
+- Verification: unread image artifacts stay in the verdict record (#36127).
+- MSX: press fields are parsed at the boundary and the presser comes from actor auth (#36128).
+- TUI: the active runtime row states its one timestamp once (#36155); the Context row stops opening with the word its label already said (#36152); the Activity legend stops naming a mark no row draws (#36148); the screen says its timezone once, not on five rows (#36143); and the Overview names each transport path once, marking the one in use (#36136).
 
 ### Documentation
 

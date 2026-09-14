@@ -1379,6 +1379,110 @@ let test_operation_executor_claims_latest_input_and_drains_fifo () =
   check int "one child drains one operation at a time" 2 !execution_count
 ;;
 
+let test_owner_coalesces_compatible_messages_and_preserves_other_conversations () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let calls = ref [] in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    if !calls = [] then (Eio.Promise.resolve resolve_started (); Eio.Promise.await release);
+    match claim () with
+    | Ok (Some operation) -> calls := operation :: !calls;
+      Owner.Operation_succeeded { outcome_ref = "shared-turn" }
+    | Ok None -> fail "no queued work"
+    | Error error -> fail (Owner.error_to_string error) in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_executor:(Some execute) ~keeper_name:"batch-owner"
+    ~initial_meta:(Some (make_meta "batch-owner")) ()) in
+  let source actor thread =
+    let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id:thread with
+      | Ok channel -> channel | Error detail -> fail detail in
+    match Keeper_chat_operation_payload.source_to_json ~submitted_by:actor ~thread_id:thread
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let payload message user_blocks = Keeper_chat_operation_payload.input_to_json
+    ~message ~user_blocks ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let ids = List.map operation_id ["batch-one"; "batch-two"; "batch-other-actor"; "batch-other-thread"] in
+  let submit index actor thread text blocks = ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id:(List.nth ids index) ~source:(source actor thread) ~input:(payload text blocks))) in
+  let image = Keeper_multimodal_input.User_image (Url_ref {value="https://example.com/image.png"; mime_type=None}) in
+  submit 0 "alice" "keeper:batch" "one" [image];
+  Eio.Promise.await started;
+  submit 1 "alice" "keeper:batch" "two" [];
+  submit 2 "bob" "keeper:batch" "other actor" [];
+  submit 3 "alice" "keeper:other" "other thread" [];
+  Eio.Promise.resolve resolve_release ();
+  List.iter (fun id -> ignore (await_terminal owner id 1_000)) ids;
+  check int "one shared call plus separate actor and route" 3 (List.length !calls);
+  let shared = List.hd (List.rev !calls) in
+  let input = match shared.Chat_operation.input with
+    | Some input -> (match Keeper_chat_operation_payload.input_of_json input with Ok input -> input | Error detail -> fail detail)
+    | None -> fail "executor lost input" in
+  check string "ordered text" "one\n\ntwo" input.message;
+  check bool "mixed media and text preserve order" true (input.user_blocks = [User_text "one"; image; User_text "two"]);
+  check int "each original request belongs to same execution" 2
+    (List.length (owner_ok (Owner.batch_operations owner (List.nth ids 1))))
+;;
+
+let test_batch_member_interrupt_before_wire_binding ~interactive () =
+  Eio_main.run @@ fun _ -> Eio.Switch.run @@ fun sw ->
+  let before_claim, mark_before_claim = Eio.Promise.create () in
+  let release, release_claim = Eio.Promise.create () in
+  let started = Eio.Stream.create 2 in
+  let first_claim = ref true in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    if !first_claim then (first_claim := false; Eio.Promise.resolve mark_before_claim (); Eio.Promise.await release);
+    let operation = match owner_ok (claim ()) with Some operation -> operation | None -> fail "no queued operation" in
+    (* Deliberately publish no Run_started/Batch_bound wire event. The only
+       authority available to interruption is the durable membership. *)
+    Eio.Stream.add started operation.Chat_operation.operation_id;
+    Eio.Fiber.await_cancel () in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ())}
+    ~operation_executor:(Some execute) ~keeper_name:"member-interrupt"
+    ~initial_meta:(Some (make_meta "member-interrupt")) ()) in
+  let thread_id = "keeper:member-interrupt" in
+  let continuation_channel = match Keeper_continuation_channel.dashboard ~thread_id with
+    | Ok channel -> channel | Error detail -> fail detail in
+  let source = match Keeper_chat_operation_payload.source_to_json ~submitted_by:"alice" ~thread_id
+      ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
+      ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None ~external_message_id:None
+      ~workspace_id:None ~extra_mentions:[] ~user_row_origin:Keeper_chat_store.Needs_append with
+    | Ok source -> source | Error detail -> fail detail in
+  let input message = Keeper_chat_operation_payload.input_to_json ~message ~user_blocks:[]
+    ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let leader = operation_id "member-interrupt-leader" and follower = operation_id "member-interrupt-follower"
+  and next = operation_id "member-interrupt-next" in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:leader ~source ~input:(input "first")));
+  Eio.Promise.await before_claim;
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:follower ~source ~input:(input "second")));
+  Eio.Promise.resolve release_claim ();
+  check bool "shared owner started" true (Chat_operation.Operation_id.equal leader (Eio.Stream.take started));
+  if interactive then (
+    let _, receipt = owner_ok (Owner.submit_interactive_operation owner ~operation_id:next ~source ~input:(input "next")
+      ~intent:{control_token = Owner.chat_control_token owner; target = Some (Direct_operation follower)}) in
+    check bool "interactive follower signal resolves durable owner" true receipt.signalled)
+  else (
+    let receipt, _ = owner_ok (Owner.pause_and_interrupt owner (Direct_operation follower)) in
+    (match receipt with Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "follower Esc did not stop shared owner"));
+  List.iter (fun id -> ignore (await_terminal owner id 1_000)) [leader; follower];
+  if not interactive then (
+    ignore (owner_ok (Owner.submit_operation owner ~operation_id:next ~source ~input:(input "next")));
+    ignore (owner_ok (Owner.apply_meta owner (Resume {updated_at = "resume-after-member-stop"}))));
+  check bool "independent successor started" true (Chat_operation.Operation_id.equal next (Eio.Stream.take started));
+  let token = Owner.chat_control_token owner in
+  let stale, after = owner_ok (Owner.pause_and_interrupt owner (Direct_operation follower)) in
+  (match stale with Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "settled member interrupted another execution");
+  check string "stale member does not change control authority" token after;
+  check bool "successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
+  ignore (owner_ok (Owner.pause_and_interrupt owner (Direct_operation next)));
+  ignore (await_terminal owner next 1_000)
+;;
+
 let test_operation_executor_exception_is_terminal_and_next_runs () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1580,8 +1684,8 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
     ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first; second; third];
   check bool "first started" true (Chat_operation.Operation_id.equal first (Eio.Stream.take started));
-  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
-   | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Direct_operation first))) with
+   | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
   ignore (await_terminal owner first 1_000);
   check bool "pause persisted before stopping" true
     (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
@@ -1591,8 +1695,8 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   (match Owner.run_maintenance_if_idle owner (fun () -> "operator queue control") with
    | Ok (`Ran value) -> check string "paused queue remains controllable" "operator queue control" value
    | _ -> fail "pause blocked operator maintenance");
-  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
-   | Owner.Operation_not_current _ -> () | _ -> fail "settled execution was signalled");
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Direct_operation first))) with
+   | Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "settled execution was signalled");
   (match owner_ok (Owner.run_next_operation owner ~operation_id:third ~observed:None) with
    | Owner.Run_next_applied { resumed; _ } -> check bool "run-next resumes its chat pause" true resumed
    | Owner.Run_next_paused -> fail "chat pause was not resumable");
@@ -1607,6 +1711,93 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   check int "manual pause preserves input" 1 (Owner.operation_projection owner).queued_count
 ;;
 
+let test_interactive_admission_respects_stop_authority () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ())}
+    ~operation_executor:None ~keeper_name:"interactive-admission"
+    ~initial_meta:(Some (make_meta "interactive-admission")) ()) in
+  let original_token = Owner.chat_control_token owner in
+  let pause actor = ignore (owner_ok (Owner.apply_meta owner
+    (Pause {reason = Keeper_latched_reason.Operator_paused {operator_actor = actor}; updated_at = "pause"}))) in
+  let submit name token = owner_ok (Owner.submit_interactive_operation owner
+    ~operation_id:(operation_id name) ~source:operation_source ~input:(operation_input name)
+    ~intent:{control_token = token; target = None}) in
+  pause Chat_interrupt;
+  let stop_token = Owner.chat_control_token owner in
+  check bool "accepted pause invalidates captured Enter" false (String.equal original_token stop_token);
+  let admitted, stale = submit "interactive-before-stop" original_token in
+  check bool "stale Enter is durably queued" false admitted.existing;
+  check bool "stale Enter has no control effect" true (stale.outcome = Owner.Stale_control && not stale.resumed && not stale.signalled);
+  check bool "stop remains paused" true (Option.get (Owner.projection owner).meta).paused;
+  let _, resumed = submit "interactive-after-stop" stop_token in
+  check bool "new Enter resumes chat stop" true (resumed.outcome = Owner.Applied && resumed.resumed);
+  check bool "resume issues new authority" false (String.equal stop_token resumed.chat_control_token);
+  pause Chat_interrupt;
+  let later_stop = Owner.chat_control_token owner in
+  let replay, receipt = submit "interactive-after-stop" later_stop in
+  check bool "reconnect retains durable request" true replay.existing;
+  check bool "reconnect never resumes newer stop" true (receipt.outcome = Owner.Replayed && not receipt.resumed);
+  check bool "replay preserves stop authority" true (String.equal later_stop (Owner.chat_control_token owner));
+  pause Grpc_directive;
+  let _, manual = submit "interactive-manual-pause" (Owner.chat_control_token owner) in
+  check bool "Enter cannot release manual pause" true (manual.outcome = Owner.Paused && not manual.resumed);
+  check bool "manual latch remains paused" true (Option.get (Owner.projection owner).meta).paused
+;;
+
+let test_stop_before_interactive_admission_retains_message () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let persisted = ref None in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun meta -> persisted := Some meta; Ok ()); remove = (fun _ -> Ok ())}
+    ~operation_executor:None ~keeper_name:"stop-before-admission"
+    ~initial_meta:(Some (make_meta "stop-before-admission")) ()) in
+  let pending = operation_id "not-yet-admitted" in
+  let captured = Owner.chat_control_token owner in
+  let result, stopped = owner_ok (Owner.pause_and_interrupt ~expected_control_token:captured owner (Direct_operation pending)) in
+  (match result with Owner.Pending_admission_paused -> () | _ -> fail "pending admission was not paused");
+  check bool "pending stop is durable" true (Option.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !persisted);
+  check bool "pending stop invalidates earlier POST" false (String.equal captured stopped);
+  check bool "stop does not invent a submitted operation" true (owner_ok (Owner.exact_operation owner pending) = None);
+  let accepted, receipt = owner_ok (Owner.submit_interactive_operation owner ~operation_id:pending
+    ~source:operation_source ~input:(operation_input "preserved input")
+    ~intent:{control_token = captured; target = None}) in
+  check bool "late POST is retained, not discarded" false accepted.existing;
+  check bool "late POST cannot undo Esc" true (receipt.outcome = Owner.Stale_control && not receipt.resumed && not receipt.signalled);
+  check bool "late POST stays queued" true (accepted.operation.state = Chat_operation.Queued);
+  let refused, token = owner_ok (Owner.pause_and_interrupt ~expected_control_token:captured owner
+    (Direct_operation (operation_id "other-pending"))) in
+  (match refused with Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "stale control paused another admission");
+  check string "refused stop changes no authority" stopped token;
+  let result, refreshed = owner_ok (Owner.pause_and_interrupt ~expected_control_token:stopped owner (Direct_operation pending)) in
+  (match result with Owner.Pending_admission_paused -> () | _ -> fail "known queued request cannot be stopped");
+  check bool "queued stop also advances authority" false (String.equal stopped refreshed)
+;;
+
+let test_pending_stop_cannot_pause_different_active_child () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let started = Eio.Stream.create 1 in
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun _ -> fail "pending stop mutated a different active turn"); remove = (fun _ -> Ok ())}
+    ~operation_executor:(Some (fun ~sw:_ ~keeper_name:_ ~claim ->
+      ignore (owner_ok (claim ())); Eio.Stream.add started (); Eio.Fiber.await_cancel ()))
+    ~keeper_name:"different-active-admission" ~initial_meta:(Some (make_meta "different-active-admission")) ()) in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:(operation_id "active-other")
+    ~source:operation_source ~input:(operation_input "working")));
+  Eio.Stream.take started;
+  let captured = Owner.chat_control_token owner in
+  let result, token = owner_ok (Owner.pause_and_interrupt ~expected_control_token:captured owner
+    (Direct_operation (operation_id "not-submitted"))) in
+  (match result with Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "unknown request affected active successor");
+  check string "active successor keeps control token" captured token;
+  check bool "active successor remains unpaused" false (Option.get (Owner.projection owner).meta).paused;
+  (* The refusal deliberately leaves this child working. End only that fixture
+     execution so the enclosing switch can finish after the assertions. *)
+  ignore (owner_ok (Owner.interrupt_running_operation owner (operation_id "active-other")));
+  ignore (await_terminal owner (operation_id "active-other") 1_000)
+;;
+
 let test_stale_chat_interrupt_cannot_pause_successor () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1616,13 +1807,13 @@ let test_stale_chat_interrupt_cannot_pause_successor () =
     ~initial_meta:(Some (make_meta "stale-chat-stop")) ()) in
   Eio.Switch.run @@ fun successor ->
   let current = Atomic.make (Some { Keeper_registry_types.interrupt_token = "successor"; switch = successor }) in
-  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn { current; interrupt_token = "old" })) with
-   | Owner.Operation_not_current _ -> () | _ -> fail "stale token was accepted");
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn { current; interrupt_token = "old" }))) with
+   | Owner.Interrupt_result (Operation_not_current _) -> () | _ -> fail "stale token was accepted");
   check bool "successor remains unpaused" false
     (Option.get (Owner.projection owner).meta).paused
 ;;
 
-let test_observed_stop_cancels_request_owned_stalled_http () =
+let run_observed_control_with_request_owned_stalled_http ~interactive =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun outer ->
   let socket = Eio.Net.listen env#net ~sw:outer ~reuse_addr:false ~backlog:1
@@ -1644,13 +1835,18 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
   let body_started, mark_body_started = Eio.Promise.create () in
   let http_cancelled, mark_http_cancelled = Eio.Promise.create () in
   let turn_ready, mark_turn_ready = Eio.Promise.create () in
+  let successor_started = ref false in
   let current = Atomic.make None in
   let first = operation_id "observed-stop-http" in
   let queued = operation_id "observed-stop-queued" in
   let operation_executor ~sw ~keeper_name:_ ~claim =
     let operation : Chat_operation.t = match owner_ok (claim ()) with Some value -> value | None -> fail "no claim" in
-    if not (Chat_operation.Operation_id.equal operation.operation_id first)
-    then fail "paused successor ran";
+    if not (Chat_operation.Operation_id.equal operation.operation_id first) then (
+      check bool "only interactive Enter admits successor" true interactive;
+      check bool "intended message consumed" true (Chat_operation.Operation_id.equal operation.operation_id queued);
+      successor_started := true;
+      Owner.Operation_succeeded {outcome_ref="new-answer"})
+    else (
     (* This HTTP task belongs to the enclosing request, not the inner model
        switch. The fixture stalls on an actual body read, not a timer in f. *)
     Eio.Fiber.fork ~sw (fun () ->
@@ -1672,18 +1868,28 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
     (* Mirror execute_keeper_stream_tool_streaming: an inner interruption can
        become a returned failure while the outer request waits for children. *)
     Owner.Operation_failed {kind=Chat_operation.Turn_cancelled;
-      detail=Keeper_registry_types.operator_interrupt_detail;outcome_ref=None}
+      detail=Keeper_registry_types.operator_interrupt_detail;outcome_ref=None})
   in
   let owner = owner_ok (start_owner_with_executor ~sw:outer
     ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
     ~operation_executor:(Some operation_executor) ~keeper_name:"observed-http"
     ~initial_meta:(Some (make_meta "observed-http")) ()) in
   List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
-    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first;queued];
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) (if interactive then [first] else [first;queued]);
   Eio.Promise.await turn_ready;
   Eio.Promise.await body_started;
-  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"})) with
-   | Owner.Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
+  if interactive then (
+    let acceptance, receipt = owner_ok (Owner.submit_interactive_operation owner
+      ~operation_id:queued ~source:operation_source ~input:(operation_input "new question")
+      ~intent:{control_token=Owner.chat_control_token owner;
+        target=Some (Observed_turn {current;interrupt_token="observed"})}) in
+    check bool "Enter persists a new operation" false acceptance.existing;
+    check bool "Enter signals the exact running owner" true
+      (receipt.outcome=Owner.Applied && receipt.signalled && not receipt.resumed);
+    check bool "Enter leaves consumption open" false (Option.get (Owner.projection owner).meta).paused)
+  else
+    (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"}))) with
+     | Owner.Interrupt_result Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
   let cancelled = Eio.Fiber.first
     (fun () -> Eio.Promise.await http_cancelled; true)
     (fun () -> Eio.Time.sleep env#clock 2.0; false) in
@@ -1691,9 +1897,23 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
      switch teardown. This deadline is fixture-only, never runtime policy. *)
   Eio.Promise.resolve unblock_server ();
   ignore (await_terminal owner first 1_000);
-  check bool "observed Esc reaches request-owned HTTP read" true cancelled;
+  check bool "observed control reaches request-owned HTTP read" true cancelled;
+  if interactive then (
+    let operation = await_terminal owner queued 1_000 in
+    check bool "Enter consumes the new message without run-next" true !successor_started;
+    match operation.Chat_operation.state with
+    | Chat_operation.Succeeded _ -> ()
+    | _ -> fail "interactive successor did not answer");
   check bool "real teardown releases owner slot" true (Owner.turn_in_flight owner = None);
-  check int "queued input remains paused" 1 (Owner.operation_projection owner).queued_count
+  check int "only Esc retains paused input" (if interactive then 0 else 1) (Owner.operation_projection owner).queued_count
+;;
+
+let test_observed_stop_cancels_request_owned_stalled_http () =
+  run_observed_control_with_request_owned_stalled_http ~interactive:false
+;;
+
+let test_interactive_enter_replaces_request_owned_stalled_http () =
+  run_observed_control_with_request_owned_stalled_http ~interactive:true
 ;;
 
 let test_is_operator_interrupt_unwraps_every_shape () =
@@ -3378,6 +3598,11 @@ let () =
             test_stale_chat_interrupt_cannot_pause_successor
         ; test_case "observed Esc cancels request-owned stalled HTTP" `Quick
             test_observed_stop_cancels_request_owned_stalled_http
+        ; test_case "interactive Enter consumes input after cancelling stalled HTTP" `Quick
+            test_interactive_enter_replaces_request_owned_stalled_http
+        ; test_case "interactive admission honors stop and replay authority" `Quick test_interactive_admission_respects_stop_authority
+        ; test_case "Esc before interactive POST retains paused admission" `Quick test_stop_before_interactive_admission_retains_message
+        ; test_case "pending admission stop cannot pause another active child" `Quick test_pending_stop_cannot_pause_different_active_child
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick
@@ -3404,6 +3629,10 @@ let () =
             test_startup_queued_waits_for_runner_readiness
         ; test_case "Gate waiting releases Owner without repeated children" `Quick
             test_gate_wait_releases_owner_without_repeated_children
+        ; test_case "compatible direct messages share an execution" `Quick
+            test_owner_coalesces_compatible_messages_and_preserves_other_conversations
+        ; test_case "Esc resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:false)
+        ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case

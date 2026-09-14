@@ -2223,6 +2223,11 @@ let render_keeper_message (state : state) =
        corners onto rows that never close. *)
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
+      |> List.filter (fun settled -> match state.msg_live with
+        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name
+            && Option.is_none promoted ->
+          Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
+        | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
       |> List.map settled_projection
       |> List.filter (fun block -> block.lb_entries <> [])
@@ -2504,7 +2509,7 @@ let render_keeper_message (state : state) =
       | Some live
         when state.msg_target_keeper_name
              = Some (Masc_tui_types.turn_log_keeper_name live) ->
-        Some (Masc_tui_types.turn_log_request_id live)
+        Some (Masc_tui_types.turn_log_execution_id live)
       | Some _ | None -> None
     in
     (match
@@ -2518,11 +2523,13 @@ let render_keeper_message (state : state) =
              if
                not
                  (Option.equal String.equal live_request_id
-                    (Some entry.sent_request.request_id))
+                    (Some (Masc_tui_types.turn_log_execution_id entry.log)))
              then
              let activity =
                match entry.phase with
-               | Turn_streaming -> "sending"
+               | Turn_streaming ->
+                 if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
+                 then "awaiting continuation" else "sending"
                | Turn_reconciling -> "reconciling"
              in
              box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
@@ -2887,14 +2894,14 @@ let render_keeper_message (state : state) =
         | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
         | None -> (
             match pending_count with
-            | 0 -> "Enter:queue for next turn"
+            | 0 -> "Enter:send update"
             | waiting ->
                 Printf.sprintf
-                  "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+                  "Enter:send update (%d local)  Ctrl-K:cancel last  Ctrl-P:edit last"
                   waiting)
       in
       match disposition with
-      | Queues_behind _ -> queue_hint ()
+      | Updates _ -> queue_hint ()
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then
@@ -2916,7 +2923,12 @@ let render_keeper_message (state : state) =
        interrupt Esc will not spend itself on, nor say "interrupt sent" after
        the grace window when Esc would leave. *)
     let escape_hint =
-      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_interrupt_action state) with
+      let action = Option.bind state.msg_target_keeper_name (fun keeper_name ->
+        match Masc_tui_types.working_chat_for_keeper state keeper_name with
+        | Some entry -> Some (Masc_tui_types.working_chat_interrupt_action
+            ~now_ns:(Mtime_clock.elapsed_ns ()) state keeper_name entry)
+        | None -> Masc_tui_types.keeper_observed_interrupt_action state keeper_name) in
+      match action with
       | Some Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:stop current turn"
       | Some Swallow -> "Esc:interrupt requested"
       | Some Leave -> return_hint ()
@@ -3012,11 +3024,11 @@ let render_keeper_message (state : state) =
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
-          | Queues_behind _ -> (
+          | Updates _ -> (
               match state.msg_recall_replaces with
               | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
               | None ->
-                  Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
+                  Printf.sprintf "Enter:send update (%d local)  Ctrl-K:cancel  Ctrl-P:edit"
                     pending_count)
           | Sends -> enter_hint
         in

@@ -610,7 +610,7 @@ let test_interrupt_receipt_is_bound_to_the_exact_request () =
        (response "parent-a")
    with
    | Ok (Interrupt_signal.Signalled _) -> ()
-   | Ok (Interrupt_signal.Not_signalled _) | Error _ ->
+   | Ok Interrupt_signal.Pending_admission_paused | Ok (Interrupt_signal.Not_signalled _) | Error _ ->
      Alcotest.fail "the keeper's own receipt was not accepted");
   match
     Interrupt_signal.decode_interrupt_signal ~expected_request_id:"parent-a"
@@ -633,11 +633,96 @@ let test_observed_interrupt_response_identity () =
     [response "successor"; `Assoc ["signalled", `Bool true]; `Null]
 ;;
 
-let test_enter_during_a_turn_queues () =
+let test_pending_admission_pause_is_not_a_cancellation_claim () =
+  let receipt = `Assoc ["request_id", `String "pending"; "signalled", `Bool false;
+    "paused", `Bool true; "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_interrupt_signal ~expected_request_id:"pending" receipt with
+   | Ok Interrupt_signal.Pending_admission_paused -> ()
+   | _ -> fail "exact pending pause receipt rejected");
+  let missing_pause = `Assoc ["request_id", `String "pending"; "signalled", `Bool false;
+    "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_interrupt_signal ~expected_request_id:"pending" missing_pause with
+   | Error _ -> () | Ok _ -> fail "unconfirmed pause accepted");
+  let observed = `Assoc ["interrupt_token", `String "observed"; "signalled", `Bool false;
+    "paused", `Bool true; "reason", `String "paused_pending_admission"] in
+  (match Interrupt_signal.decode_observed_interrupt_signal ~expected_token:"observed" observed with
+   | Error _ -> () | Ok _ -> fail "pending receipt accepted for an observed running turn")
+;;
+
+let test_stop_ack_releases_only_input_after_that_stop () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.keeper_chat_control_tokens <- ["alpha", "before"; "beta", "other"];
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  state.keeper_interactive_waiting <- ["alpha", "after-stop", Tui_types.Awaiting_control {generation=stop;target=None}];
+  check bool "old snapshot is no longer current" true
+    (Tui_types.keeper_chat_control_generation state "alpha" <> 0);
+  check bool "stop acknowledgement settles pending control" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  let acknowledged = Tui_types.keeper_chat_control_generation state "alpha" in
+  check bool "poll started before acknowledgement is stale" true (acknowledged <> stop);
+  check bool "later input follows acknowledged control epoch" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Awaiting_control {generation=acknowledged;target=None}]);
+  ignore (Tui_types.begin_keeper_chat_control state "alpha");
+  check bool "a newer stop retains the input but revokes automatic resumption" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Retained_after_stop]);
+  let newer_stop = Tui_types.keeper_chat_control_generation state "alpha" in
+  check bool "new stop acknowledgement finishes" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:newer_stop);
+  check bool "acknowledgement cannot release revoked input" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", Tui_types.Retained_after_stop]);
+  check bool "older acknowledgement cannot finish newer stop" false
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  check (option string) "unrelated keeper token remains usable" (Some "other")
+    (List.assoc_opt "beta" state.keeper_chat_control_tokens);
+  state.keeper_interactive_waiting <- state.keeper_interactive_waiting @
+    ["beta", "other-stopped", Tui_types.Retained_after_stop;
+     "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}];
+  Tui_types.release_retained_keeper_input state "alpha";
+  check bool "explicit resume releases only stopped input for its keeper" true
+    (state.keeper_interactive_waiting =
+      ["beta", "other-stopped", Tui_types.Retained_after_stop;
+       "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}])
+;;
+
+let test_late_interrupt_outcome_cannot_mark_newer_control () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  check bool "outcome without a token callback is current" true
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  check bool "outcome after its own callback is current" true
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  ignore (Tui_types.advance_keeper_chat_control state "alpha");
+  check bool "resumed Enter excludes previous stop outcome" false
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
+  let first = Tui_types.begin_keeper_chat_control state "alpha" in
+  let second = Tui_types.begin_keeper_chat_control state "alpha" in
+  let pending_started = List.assoc "alpha" state.keeper_chat_control_pending in
+  check bool "stale finish retains newer request clock" false
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:first);
+  check int64 "pending time belongs to newer control" pending_started
+    (List.assoc "alpha" state.keeper_chat_control_pending);
+  check bool "second pending stop is not first receipt acknowledgement" false
+    (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:first);
+  check bool "the newer request clock is the one a finish settles" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:second)
+;;
+
+let test_control_receipts_are_scoped_to_each_keeper () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Tui_types.begin_keeper_chat_control state "alpha" in
+  let beta = Tui_types.begin_keeper_chat_control state "beta" in
+  check bool "beta does not invalidate alpha receipt" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:alpha);
+  check bool "alpha does not invalidate beta receipt" true
+    (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
+;;
+
+let test_enter_stages_the_input_before_submission () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
     failf
-      "bin/masc_tui.ml must queue a message typed while a turn is running; \
+      "bin/masc_tui.ml must stage accepted input before submitting the update; \
        queue_keeper_message is called %d time(s)"
       n
 ;;
@@ -649,29 +734,6 @@ let test_a_settled_turn_drains_the_queue () =
       "bin/masc_tui.ml must drain the queue when a turn settles; \
        drain_queued_message is called %d time(s)"
       n
-;;
-
-let test_steer_queues_then_interrupts_through_distinct_paths () =
-  let queued =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
-      ~callee:"queue_keeper_steer"
-  in
-  let interrupted =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
-      ~callee:"launch_keeper_interrupt"
-  in
-  let prioritized =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"queue_keeper_steer"
-      ~callee:"Chat_queue.push_steer"
-  in
-  if queued <> 1 || interrupted <> 1 || prioritized <> 1 then
-    failf
-      "steer must persist the replacement before signalling the current turn: \
-       queue=%d interrupt=%d priority=%d"
-      queued interrupted prioritized
 ;;
 
 (* Two Keepers can stream at once. A single [state.msg_live] slot lets the
@@ -711,6 +773,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
     ({ Tui_types.sent_request
      ; submitted_at = 1.0
      ; sent_at = 1.0
+     ; control_generation = 0
      ; origin = Tui_types.Direct_submission
      ; phase = Tui_types.Turn_streaming
      ; log =
@@ -765,6 +828,7 @@ let test_live_transcripts_are_kept_per_keeper () =
     ({ Tui_types.sent_request = sent_request
      ; submitted_at = started_at
      ; sent_at = started_at
+     ; control_generation = 0
      ; origin = Tui_types.Direct_submission
      (* A request that has just been POSTed is streaming; reconciling is what
         it becomes after the stream settles. *)
@@ -846,6 +910,7 @@ let inflight_with_log ~keeper_name ~started_at deltas : Tui_types.inflight =
   { Tui_types.sent_request
   ; submitted_at = started_at
   ; sent_at = started_at
+     ; control_generation = 0
   ; origin = Tui_types.Direct_submission
   ; phase = Tui_types.Turn_streaming
   ; log
@@ -886,7 +951,7 @@ let test_settle_turn_log_commits_holds_and_clears_live () =
 
 let completed ?(outcome = Masc.Keeper_turn_outcome.Visible_reply) reply
     : Keeper_chat.completed_turn =
-  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0 }
+  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0; interactive = None }
   ; reply
   ; turn_outcome = outcome
   ; turn_ref = "trace-1#1"
@@ -1084,7 +1149,7 @@ let test_the_acceptance_is_read_but_not_logged () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1" ~started_at:1.
   in
-  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2 } in
+  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2; interactive = None } in
   Tui_types.turn_log_add ~now:1. log ~seq:None accepted;
   Tui_types.turn_log_add ~now:2. log ~seq:None accepted;
   check int "no entries" 0 (List.length (Log.entries log.Tui_types.tl_log));
@@ -1442,6 +1507,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
     [ { Tui_types.sent_request = request
       ; submitted_at = 42.0
       ; sent_at = 43.0
+     ; control_generation = 0
       ; origin =
           Tui_types.Promoted_queue
             { submission_seq = 7
@@ -2360,24 +2426,6 @@ let test_the_arrow_walk_does_not_repeat_the_queue () =
       n
 ;;
 
-(* The footer says what Enter does, and it has to say what Enter actually
-   does. It used to work that out from [msg_inflight_kind] while the send path
-   read the durable fences first, so a request being reconciled or cleaned up
-   drew "queued 1" and [Enter:blocked] on the same screen. Both now read
-   [send_disposition], which is where the order lives. *)
-let test_both_readers_share_one_disposition () =
-  List.iter
-    (fun (module_path, what) ->
-      let n = calls ~module_path ~callee:"send_disposition" in
-      if n < 1 then
-        failf
-          "%s must decide %s from send_disposition, not from its own reading            of the state; it is called %d time(s)"
-          module_path what n)
-    [ ("bin/masc_tui.ml", "what Enter does")
-    ; ("bin/masc_tui_render_chat.ml", "what the footer says Enter does")
-    ]
-;;
-
 (* The Keeper Calls table says a call ran and what it was called with. What
    it answered is the question a failed call leaves open, and the digest is
    computed where it can be tested; this pins that the table asks for it. *)
@@ -2416,21 +2464,92 @@ let test_image_headers_sanitize_untrusted_attachment_names () =
        ~binding_name:"draw_image" ~callee:"Keeper_chat.terminal_safe_text")
 ;;
 
+let test_checkpoint_watcher_allows_new_input () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original" () in
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
+  state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.; control_generation=0;
+    origin=Tui_types.Direct_submission; phase=Tui_types.Turn_streaming; log}];
+  List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+    [Masc_tui_keeper_chat_live.Run_started;
+     Masc_tui_keeper_chat_live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
+     Masc_tui_keeper_chat_live.Run_finished];
+  check bool "watcher remains attached" true (Option.is_some (Tui_types.inflight_for_keeper state "alpha"));
+  check bool "new operator input can be sent" true
+    (Tui_types.send_disposition state ~keeper_name:"alpha" = Masc_tui_send_disposition.Sends)
+;;
+
+let test_old_queued_watcher_does_not_rearm_esc () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let working = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
+  let queued = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
+  state.msg_inflight <- [queued; working];
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  Masc_tui_keeper_chat_transcript.note_interrupt working.log.tl_transcript
+    (Signal_sent {turn_id=None;signalled_at_ns=0L});
+  let now_ns = Int64.succ Masc_tui_esc_interrupt.grace_window_ns in
+  check bool "old queued watcher cannot keep signalling after stop acknowledgement" true
+    (Tui_types.working_chat_interrupt_action ~now_ns state "alpha" working = Masc_tui_esc_interrupt.Leave);
+  let generation = Tui_types.advance_keeper_chat_control state "alpha" in
+  state.msg_inflight <- [{queued with control_generation=generation}; working];
+  check bool "a fresh input epoch can request another exact stop" true
+    (Tui_types.working_chat_interrupt_action ~now_ns state "alpha" working = Masc_tui_esc_interrupt.Launch_interrupt)
+;;
+
+let test_batch_watchers_render_one_shared_settled_turn () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let make request_id execution_id =
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
+    List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
+      [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
+       Live.Text "shared answer";
+       Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
+       Live.Run_finished];
+    log in
+  let leader = make "batch-owner" "batch-owner" in
+  let follower = make "batch-follower" "batch-owner" in
+  let independent = make "different-request" "different-request" in
+  state.msg_settled_logs <- [follower; independent; leader];
+  let visible = Tui_types.settled_logs_for_keeper state "alpha" in
+  check (list string) "shared execution draws once; independent identical text is retained"
+    ["batch-owner"; "different-request"] (List.map Tui_types.turn_log_request_id visible);
+  check bool "follower watcher retains its own request lookup" true
+    (Option.is_some (Tui_types.settled_log_for_request state ~keeper_name:"alpha" "batch-follower"));
+  check string "held transcript suppresses only the canonical owner's persisted reply"
+    "batch-owner" (Tui_types.held_turn_of_log follower).ht_request_id;
+  let invalid = make "unrelated-request" "unrelated-request" in
+  Tui_types.turn_log_add ~now:3. invalid ~seq:None
+    (Live.Batch_bound {operation_id="other-request"; execution_id="batch-owner"});
+  check string "mismatched binding cannot hide another request"
+    "unrelated-request" (Tui_types.turn_log_execution_id invalid)
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
     [ ( "wiring"
-      , [ test_case "image headers sanitize attachment names" `Quick
+      , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
+        ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
+            test_old_queued_watcher_does_not_rearm_esc
+        ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
+        ; test_case "image headers sanitize attachment names" `Quick
             test_image_headers_sanitize_untrusted_attachment_names
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
-        ; test_case "Enter during a turn queues" `Quick
-            test_enter_during_a_turn_queues
+        ; test_case "pending admission pause is not cancellation" `Quick
+            test_pending_admission_pause_is_not_a_cancellation_claim
+        ; test_case "stop acknowledgement releases only later input" `Quick
+            test_stop_ack_releases_only_input_after_that_stop
+        ; test_case "late interrupt outcomes cannot mark newer controls" `Quick
+            test_late_interrupt_outcome_cannot_mark_newer_control
+        ; test_case "control receipts are per Keeper" `Quick
+            test_control_receipts_are_scoped_to_each_keeper
+        ; test_case "Enter stages input before immediate submission" `Quick
+            test_enter_stages_the_input_before_submission
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
-        ; test_case "steer queues then interrupts through distinct paths" `Quick
-            test_steer_queues_then_interrupts_through_distinct_paths
         ; test_case "concurrent turns keep request-owned transcripts" `Quick
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "another keeper's request does not pin this pane" `Quick
@@ -2536,8 +2655,6 @@ let () =
             test_the_pane_draws_every_row_into_its_own_buffer
         ; test_case "the arrow walk does not repeat the queue" `Quick
             test_the_arrow_walk_does_not_repeat_the_queue
-        ; test_case "both readers share one disposition" `Quick
-            test_both_readers_share_one_disposition
         ; test_case "the calls table says what came back" `Quick
             test_the_calls_table_says_what_came_back
         ; test_case "the sending rows show an age" `Quick

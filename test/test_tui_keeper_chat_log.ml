@@ -24,6 +24,7 @@ let occurrence_to_string (o : Live.tool_occurrence) =
     (Option.value ~default:"-" o.tool_call_id)
 
 let delta_to_string : Live.delta -> string = function
+  | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       Printf.sprintf "runtime_attempt_started(%s,%s)"
@@ -51,7 +52,7 @@ let delta_to_string : Live.delta -> string = function
         question because
   | Live.Approval_settled { call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
-  | Live.Accepted { admission; queue_length } ->
+  | Live.Accepted { admission; queue_length; _ } ->
       Printf.sprintf "accepted(%s,%d)"
         (match admission with
          | Live.Queued -> "queued"
@@ -79,8 +80,8 @@ let test_seq_dedup_and_none_never_dedupes () =
   check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text "again"));
   let revision = Log.revision t in
   check bool "duplicate leaves the revision alone" true (Log.revision t = revision);
-  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1 }));
-  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1 }));
+  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None }));
+  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None }));
   check int "three entries" 3 (List.length (Log.entries t));
   check position "resume position" (Journal.After_seq 0) (Log.resume_position t)
 
@@ -233,6 +234,9 @@ let occurrence_anon : E.tool_stream_occurrence =
    test does not link) and [Event_error] (terminal; see [failed_turn]). *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
+  ; E.Batch_bound
+      { operation_id = (match Keeper_chat_operation.Operation_id.of_string "tui-req-1" with Ok id -> id | Error detail -> fail detail)
+      ; execution_id = (match Keeper_chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> fail detail) }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
       { provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }

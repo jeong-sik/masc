@@ -1007,6 +1007,8 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
+    ?official_client_original_turn
+    ?official_task_reference
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -1469,6 +1471,8 @@ let run_named
             ~context
             ~terminal_effect_state
             ?official_client_continuation
+            ?official_task_reference
+            ?official_client_original_turn
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1600,6 +1604,7 @@ let run_named
             ~context
             ~terminal_effect_state
             ?official_client_continuation
+            ?official_task_reference
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -1714,6 +1719,7 @@ let run_named
             ~context
             ~terminal_effect_state
             ?official_client_continuation
+            ?official_task_reference
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->

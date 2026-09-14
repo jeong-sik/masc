@@ -84,7 +84,7 @@ type fixture_step =
   | Emit_and_read of string
   | Close_transport
 
-let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
@@ -102,6 +102,11 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = fa
   then output_string output "  rm -- \"$0\"\n";
   output_string output "  exit 0\n";
   output_string output "  ;;\nesac\n";
+  Option.iter (fun marker ->
+    output_string output ("previous_arg=''\nfor arg in \"$@\"; do\n" ^
+      "  if [ \"$previous_arg\" = '--system-prompt-file' ]; then cat -- \"$arg\" > " ^
+      shell_quote marker ^ "; printf '%s' \"$arg\" > " ^ shell_quote (marker ^ ".path") ^
+      "; fi\n  previous_arg=$arg\ndone\n")) system_marker;
   output_string output "session=''\n";
   output_string output "for arg in \"$@\"; do\n";
   output_string output "  case \"$arg\" in\n";
@@ -142,21 +147,23 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = fa
   path
 ;;
 
-let with_fixture ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
-  let path = fixture_script ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
+  let path = fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
 ;;
 
 let with_fixture_sequence
+    ?first_system_marker
+    ?second_system_marker
     ?first_prompt_marker
     ?second_prompt_marker
     first_lines
     second_lines
     f =
-  let first_path = fixture_script ?prompt_marker:first_prompt_marker first_lines in
-  let second_path = fixture_script ?prompt_marker:second_prompt_marker second_lines in
+  let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
+  let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
   let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
   Sys.remove counter_path;
   let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
@@ -271,6 +278,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
+    ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -302,7 +310,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~keeper_name:"claude-fixture"
                            ~base_path
                            ~goal
-                           ~system_prompt:"pre-dispatch fixture system prompt"
+                           ~system_prompt
                            ~tools
                            ~agent_core_tools:tools
                            ~initial_messages
@@ -931,6 +939,8 @@ let history_uses_current_schema history =
 
 let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=false) () =
   let base_path = temp_workspace () in
+  let first_system_marker = Filename.concat base_path "full-system.txt" in
+  let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
   let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
   let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
   let initial_messages =
@@ -963,6 +973,7 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
              frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint)
          | _ -> fail "native Gate seed did not settle") in
        with_fixture_sequence
+         ~first_system_marker ~second_system_marker
          ~first_prompt_marker
          ~second_prompt_marker
          [ Emit prompt_too_long_statusless_result ]
@@ -985,6 +996,26 @@ let test_keeper_shrinks_history_after_statusless_context_error ?(native_gate=fal
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       List.iter (fun marker ->
+         let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
+         check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
+         [first_system_marker; second_system_marker];
+       (if native_gate then (
+         let snapshot marker = In_channel.with_open_bin marker In_channel.input_all
+           |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
+         let full = snapshot first_system_marker and shrunk = snapshot second_system_marker in
+         let messages value = Yojson.Safe.Util.member "messages" value in
+         check string "large replacement file preserves full initial canonical snapshot"
+           (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json initial_messages)))
+           (Yojson.Safe.to_string (messages full));
+         check bool "projected retry is smaller in the replacement file" true
+           (List.length (Yojson.Safe.Util.to_list (messages shrunk)) < List.length initial_messages);
+         List.iter (fun value ->
+           let digest = messages value |> Yojson.Safe.to_string
+             |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+           check string "file transport preserves projected provenance hash" digest
+             Yojson.Safe.Util.(value |> member "snapshot_sha256" |> to_string)) [full; shrunk]
+       ));
        (if native_gate then
           (* A native continuation sends only its new input; the official
              session already owns the prior history, including the Gate. *)
@@ -1171,7 +1202,17 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
 ;;
 
 let test_keeper_settles_and_resumes () =
+  let effect_count = ref 0 in
+  let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Record one effect"
+    ~parameters:[{Agent_core.Types.name="marker";description="marker";param_type=String;required=true}]
+    (fun _ -> incr effect_count;
+      Ok {Agent_core.Types.content="completed official effect";content_blocks=None;_meta=None}) in
   let base_path = temp_workspace () in
+  let system_marker = Filename.concat base_path "resume-system.txt" in
+  let native_history = [message User "Native correction after the official turn";
+    Agent_core.Types.make_message ~role:Tool [Agent_core.Types.ToolResult
+      {tool_use_id="native-call";content="completed native effect";outcome=Tool_succeeded;
+       json=Some (`Assoc ["receipt",`String "native-proof"]);content_blocks=None}]] in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
   (* What each turn reported about its own model input. The start/resume split
      the rest of this test pins on the wire has to be the same split the
@@ -1194,12 +1235,15 @@ let test_keeper_settles_and_resumes () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
-         [ Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
+         [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
+           Emit_and_read mcp_list; Emit_and_read mcp_call;
+           Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
          ; Emit (result ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
          ]
          (fun cli_path ->
            match
              run_keeper_turn
+               ~tools:[tool]
                ~initial_messages:
                  [ message User "earlier user"; message Assistant "earlier assistant" ]
                ~base_path
@@ -1233,14 +1277,16 @@ let test_keeper_settles_and_resumes () =
          | _ -> fail "first Claude Code turn did not settle"
        in
        with_fixture
-         ~prompt_marker
+         ~prompt_marker ~system_marker
          [ Emit (assistant ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
          ; Emit (result ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
          ]
          (fun cli_path ->
            match
              run_keeper_turn
-               ~initial_messages:[ message User "ALREADY_IN_OFFICIAL_SESSION" ]
+               ~tools:[tool]
+               ~initial_messages:native_history
+               ~system_prompt:"Updated core instructions"
                ~base_path
                ~cli_path
                ~goal:"SECOND_GOAL"
@@ -1263,19 +1309,30 @@ let test_keeper_settles_and_resumes () =
          "resume sends only current goal"
          "SECOND_GOAL"
          (content_of_wire_message raw);
-       (* And the record says the same thing the wire does. Reporting the
-          prepared list here would attribute "ALREADY_IN_OFFICIAL_SESSION" and
-          the first turn's history to a request that carried neither
-          (masc#32995). *)
+       let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
+       let scoped_path = In_channel.with_open_bin (system_marker ^ ".path") In_channel.input_all in
+       check bool "replacement context file removed after child settles" false (Sys.file_exists scoped_path);
+       check bool "core instructions replace the prior prompt" true
+         (String.starts_with ~prefix:"Updated core instructions" system_wire);
+       let snapshot = system_wire |> String.split_on_char '\n'
+         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
+           | `Assoc fields as value when List.assoc_opt "schema" fields =
+               Some (`String "masc.official-client-canonical-context.v1") -> Some value
+           | _ -> None | exception Yojson.Json_error _ -> None)
+         |> function Some value -> value | None -> fail "missing canonical context on system wire" in
+       check string "native conversation and completed tool receipt stay exact"
+         (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json native_history)))
+         (snapshot |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.to_string);
        (match reported_input () with
-        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Held_by_client_session -> fail "current canonical context was transmitted"
         | Keeper_official_client_host.Whole_input_transmitted messages ->
-          fail
-            (Printf.sprintf
-               "a resumed conversation attributed %d messages the wire did not \
-                carry"
-               (List.length messages)));
+          check int "current canonical context is attributed" 2 (List.length messages));
+       check int "resumed context does not repeat official tool effect" 1 !effect_count;
        let second = load_state base_path in
+       (match second.context_frontier with
+        | Some {acknowledged_turn=Some receipt;delivery=Replaced_configuration;_} ->
+          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id
+        | Some _ | None -> fail "missing settled replacement context receipt");
        check int "durable cumulative turns" 2 second.turn_count;
        match second.phase with
        | Settled { session_id = settled_session; turn_id = "turn-2" } ->

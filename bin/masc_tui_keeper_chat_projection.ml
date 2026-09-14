@@ -354,6 +354,16 @@ let error_to_string = function
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
 
+(* What the operator reads while the TUI re-POSTs an operation whose outcome it
+   could not verify. The sentence used to open with "connection lost" for every
+   [Outcome_unverified] error, so a rejection the server answered over a live
+   connection -- a fenced store, an HTTP 500, a malformed event -- read as a
+   network failure, and the operator had no way to tell which. The cause now
+   comes from [error_to_string]; what the TUI does next is the second half. *)
+let unverified_retry_notice ~request_id error =
+  Printf.sprintf "%s; reconciling exact request %s before NEXT"
+    (error_to_string error |> terminal_safe_text) request_id
+
 (* A reconciliation read asks "what happened to the operation". 401 and 403 do
    not answer that question: the request stopped before the handler, so the
    operation is untouched and still on the server. [error_certainty] below reads

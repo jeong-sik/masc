@@ -341,6 +341,30 @@ let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
     "failsafe_floor"
     (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
 
+(* With no explicit env/toml value the resolver substitutes the no-progress
+   floor (not [None]): a default install runs the attempt watchdog and a
+   tool's provider sub-call is bounded. Reverting the floor (back to [None])
+   makes this fail; the two units that consume the value
+   ([Keeper_turn_driver_try_provider] and [Keeper_provider_subcall]) treat
+   [None] as "no bound". *)
+let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "provider-call threshold defaults to fail-safe floor"
+    (Some Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec)
+    runtime.provider_call_deadline_sec.value;
+  check (option (float 0.0001)) "accessor returns the floor when unset"
+    (Some Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec)
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check string "provider-call threshold floor source"
+    "failsafe_floor"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source);
+  check bool "the floor sits above the first-event floor, so a silent prefill is the reader's call"
+    true
+    (Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
+     > Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+
 let test_resolved_first_event_timeout_uses_toml () =
   (* End-to-end pin for the registry-driven mapping: runtime.toml
      [turn.first_event_timeout_sec] must reach the resolver as
@@ -598,11 +622,12 @@ let test_settings_projection_uses_typed_effective_values () =
     (snapshot |> member "effective_error" = `Null);
   let deadline = find "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" in
   let expected_deadline =
-    match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
-    | Some value -> Printf.sprintf "%g" value
-    | None -> "(none)"
+    Printf.sprintf "%g"
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | Some value -> value
+       | None -> Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec)
   in
-  check string "deadline projection uses typed runtime value" expected_deadline
+  check string "deadline projection shows the value in effect, floor included" expected_deadline
     (deadline |> member "effective_value" |> to_string)
 ;;
 
@@ -771,6 +796,7 @@ let () =
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
         ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
         ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor
+        ; test_case "resolved provider-call threshold defaults to fail-safe floor" `Quick test_resolved_provider_call_deadline_defaults_to_failsafe_floor
         ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error

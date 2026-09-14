@@ -297,7 +297,7 @@ let all =
       ~env_name:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
       ~value_kind:Float
-      ~default:"(none)"
+      ~default:"(failsafe 900)"
       ~consumers:
         [ "Keeper_runtime_resolved"
         ; "Keeper_turn_driver_try_provider attempt watchdog"

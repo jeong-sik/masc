@@ -686,6 +686,23 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Log.Runtime.info
         ~category:Log.Boundary
         "keeper first-event timeout resolved: disabled (no first-event bound)");
+  (* The provider-call no-progress threshold: the attempt watchdog's bound and
+     the only bound on a tool's provider sub-call. Stated with its source for
+     the same reason as the two lines above. *)
+  Keeper_runtime_resolved.(
+    let threshold = (current ()).provider_call_deadline_sec in
+    match threshold.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string threshold.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper provider-call no-progress threshold resolved: disabled (no attempt \
+         watchdog, unbounded sub-calls)");
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
     ~invalidate_full_health_snapshot:

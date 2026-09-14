@@ -2614,7 +2614,14 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (named_refusal "asks" ~status ~body)
+      (* Named once. [remember_surface_error] is the only reader of this
+         error -- the three call sites all reach it through [apply_asks_load]
+         -- and it already opens with the surface, so a name here made the row
+         read "asks data unreliable: asks: HTTP 503: ...". The other seven
+         surfaces that go through that function return their refusal unnamed;
+         this was the one that did not. The event row is cut to thirty-six
+         cells, so the repetition cost six of them. *)
+      Error (refusal ~status_code:status ~body)
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc.Tui_decode.decode_asks_snapshot json

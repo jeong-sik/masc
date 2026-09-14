@@ -515,10 +515,16 @@ let connect_failure_to_string = function
   | Client_failure msg -> msg
 
 (* One timer covers every yielding establishment stage. Catch only network
-   exceptions; cancellation and unexpected exceptions must still unwind. *)
+   exceptions; cancellation and unexpected exceptions must still unwind. A
+   client whose creation finished as the window closed is the client: the
+   race keeps the work's outcome, so it is handed on rather than closed and
+   reported as a timeout. *)
 let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
-  try
-    Eio.Time.with_timeout_exn clock timeout_seconds (fun () ->
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_seconds;
+      Error Establishment_timeout)
+    (fun () ->
       let addresses =
         try Ok (resolve ()) with
         | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Dns_failure exn)
@@ -542,7 +548,6 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
           | Error failure -> probe failure rest
       in
       Result.bind addresses (probe No_addresses))
-  with Eio.Time.Timeout -> Error Establishment_timeout
 
 (* ── Probe-first connect ───────────────────────────────────────── *)
 
@@ -561,8 +566,9 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
 let create_probed_client t key uri =
   let net = Eio.Stdenv.net t.env in
   let clock = Eio.Stdenv.clock t.env in
-  (* The timeout race can cancel after create returned a client but before
-     the race hands it to its caller. Keep ownership until that handoff. *)
+  (* A cancellation from outside can arrive after create returned a client
+     but before the race hands it to its caller. Keep ownership until that
+     handoff. *)
   let pending = ref None in
   try
     let result = establish_connection ~clock
@@ -777,7 +783,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   | Ok client ->
     (* Mirror [do_request_with_idle_timeout]: guarantee the client is released
        on EVERY exit. [Pool.request] wraps this call in [with_optional_timeout]'s
-       [Eio.Fiber.first]; when the timeout wins it cancels this fiber, and the
+       [Watched_work.run]; when the timeout wins it cancels this fiber, and the
        cancel can land inside [Piaf.Body.to_string] — past the explicit releases
        below. Without the finally the Piaf client/socket is neither parked nor
        closed and the FD leaks (#21547). [Eio.Cancel.protect] lets the blocking

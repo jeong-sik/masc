@@ -2156,7 +2156,7 @@ let post_sync_once_after_validation
     match headers_deadline with
     | None -> f ()
     | Some (clock, timeout_s, owner) ->
-      (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+      (match Under_deadline.run clock timeout_s f with
        | Ok result -> result
        | Error `Timeout ->
          Error
@@ -2247,8 +2247,8 @@ let post_sync_once_after_validation
           then `Deadline_passed timeout_s
           else (
             match
-              Eio.Time.with_timeout clock remaining (fun () ->
-                Ok (read_response_body response_body))
+              Under_deadline.run clock remaining (fun () ->
+                read_response_body response_body)
             with
             | Ok (Ok body) -> `Body body
             | Ok (Error error) -> `Failed error
@@ -2518,10 +2518,14 @@ type pre_header_budget =
    accepts the request and never answers never reaches the reader. Two
    steps the window cannot end: [getaddrinfo] runs in a systhread with no
    cancellation, so a closed window is observed once the lookup returns,
-   and the resolver's own timeout is the bound until then; and the
-   process's first https connection loads the system trust store
-   ([Api_common.tls_client_config], cached after that) synchronously on
-   this domain, so no timer runs until it is back. *)
+   and the resolver's own timeout is the bound until then; and an https
+   connection loads the system trust store ([Api_common.tls_client_config])
+   synchronously on this domain, so no timer runs until it is back. The
+   load is cached once it succeeds; a load that fails is made again,
+   synchronously, by every https connection until one succeeds. On a
+   connection that loads the store the two steps are one stretch, the
+   load and then the lookup with no suspension between them, so the
+   window is observed after their sum, not after the longer. *)
 let pre_header_deadline
       ~(connect : 'clock explicit_deadline)
       ~(first_event : 'clock explicit_deadline)
@@ -2594,7 +2598,7 @@ let with_post_stream
      second full one: the budget is one window from here to the first
      token. Without a clock no budget is armed anywhere and the elapsed time
      is not read. *)
-  let opened_at = Option.map Eio.Time.now clock in
+  let window_opened = Option.map (fun clock -> clock, Eio.Time.now clock) clock in
   Eio.Switch.run
   @@ fun sw ->
   (* When a cache is active, bind the transport to the cache's long-lived
@@ -2723,23 +2727,23 @@ let with_post_stream
           (fun () ->
              let read_body () =
                match read_response_body resp_body with
-               | Ok refusal_body -> Ok (Ok refusal_body)
-               | Error err -> Ok (Error err)
+               | Ok refusal_body -> Ok refusal_body
+               | Error err -> Error err
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                | exception exn ->
                  (match classify_network_exn exn with
-                  | Some e -> Ok (Error e)
-                  | None when !transport_eof_seen -> Ok (Error (eof_error exn))
+                  | Some e -> Error e
+                  | None when !transport_eof_seen -> Error (eof_error exn)
                   | None -> raise exn)
              in
              let body_result =
                match closes_at with
-               | None -> read_body ()
+               | None -> Ok (read_body ())
                | Some (clock, closes_at) ->
                  let left_s = closes_at -. Eio.Time.now clock in
                  if Float.compare left_s 0.0 <= 0
                  then Error `Timeout
-                 else Eio.Time.with_timeout clock left_s read_body
+                 else Under_deadline.run clock left_s read_body
              in
              match body_result with
              | Ok (Ok refusal_body) ->
@@ -2802,9 +2806,9 @@ let with_post_stream
      successfully, ensuring the reader is no longer using the flow. *)
   let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
   let pre_header_elapsed_s =
-    match clock, opened_at with
-    | Some clock, Some opened_at -> Eio.Time.now clock -. opened_at
-    | None, _ | _, None -> 0.0
+    match window_opened with
+    | Some (clock, opened_at) -> Eio.Time.now clock -. opened_at
+    | None -> 0.0
   in
   let body_result =
     try Ok (f ~pre_header_elapsed_s reader) with

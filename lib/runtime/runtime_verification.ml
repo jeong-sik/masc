@@ -652,6 +652,32 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         Error (Provider_rejected (Printexc.to_string exn)))
 ;;
 
+(* The process globals a provider request reads -- the env, and the clock
+   the runtime agent derives every declared deadline from (Agent Core refuses
+   a declared deadline it cannot enforce rather than dropping it) -- and the
+   verification, in one place. The CLI arm and the suite that stands in for
+   it used to install these by hand, each its own copy, and four pull
+   requests on 2026-09-14 went to keeping the two copies alike; a suite
+   that calls this proves the command's shape by running it. Children start
+   through the posix_spawn manager the server itself uses, so a runtime that
+   verifies here is started the way the server will start it. *)
+let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.set_env env;
+  Eio_context.set_clock clock;
+  Time_compat.set_clock clock;
+  verify
+    ~secure_random:(Eio.Stdenv.secure_random env)
+    ~sw
+    ~net:(Eio.Stdenv.net env)
+    ~mgr:Posix_spawn_process_mgr.mgr
+    ~clock
+    ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
+    ~cwd_path:private_dir
+    ~timeout_s
+    runtime
+;;
+
 module For_testing = struct
   let measure = measure
 end

@@ -660,7 +660,7 @@ let parse_control_response ~expected_request_id fields =
 ;;
 
 let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
-    ~on_stream_event ~ignored =
+    ~on_stream_event =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -680,8 +680,11 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
     in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-      ~ignored
-  | ("system" | "rate_limit_event") when ignored < 32 ->
+  | "system" | "rate_limit_event" ->
+    (* Informational frames before the control response. The admission
+       deadline bounds a client that never answers and the wall-clock ceiling
+       one that keeps talking; a count of these frames does not change what
+       the client is doing. *)
     await_initialize
       io
       ~mcp_session
@@ -690,7 +693,6 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~assistant_usage
       ~request_id
       ~on_stream_event
-      ~ignored:(ignored + 1)
   | other ->
     protocol_error
       "initialize"
@@ -1082,13 +1084,11 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     else Ok (turn_id, result, usage)
 ;;
 
-let max_ignored_messages = 256
-
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~stream_started ~response_emitted ~ignored =
+    ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -1107,7 +1107,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
       ~response_emitted
   | "control_response" ->
@@ -1151,7 +1151,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted ~ignored
+      ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
@@ -1159,7 +1159,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~stream_started ~response_emitted ~ignored
+      ~stream_started ~response_emitted
   | "result" ->
     let parsed_result =
       parse_result
@@ -1214,7 +1214,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; resumed
       ; usage
       }
-  | "user" when ignored < max_ignored_messages ->
+  | "user" ->
     let* finished_ids = native_tool_result_ids ~expected_session_id fields in
     List.iter
       (fun call_id ->
@@ -1229,18 +1229,20 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
-      ~response_emitted ~ignored:(ignored + 1)
-  | ("system" | "tool_progress") when ignored < max_ignored_messages ->
+      ~response_emitted
+  | "system" | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
-       arrive through assistant/user messages.  Consume it as bounded stream
-       activity without treating an in-flight tool as a protocol failure. *)
+       arrive through assistant/user messages.  Consume it as stream activity
+       without treating an in-flight tool as a protocol failure. How many of
+       these a turn carries says nothing about its health; the idle deadline
+       and the wall-clock ceiling bound the turn. *)
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
-      ~response_emitted ~ignored:(ignored + 1)
+      ~response_emitted
   | other ->
     protocol_error
       "turn"
@@ -1289,26 +1291,19 @@ let reasoning_args = function
     Ok [ "--effort"; Llm_provider.Reasoning_effort.to_string effort ]
 ;;
 
-let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
+let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
   let* reasoning_args = reasoning_args reasoning_effort in
+  let* system_prompt_args = match config.system_prompt, system_prompt_file with
+    | None, None -> Ok []
+    | Some _, Some path when String.trim path <> "" -> Ok ["--system-prompt-file"; path]
+    | Some _, None -> Error (Invalid_config "configured system prompt requires a prepared system_prompt_file")
+    | None, Some _ -> Error (Invalid_config "system_prompt_file requires a configured system prompt")
+    | Some _, Some _ -> Error (Invalid_config "system_prompt_file must not be empty")
+  in
   let args =
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
-    (* Passing [--system-prompt] replaces the CLI's built-in prompt outright,
-       so omitting the flag is what selects that prompt. An empty string is not
-       the same as omitting it: claude 2.1.260 picks the prompt with
-       [typeof r === "string" ? [r] : Array.isArray(r) ? r : o], where [r] is
-       the given prompt and [o] the built-in one, so "" takes the string branch
-       and the built-in prompt is discarded. The CLI's own --help says as much
-       twice — "Only applies with the default system prompt (ignored with
-       --system-prompt)" under --exclude-dynamic-system-prompt-sections, and
-       "passing --system-prompt or --append-system-prompt turns it off" under
-       --system-prompt-snapshot, whose default-on is lost with the flag
-       present. Docs: https://code.claude.com/docs/en/cli-reference —
-       "--system-prompt: Replace the entire system prompt with custom text".
-       [None] therefore drops the flag instead of sending "". *)
-    @ (match config.system_prompt with
-       | None -> []
-       | Some prompt -> [ "--system-prompt"; prompt ])
+    (* System context is prepared before spawn; no prompt bytes enter argv. *)
+    @ system_prompt_args
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.
@@ -1422,7 +1417,6 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       ~assistant_usage
       ~request_id:initialize_id
       ~on_stream_event
-      ~ignored:0
   in
   let* () =
     invoke_state_callback ~stage:"session ready callback" (fun () ->
@@ -1472,17 +1466,35 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~on_stream_event
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
-    ~ignored:0
+;;
+
+(* The replacement System channel supports files in print mode. Keep complete
+   projected context off argv (Linux limits each argument independently), and
+   keep the private file alive until the child and its scoped fibers exit. *)
+let with_system_prompt_file prompt use = match prompt with
+  | None -> use None
+  | Some contents ->
+    let path, output = Filename.open_temp_file ~perms:0o600 ~mode:[Open_binary]
+      "masc-claude-system-" ".txt" in
+    Fun.protect
+      ~finally:(fun () ->
+        close_out_noerr output;
+        try Sys.remove path with Sys_error detail ->
+          Log.Runtime_agent.warn "Claude system context file cleanup failed: %s" detail)
+      (fun () ->
+        output_string output contents;
+        close_out output;
+        let absolute_path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
+        use (Some absolute_path))
 ;;
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
     ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
-  let* argv =
-    command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
-  in
   let turn_admitted = ref false in
   try
+    with_system_prompt_file config.system_prompt (fun system_prompt_file ->
+    let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
     Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -1507,7 +1519,14 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
-    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    (* Diagnostics only, so a daemon: the switch cancels it once the body
+       returns. A grandchild the CLI leaves behind (an MCP server orphaned
+       when the CLI is reaped) inherits this pipe's write end, so EOF may
+       never come, and a joined fiber would hold the switch open after the
+       turn was served. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      drain_stderr stderr_r stderr_tail;
+      `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let wall_clock =
       Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
@@ -1572,7 +1591,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
           ~on_stream_event
-          ~turn_admitted))
+          ~turn_admitted)))
   with
   | Idle_timeout seconds -> Error (Timeout seconds)
   | Eio.Time.Timeout as exn -> raise exn

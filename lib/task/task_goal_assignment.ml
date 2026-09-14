@@ -15,7 +15,8 @@
    precondition checks live in a single place. *)
 
 type set_task_goal_error =
-  | Goal_source_unavailable of string
+  | Goal_source_unavailable of Goal_store.unavailable
+  | Goal_lock_failed of Masc_domain.masc_error
   | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
@@ -26,7 +27,9 @@ type set_task_goal_error =
   | Link_write_failed of string
 
 let set_task_goal_error_to_string = function
-  | Goal_source_unavailable message -> "Goal store unavailable: " ^ message
+  | Goal_source_unavailable unavailable ->
+    "Goal store unavailable: " ^ Goal_store.unavailable_to_string unavailable
+  | Goal_lock_failed error -> "Goal store lock failed: " ^ Masc_domain.masc_error_to_string error
   | Backlog_read_failed message -> Printf.sprintf "failed to read authoritative backlog: %s" message
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
   | Unknown_goal goal_id -> Printf.sprintf "unknown goal '%s'" goal_id
@@ -57,12 +60,9 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
     | Error error -> Error (Backlog_read_failed (Masc_domain.masc_error_to_string error))) with
   | Ok result -> result
   | Error (Goal_store.Goal_missing id) -> Error (Unknown_goal id)
-  (* [set_task_goal_error.Goal_source_unavailable] stays a string in PR-1;
-     RFC-0444 PR-2 carries the [unavailable] value into the task surfaces. *)
   | Error (Goal_store.Goal_source_unavailable unavailable) ->
-    Error (Goal_source_unavailable (Goal_store.unavailable_to_string unavailable))
-  | Error (Goal_store.Goal_lock_failed error) ->
-    Error (Goal_source_unavailable (Masc_domain.masc_error_to_string error))
+    Error (Goal_source_unavailable unavailable)
+  | Error (Goal_store.Goal_lock_failed error) -> Error (Goal_lock_failed error)
 ;;
 
 (* Workspace is the persistence layer and Goal depends on it. This task-domain
@@ -77,9 +77,9 @@ let add_task_with_result ?contract ?goal_id ?created_by ?predecessor_task_id
   | Ok result -> result
   | Error (Goal_store.Goal_missing id) -> Error (Workspace_task.Unknown_goal id)
   | Error (Goal_store.Goal_source_unavailable unavailable) ->
-    Error (Workspace_task.Goal_source_unavailable (Goal_store.unavailable_to_string unavailable))
+    Error (Workspace_task.Goal_source_unavailable unavailable)
   | Error (Goal_store.Goal_lock_failed error) ->
-    Error (Workspace_task.Goal_source_unavailable (Masc_domain.masc_error_to_string error))
+    Error (Workspace_task.Goal_lock_failed (Masc_domain.masc_error_to_string error))
 ;;
 
 let batch_add_tasks_with_contracts_result ?created_by config tasks =
@@ -91,7 +91,7 @@ let batch_add_tasks_with_contracts_result ?created_by config tasks =
   | Ok result -> result
   | Error (Goal_store.Goal_missing id) -> Error (Workspace_task.Batch_unknown_goal id)
   | Error (Goal_store.Goal_source_unavailable unavailable) ->
-    Error (Workspace_task.Batch_goal_source_unavailable (Goal_store.unavailable_to_string unavailable))
+    Error (Workspace_task.Batch_goal_source_unavailable unavailable)
   | Error (Goal_store.Goal_lock_failed error) ->
-    Error (Workspace_task.Batch_goal_source_unavailable (Masc_domain.masc_error_to_string error))
+    Error (Workspace_task.Batch_goal_lock_failed (Masc_domain.masc_error_to_string error))
 ;;

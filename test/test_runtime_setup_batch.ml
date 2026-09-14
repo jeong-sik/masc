@@ -20,13 +20,18 @@ let fixture run =
     save runtime original; Unix.chmod runtime 0o640;
     let binary = Filename.concat base "native-fixture" in
     run base runtime binary spec original))
-let fake base binary action =
+let verified_report = "print(report(a[3]))"
+let fake ?(verify=verified_report) base binary action =
   let python = match Process_eio.run_argv_with_status_split_or_refusal
     ["python3";"-c";"import sys;print(sys.executable)"] with
     | Ok (Unix.WEXITED 0,s,_) -> String.trim s | _ -> Alcotest.fail "Python fixture unavailable" in
   save binary (Printf.sprintf {|#!%s
 import json,os,pathlib,sys
 base=pathlib.Path(%s)
+def report(runtime_id,status='verified',failure=None,model='fixture-model'):
+    ok=failure is None
+    return json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':runtime_id,'model':model,
+      'observed_model':model,'status':status,'checks':{'response':ok,'tool_called':ok,'tool_roundtrip':ok},'failure':failure})
 a=sys.argv[1:]
 assert a[1]=='--base-path'
 stage=pathlib.Path(a[2]); config=stage/'.masc/config'
@@ -41,10 +46,9 @@ if a[0]=='runtime-default-set':
     p.write_text(p.read_text()+'\n# native lane writer fixture\n')
     %s
 elif a[0]=='runtime-verify':
-    print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':a[3],
-      'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
+    %s
 else: raise AssertionError(a)
-|} python (Yojson.Safe.to_string (`String base)) action);
+|} python (Yojson.Safe.to_string (`String base)) action verify);
   Unix.chmod binary 0o700
 let apply base binary specs ids revision verify =
   Batch.configure ~binary ~base_path:base ~expected_revision:revision ~specs
@@ -80,15 +84,51 @@ let test_cas () = fixture (fun base runtime binary spec original ->
   save overlay "# independently added overlay\n";
   Alcotest.check Alcotest.bool "overlay participates in revision" true
     (apply base binary specs ids revision false=Error Batch.Changed_configuration))
+(* Proves a refusing validator reports how it ended and what it said: exit 2
+   with stderr arrives as [Validation_failed { exit; stderr }]. On origin/main
+   the same child reports a payload-free [Validation_failed]. *)
 let test_refusal () = fixture (fun base runtime binary spec original ->
-  fake base binary "sys.exit(7)";
+  fake base binary "sys.stderr.write('fixture: stage rejected\\n'); sys.exit(2)";
   let specs=[spec "new"] in let ids=List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in
   let revision=get (Batch.observe ~base_path:base) in
-  Alcotest.check Alcotest.bool "native validation failure preserved" true
-    (apply base binary specs ids revision false=Error Batch.Validation_failed);
+  Alcotest.check Alcotest.bool "native validation failure carries exit and stderr" true
+    (apply base binary specs ids revision false
+     = Error (Batch.Validation_failed { exit = Unix.WEXITED 2; stderr = "fixture: stage rejected\n" }));
   Alcotest.check Alcotest.string "runtime bytes untouched" original (text runtime);
   Alcotest.check Alcotest.bool "overlay not published" false
     (Sys.file_exists (Filename.concat (Filename.dirname runtime) "agent-core-models-overlay.toml")))
+(* Proves the verification child's report is read back typed instead of
+   string-matched: a failing report carries its code and detail, an unmeasured
+   report carries the command's own code, and a document whose status says
+   verified while it carries a failure, that carries a key the writer never
+   writes, or that names another runtime is refused as unreadable. On
+   origin/main the extra-key document passes the literal schema/status/checks
+   match and the batch reports the runtime verified; the verified-with-failure
+   document was already rejected there, but as a plain verification failure
+   rather than as an unreadable report. *)
+let test_verification_report () = fixture (fun base _runtime binary spec _original ->
+  let specs=[spec "new"] in
+  let id=(Runtime_setup_spec.render (spec "new")).runtime_id in
+  let revision=get (Batch.observe ~base_path:base) in
+  let outcome verify = fake ~verify base binary "pass"; apply base binary specs [id] revision true in
+  Alcotest.check Alcotest.bool "failed report carries code and detail" true
+    (outcome "print(report(a[3],status='failed',failure={'code':'provider_rejected','message':'refused','detail':'HTTP 400 from fixture'})); sys.exit(1)"
+     = Error (Batch.Verification_failed { runtime_id = id; code = "provider_rejected"; detail = Some "HTTP 400 from fixture" }));
+  Alcotest.check Alcotest.bool "unmeasured report carries the command's code" true
+    (outcome "print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':a[3],'model':None,'observed_model':None,'status':'unavailable','checks':{'response':False,'tool_called':False,'tool_roundtrip':False},'failure':{'code':'runtime_not_configured','message':'not configured','detail':None}})); sys.exit(2)"
+     = Error (Batch.Verification_failed { runtime_id = id; code = "runtime_not_configured"; detail = None }));
+  let unreadable verify = match outcome verify with
+    | Error (Batch.Verification_unreadable { runtime_id; exit = Unix.WEXITED 0; stderr = ""; reason = _ }) -> runtime_id = id
+    | Ok _
+    | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
+            | Child_not_started _ | Validation_failed _ | Verification_failed _ | Verification_unreadable _
+            | Write_failed | Rollback_failed | Lock_unavailable) -> false in
+  Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
+    (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
+  Alcotest.check Alcotest.bool "a key the writer never writes is refused" true
+    (unreadable "d=json.loads(report(a[3])); d['extra']='x'; print(json.dumps(d))");
+  Alcotest.check Alcotest.bool "a report naming another runtime is refused" true
+    (unreadable "print(report('other.runtime'))"))
 let test_rollback () = fixture (fun _base runtime _binary _spec original ->
   let overlay = Filename.concat (Filename.dirname runtime) "agent-core-models-overlay.toml" in
   let real path mode contents = Fs_compat.write_file_atomic_strict_staged path ~write:(fun out ->
@@ -141,5 +181,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
   Alcotest.test_case "runtime and overlay compare-and-swap" `Quick test_cas;
   Alcotest.test_case "native refusal publishes nothing" `Quick test_refusal;
+  Alcotest.test_case "verification report is read back typed" `Quick test_verification_report;
   Alcotest.test_case "before and after rename failures restore pair" `Quick test_rollback;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

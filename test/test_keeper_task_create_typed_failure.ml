@@ -118,6 +118,7 @@ let test_task_create_failure_route_splits_workflow_from_runtime () =
   in
   let runtime_failure_cases =
     [ "Backlog_read_failed", Workspace_task.Backlog_read_failed "disk error"
+    ; "Goal_lock_failed", Workspace_task.Goal_lock_failed "lock timeout"
     ; "Goal_link_write_failed", Workspace_task.Goal_link_write_failed "disk error"
     ; "Backlog_write_failed", Workspace_task.Backlog_write_failed "disk error"
     ; "Unexpected_error", Workspace_task.Unexpected_error "Failure(\"boom\")"

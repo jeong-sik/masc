@@ -31,7 +31,14 @@ type acceptance_state =
   | Failed
   | Cancelled
 
+type interactive_target = Observed_turn_token of string | Direct_operation_id of string
+type admission_intent = Queue_only | Interactive of {control_token : string; target : interactive_target option}
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
+  signalled : bool; resumed : bool; interrupt_error : string option}
+
 type acceptance = {
+  interactive : interactive_receipt option;
   state : acceptance_state;
   queued_count : int;
 }
@@ -164,6 +171,9 @@ val known_custom_names : string list
 (** Decode the acceptance payload for both the strict whole-stream reader
     and the incremental live reader. [expected_request_id] additionally binds
     the strict response to the request that opened it. *)
+type batch_binding = { operation_id : string; execution_id : string }
+val decode_batch_binding : ?expected_request_id:string -> Yojson.Safe.t -> (batch_binding, stream_error) result
+
 val decode_acceptance
   :  ?expected_request_id:string
   -> Yojson.Safe.t
@@ -183,6 +193,7 @@ val create_request :
   unit ->
   request
 val request_to_yojson :
+  ?admission_intent:admission_intent ->
   since_seq:Masc.Keeper_chat_event_log.replay_position -> request -> Yojson.Safe.t
 (** The POST body. [since_seq] is where a re-POST of the same operation asks
     the stream to resume: after the last journal seq the pane holds, or the
@@ -192,6 +203,7 @@ val request_to_yojson :
     the operator's words and keeps one identity across resends. *)
 
 val request_body :
+  ?admission_intent:admission_intent ->
   since_seq:Masc.Keeper_chat_event_log.replay_position -> request -> string
 val same_request_identity : request -> request -> bool
 val compact_request_id : string -> string

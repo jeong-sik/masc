@@ -40,8 +40,9 @@ val start_runtime_attempt
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the
     outer transport/cancellation boundary fails after the typed stream reader
-    can no longer emit another event. Idempotent after an earlier scope
-    failure. *)
+    can no longer emit another event. A no-op after an attempt reported its
+    own failure, whether it cut the stream (incomplete, repeating) or poisoned
+    the scope: that failure is diagnosed once. *)
 (** Reads the generated-media wire cap once, so every decision in this stream
     is made against one number even if an operator edits the env var while it
     runs. *)

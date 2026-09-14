@@ -138,11 +138,8 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
   let meta = make_meta ~name:"costume-advice" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
-      cleanup_dir base)
-    (fun () ->
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->
@@ -228,11 +225,8 @@ let test_a_backgrounded_child_still_holds_the_call () =
     ~clock:(Eio.Stdenv.clock env);
   let config = Workspace.default_config base in
   let meta = make_meta ~name:"background-holds" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_test_deps.teardown_fixture_sandbox ~config ~meta;
-      cleanup_dir base)
-    (fun () ->
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Masc_test_deps.with_fixture_sandbox ~config ~meta (fun () ->
       (match Keeper_approval_queue.install_persistence ~base_path:base with
        | Ok _ -> ()
        | Error error ->

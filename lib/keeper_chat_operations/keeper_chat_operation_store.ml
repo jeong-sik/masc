@@ -778,6 +778,24 @@ let open_or_create ~path =
   | Error error -> fail error
 ;;
 
+let open_existing ~path =
+  match Sqlite3.db_open ~mode:`NO_CREATE path with
+  | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
+  | db ->
+    let result =
+      let* () = validate_schema db in
+      let* () = configure db in
+      Ok { db; path; closed = Atomic.make false }
+    in
+    (match result with
+     | Ok _ -> result
+     | Error error ->
+       (* Failed candidates never become the Owner's active handle. See open
+          failure contract: preserve the typed store error; close is best-effort. *)
+       ignore (close_db db : bool);
+       Error error)
+;;
+
 let close store =
   if Atomic.compare_and_set store.closed false true
   then

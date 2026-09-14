@@ -49,6 +49,12 @@ val open_or_create : path:string -> (t, error) result
 val open_existing : path:string -> (t, error) result
 (** Open and validate the current authoritative schema without creating or
     migrating a database. Used only by the serialized Owner recovery path. *)
+val is_open : t -> bool
+(** Whether this handle still names a live database. Every command is guarded,
+    so this is not a precondition callers must check; it lets a caller that
+    already knows why the handle was closed report that cause rather than the
+    closure. *)
+
 val close : t -> (unit, error) result
 val path : t -> string
 

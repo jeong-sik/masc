@@ -789,9 +789,27 @@ let run_operation_command t ~label f =
           Ok (value, projection)))
 ;;
 
+(* A read must not be what discovers a closed handle. [recover_operation_availability]
+   closes before it reopens, so a reopen that fails leaves this field naming a
+   closed database; every command is guarded, so the read then fails with
+   "database handle is closed". That string is the closure, not the cause, and
+   [retain_operation_fault] lets a new availability failure replace an older
+   one -- so the reopen's real reason (the file gone, permission withdrawn, the
+   disk full) was overwritten by its own consequence the first time a dashboard
+   poll or a TUI refresh read the store. The operator was left with a sentence
+   that says only that the handle is shut.
+
+   These reads run while the fence is up -- unlike a child, which
+   [start_child_if_needed] holds back -- so they are the ones that reach it.
+   The recorded fault is returned instead, and the handle is left alone; the
+   command path reopens it under its own guard. *)
 let run_operation_read t ~label f =
-  run_operation_store ~label f
-  |> Result.map_error (record_operation_error t)
+  match !(t.operation_error) with
+  | Some fault when not (Chat_operation_store.is_open t.operation_store) ->
+    Error (Store_unavailable (operation_fault_detail fault))
+  | Some _ | None ->
+    run_operation_store ~label f
+    |> Result.map_error (record_operation_error t)
 ;;
 
 let reject_if_stopping state f =

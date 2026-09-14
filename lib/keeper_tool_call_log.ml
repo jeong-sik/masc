@@ -1032,10 +1032,11 @@ let log_call
       else append_or_enqueue entry
 ;;
 
-(* Scan multiplier applied before the keeper filter: [read_recent] reads
-   [n * read_over_scan_factor] fleet rows to find [n] matching entries.
-   Named (rather than a literal 5) so callers sharing one fleet read can
-   size their window to reproduce [read_recent]'s coverage exactly. *)
+(* Scan multiplier for callers sharing one fleet read ([read_recent_rows] +
+   [filter_rows_for_keeper]): to end up with [n] rows from one keeper such a
+   read covers [n * read_over_scan_factor] fleet rows. Named (rather than a
+   literal 5) so those callers size their window to the coverage the old
+   per-keeper over-scan had. [read_recent] no longer applies it. *)
 let read_over_scan_factor = 5
 
 let keeper_matches name json =

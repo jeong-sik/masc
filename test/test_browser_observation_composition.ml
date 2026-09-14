@@ -101,7 +101,9 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         | Error { cause = Executor.Node_observation_failed _; _ } -> ()
         | _ -> fail "missing retained receipt must fail the composition observer")
       else (
-      let rows = Log.read_recent ~keeper_name:meta.name () in
+      let rows = match Log.read_recent ~keeper_name:meta.name () with
+        | Ok rows -> rows
+        | Error (Log.Index_unavailable detail) -> fail detail in
       let row = match rows with [row] -> row | _ -> fail "production observer must commit exactly one node row" in
       let open Yojson.Safe.Util in
       check bool "node log records schema rejection" (not reject_schema) (row |> member "success" |> to_bool);

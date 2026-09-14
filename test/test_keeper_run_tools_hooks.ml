@@ -733,7 +733,9 @@ let test_retained_observation_commits_through_production_hook () =
         (List.length (Log.peek_retained_artifacts ~invocation:first ()));
       check int "blank provider id does not consume sibling observation" 1
         (List.length (Log.peek_retained_artifacts ~invocation:second ()));
-      let rows = Log.read_recent ~keeper_name:"observation-reader" () in
+      let rows = match Log.read_recent ~keeper_name:"observation-reader" () with
+        | Ok rows -> rows
+        | Error (Log.Index_unavailable detail) -> fail detail in
       let row = match rows with [row] -> row | _ -> fail "exactly one durable receipt required" in
       let open Yojson.Safe.Util in
       let root = match Tool_output.normalized_artifact_refs_in_json
@@ -790,7 +792,9 @@ let test_plain_tool_commits_before_hook_returns ~success () =
         (Log.queued_count_for_testing ());
       check bool "history freshness changes before hook returns" true
         (Log.committed_revision () > revision);
-      let rows = Log.read_recent ~keeper_name:"plain-reader" () in
+      let rows = match Log.read_recent ~keeper_name:"plain-reader" () with
+        | Ok rows -> rows
+        | Error (Log.Index_unavailable detail) -> fail detail in
       check int "execution row is readable before ToolCompleted publication" 1
         (List.length rows))
 ;;

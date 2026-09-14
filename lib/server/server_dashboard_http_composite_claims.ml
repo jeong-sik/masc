@@ -61,10 +61,10 @@ let composite_claim_attempt_absent =
 ;;
 
 (* Rows one keeper's claim lookup considers, and the fleet-wide window that
-   covers it. [read_recent ~keeper_name ~n] over-scans by
-   [read_over_scan_factor] before its keeper filter, so a shared read of
-   [claim_window_rows] covers exactly what a per-keeper [read_recent ~n:100]
-   would have read. *)
+   covers it. [read_recent ~keeper_name ~n] used to over-scan by
+   [read_over_scan_factor] before its keeper filter; the factor is kept here
+   so a shared read of [claim_window_rows] still covers what that per-keeper
+   [read_recent ~n:100] read. Both readers now answer from the index. *)
 let claim_rows_per_keeper = 100
 
 let claim_window_rows =

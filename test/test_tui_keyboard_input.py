@@ -11864,18 +11864,23 @@ def runtime_surface_interaction(
             if b"MASC Config / Runtime detail" in lane_screen:
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
-            all_list = send_and_wait(
+            send_and_wait(
                 process,
                 master_fd,
                 output,
                 b"p",
                 b"All runtimes (5)",
             )
-            if b"runtime-a" not in CSI_RE.sub(b"", all_list):
+            # Read off the screen, the way the lane list above is read: only
+            # the rows that changed are repainted, so a row the catalog kept
+            # unchanged carries no bytes in the frames that press drew and
+            # cannot be found in them.
+            all_list = screen_text(bytes(output))
+            if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 4 slots)" not in CSI_RE.sub(b"", all_list):
+            if b"Lanes (3 lanes, 4 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
-            if b"ready / reachable" not in CSI_RE.sub(b"", all_list):
+            if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
             catalog_detail = send_and_wait(
                 process,

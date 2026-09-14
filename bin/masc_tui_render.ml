@@ -13968,6 +13968,23 @@ let render_config (state : state) =
            let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
            let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
            let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
+           (* On a workspace that follows the convention the masc root is the
+              base path with one segment added, so drawing it whole spends the
+              base path's cells saying the base path again. Under /var/folders
+              both were cut to "/var/fold\xe2\x80\xa6" and neither could be read.
+              Named against the label beside it the nested case costs twelve
+              cells and the base keeps the rest. A root that is not under the
+              base is the reading worth the room, and still draws whole. *)
+           let masc =
+             let prefix = base ^ "/" in
+             let prefix_len = String.length prefix in
+             if String.length masc > prefix_len
+                && String.starts_with ~prefix masc
+             then
+               "<base>/"
+               ^ String.sub masc prefix_len (String.length masc - prefix_len)
+             else masc
+           in
            let labels = "  base " ^ "   masc " ^ "   binary " in
            let room =
              framed_inner_width cols

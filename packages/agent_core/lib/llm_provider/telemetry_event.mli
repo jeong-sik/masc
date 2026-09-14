@@ -5,7 +5,7 @@ type timeout_type =
   | Ttft_exceeded
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of Http_client.stream_idle_state
+  | Stream_idle of Http_client.stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout

@@ -25,14 +25,11 @@ type network_error_kind =
   | End_of_file (** Peer closed the connection unexpectedly. *)
   | Unknown (** Unclassified network error. *)
 
-(** Last observed streaming state when an inter-line idle deadline fired.
-
-    This is deliberately transport-generic.  Provider-specific parsers
-    translate chunks into AGENT_CORE SSE events first; the timeout evidence only
-    records the broad activity the stream was in when progress stopped. *)
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+(** What a stream was producing when it went idle: the state its last
+    named production left it in. Transport-generic: provider parsers
+    translate chunks into AGENT_CORE SSE events first, and the evidence
+    records only the broad activity. *)
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -40,6 +37,18 @@ type stream_idle_state =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving yojson, show]
+
+(** Where a stream reader stands before its first output: waiting for the
+    first frame, waiting for a delta after a frame that carried none, or on
+    a production a frame named before any output arrived (a heartbeat, a
+    block opening). Read for the message a first-token timeout carries; the
+    phase of such a timeout is {!First_token}, never {!Stream_idle}, which
+    is why {!timeout_phase} takes a {!stream_production}. *)
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Producing of stream_production
 [@@deriving yojson, show]
 
 (** Typed timeout source.
@@ -65,7 +74,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout
@@ -288,8 +297,8 @@ val empty_completion_error : stop_reason:Types.stop_reason -> http_error
     serialized request body that exceeds its resolved target limit. *)
 val request_body_too_large_error : actual_bytes:int -> limit_bytes:int -> http_error
 
+val stream_production_to_label : stream_production -> string
 val stream_idle_state_to_label : stream_idle_state -> string
-val timeout_phase_of_stream_idle_state : stream_idle_state -> timeout_phase
 val timeout_phase_to_label : timeout_phase -> string
 
 (** Agent Core contract: the caller-supplied knob a streaming deadline came from. A

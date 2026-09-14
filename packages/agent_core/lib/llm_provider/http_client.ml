@@ -21,9 +21,7 @@ type network_error_kind =
   | End_of_file
   | Unknown
 
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -31,6 +29,12 @@ type stream_idle_state =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving yojson, show]
+
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Producing of stream_production
 [@@deriving yojson, show]
 
 type timeout_phase =
@@ -41,7 +45,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout
@@ -260,9 +264,7 @@ let request_body_too_large_error ~actual_bytes ~limit_bytes =
     }
 ;;
 
-let stream_idle_state_to_label = function
-  | Awaiting_first_event -> "awaiting_first_event"
-  | Awaiting_first_delta -> "awaiting_first_delta"
+let stream_production_to_label = function
   | Streaming_answer -> "streaming_answer"
   | Streaming_thinking -> "streaming_thinking"
   | Streaming_tool_call -> "streaming_tool_call"
@@ -272,9 +274,10 @@ let stream_idle_state_to_label = function
   | Streaming_unknown -> "streaming_unknown"
 ;;
 
-let timeout_phase_of_stream_idle_state = function
-  | Awaiting_first_event | Awaiting_first_delta -> First_token
-  | state -> Stream_idle state
+let stream_idle_state_to_label = function
+  | Awaiting_first_event -> "awaiting_first_event"
+  | Awaiting_first_delta -> "awaiting_first_delta"
+  | Producing production -> stream_production_to_label production
 ;;
 
 let timeout_phase_to_label = function
@@ -286,7 +289,7 @@ let timeout_phase_to_label = function
   | Non_streaming_body -> "non_streaming_body"
   | Stream_body -> "stream_body"
   | Stream_idle state ->
-    Printf.sprintf "stream_idle:%s" (stream_idle_state_to_label state)
+    Printf.sprintf "stream_idle:%s" (stream_production_to_label state)
   | Provider_step -> "provider_step"
   | Cli_stdout_idle -> "cli_stdout_idle"
   | Unknown_timeout -> "unknown_timeout"
@@ -1071,13 +1074,6 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
 
 let%test "classify_network_exn: non-network exn is None (propagates)" =
   classify_network_exn Not_found = None
-;;
-
-let%test "timeout_phase_of_stream_idle_state: Awaiting_first_* -> First_token" =
-  (* Prefill (no first chunk yet) must surface as [First_token], never
-     [Http_operation]. Guards the phase-accuracy fix. *)
-  timeout_phase_of_stream_idle_state Awaiting_first_event = First_token
-  && timeout_phase_of_stream_idle_state Awaiting_first_delta = First_token
 ;;
 
 (* ── Retry-After header parsing (RFC 9110 S10.2.3) ────────── *)

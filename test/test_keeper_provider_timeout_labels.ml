@@ -3,8 +3,8 @@
    A record rehydrated from disk has no typed error left, only its code
    string, and [classify_provider_runtime_error_record] turns that string into
    the phase the runtime acts on. The mapping is two copy-pasted lists --
-   the idle states, and the phases with their aliases -- and the suite named
-   two of the labels.
+   the productions an idle gap can be in, and the phases with their aliases
+   -- and the suite named two of the labels.
 
    A crossed pair does not fail anything: it reports one timeout as another,
    which is a wrong reason on an operator's screen and a wrong bucket in the
@@ -24,9 +24,7 @@ let phase_of code =
       Alcotest.failf "%S was not read as a provider timeout at all" code
 
 let idle_labels =
-  [ "awaiting_first_event", KPB.Awaiting_first_event
-  ; "awaiting_first_delta", KPB.Awaiting_first_delta
-  ; "streaming_answer", KPB.Streaming_answer
+  [ "streaming_answer", KPB.Streaming_answer
   ; "streaming_thinking", KPB.Streaming_thinking
   ; "streaming_tool_call", KPB.Streaming_tool_call
   ; "streaming_heartbeat", KPB.Streaming_heartbeat

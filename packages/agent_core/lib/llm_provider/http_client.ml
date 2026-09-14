@@ -2156,7 +2156,7 @@ let post_sync_once_after_validation
     match headers_deadline with
     | None -> f ()
     | Some (clock, timeout_s, owner) ->
-      (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+      (match Under_deadline.run clock timeout_s f with
        | Ok result -> result
        | Error `Timeout ->
          Error
@@ -2247,8 +2247,8 @@ let post_sync_once_after_validation
           then `Deadline_passed timeout_s
           else (
             match
-              Eio.Time.with_timeout clock remaining (fun () ->
-                Ok (read_response_body response_body))
+              Under_deadline.run clock remaining (fun () ->
+                read_response_body response_body)
             with
             | Ok (Ok body) -> `Body body
             | Ok (Error error) -> `Failed error
@@ -2723,23 +2723,23 @@ let with_post_stream
           (fun () ->
              let read_body () =
                match read_response_body resp_body with
-               | Ok refusal_body -> Ok (Ok refusal_body)
-               | Error err -> Ok (Error err)
+               | Ok refusal_body -> Ok refusal_body
+               | Error err -> Error err
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                | exception exn ->
                  (match classify_network_exn exn with
-                  | Some e -> Ok (Error e)
-                  | None when !transport_eof_seen -> Ok (Error (eof_error exn))
+                  | Some e -> Error e
+                  | None when !transport_eof_seen -> Error (eof_error exn)
                   | None -> raise exn)
              in
              let body_result =
                match closes_at with
-               | None -> read_body ()
+               | None -> Ok (read_body ())
                | Some (clock, closes_at) ->
                  let left_s = closes_at -. Eio.Time.now clock in
                  if Float.compare left_s 0.0 <= 0
                  then Error `Timeout
-                 else Eio.Time.with_timeout clock left_s read_body
+                 else Under_deadline.run clock left_s read_body
              in
              match body_result with
              | Ok (Ok refusal_body) ->

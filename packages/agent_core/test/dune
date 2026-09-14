@@ -774,6 +774,11 @@
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
 (test
+ (name test_under_deadline)
+ (modules test_under_deadline)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
+(test
  (name test_tls_config_cache)
  (modules test_tls_config_cache)
  (libraries agent_core_test_deps agent_core llm_provider alcotest))

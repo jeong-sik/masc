@@ -298,7 +298,7 @@ let post_sync_once_after_commit
     match headers_deadline with
     | None -> f ()
     | Some (deadline_clock, timeout_s, owner) ->
-      (match Eio.Time.with_timeout deadline_clock timeout_s (fun () -> Ok (f ())) with
+      (match Under_deadline.run deadline_clock timeout_s f with
        | Ok result -> result
        | Error `Timeout ->
          Error
@@ -363,8 +363,8 @@ let post_sync_once_after_commit
           then Error (total_deadline_error timeout_s)
           else (
             match
-              Eio.Time.with_timeout deadline_clock remaining (fun () ->
-                Ok (read_response_body response_body))
+              Under_deadline.run deadline_clock remaining (fun () ->
+                read_response_body response_body)
             with
             | Ok result -> result
             | Error `Timeout -> Error (total_deadline_error timeout_s))

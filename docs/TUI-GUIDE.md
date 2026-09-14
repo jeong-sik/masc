@@ -16,11 +16,12 @@ Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
 Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
-reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
-Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
-entries;
-Verdicts, Changes, and Keeper operations are reached from their parents
-only.
+reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
+Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
+also keep `go <name>` palette entries, and each Config pane has
+`go Config / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
+`presets`, `themes`, `voice`). Changes follows the Keeper selected on
+Keepers. Keeper operations are reached from their parent only.
 
 ## Quick Start
 
@@ -303,7 +304,7 @@ opening ten chats.
 ```
  MASC Activity (212 of 640 held, actions)  01:12:04  [connected]
    feed: live 640  dropped 0
-   Time     Keeper             Event            Detail
+   TIME     KEEPER             EVENT            DETAIL
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
    01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
    01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
@@ -428,7 +429,7 @@ with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
 
 ```
  MASC Runtime · Clients (12 attached)  17:02:53  [connected]
-  Status    Name                 Type        Keeper           Task      Last seen
+  STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
  >active   codex-mcp-client      codex       -                -         17:02:41
   busy     analyst-agent         keeper      analyst          task-845  17:02:50
 ```
@@ -441,13 +442,21 @@ process holding a connection is still an `lsof` question.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · READ-ONLY OBSERVATION · observed 17:02:52
- >● Librarian       running 12s    slots librarian-exact  active 1  runs 50  ok/fail/cancel 47/2/1
+  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+    LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
+ >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
 
-Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
-current activity, retained run counts, execution outcomes, latency, and the
-slots actually selected. This build projects four fixed consumers:
+Rows come from `GET /api/v1/dashboard/standalone-lanes`. One dim header
+carries the column names; a row carries the lane's mark and name, its status
+(with the elapsed time of a running lane), the running count, retained run
+count, execution outcomes, latency, the admitted slots, and the slots actually
+selected. The name and slot columns are as wide as the widest row needs, so
+a long name moves every row's columns together rather than one row's. The
+counts come before the slots because they are what a reader compares down
+the column; beside the Activity pane the slot column is the one cut, and the
+block under the list prints the selected lane's slots in full. This build
+projects four fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion
@@ -1089,8 +1098,7 @@ Keeper also exposes its automation in the Automation detail tab.
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
-   Requests: 34  (page shows first 20)
-   Next due: 2026-08-24T09:57:00
+   Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
      [running  ] 2026-08-24T09:12:00  sangsu       one-shot
   j/k:move  Enter:details  n:new  e:modify  x:cancel  r:refresh  Tab:next

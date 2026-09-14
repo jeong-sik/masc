@@ -73,7 +73,12 @@ let check_backoff label route expected =
   let show = function
     | None -> "none"
     | Some (b : Loop.provider_backoff) ->
-      Printf.sprintf "%.1f/%s" b.retry_after_hint (policy_name b.wake_policy)
+      let hint =
+        match b.retry_after_hint with
+        | None -> "no-hint"
+        | Some seconds -> Printf.sprintf "%.1f" seconds
+      in
+      Printf.sprintf "%s/%s" hint (policy_name b.wake_policy)
   in
   check string label (show expected) (show (backoff_of_route route))
 ;;
@@ -82,13 +87,13 @@ let test_rate_limit_and_quota_park_until_the_backoff_ends () =
   check_backoff "rate limited with a Retry-After"
     (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 120.0 })
     (Some
-       { retry_after_hint = 120.0
+       { retry_after_hint = Some 120.0
        ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
        });
   check_backoff "hard quota without a hint"
     (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
     (Some
-       { retry_after_hint = 0.0
+       { retry_after_hint = None
        ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
        })
 ;;
@@ -98,7 +103,7 @@ let test_capacity_backpressure_stays_interruptible () =
     (KFR.Retry_after_observed
        { retry_class = KFR.Capacity_backpressure; retry_after = Some 5.0 })
     (Some
-       { retry_after_hint = 5.0
+       { retry_after_hint = Some 5.0
        ; wake_policy = Masc.Keeper_keepalive_signal.Interrupt_on_wakeup
        })
 ;;

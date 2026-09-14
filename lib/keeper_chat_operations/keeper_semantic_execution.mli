@@ -53,6 +53,7 @@ type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
 type gate_checkpoint = Agent_core of Keeper_checkpoint_ref.t | Official_client of official_client_checkpoint
+val equal_gate_checkpoint : gate_checkpoint -> gate_checkpoint -> bool
 type gate_wait = private
   { checkpoint : gate_checkpoint; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
@@ -78,6 +79,7 @@ type recovery_origin =
   | Unconfirmed_sources
   | Confirmed_undispatched
   | Checkpointed of Keeper_checkpoint_ref.t
+  | Official_checkpointed of official_client_checkpoint
   | Interrupted_execution
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
@@ -116,9 +118,11 @@ type action =
   | Begin_execution
   | Recheck_sources of source_projection list
   | Resume_checkpoint of Keeper_checkpoint_ref.t
+  | Resume_official_checkpoint of official_client_checkpoint
   | Record_observation of Keeper_repetition_snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
+  | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
   | Suspend_gate_reconciliation of gate_binding * string

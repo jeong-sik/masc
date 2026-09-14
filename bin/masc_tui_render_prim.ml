@@ -2015,6 +2015,21 @@ let planning_backlog_counts (backlog : planning_backlog) =
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]
 
+(* The retained-history count above the Goal list. The row carried two numbers
+   joined by the same separator the Backlog counts use for disjoint parts, but
+   the goals that reached an end are a subset of the goals no longer listed --
+   so when every one of them ended, the row said the same number twice and
+   never said the difference. That difference is the reading an operator
+   cannot take off a row: the server fills [closed_at] only for a goal whose
+   last phase is terminal, so a goal counted here without one left the list
+   with no outcome recorded. *)
+let planning_goal_history_summary ~unlisted ~ended =
+  let without_an_outcome = unlisted - ended in
+  if without_an_outcome <= 0 then Printf.sprintf "  No longer listed: %d" unlisted
+  else
+    Printf.sprintf "  No longer listed: %d · %d with no outcome" unlisted
+      without_an_outcome
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title
@@ -2696,14 +2711,7 @@ let config_pane_strip ~cols ~before (state : state) =
   Ansi.dim ^ keys ^ Ansi.reset
   ^ tab_strip
       ~width:(tab_strip_width ~cols ~before:(before ^ tab_strip_gap ^ keys))
-      [ name Config_runtime "runtime.toml"
-      ; name Config_models "models"
-      ; name Config_params "params"
-      ; name Config_prompts "prompts"
-      ; name Config_presets "presets"
-      ; name Config_themes "themes"
-      ; name Config_voice "voice"
-      ]
+      (List.map (fun (pane, label) -> name pane label) config_panes)
 
 
 let config_metadata_summary (state : state) =

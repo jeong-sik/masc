@@ -482,6 +482,39 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+(* RFC-0444 §2.3 row 5: the Goal store envelope as the TUI reads it. The wire
+   carries constructor names (reason, mirror.status, reset_step), the refused
+   member, the file and the mirror's row count; the payloads the store keeps
+   beside them (the Unix error, the parse detail, the mirror stamp) do not
+   travel, so reason and mirror are views rather than
+   [Goal_store_unavailable.reason] and [.mirror_status]. The reset step
+   travels whole: its one payload is the same [field] member. *)
+type goal_store_unavailable_reason_view =
+  | Missing_after_init_view
+  | Unreadable_view
+  | Not_json_view
+  | Schema_rejected_view of string
+
+type goal_store_mirror_view =
+  | Mirror_absent_view
+  | Mirror_unreadable_view
+  | Mirror_decodes_view of int
+  | Mirror_rejected_view
+
+type goal_store_unavailable_view = {
+  gsu_file : string;
+  gsu_reason : goal_store_unavailable_reason_view;
+  gsu_mirror : goal_store_mirror_view;
+  gsu_reset_step : Goal_store_unavailable.reset_step;
+}
+
+(* A goal projection body that is a failure envelope instead of the
+   projection: the Goal store (RFC-0444) or the Goal–Task link registry,
+   which is a different source with its own one-line envelope. *)
+type goal_source_failure =
+  | Goal_store_unavailable of goal_store_unavailable_view
+  | Goal_task_links_unavailable of string
+
 (* One tool call a keeper is holding for an operator's answer, from
    GET /api/v1/keepers/tool-approvals. [kta_asked_at] is the server clock's
    epoch reading when the wait opened; the drawing side derives age from it. *)
@@ -5413,10 +5446,102 @@ let decode_system_log_snapshot json =
   let* sys_latest_seq = required_int_field json "latest_seq" in
   Ok { sys_entries; sys_total; sys_latest_seq }
 
-let goal_store_unavailable_detail json =
-  match member "ok" json, member "error_code" json, member "error" json with
-  | `Bool false, `String ("goal_store_unavailable" | "goal_task_links_unavailable"), `String detail -> Some detail
-  | _ -> None
+(* The tokens are the lowercase constructor names
+   [Goal_store_unavailable.reason_name] and siblings put on the wire; each
+   parse is exact and an unknown token is a decode error, never a default.
+   [field] is the refused member: it must be present exactly when the reason
+   is [schema_rejected], and [repair_field] repairs that same member. *)
+let goal_store_unavailable_reason_view_of_wire ~field token =
+  match token, field with
+  | "missing_after_init", None -> Ok Missing_after_init_view
+  | "unreadable", None -> Ok Unreadable_view
+  | "not_json", None -> Ok Not_json_view
+  | "schema_rejected", Some refused -> Ok (Schema_rejected_view refused)
+  | "schema_rejected", None -> Error "goal store envelope reason schema_rejected names no field"
+  | ("missing_after_init" | "unreadable" | "not_json"), Some refused ->
+      Error
+        (Printf.sprintf "goal store envelope reason %s carries field %S" token refused)
+  | other, _ -> Error (Printf.sprintf "unknown goal store envelope reason %S" other)
+
+let goal_store_mirror_view_of_wire ~goal_count token =
+  match token, goal_count with
+  | "mirror_absent", None -> Ok Mirror_absent_view
+  | "mirror_unreadable", None -> Ok Mirror_unreadable_view
+  | "mirror_decodes", Some count -> Ok (Mirror_decodes_view count)
+  | "mirror_rejected", None -> Ok Mirror_rejected_view
+  | "mirror_decodes", None -> Error "goal store envelope mirror_decodes carries no goal_count"
+  | ("mirror_absent" | "mirror_unreadable" | "mirror_rejected"), Some count ->
+      Error
+        (Printf.sprintf "goal store envelope mirror %s carries goal_count %d" token count)
+  | other, _ -> Error (Printf.sprintf "unknown goal store envelope mirror status %S" other)
+
+let goal_store_reset_step_of_wire ~field token :
+    (Goal_store_unavailable.reset_step, string) result =
+  match token, field with
+  | "repair_field", Some refused -> Ok (Goal_store_unavailable.Repair_field refused)
+  | "repair_field", None -> Error "goal store envelope reset_step repair_field names no field"
+  | "reset_goal_store", None -> Ok Goal_store_unavailable.Reset_goal_store
+  | "restore_permission", None -> Ok Goal_store_unavailable.Restore_permission
+  | ("reset_goal_store" | "restore_permission"), Some refused ->
+      Error
+        (Printf.sprintf "goal store envelope reset_step %s carries field %S" token refused)
+  | other, _ -> Error (Printf.sprintf "unknown goal store envelope reset_step %S" other)
+
+let decode_goal_store_unavailable_view json =
+  let* gsu_file = required_string_field json "file" in
+  let* field = required_nullable_string_field json "field" in
+  let* reason = required_string_field json "reason" in
+  let* gsu_reason = goal_store_unavailable_reason_view_of_wire ~field reason in
+  let* mirror = required_object_field json "mirror" in
+  let* status = required_string_field mirror "status" in
+  let* goal_count = required_nullable_int_field mirror "goal_count" in
+  let* gsu_mirror = goal_store_mirror_view_of_wire ~goal_count status in
+  let* reset_step = required_string_field json "reset_step" in
+  let* gsu_reset_step = goal_store_reset_step_of_wire ~field reset_step in
+  Ok { gsu_file; gsu_reason; gsu_mirror; gsu_reset_step }
+
+(* [Ok None] is a body that is not a failure envelope: the projection itself,
+   which the caller decodes. Any other [ok:false] body is that caller's to
+   refuse, so it is not read here. *)
+let decode_goal_source_failure json =
+  let goal_store_code = Tool_args.error_code_to_string Tool_args.Unavailable in
+  match member "ok" json, member "error_code" json with
+  | `Bool false, `String code when String.equal code goal_store_code ->
+      let* view = decode_goal_store_unavailable_view json in
+      Ok (Some (Goal_store_unavailable view))
+  | `Bool false, `String "goal_task_links_unavailable" ->
+      let* detail = required_string_field json "error" in
+      Ok (Some (Goal_task_links_unavailable detail))
+  | _ -> Ok None
+
+(* One line for the surfaces that still end in a string: the Planning header's
+   [planning_error] and the detail pane's [Goal_timeline_unavailable]. Same
+   shape as [Goal_store_unavailable.to_string] minus the payloads the wire
+   does not carry. Residue: RFC-0444 PR-4 lifts the view into
+   [Planning_unavailable] and draws file, reason and reset step in the pane
+   body, and this renderer goes with it. *)
+let goal_store_unavailable_reason_view_to_string = function
+  | Missing_after_init_view -> "missing_after_init"
+  | Unreadable_view -> "unreadable"
+  | Not_json_view -> "not_json"
+  | Schema_rejected_view refused -> "schema_rejected field=" ^ refused
+
+let goal_store_mirror_view_to_string = function
+  | Mirror_absent_view -> "absent"
+  | Mirror_unreadable_view -> "unreadable"
+  | Mirror_decodes_view goal_count -> Printf.sprintf "decodes goal_count=%d" goal_count
+  | Mirror_rejected_view -> "rejected"
+
+let goal_store_unavailable_view_to_string { gsu_file; gsu_reason; gsu_mirror; gsu_reset_step } =
+  Printf.sprintf "goal_store: unavailable reason=%s file=%s mirror=%s reset=%s"
+    (goal_store_unavailable_reason_view_to_string gsu_reason)
+    gsu_file
+    (goal_store_mirror_view_to_string gsu_mirror)
+    (Goal_store_unavailable.reset_step_to_string gsu_reset_step)
+
+let goal_source_failure_to_string = function
+  | Goal_store_unavailable view -> goal_store_unavailable_view_to_string view
+  | Goal_task_links_unavailable detail -> detail
 
 (* Every field past the id is nullable on the wire, so each stays an option
    here. A missing opening is not a zero time: the goal predates the server
@@ -5432,8 +5557,12 @@ let decode_planning_goal_history json =
        pgh_lifetime_hours }
 
 let decode_planning_snapshot json =
-  let* () = match goal_store_unavailable_detail json with
-    | Some detail -> Error detail | None -> Ok () in
+  let* () =
+    match decode_goal_source_failure json with
+    | Ok (Some failure) -> Error (goal_source_failure_to_string failure)
+    | Ok None -> Ok ()
+    | Error message -> Error message
+  in
   let* goals_json = required_list_field json "goals" in
   let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
   let* rollup_json = required_object_field json "rollup" in
@@ -7116,6 +7245,7 @@ let keeper_turn_lane_of_string = function
 
 type keeper_turn_preview = {
   ktp_status_text : string;
+  ktp_updated_at_unix : float;
   ktp_text_tail : string;
   ktp_last_tool : string option;
 }
@@ -7132,20 +7262,25 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 
 let decode_keeper_turn_row json =
   let* ktr_keeper_name = required_string_field json "keeper_name" in
+  let* ktr_chat_control_token = match Json_util.assoc_member_opt "chat_control_token" json with
+    | Some (`String token) when token <> "" -> Ok (Some token)
+    | Some `Null | None -> Ok None
+    | Some _ -> Error "keeper chat_control_token must be nonempty text or null" in
   let* status = required_string_field json "status" in
   match status with
   | "unavailable" ->
       let* detail = required_string_field json "detail" in
-      Ok { ktr_keeper_name; ktr_state = Keeper_turn_unavailable detail }
+      Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_unavailable detail }
   | "ok" -> (
       match Json_util.assoc_member_opt "turn" json with
       | None -> Error "keeper turn row is missing required field 'turn'"
-      | Some `Null -> Ok { ktr_keeper_name; ktr_state = Keeper_turn_idle }
+      | Some `Null -> Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_idle }
       | Some (`Assoc _ as turn_json) ->
           let* lane_raw = required_string_field turn_json "lane" in
           let* lane =
@@ -7178,7 +7313,13 @@ let decode_keeper_turn_row json =
                   required_nullable_string_field preview_json "last_tool"
                 in
                 let* ktp_status_text = required_string_field preview_json "status_text" in
-                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text })
+                let* ktp_updated_at_unix =
+                  match Json_util.assoc_member_opt "updated_at_unix" preview_json with
+                  | Some (`Float value) when Float.is_finite value -> Ok value
+                  | Some (`Int value) -> Ok (Float.of_int value)
+                  | _ -> Error "turn preview updated_at_unix must be a finite number"
+                in
+                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
             | Some other ->
                 Error
                   (Printf.sprintf
@@ -7188,6 +7329,7 @@ let decode_keeper_turn_row json =
           Ok
             {
               ktr_keeper_name;
+              ktr_chat_control_token;
               ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
             }
       | Some other ->
@@ -7252,7 +7394,7 @@ let decode_runtime_assignment json =
   in
   Ok { ra_keeper; ra_source; ra_target_id; ra_unavailable_reason }
 
-let decode_runtime_resolved json =
+let decode_runtime_resolved_full json =
   let* snapshot = decode_runtime_resolved_snapshot json in
   let* assignment_items = required_list_field json "assignments" in
   let* assignments =
@@ -7277,7 +7419,11 @@ let decode_runtime_resolved json =
           (Printf.sprintf "runtime assignment for %S names an absent lane"
              assignment.ra_keeper)
   in
-  Ok (snapshot.rrs_runtimes, assignments)
+  Ok (snapshot.rrs_runtimes, snapshot.rrs_lanes, assignments)
+
+let decode_runtime_resolved json =
+  let* runtimes, _lanes, assignments = decode_runtime_resolved_full json in
+  Ok (runtimes, assignments)
 
 type server_gc_health = {
   sgc_heap_words : int;
@@ -9311,9 +9457,10 @@ let decode_goal_timeline_event json =
   Ok { gt_ts; gt_kind; gt_lane; gt_title; gt_summary; gt_severity }
 
 let decode_goal_detail_timeline json =
-  match goal_store_unavailable_detail json with
-  | Some detail -> Ok (Goal_timeline_unavailable detail)
-  | None ->
+  match decode_goal_source_failure json with
+  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (goal_source_failure_to_string failure))
+  | Error message -> Error message
+  | Ok None ->
   match Json_util.assoc_member_opt "timeline" json with
   | Some `Null ->
       let state = member "approval_queue_state" json in

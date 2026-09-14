@@ -1070,6 +1070,31 @@ let test_beside_the_roster_a_long_record_folds_and_scrolls () =
   check bool "the last call is reachable" true
     (List.exists (fun row -> contains "call-11" (text row)) last.Pane.rows)
 
+(* Beside the roster, a keeper with no record of its own leaves the pane one
+   sentence -- "tester \xc2\xb7 no events on this feed yet" -- and the four
+   column names have nothing under them. The names go, and the sentence sits
+   under the header where the names were. With a record the names stay, which
+   [test_beside_the_roster_only_the_selected_keepers_record_draws] holds. *)
+let test_the_column_names_wait_for_a_row_that_uses_them () =
+  let input =
+    { fixture with
+      Pane.scope = Pane.Selected_only
+    ; keepers = Some [ keeper "tester" ]
+    ; approvals = []
+    ; chunks = chunks [ "tester" ] (entries [])
+    }
+  in
+  let view = Pane.lines ~rows ~cols ~scroll:0 input in
+  let texts = List.map text view.Pane.rows in
+  check bool "no row uses the columns" false
+    (List.exists (fun row -> contains Pane.legend row) texts);
+  check bool "the sentence is under the header" true
+    (contains "tester" (List.nth texts 1)
+     && contains "no events on this feed yet" (List.nth texts 1));
+  List.iteri
+    (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
+    view.Pane.rows
+
 let test_fleet_rows_carry_no_clock () =
   List.iter2
     (fun row target ->
@@ -1286,6 +1311,8 @@ let () =
     ; ( "beside the roster"
       , [ test_case "only the selected keeper's record draws" `Quick
             test_beside_the_roster_only_the_selected_keepers_record_draws
+        ; Alcotest.test_case "the column names wait for a row that uses them"
+            `Quick test_the_column_names_wait_for_a_row_that_uses_them
         ; test_case "a long record folds and scrolls" `Quick
             test_beside_the_roster_a_long_record_folds_and_scrolls
         ; test_case "keepers waiting on approval still draw" `Quick

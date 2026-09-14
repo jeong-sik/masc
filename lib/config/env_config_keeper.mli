@@ -170,13 +170,21 @@ module KeeperKeepalive : sig
   val interval_sec : int
   val sleep_chunk_sec : float
 
+  val rate_limit_backoff_floor_sec : float
+  (** Lower bound of the failure-route backoff sleep when a provider
+      rate-limit ([429]) or capacity route carries no usable [Retry-After]
+      (absent, zero, negative, NaN, infinite): the signal is real even
+      without a duration, so the lane waits at least this long (#26068).
+      Also the lower clamp of {!rate_limit_backoff_cap_sec}. Fixed at
+      [60.0]; not env-configurable. *)
+
   val rate_limit_backoff_cap_sec : float
   (** Upper bound for the failure-route backoff sleep after a provider
       rate-limit ([429]) or capacity cycle (#26068). Clamped to
-      [60.0, 3600.0]; env [MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC],
-      default [900.0]. The sleep stays interruptible
-      ({!sleep_chunk_sec} granularity), so the cap bounds only the wait,
-      never lane reactivity. *)
+      [{!rate_limit_backoff_floor_sec}, 3600.0]; env
+      [MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC], default [900.0]. The sleep
+      stays interruptible ({!sleep_chunk_sec} granularity), so the cap
+      bounds only the wait, never lane reactivity. *)
   val stream_idle_failsafe_floor_sec : float
   (** Resolved runtime fallback used only when the explicit idle timeout is
       absent. Kept here so runtime execution and operator projection share one

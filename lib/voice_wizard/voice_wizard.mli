@@ -13,6 +13,8 @@
     be guessing. *)
 
 type provider =
+  | Macos_say
+  | Whisper_cli
   | Elevenlabs
   | Openai_compatible
   | Mcp_tool
@@ -21,9 +23,12 @@ val provider_label : provider -> string
 val provider_of_label : string -> provider option
 
 val providers_for : Voice_setup.section -> provider list
-(** Which providers can serve this section. [Mcp_tool] is offered for speech out
-    and not for speech in: that kind synthesizes through a tool call and has no
-    transcribe path. *)
+(** Which providers can serve this section, in the order they are offered.
+    [Mcp_tool] and [Macos_say] are offered for speech out and not for speech
+    in: both synthesize and have no transcribe path. [Whisper_cli] is the
+    mirror, offered for speech in only. The two command kinds lead their side:
+    they need no address and no key, so what they cost is whether the command
+    is on the machine. *)
 
 type draft =
   { section : Voice_setup.section
@@ -71,14 +76,17 @@ val gaps : draft -> gap list
     Which fields are required depends on the provider: an OpenAI-compatible
     endpoint needs an address and can go without a credential (omitting it is
     what keeps the Authorization header off a local server that never asked for
-    one), while ElevenLabs needs the credential and can go without an address. *)
+    one), while ElevenLabs needs the credential and can go without an address.
+    A command kind needs neither: [Macos_say] needs only a name, because it is
+    asked for a voice rather than a model, and [Whisper_cli] needs the name and
+    the model file it loads. *)
 
 val changes : draft -> (Voice_setup.change list, gap list) result
 (** The changes this draft describes, or what it is still missing.
 
-    The section's [default_model] is set alongside the endpoint rather than
-    after it: a section that exists must name one, so an endpoint written on its
-    own would leave a file the loader refuses. *)
+    The model is written on the endpoint, not as the section's
+    [default_model], so adding a provider leaves the model every other endpoint
+    in the section is asked for as it was. *)
 
 type step =
   | Section

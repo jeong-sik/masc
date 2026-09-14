@@ -7,7 +7,16 @@ import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, 
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { get } from './core'
 import { decodeKeeperApprovalQueueState } from './dashboard-gate'
+import { goalStoreUnavailableSummary } from '../lib/goal-store-unavailable-labels'
+import {
+  GOAL_STORE_MIRROR_STATUSES,
+  GOAL_STORE_RESET_STEPS,
+  GOAL_STORE_UNAVAILABLE_REASONS,
+} from '../types/goal-store-unavailable'
 import type {
+  GoalSourceUnavailable,
+  GoalStoreMirror,
+  GoalStoreUnavailable,
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
   GoalDetailKeeper,
@@ -23,11 +32,129 @@ import type {
   KeeperApprovalQueueState,
 } from '../types'
 
-export function goalStoreUnavailableDetail(raw: unknown): string | null {
+// ── Goal source unavailable envelopes (RFC-0444 §2.3 row 4) ─────────────────
+
+/** The envelope named a Goal source failure but its members do not parse. */
+export class GoalStoreEnvelopeError extends Error {
+  constructor(detail: string) {
+    super(`invalid goal_store_unavailable envelope: ${detail}`)
+    this.name = 'GoalStoreEnvelopeError'
+  }
+}
+
+/** A fetch answered with a parsed Goal source failure instead of a snapshot. */
+export class GoalSourceUnavailableError extends Error {
+  readonly unavailable: GoalSourceUnavailable
+
+  constructor(unavailable: GoalSourceUnavailable) {
+    super(goalSourceUnavailableMessage(unavailable))
+    this.name = 'GoalSourceUnavailableError'
+    this.unavailable = unavailable
+  }
+}
+
+function goalSourceUnavailableMessage(unavailable: GoalSourceUnavailable): string {
+  switch (unavailable.kind) {
+    case 'unavailable':
+      return goalStoreUnavailableSummary(unavailable)
+    case 'links_unavailable':
+      return unavailable.detail
+    default: {
+      const unhandled: never = unavailable
+      return unhandled
+    }
+  }
+}
+
+function wireToken<T extends string>(tokens: readonly T[], value: unknown): T | null {
+  return typeof value === 'string' && (tokens as readonly string[]).includes(value)
+    ? (value as T)
+    : null
+}
+
+const GOAL_STORE_ENVELOPE_KEY_COUNT = 7
+const GOAL_STORE_MIRROR_KEY_COUNT = 2
+
+function decodeGoalStoreMirror(raw: unknown): GoalStoreMirror {
+  if (!isRecord(raw) || Object.keys(raw).length !== GOAL_STORE_MIRROR_KEY_COUNT) {
+    throw new GoalStoreEnvelopeError('mirror is not a {status, goal_count} object')
+  }
+  const status = wireToken(GOAL_STORE_MIRROR_STATUSES, raw.status)
+  if (status === null) throw new GoalStoreEnvelopeError(`unknown mirror status ${JSON.stringify(raw.status)}`)
+  switch (status) {
+    case 'mirror_decodes': {
+      const goalCount = raw.goal_count
+      if (typeof goalCount !== 'number' || !Number.isSafeInteger(goalCount) || goalCount < 0) {
+        throw new GoalStoreEnvelopeError('mirror_decodes carries no goal_count')
+      }
+      return { status, goalCount }
+    }
+    case 'mirror_absent':
+    case 'mirror_unreadable':
+    case 'mirror_rejected':
+      if (raw.goal_count !== null) throw new GoalStoreEnvelopeError(`${status} carries a goal_count`)
+      return { status, goalCount: null }
+    default: {
+      const unhandled: never = status
+      return unhandled
+    }
+  }
+}
+
+function decodeGoalStoreUnavailable(raw: Record<string, unknown>): GoalStoreUnavailable {
+  if (Object.keys(raw).length !== GOAL_STORE_ENVELOPE_KEY_COUNT) {
+    throw new GoalStoreEnvelopeError(`expected ${GOAL_STORE_ENVELOPE_KEY_COUNT} members, got ${Object.keys(raw).length}`)
+  }
+  const reason = wireToken(GOAL_STORE_UNAVAILABLE_REASONS, raw.reason)
+  if (reason === null) throw new GoalStoreEnvelopeError(`unknown reason ${JSON.stringify(raw.reason)}`)
+  const resetStep = wireToken(GOAL_STORE_RESET_STEPS, raw.reset_step)
+  if (resetStep === null) throw new GoalStoreEnvelopeError(`unknown reset_step ${JSON.stringify(raw.reset_step)}`)
+  if (typeof raw.file !== 'string' || raw.file.length === 0) throw new GoalStoreEnvelopeError('file is not a path')
+  let field: string | null
+  switch (reason) {
+    case 'schema_rejected':
+      if (typeof raw.field !== 'string' || raw.field.length === 0) {
+        throw new GoalStoreEnvelopeError('schema_rejected names no field')
+      }
+      field = raw.field
+      break
+    case 'missing_after_init':
+    case 'unreadable':
+    case 'not_json':
+      if (raw.field !== null) throw new GoalStoreEnvelopeError(`${reason} carries a field`)
+      field = null
+      break
+    default: {
+      const unhandled: never = reason
+      return unhandled
+    }
+  }
+  return {
+    kind: 'unavailable',
+    reason,
+    field,
+    file: raw.file,
+    mirror: decodeGoalStoreMirror(raw.mirror),
+    resetStep,
+  }
+}
+
+/**
+ * Parses a projection body into the closed Goal source failure union.
+ * Returns null when the body is not a failure envelope at all; throws
+ * {@link GoalStoreEnvelopeError} when it names one but a member does not
+ * parse — an unknown token is refused, never mapped to a default.
+ */
+export function goalSourceUnavailable(raw: unknown): GoalSourceUnavailable | null {
   if (!isRecord(raw) || raw.ok !== false) return null
-  if (raw.error_code !== 'goal_store_unavailable' && raw.error_code !== 'goal_task_links_unavailable') return null
-  return typeof raw.error === 'string' && raw.error.length > 0
-    ? raw.error : raw.error_code === 'goal_task_links_unavailable' ? 'Goal–Task link source unavailable' : 'Goal store unavailable'
+  if (raw.error_code === 'goal_task_links_unavailable') {
+    if (typeof raw.error !== 'string' || raw.error.length === 0) {
+      throw new GoalStoreEnvelopeError('goal_task_links_unavailable carries no error line')
+    }
+    return { kind: 'links_unavailable', detail: raw.error }
+  }
+  if (raw.error_code !== 'goal_store_unavailable') return null
+  return decodeGoalStoreUnavailable(raw)
 }
 
 export class DashboardGoalsApprovalQueueUnavailableError extends Error {
@@ -353,8 +480,8 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
 
 export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
   const raw = await get<unknown>('/api/v1/dashboard/goals')
-  const unavailable = goalStoreUnavailableDetail(raw)
-  if (unavailable !== null) throw new Error(unavailable)
+  const unavailable = goalSourceUnavailable(raw)
+  if (unavailable !== null) throw new GoalSourceUnavailableError(unavailable)
   const decoded = decodeDashboardGoalsTreeResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goals payload')
   return decoded
@@ -362,8 +489,8 @@ export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeRespo
 
 export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
   const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
-  const unavailable = goalStoreUnavailableDetail(raw)
-  if (unavailable !== null) throw new Error(unavailable)
+  const unavailable = goalSourceUnavailable(raw)
+  if (unavailable !== null) throw new GoalSourceUnavailableError(unavailable)
   const decoded = decodeDashboardGoalDetailResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goal detail payload')
   return decoded

@@ -595,9 +595,26 @@ let visual_lines ?(failed_note = "") ~height ~width view =
         @ (match view.receipt with None -> [] | Some json ->
             List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
 
+(* The tone a cell was built with, as the terminal reads it. The cells carried
+   Dim/Accent/Attention from the moment this screen was drawn, and the text
+   conversion dropped them: every heading, hint, selected row and warning left
+   this surface in the same white as the data, so nothing on it said what was
+   a label and what was a reading. The colours are the ones every other
+   surface uses ({!Masc_tui_theme}). *)
+let sgr_of_tone = function
+  | Normal -> ""
+  | Dim -> Masc_tui_theme.tone Masc_tui_theme.Dim
+  | Accent -> Masc_tui_theme.tone Masc_tui_theme.Accent
+  | Attention -> Masc_tui_theme.status Masc_tui_theme.Warn
+
+let painted_cell (tone, text) =
+  match sgr_of_tone tone with
+  | "" -> text
+  | sgr -> sgr ^ text ^ Masc_tui_theme.Sgr.reset
+
 let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width view =
   match if visual then visual_lines ~failed_note ~height ~width view else None with
-  | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
+  | Some lines -> List.map (fun line -> String.concat "" (List.map painted_cell line.cells)) lines
   | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
   let header = [String.concat "  " [tab Timeline "1 Time"; tab Connections "2 Links";
@@ -617,9 +634,12 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
          else Some (Masc_tui_message_layout.fit_width
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
-    | None -> [if view.loading then "Refreshing… · No Add-ons installed."
+    (* Nothing has been read yet, which is not the same as nothing installed:
+       both of these lines said "No Add-ons installed." while the read was
+       still on its way or had never been asked for. *)
+    | None -> [if view.loading then "Refreshing…"
         else if Option.is_some view.error then failed_note
-        else "No reading yet · No Add-ons installed. · r:refresh"]
+        else "No reading yet · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)
@@ -635,7 +655,12 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                 snapshot.output.rows
             else []
         | Configurations ->
-            ["No Add-ons installed."] @ (match snapshot.configuration with
+            (* "No Add-ons installed." only when the read says so: a complete
+               inventory with no declaration in it. It stood before this match
+               unconditionally, so a screen listing installations opened by
+               saying there were none, and a partial read -- which has not
+               finished looking -- said the same. *)
+            (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
              | Some config ->
                  window view.configuration_cursor (fun (d : declaration) ->
@@ -661,8 +686,13 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
             @ (match selected_instance view with
-               | None -> ["No Add-ons installed. No instances. Tab to Installations to create or repair a declaration.";
-                          "Manual attachment: :attach {manifest_path,run_id,binding}"]
+               (* The read carries the instances; an empty list is "none
+                  installed", and a cursor past the end is not. *)
+               | None ->
+                   [(if snapshot.instances=[]
+                     then "No Add-ons installed. No instances. Tab to Installations to create or repair a declaration."
+                     else "No instance selected. j/k picks one.");
+                    "Manual attachment: :attach {manifest_path,run_id,binding}"]
                | Some item -> [""; "Instance details"]
                    @ instance_lines {view with instance_cursor=0} [item])
         | Rows ->
@@ -878,7 +908,15 @@ let compact_lines ~width view =
             ^ instance.title ^ " · " ^ phase_label instance.phase
             ^ (if Option.is_some instance.action_schema then " · a:actions" else " · o:observe")) snapshot.instances in
         let configurations = if view.focus<>Configurations then [] else
-          ["Installations (E:edit)"] @ (match snapshot.configuration with None -> [] | Some config ->
+          ["Installations (E:edit)"]
+          @ (match snapshot.configuration with
+             | Some config when config.complete && config.declarations=[] ->
+                 (* The inventory finished reading and found none. Without this
+                    the block drew its heading and stopped, which reads as a
+                    list still loading. *)
+                 ["No Add-ons installed."]
+             | None | Some _ -> [])
+          @ (match snapshot.configuration with None -> [] | Some config ->
             List.mapi (fun index (declaration : declaration) ->
               (if index=view.configuration_cursor then "> " else "  ")
               ^ Option.value ~default:declaration.source_path declaration.installation_id

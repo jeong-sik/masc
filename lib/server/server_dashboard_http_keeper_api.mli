@@ -9,9 +9,14 @@
 module Http = Http_server_eio
 (** Alias used internally for the Eio HTTP server module. *)
 
-val tool_call_entries : keeper_name:string -> limit:int -> Yojson.Safe.t list
+val tool_call_entries :
+  keeper_name:string ->
+  limit:int ->
+  (Yojson.Safe.t list, Keeper_tool_call_log.index_error) result
 (** Exact per-Keeper indexed tail, in chronological order, with the same tool
-    definition annotations emitted by [/tool-calls]. *)
+    definition annotations emitted by [/tool-calls]. An index that cannot be
+    read is the [Error], which [/tool-calls] answers as 503
+    [tool_call_store_unavailable]; it is never an empty list. *)
 
 val keeper_tool_call_lookup_response :
   config:Workspace.config ->

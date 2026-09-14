@@ -98,6 +98,11 @@ val footer_hints_approval_detail : string
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
 
+val footer_hints_voice_agent : unit -> string
+(** The keeper-voice screen's own row: the keeper axis, the voice axis, the
+    write and the way out. Its keys are not the Config pane's, so the row is
+    the screen's rather than the pane's. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)
@@ -130,6 +135,12 @@ val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
+
+val footer_hints_board_read : focus_posts:bool -> split:bool -> string
+(** The Board read footer. [focus_posts] is whether j/k moves the post list
+    beside the open post rather than scrolling it; [split] is whether that
+    list is on screen, which is when h/l and Ctrl-W have a pane to reach. The
+    vote, reply and copy keys are the Board surface list's own bindings. *)
 
 val footer_hints_fusion_detail : position:string -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends

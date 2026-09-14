@@ -510,7 +510,7 @@ if printf '%s\n' \
   'Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit' \
   '  tab:planning_tab ->' \
   'write_two_panes buf ~left_cols ~left:left_buf' \
-  '"   No longer listed: %d reached an end: %d"' \
+  '"  No longer listed: %d · %d with no outcome"' \
   '"on the %s tab: %s"' \
   | rg -q "$r19_pattern"; then
   echo "ERROR[R19-pattern-self-test]: matched a corrected hint, a signature, or prose" >&2

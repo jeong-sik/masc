@@ -75,6 +75,32 @@ let test_saving_is_followed_by_asking_the_endpoints () =
     (Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_wizard_probe" > 0
      && Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_wizard_save" > 0)
 
+(* The keeper-voice screen, the same way: a session type and two cursors are
+   testable where they live, and neither says whether a key opens the screen,
+   whether anything draws it, or whether Enter writes. *)
+let test_the_voice_pane_hands_over_to_the_keeper_voices () =
+  reached render "render_voice" "render_voice_agent"
+
+let test_a_opens_the_keeper_voices () =
+  reached tui "main" "Masc_tui_types.voice_agent_open"
+
+(* Both axes, and the write. An axis with no key is a list a reader can see and
+   cannot move; a screen with no save is two lists and no assignment. *)
+let keeper_voice_movers =
+  [ "Masc_tui_types.voice_agent_walk_agents"
+  ; "Masc_tui_types.voice_agent_walk_voices"
+  ]
+
+let test_every_keeper_voice_axis_has_a_key () =
+  List.iter (fun mover -> reached tui "main" mover) keeper_voice_movers
+
+let test_opening_asks_the_endpoint_and_enter_writes () =
+  Alcotest.(check bool)
+    "the TUI asks the endpoint for its voices and sends the assignment"
+    true
+    (Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_agent_voices" > 0
+     && Ast_grep.count_calls ~module_path:tui ~callee:"launch_voice_agent_voice_save" > 0)
+
 let () =
   Alcotest.run
     "masc_tui_voice_wizard_wiring"
@@ -89,11 +115,19 @@ let () =
             test_the_starting_addresses_reach_the_screen
         ; Alcotest.test_case "the prompts come from the state machine" `Quick
             test_the_prompts_come_from_the_state_machine
+        ; Alcotest.test_case "the voice pane hands over to the keeper voices" `Quick
+            test_the_voice_pane_hands_over_to_the_keeper_voices
         ] )
     ; ( "the keys"
       , [ Alcotest.test_case "e opens the wizard" `Quick test_e_opens_the_wizard
         ; Alcotest.test_case "every mover has a key" `Quick test_every_mover_has_a_key
         ; Alcotest.test_case "saving is followed by asking the endpoints" `Quick
             test_saving_is_followed_by_asking_the_endpoints
+        ; Alcotest.test_case "a opens the keeper voices" `Quick
+            test_a_opens_the_keeper_voices
+        ; Alcotest.test_case "every keeper-voice axis has a key" `Quick
+            test_every_keeper_voice_axis_has_a_key
+        ; Alcotest.test_case "opening asks the endpoint and Enter writes" `Quick
+            test_opening_asks_the_endpoint_and_enter_writes
         ] )
     ]

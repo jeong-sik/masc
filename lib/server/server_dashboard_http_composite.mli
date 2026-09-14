@@ -24,7 +24,9 @@ type claim_window = Server_dashboard_http_composite_claims.claim_window
 val read_claim_window : unit -> claim_window
 
 val latest_task_claim_row :
-  claim_window -> keeper_name:string -> Yojson.Safe.t option
+  claim_window ->
+  keeper_name:string ->
+  (Yojson.Safe.t option, Keeper_tool_call_log.index_error) result
 
 val composite_claim_attempt_json :
   claim_window:claim_window ->

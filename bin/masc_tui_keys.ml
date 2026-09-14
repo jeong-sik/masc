@@ -67,10 +67,11 @@ let config_bindings =
       Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments"
+  ; b Act "a" "fragments / keeper voice"
       ~help:"on prompts, show or hide the internal pieces the main prompts \
-             are built from; not on the runtime assets reading",
-      Some [ Config_prompts ]
+             are built from, though not on the runtime assets reading; on \
+             voice, give the selected keeper its own voice",
+      Some [ Config_prompts; Config_voice ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -243,6 +244,15 @@ let approval_retry =
 (* Where a Fusion run's caller and its Board evidence are, on the list and
    in the detail alike: one binding each, so the two footers cannot name the
    key two ways. *)
+(* The keys a post answers to, in the Board's surface list and in the read
+   footer alike. The read pane spelled them a second time in its own row --
+   "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
+   footer that spelled c, Y and Esc again and had no vote key at all, so that
+   row was the only place on the screen that said v votes. *)
+let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
+let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
 
@@ -406,8 +416,8 @@ let for_surface = function
       ; b Act "Right / Enter" "read" ~help:"read the post"
       ; b Act "Left / Esc" "back" ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
-      ; b Act "v / V" "vote up / down"
-      ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; board_vote_key
+      ; board_reply_key
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
@@ -415,7 +425,7 @@ let for_surface = function
           ~help:"move forward or backward through all hearths"
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
-      ; b Act "Y" "copy link" ~help:"copy the selected post reference"
+      ; board_copy_key
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
@@ -800,6 +810,20 @@ let footer_hints_config ~pane =
   let own, shared = config_pane_bindings pane in
   config_row ~own ~shared
 
+(* The keeper-voice screen: two lists and one write. The keys are its own --
+   the keeper walks under [j]/[k] and the voice under the arrows, so an
+   assignment cannot be made by moving one axis and hoping the other
+   followed -- and the row is built here rather than written as a string, so
+   the spellings are the table's. *)
+let voice_agent_bindings =
+  [ b Navigate "j/k" "keeper"
+  ; b Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
+  ; b Act "Esc" "back" ~help:"leave the screen; nothing is written"
+  ]
+
+let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
+
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
    notice rather than acting (masc_tui.ml), so the row leaves them out and
@@ -930,6 +954,23 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
+let footer_hints_board_read ~focus_posts ~split =
+  hints_of_bindings
+    ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
+     ; b Navigate "[/]" "post"
+     ; b Navigate "PgUp/PgDn" "page"
+     ]
+     @ (if split then [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+        else [])
+     @ [ b Navigate "z" "wide"
+       ; board_vote_key
+       ; board_reply_key
+       ; board_copy_key
+       ; b Act "Left / Esc" "back"
+       ; b Meta "r" "refresh"
+       ; b Meta "Tab" "next"
+       ])
+
 let footer_hints_fusion_detail ~position =
   Printf.sprintf "%s  %s"
     (hints_of_bindings

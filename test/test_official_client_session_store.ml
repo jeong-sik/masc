@@ -1194,11 +1194,107 @@ let test_tool_surface_fingerprint_is_canonical () =
           (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])))
 ;;
 
+let test_cooperative_resume_preserves_thread_after_newer_steering () =
+  let module Semantic = Keeper_semantic_execution in
+  let module Cooperative = Keeper_direct_checkpoint_continuation in
+  let operation_id = match Keeper_chat_operation.Operation_id.of_string "cooperative-original" with
+    | Ok id -> id | Error detail -> fail detail in
+  let seed = match Semantic.create ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String "original request with completed effects") ~sources:[] ~now:1. with
+    | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
+  let observed : Semantic.official_client_checkpoint =
+    { client_kind = Codex; runtime_id = "codex.original"; session_id = "thread-original";
+      turn_id = "old-turn"; tool_surface_sha256 = empty_surface; frame = seed.frame } in
+  let latest : t = { client_kind = Codex; runtime_id = observed.runtime_id;
+    phase = Settled { session_id = observed.session_id; turn_id = "steering-turn" };
+    turn_count = 2; tool_surface_sha256 = empty_surface; last_recovery_resolution = None;
+    last_transient_release = None; context_frontier = None; updated_at = 2. } in
+  let resumed = match Cooperative.For_testing.prepare_official_resume ~observed ~expected:(Some latest) with
+    | Ok resumed -> resumed | Error detail -> fail detail in
+  check string "resume includes newer steering in the same thread" "steering-turn" resumed.turn_id;
+  check bool "original effect scope remains intact" true
+    (Keeper_repetition_snapshot.equal observed.frame resumed.frame);
+  let reject expected = match Cooperative.For_testing.prepare_official_resume ~observed ~expected with
+    | Error _ -> () | Ok _ -> fail "cooperative continuation admitted unrelated authority" in
+  reject None;
+  reject (Some {latest with phase = Settled {session_id="replacement-thread";turn_id="steering-turn"}});
+  reject (Some {latest with tool_surface_sha256=String.make 64 'b'});
+  reject (Some {latest with runtime_id="codex.other"});
+  check bool "resume instruction contains no original input replay" false
+    (String_util.contains_substring (Cooperative.official_resume_message ~operation_id)
+       "original request with completed effects")
+;;
+
+let test_context_frontier_is_acknowledged_only_by_settlement () =
+  with_workspace "masc-context-frontier-" (fun base_path ->
+    let keeper_name = "frontier" in
+    let frontier = {snapshot_sha256=String.make 64 'a'; message_count=3;
+      delivery=Replaced_configuration;
+      acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"}} in
+    let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
+      ~base_path ~keeper_name ~expected:None ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    let observed binding = match binding.context_frontier with
+      | Some value -> value | None -> fail "missing frontier" in
+    check bool "claim clears caller-supplied acknowledgement" true
+      ((observed claimed).acknowledged_turn = None);
+    check bool "intent survives reopen without acknowledgement" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    check bool "inflight does not claim acknowledged context" true
+      ((observed started).acknowledged_turn = None);
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    check bool "terminal settlement records exact vendor identity" true
+      ((observed settled).acknowledged_turn = Some {session_id="session";turn_id="turn"});
+    check bool "unchanged canonical context is admitted" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+    check bool "changed canonical context is a typed rejection" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:(String.make 64 'b') = Error Canonical_context_changed);
+    check bool "inflight intent is never accepted as prior context proof" true
+      (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
+    check bool "acknowledged frontier survives reopen" true
+      (load ~base_path ~keeper_name = Ok (Some settled));
+    let guarded = claim_with_context_frontier
+      ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
+      ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
+      |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:guarded
+      ~failure:Transient_spawn_failed ~released_at:7. |> Result.get_ok in
+    check bool "transient spawn failure preserves verified unchanged source"
+      true (validate_unchanged_context ~expected:(Some released)
+        ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+    check bool "changed source cannot claim the unchanged-source channel" true
+      (Result.is_error (claim_with_context_frontier
+        ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
+          snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
+        ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
+        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let unbound_json = match Yojson.Safe.from_file state_path with
+      | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
+      | _ -> fail "binding encoding is not an object" in
+    Yojson.Safe.to_file state_path unbound_json;
+    match load ~base_path ~keeper_name with
+    | Ok (Some binding) -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = released.phase)
+    | Ok None -> fail "existing vendor session disappeared with optional proof"
+    | Error detail -> fail detail)
+;;
+
 let () =
   run
     "official client session store"
     [ ( "durable owner"
-      , [ test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
+      , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
         ; test_case
             "duplicate claim and CAS fail closed"
             `Quick
@@ -1232,6 +1328,8 @@ let () =
             "input-rejected recovery is not auto-superseded"
             `Quick
             test_input_rejected_recovery_is_not_auto_superseded
+        ; test_case "cooperative continuation preserves its thread after steering" `Quick
+            test_cooperative_resume_preserves_thread_after_newer_steering
         ; test_case "a continuation is admitted only for the turn it left" `Quick
             test_a_continuation_is_admitted_only_for_the_turn_it_left
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected

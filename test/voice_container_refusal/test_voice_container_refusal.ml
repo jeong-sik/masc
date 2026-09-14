@@ -115,6 +115,7 @@ let transcriber_in dir =
     ; timeout_seconds = None
     ; default_voice = None
     ; command = Some script
+    ; model = None
     }
   in
   endpoint, mark

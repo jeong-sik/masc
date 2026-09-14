@@ -37,6 +37,7 @@ let endpoint ?command ~kind id =
   ; timeout_seconds = None
   ; default_voice = None
   ; command
+  ; model = None
   }
 
 let argv_of = function
@@ -168,7 +169,9 @@ let test_the_language_is_detected_not_configured () =
 
 (* Blank is refused by name. Defaulting to a path would fail inside whisper
    with a message about a model file, and the reader would go looking for a
-   file rather than for the setting that is empty. *)
+   file rather than for the setting that is empty. The setting is the
+   endpoint's own model, so the refusal has to say which endpoint: a section
+   has more than one, and only one of them is blank. *)
 let test_a_missing_model_is_refused_by_name () =
   match
     Overlay.stt_command_for_endpoint
@@ -178,8 +181,10 @@ let test_a_missing_model_is_refused_by_name () =
   | Ok request ->
     Alcotest.failf "expected a refusal, got %s" (String.concat " " request.Overlay.argv)
   | Error message ->
+    Alcotest.(check bool) "the refusal names the endpoint that is blank" true
+      (Astring.String.is_infix ~affix:"whisper-local" message);
     Alcotest.(check bool) "the refusal names the setting to fill" true
-      (Astring.String.is_infix ~affix:"default_model" message)
+      (Astring.String.is_infix ~affix:"set its model" message)
 
 (* An installation that keeps the binary somewhere PATH does not carry. *)
 let test_the_command_can_be_overridden () =

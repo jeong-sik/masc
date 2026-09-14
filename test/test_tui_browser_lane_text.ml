@@ -229,6 +229,27 @@ let () =
   let trailing_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
     {view with scene=Some trailing_inline; scene_cursor=0} in
   assert (trailing_lines = ["[>1] ABC"; "D"]);
+  (* One paragraph with two inline elements arrives as five fragments, the
+     paragraph's own id between them: "a " <b>b</b> " c " <i>d</i> " e". *)
+  let two_inlines = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="a "};
+    {emphasis with node_id="bold"; text="b"};
+    {paragraph with node_id="paragraph-a"; text=" c "};
+    {emphasis with node_id="italic"; text="d"};
+    {paragraph with node_id="paragraph-a"; text=" e"}]}} in
+  let two_inline_lines, two_inline_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some two_inlines; scene_cursor=2} in
+  assert (two_inline_lines = ["[>3] a b c d e"] && two_inline_selected = Some 0);
+  let two_inlines_then_trailing = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="bold"; text="B"};
+    {paragraph with node_id="paragraph-a"; text="C"};
+    {emphasis with node_id="italic"; text="D"};
+    {paragraph with node_id="paragraph-a"; text="E"};
+    {emphasis with node_id="paragraph-b-inline"; text="F"}]}} in
+  let two_inline_trailing_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some two_inlines_then_trailing; scene_cursor=0} in
+  assert (two_inline_trailing_lines = ["[>1] ABCDE"; "F"]);
   let article : Masc.Browser_scene.region_ref =
     {node_id="article"; role=Masc.Browser_scene.Article; label="Post A"} in
   let article_heading = {heading with ancestor_region=Some article} in

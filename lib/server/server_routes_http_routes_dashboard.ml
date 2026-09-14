@@ -1354,6 +1354,10 @@ let handle_gate_rule_delete_body state request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
+(* The tool-quality read index could not be read; carries the index's detail
+   across the cache compute boundary to the route below. *)
+exception Tool_quality_log_unavailable of string
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -1655,7 +1659,7 @@ let add_routes ~sw ~clock router =
          (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let result = match Eio_context.get_net_opt () with
-               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | None -> Error Server_runtime_setup_actions.Network_unavailable
                | Some net ->
                  (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
                   | None -> Error Server_runtime_setup_actions.Invalid_request
@@ -1663,7 +1667,7 @@ let add_routes ~sw ~clock router =
                       ~base_path:(Mcp_server.workspace_config state).base_path json) in
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd
-             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/accounts/antigravity" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1675,14 +1679,14 @@ let add_routes ~sw ~clock router =
                    ~base_path:(Mcp_server.workspace_config state).base_path json in
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd
-             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/context" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let result = match Eio_context.get_net_opt () with
-               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | None -> Error Server_runtime_setup_actions.Network_unavailable
                | Some net ->
                  (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
                   | None -> Error Server_runtime_setup_actions.Invalid_request
@@ -1690,7 +1694,7 @@ let add_routes ~sw ~clock router =
                       ~base_path:(Mcp_server.workspace_config state).base_path json) in
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd
-             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/connections" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1702,7 +1706,7 @@ let add_routes ~sw ~clock router =
                    ~base_path:(Mcp_server.workspace_config state).base_path json in
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd
-             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+             | Error error -> Http.Response.json_value ~status:(Server_runtime_setup_actions.status_of_error error) ~request:req
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/credential" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -3005,12 +3009,36 @@ let add_routes ~sw ~clock router =
             page→endpoint profile). The window itself is hours-scale so
             6× longer TTL still serves near-live data; under 30s window the
             poll just hit the previous compute and never wait 30s again. *)
+         (* [Dashboard_cache.get_or_compute] takes a [unit -> Yojson.Safe.t]
+            compute and must not store a 503 for the TTL, so the typed read
+            failure leaves the compute as an exception: the cache drops the
+            computing slot and re-raises when it has nothing stale to serve,
+            and the route answers 503 rather than a payload with zero calls
+            (audit F397). *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_http_tool_quality.aggregate ~n ?window_hours ()))
+           match
+             Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
+               Domain_pool_ref.submit_io_or_inline (fun () ->
+                 match Dashboard_http_tool_quality.aggregate ~n ?window_hours () with
+                 | Ok json -> json
+                 | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+                   raise (Tool_quality_log_unavailable detail)))
+           with
+           | json -> Ok json
+           | exception Tool_quality_log_unavailable detail -> Error detail
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         match json with
+         | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+         | Error detail ->
+           Http.Response.json_value
+             ~status:`Service_unavailable
+             ~compress:true
+             ~request:req
+             (`Assoc
+                [ "error", `String detail
+                ; "code", `String "tool_call_store_unavailable"
+                ])
+             reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/diagnostics/memprof" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

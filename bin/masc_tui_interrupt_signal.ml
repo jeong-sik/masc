@@ -1,11 +1,12 @@
 type interrupt_signal =
   | Signalled of { turn_id : int option }
+  | Pending_admission_paused
   | Not_signalled of
       { reason : string
       ; detail : string option
       }
 
-let decode_signal ~identity_field ~expected_identity json =
+let decode_signal ~allow_pending ~identity_field ~expected_identity json =
   let field name =
     match json with
     | `Assoc fields -> List.assoc_opt name fields
@@ -32,6 +33,10 @@ let decode_signal ~identity_field ~expected_identity json =
   else
   match field "signalled" with
   | Some (`Bool true) -> Ok (Signalled { turn_id })
+  | Some (`Bool false) when string_of "reason" = Some "paused_pending_admission" ->
+      if allow_pending && field "paused" = Some (`Bool true)
+      then Ok Pending_admission_paused
+      else Error "pending-admission pause receipt is not valid for this interrupt"
   | Some (`Bool false) ->
       Ok
         (Not_signalled
@@ -41,7 +46,7 @@ let decode_signal ~identity_field ~expected_identity json =
   | Some _ | None -> Error "interrupt response has no signalled flag"
 
 let decode_interrupt_signal ~expected_request_id json =
-  decode_signal ~identity_field:"request_id" ~expected_identity:expected_request_id json
+  decode_signal ~allow_pending:true ~identity_field:"request_id" ~expected_identity:expected_request_id json
 
 let decode_observed_interrupt_signal ~expected_token json =
-  decode_signal ~identity_field:"interrupt_token" ~expected_identity:expected_token json
+  decode_signal ~allow_pending:false ~identity_field:"interrupt_token" ~expected_identity:expected_token json

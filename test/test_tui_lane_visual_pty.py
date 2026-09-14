@@ -86,8 +86,14 @@ def main(executable: str, captures: Path | None) -> None:
         capture("05-narrow-timeline", 24, 64)
         key(b"3", b"No Add-ons installed.")
         os.write(master, b"d")
-        if requests:
-            raise AssertionError(f"browsing or hidden detach sent mutation: {requests!r}")
+        # Every POST the fixture sees lands in [requests], and the TUI opens an
+        # MCP session of its own at startup ("/mcp" initialize). What this
+        # scenario is about is the Add-on surface: browsing it, and pressing d
+        # where no detach is offered, must not write to it.
+        addon_writes = [entry for entry in requests
+                        if entry[0].startswith("/api/v1/lane-addons")]
+        if addon_writes:
+            raise AssertionError(f"browsing or hidden detach sent mutation: {addon_writes!r}")
         key(b"q", b"MASC Lanes")
         key(b"\x1b", b"MASC Overview")
         os.write(master, b"q")

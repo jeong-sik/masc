@@ -1948,6 +1948,7 @@ let voice_local_endpoint ~id ~kind =
   ; timeout_seconds = None
   ; default_voice = None
   ; command = None
+  ; model = None
   }
 
 let voice_local_voices_exit () =
@@ -1995,17 +1996,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
   | Ok (revision, active) ->
     let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
-    let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
-    if Option.is_some hear_model
-      && Option.exists
-           (fun (config : Voice_config.stt_config) -> List.exists
-             (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
-             config.Voice_config.endpoints)
-           stt then
-      refuse
-        "Existing STT endpoints share a provider model. Adding a local model file \
-         would change their model, so nothing was written. Configure the STT section explicitly."
-    else if Option.is_some speak_voice
+    if Option.is_some speak_voice
       && Option.exists
            (fun (config : Voice_config.tts_config) -> List.exists
              (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
@@ -2052,10 +2043,14 @@ let voice_local_setup_exit base_path speak_voice hear_model =
         match hear_model with
         | None -> []
         | Some model ->
+          (* The file goes on the whisper-cli endpoint. Written as the
+             section's default_model it became the model name every provider
+             endpoint in the section was asked for, which is why this used to
+             refuse whenever one was there. *)
           [ Voice_setup.Put_endpoint
               ( Voice_setup.Stt
-              , voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli )
-          ; Voice_setup.Set_default_model (Voice_setup.Stt, model)
+              , { (voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli)
+                  with model = Some model } )
           ]
       in
       match speaking @ hearing with

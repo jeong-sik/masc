@@ -27,8 +27,19 @@ vi.mock('../../api/dashboard', () => ({
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
 }))
 
-vi.mock('../../api/core', () => ({
+vi.mock('../../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api/core')>(),
   currentDashboardActor: mocks.currentDashboardActor,
+}))
+
+// GoalCreateForm reaches the store and the toast through goal-create-state;
+// neither is under test here.
+vi.mock('../../store', () => ({
+  refreshGoals: vi.fn(),
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
 }))
 
 vi.mock('../../api/mcp', () => ({
@@ -44,6 +55,9 @@ vi.mock('../task-manage/task-create-form', () => ({
 }))
 
 import { GoalTree } from './goal-tree'
+import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
+import { showGoalCreate } from './goal-create-state'
+import { GoalSourceUnavailableError } from '../../api/dashboard-goals'
 
 function emptySummary(): DashboardGoalsTreeResponse['summary'] {
   return {
@@ -104,6 +118,8 @@ describe('GoalTree', () => {
 
   afterEach(() => {
     cleanup()
+    showGoalCreate.value = false
+    resetGoalCreateFormLocal()
     mocks.callMcpTool.mockReset()
     mocks.currentDashboardActor.mockReset()
     mocks.currentDashboardActor.mockReturnValue('dashboard-test')
@@ -257,4 +273,80 @@ describe('GoalTree', () => {
       expect(screen.queryByTestId('goal-tree-loading')).toBeNull()
     })
   })
+
+  // RFC-0444 §2.3 row 4 / criterion 9: a Goal store this build cannot read is
+  // drawn as an alert with file · reason · mirror · reset step, and the create
+  // form refuses to submit while that state stands.
+  it('draws the Goal store failure as an alert and refuses goal creation', async () => {
+    mocks.fetchDashboardGoalsTree.mockRejectedValue(new GoalSourceUnavailableError({
+      kind: 'unavailable',
+      reason: 'schema_rejected',
+      field: 'criterion_revision',
+      file: '/srv/masc/.masc/goals.json',
+      mirror: { status: 'mirror_decodes', goalCount: 97 },
+      resetStep: 'repair_field',
+    }))
+    showGoalCreate.value = true
+
+    render(html`<div><${GoalTree} /><${GoalCreateForm} /></div>`)
+
+    const alert = await waitFor(() => screen.getByTestId('goal-store-unavailable'))
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.getAttribute('data-reason')).toBe('schema_rejected')
+    expect(alert.getAttribute('data-reset-step')).toBe('repair_field')
+    expect(alert.textContent).toContain('Goal store 를 읽을 수 없습니다')
+    expect(screen.getByTestId('goal-store-unavailable-file').textContent).toBe('/srv/masc/.masc/goals.json')
+    expect(screen.getByTestId('goal-store-unavailable-reason').textContent)
+      .toBe('이 빌드의 goal 스키마가 파일을 거절했습니다 (필드: criterion_revision)')
+    expect(screen.getByTestId('goal-store-unavailable-mirror').textContent)
+      .toBe('.last-good 미러는 읽힘 · goal 97개 (서빙하지 않음)')
+    expect(screen.getByTestId('goal-store-unavailable-reset-step').textContent)
+      .toBe('필드 criterion_revision 를 채우면 다시 읽힙니다')
+    // The generic ErrorState line is not drawn beside the structured block.
+    expect(container_alerts()).toEqual(['goal-store-unavailable', 'goal-create-source-unavailable'])
+
+    fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'Recover the store' } })
+    fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'readable goals' } })
+    fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '97' } })
+    const submit = screen.getByTestId('goal-create-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.click(submit)
+    expect(mocks.callMcpTool).not.toHaveBeenCalled()
+    expect(screen.getByTestId('goal-create-source-unavailable').getAttribute('role')).toBe('alert')
+    expect(screen.getByTestId('goal-create-source-unavailable').textContent).toContain('/srv/masc/.masc/goals.json')
+    expect(screen.getByTestId('goal-create-source-unavailable').textContent).toContain('criterion_revision')
+  })
+
+  it('offers goal creation again once the tree hydrates after a Goal store failure', async () => {
+    mocks.fetchDashboardGoalsTree.mockRejectedValueOnce(new GoalSourceUnavailableError({
+      kind: 'unavailable',
+      reason: 'not_json',
+      field: null,
+      file: '/srv/masc/.masc/goals.json',
+      mirror: { status: 'mirror_absent', goalCount: null },
+      resetStep: 'reset_goal_store',
+    }))
+    showGoalCreate.value = true
+    render(html`<div><${GoalTree} /><${GoalCreateForm} /></div>`)
+    await waitFor(() => screen.getByTestId('goal-store-unavailable'))
+
+    hydrateGoalTreeSnapshot({
+      approval_queue_state: { state: 'ready' },
+      tree: [],
+      summary: emptySummary(),
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('goal-store-unavailable')).toBeNull()
+    })
+    expect(screen.queryByTestId('goal-create-source-unavailable')).toBeNull()
+    fireEvent.input(screen.getByTestId('goal-create-title-input'), { target: { value: 'Recover the store' } })
+    fireEvent.input(screen.getByTestId('goal-create-metric'), { target: { value: 'readable goals' } })
+    fireEvent.input(screen.getByTestId('goal-create-target'), { target: { value: '1' } })
+    expect((screen.getByTestId('goal-create-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
 })
+
+function container_alerts(): string[] {
+  return Array.from(document.querySelectorAll('[role="alert"]'))
+    .map(node => node.getAttribute('data-testid') ?? '<no testid>')
+}

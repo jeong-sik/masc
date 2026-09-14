@@ -13,9 +13,11 @@
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
-    frames?}] goes to [Msx_lane.press] under the operator's identity, so its
-    edges land in the shared ledger next to the keeper's. It is a write, gated
-    like the mutating MSX tools. *)
+    frames?, sequence?}] goes to [Msx_lane.press] under the identity
+    [with_tool_actor_auth] resolved for the request, so its edges land in the
+    shared ledger next to the keeper's under the name the credential carries.
+    It is a write, gated like the mutating MSX tools. A field of the wrong
+    type is a 400 naming the field, never a silent default. *)
 
 open Server_auth
 module Http = Http_server_eio
@@ -24,17 +26,44 @@ let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
-let int_field name ~default json =
-  match json_field name json with Some (`Int n) -> n | _ -> default
+(* Frames a press holds its keys down, and the frames the call advances in
+   all, when the body names neither (RFC-0439 §3.3): a tap. *)
+let press_default_hold_frames = 5
+let press_default_step_frames = 15
 
-let bool_field name ~default json =
-  match json_field name json with Some (`Bool b) -> b | _ -> default
-
-let string_list_field name json =
+(* An absent field is the default; a present one must be a positive integer.
+   The wrong type is the caller's mistake and is named back to them, not
+   replaced by the default. *)
+let positive_int_field name ~default json : (int, string) result =
   match json_field name json with
+  | None -> Ok default
+  | Some (`Int n) when n > 0 -> Ok n
+  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Bool _ | `Null | `List _ | `Assoc _) ->
+    Error (name ^ " must be a positive integer")
+
+let bool_field name ~default json : (bool, string) result =
+  match json_field name json with
+  | None -> Ok default
+  | Some (`Bool b) -> Ok b
+  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Null | `List _ | `Assoc _) ->
+    Error (name ^ " must be a boolean")
+
+(* An absent array is empty (the press then fails for naming no key); a present
+   one must hold only strings, so a stray number cannot vanish from a chord. *)
+let string_list_field name json : (string list, string) result =
+  let not_strings = Error (name ^ " must be an array of strings") in
+  match json_field name json with
+  | None -> Ok []
   | Some (`List items) ->
-    List.filter_map (function `String s -> Some s | _ -> None) items
-  | _ -> []
+    List.fold_left
+      (fun acc item ->
+        match acc, item with
+        | (Error _ as e), _ -> e
+        | Ok ss, `String s -> Ok (ss @ [ s ])
+        | Ok _, (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null | `List _ | `Assoc _) ->
+          not_strings)
+      (Ok []) items
+  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Bool _ | `Null | `Assoc _) -> not_strings
 
 let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.Safe.t =
   let base = [ ("ok", `Bool ok) ] in
@@ -65,45 +94,38 @@ let parse_keys names =
         | Error message -> Error message))
     (Ok []) names
 
-(* The operator's identity for the ledger. The TUI presents a token, not a
-   keeper name, so its presses are recorded as the operator. *)
-let presser_of request =
-  let header k =
-    match Httpun.Headers.get request.Httpun.Request.headers k with
-    | Some s when s <> "" -> Some s
-    | _ -> None
-  in
-  match header "x-masc-agent" with Some a -> a | None -> "operator"
+(* The press body decoded and applied under [who], the identity the route's
+   actor auth resolved. Pure over the body so the route test can drive it. *)
+let press_response ~who ~body =
+  let error status message = status, press_result_json ~ok:false ~message None in
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
+  | json -> (
+    let ( let* ) = Result.bind in
+    let decoded =
+      let* names = string_list_field "keys" json in
+      let* keys = parse_keys names in
+      let* hold_frames = positive_int_field "hold_frames" ~default:press_default_hold_frames json in
+      let* step_frames = positive_int_field "frames" ~default:press_default_step_frames json in
+      let* sequence = bool_field "sequence" ~default:false json in
+      Ok (keys, hold_frames, step_frames, sequence)
+    in
+    match decoded with
+    | Error message -> error `Bad_request message
+    | Ok ([], _, _, _) -> error `Bad_request "keys must name at least one key"
+    | Ok (keys, hold_frames, step_frames, sequence) -> (
+      match Msx_lane.press ~who ~keys ~hold_frames ~step_frames ~sequence with
+      | Ok obs -> `OK, press_result_json ~ok:true (Some obs)
+      | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
+        error `Bad_request (Msx_lane.error_to_string e)
+      | Error (Msx_lane.Unreadable _ as e) ->
+        error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
-let handle_press request reqd =
+let handle_press ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message ->
-        respond ~status:`Bad_request
-          (press_result_json ~ok:false ~message:("invalid JSON: " ^ message) None)
-      | json -> (
-        match parse_keys (string_list_field "keys" json) with
-        | Error message -> respond ~status:`Bad_request (press_result_json ~ok:false ~message None)
-        | Ok [] ->
-          respond ~status:`Bad_request
-            (press_result_json ~ok:false ~message:"keys must name at least one key" None)
-        | Ok keys -> (
-          let result =
-            Msx_lane.press ~who:(presser_of request) ~keys
-              ~hold_frames:(int_field "hold_frames" ~default:5 json)
-              ~step_frames:(int_field "frames" ~default:15 json)
-              ~sequence:(bool_field "sequence" ~default:false json)
-          in
-          match result with
-          | Ok obs -> respond ~status:`OK (press_result_json ~ok:true (Some obs))
-          | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
-            respond ~status:`Bad_request
-              (press_result_json ~ok:false ~message:(Msx_lane.error_to_string e) None)
-          | Error (Msx_lane.Unreadable _ as e) ->
-            respond ~status:`Internal_server_error
-              (press_result_json ~ok:false ~message:(Msx_lane.error_to_string e) None))))
+      let status, json = press_response ~who ~body in
+      respond_json_value_with_cors ~status request reqd json)
 ;;
 
 (* The cartridge inventory the TUI load menu shows (RFC-0439 §3.7): the file
@@ -139,7 +161,7 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    keeper's masc_msx_load runs, so there is one loader and one inventory. The
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
-let handle_load ~base_path request reqd =
+let handle_load ~base_path ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let respond ~status json = respond_json_value_with_cors ~status request reqd json in
       match Yojson.Safe.from_string body with
@@ -154,7 +176,7 @@ let handle_load ~base_path request reqd =
              non-deterministic-boundary debt. *)
           Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
             ~start_time:(Time_compat.now ()) ~base_path
-            ~agent_name:"operator" args
+            ~agent_name args
         in
         let ok = Tool_result.is_success result in
         let status = if ok then `OK else `Bad_request in
@@ -164,8 +186,10 @@ let handle_load ~base_path request reqd =
 (* "who is at the machine": each keeper's most-recent key within a window of the
    current frame, newest first, projected from the shared ledger. The lane is one
    machine anyone may press, so this reports presence -- it does not reserve the
-   slot. A turn in a turn-based game can run to minutes, so the window is wide. *)
-let players_window_frames = 3600
+   slot. A turn in a turn-based game can run long, so the window is a full
+   minute of machine time at the machine's frame rate. *)
+let players_window_sec = 60
+let players_window_frames = players_window_sec * Msx_lane.frames_per_second
 
 let recent_players_of ~now entries =
   let last : (string, int) Hashtbl.t = Hashtbl.create 8 in
@@ -425,14 +449,14 @@ let add_routes router =
              (carts_json ~base_path) reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_press"
-         (fun _state _req reqd -> handle_press request reqd)
+       with_tool_actor_auth ~tool_name:"masc_msx_press"
+         (fun _state who _req reqd -> handle_press ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_load"
-         (fun state _req reqd ->
+       with_tool_actor_auth ~tool_name:"masc_msx_load"
+         (fun state agent_name _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_load ~base_path request reqd)
+           handle_load ~base_path ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_save"

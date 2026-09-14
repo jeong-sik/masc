@@ -1105,6 +1105,11 @@ type chrome_body = {
    one owner. *)
 let surface_chrome_rows = framed_chrome_rows
 
+let surface_chrome_budget state ~terminal_rows =
+  max 1
+    (Masc_tui_types.surface_body_rows state ~terminal_rows
+    - surface_chrome_rows)
+
 (* Which frame the contract draws. A surface is the terminal's whole screen and
    its edge is already the frame, so it draws rules and no box. An overlay is
    opened over a surface and keeps its box, which is how a reader tells the two
@@ -2009,6 +2014,21 @@ let planning_backlog_counts (backlog : planning_backlog) =
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]
+
+(* The retained-history count above the Goal list. The row carried two numbers
+   joined by the same separator the Backlog counts use for disjoint parts, but
+   the goals that reached an end are a subset of the goals no longer listed --
+   so when every one of them ended, the row said the same number twice and
+   never said the difference. That difference is the reading an operator
+   cannot take off a row: the server fills [closed_at] only for a goal whose
+   last phase is terminal, so a goal counted here without one left the list
+   with no outcome recorded. *)
+let planning_goal_history_summary ~unlisted ~ended =
+  let without_an_outcome = unlisted - ended in
+  if without_an_outcome <= 0 then Printf.sprintf "  No longer listed: %d" unlisted
+  else
+    Printf.sprintf "  No longer listed: %d · %d with no outcome" unlisted
+      without_an_outcome
 
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.

@@ -1210,11 +1210,22 @@ quietly gone dead looks healthy in the first and is visible in the second.
 | side | always — speech out or speech in |
 | provider | always |
 | name | always — how the entry is addressed later |
-| address | not for ElevenLabs, which carries its own |
-| credential variable | not for an MCP tool |
-| model | always |
+| address | not for ElevenLabs, which carries its own, and not for a command |
+| credential variable | not for an MCP tool, and not for a command |
+| model | always except `say`, which takes a voice instead |
 | voice | speech out only |
 | review | always |
+
+Each side offers a command kind first: `say` for speech out, `whisper-cli` for
+speech in. They lead because they are the two entries with no address and no
+key to arrange — what they cost is whether the command is on the machine. The
+wizard leaves the command path unset so each runs the name it is normally
+installed under; pointing one at a binary `PATH` does not carry is an edit to
+`runtime.toml`.
+
+For `whisper-cli` the model is the **path of the ggml file it loads**, not a
+name a provider looks up. The two readings cannot share one string, which is
+why the model is written on the endpoint rather than on the section.
 
 `enter` moves forward, `up` moves back, `esc` leaves without writing. The side
 and the provider walk on `←` / `→` / space, because both are closed sets;
@@ -1233,6 +1244,14 @@ Two blanks are real answers rather than unfinished ones:
 The save carries the revision the pane read. A wizard left open while something
 else wrote is told its read went stale rather than overwriting that writer.
 
+Where the voice lands depends on what the section already holds. A voice name is
+provider vocabulary -- `say` takes `Yuna`, ElevenLabs a 20-character id -- so it
+becomes `[voice.tts] default_voice` only when every endpoint already there
+shares this one's kind. Beside another kind it goes on the endpoint instead,
+which leaves the existing default readable by the endpoints that fall back to
+it and, as the trade, puts this one out of reach of `agent_voices` (see
+"a `default_voice` on the endpoint outranks both" above).
+
 On success the pane reloads, and for speech out every configured endpoint is
 asked to say one sentence. Each answer is shown, **including the refusals** —
 that is the part a fallback chain hides by stopping at the first endpoint that
@@ -1244,7 +1263,8 @@ Use `masc voice-verify --audio FILE`, and see above for making a file.
 ### What it will not do
 
 The wizard does not install or start anything. It registers an address and
-checks whether something answers on it. Starting a local server is still
+checks whether something answers on it; for a command kind it registers the
+name and the probe is what reports whether that command is there. Starting a local server is still
 `scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
 command is.
 

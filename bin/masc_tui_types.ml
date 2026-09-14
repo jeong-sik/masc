@@ -2247,6 +2247,7 @@ let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
     (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
     (Memory, "Memory");
     (Approvals, "Approvals");
     (Board, "Board");
@@ -2744,6 +2745,70 @@ type voice_wizard_save =
       (** The read after an unanswered save could not rule the write out. A
           retry would carry a revision this session no longer knows is
           current, so it waits for esc and a fresh read. The string says why. *)
+
+(* Assigning a voice to one keeper. Separate from the wizard because it is
+   shaped differently: the wizard walks questions to write one endpoint, this
+   walks two lists to write one line of [voice.tts.agent_voices].
+
+   It exists because a workspace with more than one keeper and one voice cannot
+   tell them apart by ear, and the setup route has taken [set_agent_voice]
+   since the writer landed with nothing on a screen to send it. *)
+type voice_agent_session =
+  { vas_agents : string list
+  ; vas_agent_cursor : int
+  ; vas_voices : (string * string) list
+        (** [(voice_id, label)] as the endpoint answers them: the id is what is
+            written, the label is what a reader picks by. *)
+  ; vas_voice_cursor : int
+  ; vas_revision : string
+        (** What the configuration read as when this opened, carried by the save
+            the way the wizard carries it. *)
+  ; vas_status : string option
+  ; vas_saving : bool
+  }
+
+let voice_agent_open ~agents ~revision =
+  { vas_agents = agents
+  ; vas_agent_cursor = 0
+  ; vas_voices = []
+  ; vas_voice_cursor = 0
+  ; vas_revision = revision
+  ; vas_status = None
+  ; vas_saving = false
+  }
+
+(* The two axes move on their own keys -- the keeper under up and down, the
+   voice under the arrows -- so an assignment cannot be made by moving one and
+   hoping the other followed. Walking either clears the status: what it said
+   was about the pair that has just changed. *)
+let voice_agent_walk_cursor cursor ~count ~ahead =
+  if count = 0 then 0 else ((cursor + if ahead then 1 else -1) + count) mod count
+
+let voice_agent_walk_agents session ~ahead =
+  { session with
+    vas_agent_cursor =
+      voice_agent_walk_cursor session.vas_agent_cursor
+        ~count:(List.length session.vas_agents) ~ahead
+  ; vas_status = None
+  }
+
+let voice_agent_walk_voices session ~ahead =
+  { session with
+    vas_voice_cursor =
+      voice_agent_walk_cursor session.vas_voice_cursor
+        ~count:(List.length session.vas_voices) ~ahead
+  ; vas_status = None
+  }
+
+(* The pair a save would write, or nothing: an empty list on either axis is a
+   screen that cannot assign, not one that assigns a blank. *)
+let voice_agent_selected session =
+  match
+    ( List.nth_opt session.vas_agents session.vas_agent_cursor
+    , List.nth_opt session.vas_voices session.vas_voice_cursor )
+  with
+  | Some agent, Some (voice_id, _) -> Some (agent, voice_id)
+  | (Some _ | None), (Some _ | None) -> None
 
 type voice_wizard_session =
   { vws_draft : Voice_wizard.draft
@@ -4422,6 +4487,7 @@ type state = {
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
+  mutable user_input_priority_next: bool;
   mutable keeper_chat_control_generations : (string * int) list;
   mutable keeper_chat_control_tokens : (string * string) list;
   mutable keeper_chat_control_pending : (string * int64) list;
@@ -4579,6 +4645,9 @@ type state = {
   mutable voice_setup: Yojson.Safe.t option;
   mutable voice_setup_error: string option;
   mutable voice_wizard: voice_wizard_session option;
+  (* The keeper-voice screen, drawn instead of the voice pane while it is
+     open. Never both this and the wizard: each is a whole surface. *)
+  mutable voice_agent_voices: voice_agent_session option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
      open now. *)
@@ -5024,7 +5093,8 @@ type state = {
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
-  (* The clients roster, off the ring under Runtime the way Lanes is. A
+  (* The clients roster, off the ring under Runtime. Lanes is a top-level
+     workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;
@@ -6350,6 +6420,7 @@ let create_state
   agenda_scroll = 0;
   hints_visible = true;
   coalesce_queued_input = true;
+  user_input_priority_next = true;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];
@@ -6421,6 +6492,7 @@ let create_state
   voice_setup = None;
   voice_setup_error = None;
   voice_wizard = None;
+  voice_agent_voices = None;
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
@@ -8134,8 +8206,8 @@ let visible_surface_ring (state : state) : (surface * string) list =
    Task Review and Verdicts collapse onto Planning, Changes collapses onto
    Keepers -- its rows are one keeper's file writes, chosen by the roster
    cursor, so it was never a destination of its own. Channels, Automation, and
-   Runs are selected-Keeper detail tabs; standalone Lanes remain Runtime
-   observation, and Code remains a Workspace child. Resources and Tools
+   Runs are selected-Keeper detail tabs; standalone Lanes is a top-level
+   observation workspace, and Code remains a Workspace child. Resources and Tools
    collapse onto Config: an MCP resource catalog and the tool catalog with its
    receipts and usage are both answers to "what is registered here", read
    rarely and never raced against. System logs collapse onto Activity (the
@@ -8143,7 +8215,8 @@ let visible_surface_ring (state : state) : (surface * string) list =
    readings of the same fleet timeline, and the ring stop that answers "what
    happened" is one. Metrics is a deep-dive telemetry surface that collapses
    onto Overview, off the Tab ring. Connectors is under Config while the
-   Browser Lane reader is on screen, and under Keepers otherwise.
+   Browser Lane reader is on screen, and under Keepers otherwise. Lanes is a
+   top-level observation workspace; Runtime remains the substrate/config view.
 
    One mapping. There were two, one per ring index, and only the tests read
    the one without the Browser Lane arm, so they checked a mapping the strip
@@ -8155,7 +8228,8 @@ let surface_ring_family (state : state) (view : surface) =
   | Verification | Harness -> Planning
   | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
   | Changes | Connectors | Schedules -> Keepers Keeper_list
-  | Runtime | Lanes | Clients -> Config
+  | Runtime | Clients -> Config
+  | Lanes -> Lanes
   | Code -> Repositories
   | Resources | Tools -> Config
   | System_logs -> Acting
@@ -8714,18 +8788,35 @@ let keeper_message_activity_rows (state : state) =
          | _ -> [])
       | Some _ | None -> []
     in
-    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+    let waiting_items = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
+    let local_count = List.length waiting_items in
     let retained = List.exists (fun (name, _, intervention) ->
       name = keeper_name && match intervention with
       | Retained_after_stop -> true | Awaiting_control _ -> false)
       state.keeper_interactive_waiting in
+    let queue_rows =
+      match waiting_items with
+      | [] -> []
+      | first :: _ ->
+        let preview =
+          let single = String.map (fun c -> if c = '\n' || c = '\r' then ' ' else c) first.request.message in
+          let trimmed = String.trim single in
+          if String.length trimmed > 34 then
+            String.sub trimmed 0 31 ^ "..."
+          else trimmed
+        in
+        let intent_str = match first.intent with
+          | Steer_after_interrupt -> " [steer]"
+          | Next -> ""
+        in
+        let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
+        [ Printf.sprintf "Queue (%d waiting · %s) NEXT%s: \"%s\" · Ctrl-T:queue"
+            local_count auto_tag intent_str preview ]
+    in
     activity @ submitted @ (if retained then
       ["Input retained after Esc; /queue resume sends it"]
-      else []) @ (if local_count > 0 then
-      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
-        local_count (if local_count = 1 then "message" else "messages")]
-      else [])
+      else []) @ queue_rows
 ;;
 
 let keeper_message_status_rows (state : state) =

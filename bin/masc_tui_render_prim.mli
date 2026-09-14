@@ -166,6 +166,9 @@ val surface_chrome_rows : int
     title and its rule, the bottom border and the footer. A key handler that
     bounds a body's scroll subtracts this, the same number the frame does. *)
 
+val surface_chrome_budget : Masc_tui_types.state -> terminal_rows:int -> int
+(** Available body rows for the shared surface chrome. *)
+
 type chrome_frame = Chrome_screen | Chrome_overlay
 (** [Chrome_screen] draws rules without a box, for a surface that is the whole
     screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
@@ -309,6 +312,10 @@ val planning_backlog_counts :
   Masc_tui_types.planning_backlog -> (string * int * string) list
 (** The Backlog counts as [(key, count, label)], each label led by the progress
     mark its Task rows wear. *)
+
+val planning_goal_history_summary : unlisted:int -> ended:int -> string
+(** The retained-history count row: how many goals are no longer listed, and
+    how many of those left the list with no outcome recorded. *)
 
 val planning_workspace_title :
   Masc_tui_types.state -> cols:int -> tab:planning_tab -> window:string -> string

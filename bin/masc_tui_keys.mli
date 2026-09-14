@@ -98,6 +98,11 @@ val footer_hints_approval_detail : string
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
 
+val footer_hints_voice_agent : unit -> string
+(** The keeper-voice screen's own row: the keeper axis, the voice axis, the
+    write and the way out. Its keys are not the Config pane's, so the row is
+    the screen's rather than the pane's. *)
+
 val footer_hints_prompt_assets : string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)

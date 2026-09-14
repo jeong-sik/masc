@@ -420,7 +420,7 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
   with_fixture ~produce:msx_observer (fun clock config root _directory _received _stopped ->
     let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
     let ledger_dir = Filename.concat root "native-machine" in
-    ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:None));
+    ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
     Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
       let press who name =
         let key = unwrap (Msx_lane.key_of_string name) in

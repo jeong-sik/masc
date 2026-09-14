@@ -160,9 +160,35 @@ let completion_verdict_of_review = function
     Masc_domain.Verdict_rejected { reason }
 ;;
 
+(* The notes projection of one unread image: the reference the producer
+   submitted and the store's reason, one JSON shape per constructor. The
+   ceiling case keeps the numbers it was decided on; the unreadable case
+   keeps the OS message, which names the filed body under the masc dir, not
+   anything in the producer's tree. *)
+let unread_image_to_yojson
+    ((reference, reason) : string * Workspace_verification_store.read_binary_error)
+  : Yojson.Safe.t =
+  let reason_json =
+    match reason with
+    | Workspace_verification_store.Not_binary -> `Assoc [ "kind", `String "not_binary" ]
+    | Workspace_verification_store.Body_not_filed ->
+      `Assoc [ "kind", `String "body_not_filed" ]
+    | Workspace_verification_store.Body_unreadable detail ->
+      `Assoc [ "kind", `String "body_unreadable"; "detail", `String detail ]
+    | Workspace_verification_store.Over_delivery_ceiling { bytes; ceiling } ->
+      `Assoc
+        [ "kind", `String "over_delivery_ceiling"
+        ; "bytes", `Int bytes
+        ; "ceiling", `Int ceiling
+        ]
+  in
+  `Assoc [ "reference", `String reference; "reason", reason_json ]
+;;
+
 let review_notes
     ~(request : Verification.verification_request)
     ~evidence_access
+    ~unread_images
     ~result
     ~authority =
   let verdict =
@@ -187,6 +213,7 @@ let review_notes
       ; "verdict", verdict
       ; "authority_kind", `String (Masc_domain.completion_authority_kind authority)
       ; "authority_actor", `String (Masc_domain.completion_authority_actor authority)
+      ; "unread_images", `List (List.map unread_image_to_yojson unread_images)
       ]
   in
   Yojson.Safe.pretty_to_string
@@ -291,55 +318,67 @@ let evidence_posture_of_snapshot
   else Task.Anti_rationalization.Usable_artifacts usable
 ;;
 
-(* RFC-0436 §4.3: the binary image artifacts the judge receives as attached
-   blocks. An image whose format the runtimes do not take as attached input,
-   or whose filed body cannot be read back, stays out of the list — its
-   reference and hash remain in the prompt text, which is the §4.4 posture
-   for it. A failed read is not fatal to the review: the artifact is still
-   judgeable on the recorded hash and size. *)
+(* RFC-0436 §4.3/§4.4: what the judge receives of the binary image
+   artifacts. [images] are the ones attached as image blocks. [unread] are
+   the image-format artifacts whose filed body did not come back, each with
+   the store's typed reason: the judge rests on the reference-and-hash line
+   for those, and the committed verdict names them so an operator reading
+   the notes knows which pictures the judge never saw. A non-image binary
+   (a diff, an archive) is in neither list — it was never an attachment
+   candidate and its reference and hash stay in the prompt text. Before
+   this record existed the read failure was dropped on the floor and the
+   verdict read as if every image had been looked at (F401). *)
+type evidence_images =
+  { images : Task.Anti_rationalization.evidence_image list
+  ; unread : (string * Workspace_verification_store.read_binary_error) list
+  }
+
 let evidence_images_of_snapshot ~base_path
       (snapshot : Workspace_verification_store.submitted_evidence_access) :
-      Task.Anti_rationalization.evidence_image list =
+      evidence_images =
   let module Store = Workspace_verification_store in
   match snapshot with
-  | Store.Evidence_unavailable _ -> []
+  | Store.Evidence_unavailable _ -> { images = []; unread = [] }
   | Store.Evidence_available { request = _; items } ->
-    List.filter_map
-      (fun (item : Store.submitted_evidence_item) ->
-         match item with
-         | Store.Evidence_artifact_binary
-             { reference; bytes; sha256; format; body = _ } ->
-           (match Store.image_media_type_of_binary_format format with
-            | None -> None
-            | Some media_type -> (
-              match Store.read_binary_body_base64 ~base_path item with
-              (* Every refusal keeps the artifact out of the attached
-                 blocks; the prompt still carries its reference and hash. *)
-              | Error Store.Not_binary
-              | Error Store.Body_not_filed
-              | Error (Store.Body_unreadable _)
-              | Error (Store.Over_delivery_ceiling _) -> None
-              | Ok body_base64 ->
-                Some
-                  Task.Anti_rationalization.
-                    { image_reference = reference
-                    ; image_sha256 = sha256
-                    ; image_bytes = bytes
-                    ; image_media_type = media_type
-                    ; image_body_base64 = body_base64
-                    }))
-         | Store.Evidence_collaboration _ -> None
-         | Store.Evidence_note _ -> None
-         | Store.Evidence_artifact _ -> None
-         | Store.Evidence_invalid_reference -> None
-         | Store.Evidence_artifact_unreadable _ -> None)
-      items
+    let images, unread =
+      List.fold_left
+        (fun (images, unread) (item : Store.submitted_evidence_item) ->
+           match item with
+           | Store.Evidence_artifact_binary
+               { reference; bytes; sha256; format; body = _ } ->
+             (match Store.image_media_type_of_binary_format format with
+              | None -> images, unread
+              | Some media_type -> (
+                match Store.read_binary_body_base64 ~base_path item with
+                | Error reason -> images, (reference, reason) :: unread
+                | Ok body_base64 ->
+                  ( Task.Anti_rationalization.
+                      { image_reference = reference
+                      ; image_sha256 = sha256
+                      ; image_bytes = bytes
+                      ; image_media_type = media_type
+                      ; image_body_base64 = body_base64
+                      }
+                    :: images
+                  , unread )))
+           | Store.Evidence_collaboration _ -> images, unread
+           | Store.Evidence_note _ -> images, unread
+           | Store.Evidence_artifact _ -> images, unread
+           | Store.Evidence_invalid_reference -> images, unread
+           | Store.Evidence_artifact_unreadable _ -> images, unread)
+        ([], [])
+        items
+    in
+    { images = List.rev images; unread = List.rev unread }
 ;;
 
 type prepared_review =
   { request : Verification.verification_request
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
   ; review_request : Task.Anti_rationalization.review_request
+  ; unread_images : (string * Workspace_verification_store.read_binary_error) list
+        (* Image artifacts whose body the judge did not receive, with the
+           store's reason; committed into the verdict notes. *)
   ; question : Task.Anti_rationalization.verdict_question
   }
 
@@ -468,6 +507,9 @@ let prepare_review
                      evidence_access )
                ])
         in
+        let { images = evidence_images; unread = unread_images } =
+          evidence_images_of_snapshot ~base_path:config.base_path evidence_access
+        in
         Ok
           { request
           ; evidence_access
@@ -478,9 +520,9 @@ let prepare_review
               ; agent_name = assignee
               ; task_id = task.id
               ; evidence_refs
-              ; evidence_images =
-                  evidence_images_of_snapshot ~base_path:config.base_path evidence_access
+              ; evidence_images
               }
+          ; unread_images
           ; question
           }
 ;;
@@ -893,6 +935,7 @@ let process_task_once
            review_notes
              ~request:prepared.request
              ~evidence_access:prepared.evidence_access
+             ~unread_images:prepared.unread_images
              ~result
              ~authority
          in
@@ -1238,6 +1281,13 @@ module For_testing = struct
   let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
+
+  type nonrec evidence_images = evidence_images =
+    { images : Task.Anti_rationalization.evidence_image list
+    ; unread : (string * Workspace_verification_store.read_binary_error) list
+    }
+
+  let evidence_images_of_snapshot = evidence_images_of_snapshot
 
   type nonrec retry_request = retry_request =
     | Retry_requested

@@ -587,10 +587,9 @@ let handle_keeper_run_next state ~actor request reqd =
               | Some error, _ -> "queued first; interrupt failed: " ^ error
               | None, true -> "queued first; interrupt received; waiting for the turn to settle"
               | None, false -> "queued first; no matching observed turn was interrupted" in
-            let detail = if result.resumed then "Chat resumed; " ^ detail else detail in
             respond_json_value_with_cors ~status:`OK request reqd
               (`Assoc ["request_id", `String request_id; "prioritized", `Bool true;
-                "signalled", `Bool result.signalled; "resumed", `Bool result.resumed; "detail", `String detail]))
+                "signalled", `Bool result.signalled; "detail", `String detail]))
 ;;
 
 let handle_keeper_turn_interrupt state request reqd =
@@ -653,10 +652,10 @@ let handle_keeper_turn_interrupt state request reqd =
             ("chat_control_token", `String control_token) ::
             (match result with
              | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
-             | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true; "paused", `Bool true]
+             | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true]
              | Interrupt_result (Operation_not_current _) -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
-             | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "cancel_failed"; "detail", `String detail])
-          | Error error -> ["signalled", `Bool false; "reason", `String "pause_failed";
+             | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
+          | Error error -> ["signalled", `Bool false; "reason", `String "interrupt_failed";
               "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
         respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("interrupt_token", `String token) :: fields))
       | None ->
@@ -669,12 +668,12 @@ let handle_keeper_turn_interrupt state request reqd =
                | Ok (result, control_token) ->
                  ("chat_control_token", `String control_token) ::
                  (match result with
-             | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
-                  | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true; "paused", `Bool true]
+                  | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
+                  | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true]
                   | Interrupt_result (Operation_not_current {running_operation_id}) ->
                     ["signalled", `Bool false; "reason", `String "operation_not_current"] @
                     Option.fold ~none:[] ~some:(fun id -> ["current_request_id", `String (Keeper_chat_operation.Operation_id.to_string id)]) running_operation_id
-                  | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "cancel_failed"; "detail", `String detail])
+                  | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
                | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable";
                    "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
              respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("request_id", `String request_id) :: fields)))

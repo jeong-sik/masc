@@ -487,6 +487,12 @@ let complete_stream_http
       let terminal_state = ref Telemetry_event.Terminal_done in
       let summary_published = ref false in
       let stream_idle_state = ref Http_client.Awaiting_first_event in
+      (* Whether a token-bearing event has been projected. This is what the
+         reader is told through [Http_client.Continue] and what names the
+         governing knob on a timeout, so the budget that fired and the knob
+         in the message come from one fact. Kept apart from
+         [first_token_at_ref], which also needs a latency counter. *)
+      let first_output_seen = ref false in
       let classify_chunk_kind (evt : Types.sse_event) =
         match evt with
         | Types.MessageStart _ -> `Skip
@@ -659,10 +665,11 @@ let complete_stream_http
                    | Some _ | None -> ());
                   stream_idle_state := Http_client.Awaiting_first_delta);
                 let project_event emitted_evt =
-                  if
-                    Option.is_none !first_token_at_ref
-                    && Streaming.sse_event_is_first_token_signal emitted_evt
-                  then first_token_at_ref := elapsed_ms;
+                  if Streaming.sse_event_is_first_token_signal emitted_evt
+                  then (
+                    first_output_seen := true;
+                    if Option.is_none !first_token_at_ref
+                    then first_token_at_ref := elapsed_ms);
                   emit_stream_event on_event emitted_evt;
                   match classify_chunk_kind emitted_evt with
                   | `Skip -> ()
@@ -787,10 +794,17 @@ let complete_stream_http
                  exception is an NDJSON final line with no trailing newline,
                  where [Buf_read.line] consumes to EOF and parking is then
                  correct, the body being spent. *)
+              (* The reader arms the first-event budget until the first
+                 [Output] and inter-token idle after it; a Responses
+                 [response.created] or an Anthropic [message_start] is
+                 [Prelude], so the prefill behind it stays under the
+                 first-event bound. *)
               let continue_unless_failed () =
                 if Complete_stream_acc.stream_failed acc
                 then Http_client.Stop
-                else Http_client.Continue
+                else if !first_output_seen
+                then Http_client.Continue Http_client.Output
+                else Http_client.Continue Http_client.Prelude
               in
               let stream_read_result =
                 try
@@ -974,7 +988,10 @@ let complete_stream_http
                   let governing_knob =
                     Http_client.timeout_knob_to_param
                       (Http_client.governing_timeout_knob
-                         ~state:!stream_idle_state
+                         ~phase:
+                           (if !first_output_seen
+                            then Http_client.After_first_output
+                            else Http_client.Before_first_output)
                          ~first_event_timeout:first_event_timeout_s
                          ~body_timeout:body_timeout_s
                          ~idle_timeout:stream_idle_timeout_s)

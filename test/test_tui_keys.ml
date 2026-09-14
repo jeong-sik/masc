@@ -161,7 +161,7 @@ let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, o, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  o:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o:Lane Add-ons  e:lane config  A:add-ons  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -761,22 +761,17 @@ let test_keeper_operations_are_not_top_level_tabs () =
           | Detail_github | Detail_identity -> None)
        keeper_detail_tabs)
 
-(* Standalone Lanes is service-lane observation -- one more reading of "is
-   the substrate alive" -- so it hangs off Runtime as [p]'s third stop
-   instead of holding a Tab stop of its own. *)
-let test_lanes_is_a_runtime_child () =
-  Alcotest.(check bool) "Lanes is not a top-level ring entry" false
+(* Lanes is the operator's top-level concurrent lane workspace. Runtime still
+   owns configuration and substrate probes; [p] remains the explicit return
+   path from the standalone run browser. *)
+let test_lanes_is_a_main_destination () =
+  Alcotest.(check bool) "Lanes is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  (* No ring assertion here on purpose. Runtime left the ring when it moved
-     under Config, so [ring_stop Runtime] and [ring_stop Lanes] are now the
-     same match arm resolving to Config -- comparing them
-     cannot fail, and would keep passing if Lanes were moved to hang off
-     Resources instead. What Lanes highlights is claimed with teeth in
-     [test_logs_is_an_activity_child], against Config's own index. The label
-     below is what still records whose child Lanes is. *)
-  Alcotest.(check bool) "and the help sheet files it under Runtime" true
+  Alcotest.(check bool) "Lanes has its own ring stop" true
+    (ring_stop Lanes <> ring_stop Config);
+  Alcotest.(check bool) "help sheet names Lanes directly" true
     (List.exists
-       (fun (label, _) -> String.equal label "Config / Runtime / Lanes")
+       (fun (label, _) -> String.equal label "Lanes")
        (Masc_tui_keys.help_sections ()));
   let lanes_keys =
     List.map
@@ -854,7 +849,7 @@ let test_logs_is_an_activity_child () =
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
         (ring_stop Config) (ring_stop surface))
-    [Runtime; Lanes; Clients];
+    [Runtime; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
@@ -1024,7 +1019,7 @@ let test_config_footer_names_child_hops () =
      in no list at all -- which pane each belongs to is in the help the ?
      overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -1118,7 +1113,10 @@ let test_config_pane_footer_actions () =
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
-    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
+    (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
+       screen the voice pane opens. *)
+    enabled "a" (List.mem pane [ Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
@@ -1173,6 +1171,28 @@ let test_config_pane_footer_actions () =
          | Config_models | Config_params | Config_prompts | Config_presets
          | Config_voice -> []))
       [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
+
+(* The keeper-voice screen has its own keys, not the Config pane's: two axes,
+   one write, one way out. Spelled from the table so the row cannot drift from
+   what masc_tui.ml reads. *)
+let test_the_keeper_voice_screen_names_its_two_axes () =
+  let row = Masc_tui_keys.footer_hints_voice_agent () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the keeper-voice row names " ^ key) true
+        (footer_has_key key row))
+    [ "j/k"; "\xe2\x86\x90/\xe2\x86\x92"; "Enter"; "Esc" ];
+  (* The pane's keys are not this screen's: it is drawn instead of the pane. *)
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the keeper-voice row leaves out " ^ key) false
+        (footer_has_key key row))
+    [ "p"; "e"; "9"; "r" ]
+
+let test_the_voice_pane_offers_the_keeper_voice_key () =
+  let voice = Masc_tui_keys.footer_hints_config ~pane:Config_voice in
+  Alcotest.(check bool) "the voice pane names the key that opens it" true
+    (footer_has_key "a" voice)
 
 let test_activity_footer_keeps_filter_before_evidence () =
   let hints = Masc_tui_keys.footer_hints Acting in
@@ -2186,8 +2206,8 @@ let () =
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "Keeper operations are detail tabs" `Quick
             test_keeper_operations_are_not_top_level_tabs
-        ; Alcotest.test_case "Lanes is a Runtime child" `Quick
-            test_lanes_is_a_runtime_child
+        ; Alcotest.test_case "Lanes is a main destination" `Quick
+            test_lanes_is_a_main_destination
         ; Alcotest.test_case "Code is a Workspace child" `Quick
             test_code_is_a_workspace_child
         ; Alcotest.test_case "Resources is a Config child" `Quick
@@ -2206,6 +2226,10 @@ let () =
             test_runtime_footer_is_the_tables
         ; Alcotest.test_case "Config footer follows active pane and width" `Quick
             test_config_pane_footer_actions
+        ; Alcotest.test_case "the keeper-voice screen names its two axes" `Quick
+            test_the_keeper_voice_screen_names_its_two_axes
+        ; Alcotest.test_case "the voice pane offers the keeper-voice key" `Quick
+            test_the_voice_pane_offers_the_keeper_voice_key
         ; Alcotest.test_case "Activity filter survives evidence hint" `Quick
             test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick

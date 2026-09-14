@@ -264,11 +264,6 @@ CAMLprim value ocaml_shim_restrict_self(value vscratch, value vdeny_fs,
     goto report;
   }
   CAMLreturn(Val_int(0));
-#else
-  (void) vdeny_fs; (void) vdeny_net;
-  unix_error(ENOSYS, "restrict_self", Nothing);
-  CAMLreturn(Val_unit);
-#endif
 report:
   {
     size_t len = strlen(refusing_rule);
@@ -276,4 +271,13 @@ report:
     memset((char *)String_val(vrule_out) + len, 0, 1);
   }
   CAMLreturn(Val_int(-1));
+#else
+  /* No goto reaches [report] here, so the label and the string calls it
+     makes live with the branch that jumps to it: outside the guard they
+     needed <string.h>, which is included for Linux only, and the label was
+     one clang reads as unused. */
+  (void) refusing_rule; (void) vdeny_fs; (void) vdeny_net;
+  unix_error(ENOSYS, "restrict_self", Nothing);
+  CAMLreturn(Val_unit);
+#endif
 }

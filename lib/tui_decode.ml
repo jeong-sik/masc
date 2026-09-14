@@ -1271,8 +1271,14 @@ let context_unavailable_reason_of_json json raw =
      | _ -> Error "context token overflow diagnostics are incomplete")
   | raw -> Error (Printf.sprintf "unknown context unavailable reason %S" raw)
 
+(* Each reason says what is wrong, and the one place that draws them writes
+   them under a row labelled "Context:" ([render_keeper_detail]). The first
+   opened with the label's own word, so that row read "Context: context
+   measurement missing" while its four siblings read "Context: turn record
+   undecodable". The wire token keeps its name; only the words the row shows
+   drop the repetition. *)
 let context_unavailable_reason_to_string = function
-  | Context_measurement_missing -> "context measurement missing"
+  | Context_measurement_missing -> "measurement missing"
   | Context_turn_record_undecodable -> "turn record undecodable"
   | Context_turn_record_read_failed -> "turn record read failed"
   | Context_turn_record_without_usage -> "turn record has no provider usage"

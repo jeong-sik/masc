@@ -299,10 +299,13 @@ type store_fault =
          lost to the outage. [settle_running_after_restart] settles it on
          the next boot; this process never fabricates an outcome. *)
 
+(* The integrity prefix matches [owner_error_of_operation_error], so the
+   first refusal and every later one read the same. *)
 let store_fault_detail = function
   | Metadata_persistence_failure detail
-  | Operation_availability_failure detail
-  | Operation_integrity_failure detail -> detail
+  | Operation_availability_failure detail -> detail
+  | Operation_integrity_failure detail ->
+    "Keeper chat operation integrity failure: " ^ detail
   | Operation_reconciliation_required operation_id ->
     Printf.sprintf
       "operation %s is Running with no live child; restart the keeper to settle it before storage recovery"
@@ -1680,7 +1683,19 @@ let start
           let result =
             match completion with
             | Operation_child_finished { claimed_operation_id; execution } ->
-              finish_operation_child claimed_operation_id execution
+              (* The child ignores this result and the row stays Running, so
+                 a refused settlement is otherwise invisible until the next
+                 boot settles it. *)
+              (match finish_operation_child claimed_operation_id execution with
+               | Ok () as ok -> ok
+               | Error error as failed ->
+                 Log.Keeper.error ~keeper_name:t.keeper_name
+                   "chat operation settlement refused operation=%s: %s"
+                   (match claimed_operation_id with
+                    | Some operation_id -> Chat_operation.Operation_id.to_string operation_id
+                    | None -> "unclaimed")
+                   (error_to_string error);
+                 failed)
             | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
               let response =
                 match outcome with
@@ -1793,8 +1808,28 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
   request t (Succeed_running_operation { operation_id; outcome_ref })
 ;;
 
-let run_if_idle t lane run =
-  match request t (Run_if_idle { lane; run }) with
+let run_autonomous_if_idle t run =
+  match request t (Run_if_idle { lane = Autonomous; run }) with
+  | Error _ as error -> error
+  | Ok (Autonomous_ran value) -> Ok (`Ran value)
+  | Ok (Autonomous_busy block) -> Ok (`Busy block)
+  | Ok (Autonomous_raised (Stop_active_child, _)) -> Error Owner_stopping
+  | Ok (Autonomous_raised (exn, _))
+    when Keeper_registry_types.is_operator_interrupt exn ->
+    (* [interrupt] fails the child switch, so [Switch.run] raises this even
+       after the turn body caught it and returned. The chat child turns the
+       same exception into a Turn_cancelled settlement; here it used to
+       escape into the keepalive fiber, and the registry recorded a crash
+       and restarted the Keeper for an operator's message. *)
+    Ok `Interrupted
+  | Ok (Autonomous_raised (exn, backtrace)) ->
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+(* Maintenance is not interruptible ([Interrupt_maintenance_running]), so an
+   operator interrupt reaching this lane is not a translated outcome. *)
+let run_maintenance_if_idle t run =
+  match request t (Run_if_idle { lane = Maintenance; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
@@ -1802,9 +1837,6 @@ let run_if_idle t lane run =
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;
-
-let run_autonomous_if_idle t run = run_if_idle t Autonomous run
-let run_maintenance_if_idle t run = run_if_idle t Maintenance run
 
 let begin_shutdown t ~operation_id = request t (Begin_shutdown { operation_id })
 let rollback_shutdown t ~operation_id = request t (Rollback_shutdown { operation_id })

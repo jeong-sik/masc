@@ -1,7 +1,9 @@
 (** Notify Module Coverage Tests
 
-    Tests for macOS Notification system:
-    - event type: Mention, Interrupt, TaskCompleted, Custom
+    Tests for the macOS mention notification:
+    - the notifier boundary: which program a mention reaches, with what
+      arguments, that no probe process runs first, and that a notifier that
+      never returns is stopped at the module's bound
     - focus_payload record type
     - sanitize_token: shell-safe identifier sanitization
     - token_value: optional token extraction
@@ -254,52 +256,6 @@ let test_agent_emoji_empty () =
   check string "empty" "🤖" (Notify.agent_emoji "")
 
 (* ============================================================
-   event Type Tests
-   ============================================================ *)
-
-let test_event_mention () =
-  let e : Notify.event = Mention {
-    from_agent = "gemini";
-    target_agent = Some "claude";
-    message = "hello";
-  } in
-  match e with
-  | Notify.Mention { from_agent; target_agent; message } ->
-    check string "from_agent" "gemini" from_agent;
-    check (option string) "target_agent" (Some "claude") target_agent;
-    check string "message" "hello" message
-  | _ -> fail "expected Mention"
-
-let test_event_interrupt () =
-  let e : Notify.event = Interrupt { agent = "claude"; action = "stop" } in
-  match e with
-  | Notify.Interrupt { agent; action } ->
-    check string "agent" "claude" agent;
-    check string "action" "stop" action
-  | _ -> fail "expected Interrupt"
-
-let test_event_task_completed () =
-  let e : Notify.event = TaskCompleted { agent = "claude"; task_id = "task-001" } in
-  match e with
-  | Notify.TaskCompleted { agent; task_id } ->
-    check string "agent" "claude" agent;
-    check string "task_id" "task-001" task_id
-  | _ -> fail "expected TaskCompleted"
-
-let test_event_custom () =
-  let e : Notify.event = Custom {
-    title = "Title";
-    subtitle = "Subtitle";
-    message = "Message";
-  } in
-  match e with
-  | Notify.Custom { title; subtitle; message } ->
-    check string "title" "Title" title;
-    check string "subtitle" "Subtitle" subtitle;
-    check string "message" "Message" message
-  | _ -> fail "expected Custom"
-
-(* ============================================================
    focus_payload Record Tests
    ============================================================ *)
 
@@ -332,6 +288,130 @@ let test_terminal_notifier_execute_requires_opt_in () =
   check bool "terminal-notifier execute is guarded" true
     (String_util.contains_substring src
        "Some cmd when shell_execute_clicks_enabled () -> base @ [\"-execute\"; cmd]")
+
+(* ============================================================
+   Notifier boundary
+   ============================================================ *)
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+(* A directory that stands in for PATH for the length of one case: the
+   programs the case plants there are the only ones the notifier lookup and
+   spawn can find. The probes the module used to run, uname and which, are
+   planted as marker writers, so a probe that still ran would leave a file. *)
+let with_path_dir f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "notify-path-%d-%d" (Unix.getpid ()) (Random.bits ()))
+  in
+  Unix.mkdir dir 0o700;
+  let previous = Sys.getenv_opt "PATH" in
+  Unix.putenv "PATH" dir;
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some path -> Unix.putenv "PATH" path
+       | None -> unsetenv "PATH");
+      Array.iter
+        (fun name -> try Sys.remove (Filename.concat dir name) with Sys_error _ -> ())
+        (Sys.readdir dir);
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () -> f dir)
+
+let plant dir name body =
+  let path = Filename.concat dir name in
+  Out_channel.with_open_bin path (fun oc -> output_string oc body);
+  Unix.chmod path 0o700
+
+(* Records each argument on its own line and exits 0, the shape of a
+   notifier that posted. *)
+let argv_recorder ~into =
+  Printf.sprintf "#!/bin/sh\nfor a in \"$@\"; do printf '%%s\\n' \"$a\"; done > '%s'\nexit 0\n" into
+
+let marker_writer ~marker = Printf.sprintf "#!/bin/sh\n: > '%s'\nexit 0\n" marker
+
+let plant_probe_markers dir =
+  plant dir "uname" (marker_writer ~marker:(Filename.concat dir "uname.ran"));
+  plant dir "which" (marker_writer ~marker:(Filename.concat dir "which.ran"))
+
+let check_no_probe_ran dir =
+  check bool "uname was not spawned" false (Sys.file_exists (Filename.concat dir "uname.ran"));
+  check bool "which was not spawned" false (Sys.file_exists (Filename.concat dir "which.ran"))
+
+let recorded_argv path =
+  if Sys.file_exists path
+  then In_channel.with_open_bin path In_channel.input_all |> String.split_on_char '\n'
+  else []
+
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing (fun () -> f env)
+
+let mention () =
+  Notify.notify_mention ~from_agent:"gemini" ~target_agent:"claude" ~message:"hello there" ()
+
+let test_a_mention_reaches_terminal_notifier_and_nothing_probes_first () =
+  with_eio @@ fun _env ->
+  with_path_dir @@ fun dir ->
+  let argv_file = Filename.concat dir "argv" in
+  plant dir "terminal-notifier" (argv_recorder ~into:argv_file);
+  plant_probe_markers dir;
+  mention ();
+  let argv = recorded_argv argv_file in
+  let has value = List.mem value argv in
+  check bool "the mention's subtitle" true (has "@gemini mentioned you");
+  check bool "the mention's body" true (has "hello there");
+  check bool "grouped under masc" true (has "-group" && has "masc");
+  check bool "a mention sounds" true (has "-sound" && has "default");
+  check bool "no click command without opt-in" false (has "-execute");
+  check_no_probe_ran dir
+
+let test_without_terminal_notifier_the_post_goes_through_osascript () =
+  with_eio @@ fun _env ->
+  with_path_dir @@ fun dir ->
+  let argv_file = Filename.concat dir "argv" in
+  plant dir "osascript" (argv_recorder ~into:argv_file);
+  plant_probe_markers dir;
+  mention ();
+  let argv = recorded_argv argv_file in
+  check bool "an inline script" true (List.mem "-e" argv);
+  let script = String.concat "\n" argv in
+  check bool "the script posts the body" true
+    (String_util.contains_substring script "display notification \"hello there\"");
+  check bool "the script names the sender" true
+    (String_util.contains_substring script "@gemini mentioned you");
+  check_no_probe_ran dir
+
+let test_a_host_with_no_notifier_starts_no_process () =
+  with_eio @@ fun _env ->
+  with_path_dir @@ fun dir ->
+  plant_probe_markers dir;
+  mention ();
+  check_no_probe_ran dir
+
+(* The bound is what turns a notifier that never returns into a failed
+   notification instead of a held tool call: the fake sleeps far past it and
+   the call comes back at the bound, not at the sleep. *)
+let test_a_notifier_that_never_returns_is_stopped_at_the_bound () =
+  with_eio @@ fun env ->
+  with_path_dir @@ fun dir ->
+  let clock = Eio.Stdenv.clock env in
+  plant dir "terminal-notifier" "#!/bin/sh\nexec /bin/sleep 600\n";
+  let started = Eio.Time.now clock in
+  mention ();
+  let elapsed = Eio.Time.now clock -. started in
+  let bound = Notify.notifier_timeout_sec in
+  check bool "the bound sits between a measured post and a minute" true
+    (bound > 1.0 && bound < 60.0);
+  check bool
+    (Printf.sprintf "returned at the bound (%.1fs), took %.1fs" bound elapsed)
+    true
+    (elapsed >= bound && elapsed < bound +. 5.0)
 
 (* ============================================================
    Test Runners
@@ -404,12 +484,6 @@ let () =
       test_case "unknown" `Quick test_agent_emoji_unknown;
       test_case "empty" `Quick test_agent_emoji_empty;
     ];
-    "event", [
-      test_case "mention" `Quick test_event_mention;
-      test_case "interrupt" `Quick test_event_interrupt;
-      test_case "task completed" `Quick test_event_task_completed;
-      test_case "custom" `Quick test_event_custom;
-    ];
     "focus_payload", [
       test_case "all some" `Quick test_focus_payload_all_some;
       test_case "all none" `Quick test_focus_payload_all_none;
@@ -417,5 +491,15 @@ let () =
     "shell_execute_guard", [
       test_case "terminal-notifier execute requires opt-in" `Quick
         test_terminal_notifier_execute_requires_opt_in;
+    ];
+    "notifier boundary", [
+      test_case "a mention reaches terminal-notifier and nothing probes first" `Quick
+        test_a_mention_reaches_terminal_notifier_and_nothing_probes_first;
+      test_case "without terminal-notifier the post goes through osascript" `Quick
+        test_without_terminal_notifier_the_post_goes_through_osascript;
+      test_case "a host with no notifier starts no process" `Quick
+        test_a_host_with_no_notifier_starts_no_process;
+      test_case "a notifier that never returns is stopped at the bound" `Slow
+        test_a_notifier_that_never_returns_is_stopped_at_the_bound;
     ];
   ]

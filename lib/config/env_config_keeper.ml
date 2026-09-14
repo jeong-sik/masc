@@ -663,6 +663,20 @@ module KeeperKeepalive = struct
       (declared_timeout_seconds "MASC_KEEPER_BODY_TIMEOUT_SEC")
   ;;
 
+  (* Fail-safe no-progress threshold for a provider call attempt (seconds),
+     substituted by the resolved layer when neither the env var nor
+     runtime.toml [turn.provider_call_deadline_sec] declares one. Without it
+     a default install runs no attempt watchdog at all and a tool's provider
+     sub-call has no bound: an attempt that never produces a token holds the
+     keeper until an operator interrupts it. The value is the one the live
+     workspace ran under for a month, chosen there from measurement
+     (2026-08-12: longest legitimate progress gap in a healthy turn 120 s,
+     the wedge it caught 65 min): 30 times the gap, and above the two 600 s
+     stream floors, so a silent prefill is ended by the reader's typed
+     first-token timeout, not by this. A universal liveness ceiling, not a
+     per-provider tuning; an explicit env/toml value overrides it. *)
+  let provider_call_deadline_failsafe_floor_sec = 900.0
+
   (** The keeper's no-progress threshold for a provider call attempt, in
       seconds (#27349; measured against the turn's progress signal since
       #28417, not against elapsed time). The attempt watchdog ends an attempt
@@ -675,8 +689,8 @@ module KeeperKeepalive = struct
       [Api (Timeout { phase = Some Wall_clock })] and routes it through the
       existing declared-lane rotation.
 
-      Opt-in: unset leaves [None], the watchdog off, and no failsafe floor
-      (#36020 tracks what that leaves unbounded). Read on every call, so a
+      Unset leaves [None] here; the resolved layer substitutes
+      {!provider_call_deadline_failsafe_floor_sec}. Read on every call, so a
       runtime.toml value applied at boot is seen; a declared value that is
       not a finite positive number of seconds raises
       {!Env_config_core.Config_error}.

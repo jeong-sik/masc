@@ -97,12 +97,28 @@ val first_event_timeout_sec : unit -> float option
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option
 
+val provider_call_deadline_failsafe_floor_sec : float
+(** Fail-safe no-progress threshold for a provider call attempt, in seconds
+    (900.0 = 15 min). Substituted for [provider_call_deadline_sec] when no
+    explicit value is configured, so a default install runs the attempt
+    watchdog and bounds a tool's provider sub-call instead of holding a
+    keeper on an attempt that never produces a token. Thirty times the
+    longest legitimate progress gap measured in a healthy turn (120 s,
+    2026-08-12) and above the two 600 s stream floors, so a silent prefill is
+    ended by the reader's typed first-token timeout first. A universal
+    liveness ceiling, not a per-provider tuned default; an explicit env/toml
+    value overrides it. *)
+
 (** The keeper's no-progress threshold for a provider call attempt (#27349,
     measured against the turn's progress signal since #28417). The attempt
     watchdog ends an attempt that made no progress for this long while no
     tool is in flight and no approval is pending; a tool's provider sub-call
-    runs under it ({!Keeper_provider_subcall}). [None] (unset) means no
-    MASC-side enforcement and no failsafe floor.
+    runs under it ({!Keeper_provider_subcall}). Always [Some] at runtime: an
+    explicit [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
+    [turn.provider_call_deadline_sec]) is honoured verbatim; when unset,
+    {!provider_call_deadline_failsafe_floor_sec} is substituted. The
+    [float option] return type mirrors the wiring; the resolver never yields
+    [None].
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float option

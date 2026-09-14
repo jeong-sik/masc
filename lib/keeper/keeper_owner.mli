@@ -270,13 +270,15 @@ val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 val run_autonomous_if_idle
   :  t
   -> (unit -> 'a)
-  -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
+  -> ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
 (** Mailbox-linearized autonomous admission. The callback runs in the Owner's
     child switch, while the actor remains responsive. An already-started child
     returns [`Busy] without consuming turn input. A Queued chat whose runner is
     not ready does not block autonomous admission. Owner-directed cancellation
     returns [Error Owner_stopping]; its private child-stop signal never escapes
-    this boundary. *)
+    this boundary. An operator interrupt of the running turn
+    ({!interrupt_turn}) returns [`Interrupted]: the child switch was failed
+    with that exception, so the callback's own return value is not available. *)
 
 val run_maintenance_if_idle
   :  t

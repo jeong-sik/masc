@@ -1815,6 +1815,14 @@
 ; seed sandbox_profile = "local" (incidental — the suite measures namespace
 ; truth, not sandbox isolation), and keeper-up validation now rejects Local
 ; fail-closed without the hatch.
+; The notifier boundary: fake notifiers planted on a private PATH, one of
+; which never returns, so the suite spawns real processes through
+; Process_eio and needs nothing beyond the shared deps.
+(test
+ (name test_notify_coverage)
+ (modules test_notify_coverage)
+ (libraries masc_test_deps))
+
 (test
  (name test_dashboard_namespace_truth)
  (modules test_dashboard_namespace_truth)

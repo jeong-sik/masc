@@ -121,9 +121,13 @@ max-context = 8192
   List.iter
     (fun error ->
        match error with
+       (* A keeper turn hands Agent Core its own transport, so the body
+          deadline wraps that transport's round trip and reports the
+          non-streaming body phase. *)
        | Agent_core.Error.Provider
            (Llm_provider.Error.Timeout
-              { timeout_phase = Some Llm_provider.Http_client.Wall_clock; _ }) -> ()
+              { timeout_phase = Some Llm_provider.Http_client.Non_streaming_body; _ })
+         -> ()
        | error ->
          failf
            "expected the declared body deadline to end the attempt, got %s"

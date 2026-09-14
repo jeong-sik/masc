@@ -27,7 +27,7 @@ let collect_sse_events payload =
   let calls = ref [] in
   let on_data ~event_type data =
     calls := (event_type, data) :: !calls;
-    Http_client.Continue
+    Http_client.Continue Http_client.Output
   in
   Http_client.read_sse ~reader ~on_data ();
   List.rev !calls

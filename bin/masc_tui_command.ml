@@ -24,6 +24,7 @@ type t =
   | Switch_keeper_missing_name
   | Queue of string
   | Run_next
+  | Priority of string option
   | Answer_tool_approval of bool
   | Interrupt_turn
   | Interrupt_keeper_turn of string
@@ -113,6 +114,11 @@ let catalog =
     ; aliases = []
     ; args = ""
     ; summary = "prioritize my queued message, stop the observed turn, and resume"
+    }
+  ; { word = "priority"
+    ; aliases = [ "autonext" ]
+    ; args = "[on|off]"
+    ; summary = "toggle or set automatic next-turn promotion for user input"
     }
   ; { word = "approve"
     ; aliases = []
@@ -328,6 +334,8 @@ let parse text =
     | "keeper", name -> Switch_keeper name
     | "queue", args -> Queue (if body = "" then args else args ^ "\n" ^ body)
     | "run-next", "" -> Run_next
+    | "priority", args | "autonext", args ->
+        Priority (if String.equal args "" then None else Some args)
     | "approve", "" -> Answer_tool_approval true
     | "deny", "" -> Answer_tool_approval false
     | "interrupt", "" -> Interrupt_turn

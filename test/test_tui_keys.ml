@@ -1024,7 +1024,7 @@ let test_config_footer_names_child_hops () =
      in no list at all -- which pane each belongs to is in the help the ?
      overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -1118,7 +1118,10 @@ let test_config_pane_footer_actions () =
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
-    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
+    List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
+    (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
+       screen the voice pane opens. *)
+    enabled "a" (List.mem pane [ Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key true) [ "j/k"; "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
   (* The prompts pane's read-only assets: the registry's edit keys only answer
@@ -1173,6 +1176,28 @@ let test_config_pane_footer_actions () =
          | Config_models | Config_params | Config_prompts | Config_presets
          | Config_voice -> []))
       [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
+
+(* The keeper-voice screen has its own keys, not the Config pane's: two axes,
+   one write, one way out. Spelled from the table so the row cannot drift from
+   what masc_tui.ml reads. *)
+let test_the_keeper_voice_screen_names_its_two_axes () =
+  let row = Masc_tui_keys.footer_hints_voice_agent () in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the keeper-voice row names " ^ key) true
+        (footer_has_key key row))
+    [ "j/k"; "\xe2\x86\x90/\xe2\x86\x92"; "Enter"; "Esc" ];
+  (* The pane's keys are not this screen's: it is drawn instead of the pane. *)
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the keeper-voice row leaves out " ^ key) false
+        (footer_has_key key row))
+    [ "p"; "e"; "9"; "r" ]
+
+let test_the_voice_pane_offers_the_keeper_voice_key () =
+  let voice = Masc_tui_keys.footer_hints_config ~pane:Config_voice in
+  Alcotest.(check bool) "the voice pane names the key that opens it" true
+    (footer_has_key "a" voice)
 
 let test_activity_footer_keeps_filter_before_evidence () =
   let hints = Masc_tui_keys.footer_hints Acting in
@@ -2206,6 +2231,10 @@ let () =
             test_runtime_footer_is_the_tables
         ; Alcotest.test_case "Config footer follows active pane and width" `Quick
             test_config_pane_footer_actions
+        ; Alcotest.test_case "the keeper-voice screen names its two axes" `Quick
+            test_the_keeper_voice_screen_names_its_two_axes
+        ; Alcotest.test_case "the voice pane offers the keeper-voice key" `Quick
+            test_the_voice_pane_offers_the_keeper_voice_key
         ; Alcotest.test_case "Activity filter survives evidence hint" `Quick
             test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick

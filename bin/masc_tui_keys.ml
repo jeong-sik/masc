@@ -67,10 +67,11 @@ let config_bindings =
       Some [ Config_presets ]
   ; b Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments"
+  ; b Act "a" "fragments / keeper voice"
       ~help:"on prompts, show or hide the internal pieces the main prompts \
-             are built from; not on the runtime assets reading",
-      Some [ Config_prompts ]
+             are built from, though not on the runtime assets reading; on \
+             voice, give the selected keeper its own voice",
+      Some [ Config_prompts; Config_voice ]
   ; b Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
@@ -351,6 +352,8 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
+      ; b Act "Ctrl-T" "queue"
+          ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
@@ -367,9 +370,8 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
-      ; b Act "Q" "leave"
-          ~help:"leave with a turn running, without interrupting it \
-                 (empty draft, no capture or edit in flight)"
+      ; b Act "Ctrl-Q" "leave"
+          ~help:"leave with a turn running, without interrupting it"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
@@ -806,6 +808,20 @@ let config_row ~own ~shared =
 let footer_hints_config ~pane =
   let own, shared = config_pane_bindings pane in
   config_row ~own ~shared
+
+(* The keeper-voice screen: two lists and one write. The keys are its own --
+   the keeper walks under [j]/[k] and the voice under the arrows, so an
+   assignment cannot be made by moving one axis and hoping the other
+   followed -- and the row is built here rather than written as a string, so
+   the spellings are the table's. *)
+let voice_agent_bindings =
+  [ b Navigate "j/k" "keeper"
+  ; b Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
+  ; b Act "Esc" "back" ~help:"leave the screen; nothing is written"
+  ]
+
+let footer_hints_voice_agent () = hints_of_bindings voice_agent_bindings
 
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a

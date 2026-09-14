@@ -12501,6 +12501,18 @@ def fusion_list_detail_interaction(
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
         )
+        drain_until_quiet(process, master_fd, output)
+        # Nothing is running in this fixture, and the title says so by not
+        # saying it: it used to end "· 0 run", a pair that names no run and
+        # reads as a third total beside the two counts before it.
+        title_rows = screen_rows(bytes(output))
+        title = title_rows.get(screen_row_of(title_rows, b"MASC Fusion"), b"")
+        if b"0 run" in title or b"running" in title:
+            raise AssertionError(
+                f"the Fusion title counted runs that are not running: {title!r}"
+            )
+        if b"runs" not in title or b"done" not in title:
+            raise AssertionError(f"the Fusion title lost its counts: {title!r}")
 
         selected = send_and_wait(
             process, master_fd, output, b"j", FUSION_TARGET_LISTED
@@ -15494,6 +15506,15 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 evidence("initial-read-failed")
             else:
                 require("schedule-proof-701", "status:running", "Requests: 1")
+                # The count and the next wake share one row: with nothing due
+                # the second row used to be drawn blank.
+                summary_rows = screen_rows(bytes(output))
+                summary_row = summary_rows.get(
+                    screen_row_of(summary_rows, b"Requests: 1"), b"")
+                if b"Next due:" not in summary_row:
+                    raise AssertionError(
+                        f"the schedule count and its next wake split rows: {summary_row!r}"
+                    )
                 fail_reads.set()
                 send_and_wait(process, master_fd, output, b"r", b"503")
                 require("이전 조회 유지 ·", "503", "schedule-proof-701",

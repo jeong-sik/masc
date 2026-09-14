@@ -13,6 +13,7 @@ type t = {
   hints_visible : bool option;
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
+  user_input_priority_next : bool option;
 }
 
 let runtime_toml_path ~base_path =
@@ -108,6 +109,9 @@ let hints_visible_of_doc doc =
 let coalesce_queued_input_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
 
+let user_input_priority_next_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc "tui.user_input_priority_next"
+
 (* Whether ^Y ending a capture also sends what was heard,
    [voice.stt].send_on_stop. Absent reads as off, unlike its siblings here:
    they choose between two ways of showing the same thing, and this one sends
@@ -153,6 +157,7 @@ let load ~base_path =
     hints_visible = read hints_visible_of_doc;
     coalesce_queued_input = read coalesce_queued_input_of_doc;
     send_on_stop = Option.bind text send_on_stop_of_text;
+    user_input_priority_next = read user_input_priority_next_of_doc;
   }
 
 let set_board_sort ~base_path sort =

@@ -2116,18 +2116,18 @@ let post_sync_once_after_validation
      of guessing a kind; the message is diagnostics only, per the note on
      [provider_failure_to_string] telling consumers to branch on the kind and never
      parse the string. *)
-  let fail_exn exn =
+  let http_error_of_exn exn =
     match classify_network_exn exn with
-    | Some error -> Error error
+    | Some error -> error
     | None ->
       release_connection ();
       Reserved_exn.reraise_if_reserved exn;
-      Error
-        (ProviderFailure
-           { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
-           ; message = "unclassified transport exception"
-           })
+      ProviderFailure
+        { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
+        ; message = "unclassified transport exception"
+        }
   in
+  let fail_exn exn = Error (http_error_of_exn exn) in
   let total_started_at =
     match body_deadline with
     | Unbounded -> None
@@ -2259,7 +2259,7 @@ let post_sync_once_after_validation
       | Eio.Time.Timeout as exn ->
         release_connection ();
         raise exn
-      | exn -> fail_exn exn
+      | exn -> `Failed (http_error_of_exn exn)
     in
     let response_of body =
       { response =

@@ -1698,36 +1698,66 @@ let start
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
-                   t.child_active := true;
-                   publish_turn_in_flight
-                     t
-                     (Some { lane; started_at = t.now ()
-                           ; interrupt_token = Keeper_interrupt_token.fresh () });
-                   Eio.Fiber.fork ~sw (fun () ->
-                     let outcome =
-                       try
-                         Ok
-                           (Eio.Switch.run (fun child_sw ->
-                              Atomic.set t.child_cancel
-                                (Some
-                                   { stop =
-                                       (fun () ->
-                                          Eio.Switch.fail child_sw Stop_active_child)
-                                   ; interrupt =
-                                       (fun () ->
-                                          Eio.Switch.fail child_sw
-                                            Keeper_registry_types.Operator_interrupt)
-                                   });
-                              run ()))
-                       with
-                       | exn -> Error (exn, Printexc.get_raw_backtrace ())
-                     in
-                     Atomic.set t.child_cancel None;
-                     ignore
-                       (request
-                          t
-                          (Child_finished
-                             (Autonomous_child_finished { outcome; resolve })))))));
+                   let run_admitted_turn () =
+                     t.child_active := true;
+                     publish_turn_in_flight
+                       t
+                       (Some { lane; started_at = t.now ()
+                             ; interrupt_token = Keeper_interrupt_token.fresh () });
+                     Eio.Fiber.fork ~sw (fun () ->
+                       let outcome =
+                         try
+                           Ok
+                             (Eio.Switch.run (fun child_sw ->
+                                Atomic.set t.child_cancel
+                                  (Some
+                                     { stop =
+                                         (fun () ->
+                                            Eio.Switch.fail child_sw Stop_active_child)
+                                     ; interrupt =
+                                         (fun () ->
+                                            Eio.Switch.fail child_sw
+                                              Keeper_registry_types.Operator_interrupt)
+                                     });
+                                run ()))
+                         with
+                         | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                       in
+                       Atomic.set t.child_cancel None;
+                       ignore
+                         (request
+                            t
+                            (Child_finished
+                               (Autonomous_child_finished { outcome; resolve }))))
+                   in
+                   (match lane with
+                    | Chat_operation | Maintenance -> run_admitted_turn ()
+                    | Autonomous ->
+                      (* Do not take a free slot ahead of a queued chat. No
+                         child holds the operation store here, so recover it
+                         first; if it is healthy and a chat can claim, hand the
+                         slot to the chat as every other slot-free path already
+                         does through [start_child_if_needed]. A still-fenced
+                         store keeps the autonomous lane productive rather than
+                         idling on a chat that cannot start yet. *)
+                      ignore (recover_operation_availability t : (unit, error) result);
+                      let inventory = Atomic.get t.operation_projection in
+                      let chat_can_take_slot =
+                        inventory.has_claimable_queued
+                        && not inventory.store_unavailable
+                        && Option.is_none inventory.running_operation_id
+                      in
+                      if not chat_can_take_slot
+                      then run_admitted_turn ()
+                      else (
+                        start_child_if_needed state shutdown_operation_id;
+                        match Atomic.get t.turn_in_flight with
+                        | Some ({ lane = Chat_operation; _ } as chat) ->
+                          t.autonomous_lost_slot := true;
+                          Eio.Promise.resolve
+                            resolve
+                            (Ok (Autonomous_busy (Turn_busy (Some chat))))
+                        | Some _ | None -> run_admitted_turn ())))));
           loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =

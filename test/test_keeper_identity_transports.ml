@@ -12,11 +12,14 @@ let access_token_env = "ATLASSIAN_ACCESS_TOKEN"
 
 exception Fixture_done
 
-(* One directory per call, made by the runtime so two calls in the same
-   second cannot collide: the pid-and-second name this replaced gave the two
-   stub-transport cases the same path when they ran within one second, and
-   the second mkdir failed with EEXIST (PR #36162's check run). *)
-let temp_base () = Filename.temp_dir "masc-identity-transports-" ""
+(* One directory per call, made by the runtime, so two calls cannot
+   collide; removed once the call is over. *)
+let with_temp_base f =
+  let base_path = Filename.temp_dir "masc-identity-transports-" "" in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () -> f ~base_path)
+;;
 
 (* A declaration for the stub-transport cases. The loader admits only https
    endpoints, so the wire cases below do not go through a declaration; the
@@ -249,7 +252,8 @@ let never_token_post ~url:_ ~headers:_ ~body:_ =
 let never_discover ~mcp_url:_ = fail "renewal reached discovery when it should not have"
 
 let run_with mcp_post =
-  let base_path = temp_base () in
+  with_temp_base
+  @@ fun ~base_path ->
   project_token ~base_path;
   Keeper_identity_tools.run_call
     ~transports:

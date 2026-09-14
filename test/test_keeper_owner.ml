@@ -1919,13 +1919,13 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
     Owner.Operation_succeeded { outcome_ref = "ok" }
   in
   let runner =
-    let base = default_runner sw in
-    { base with
-      execute = operation_executor
-    ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ ->
-        Eio.Promise.resolve mark_settling ();
-        Eio.Promise.await release)
-    }
+    Owner.
+      { ready = (fun ~keeper_name:_ -> true)
+      ; execute = operation_executor
+      ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ ->
+          Eio.Promise.resolve mark_settling ();
+          Eio.Promise.await release)
+      }
   in
   let owner = owner_ok (Owner.start ~sw
     ~keeper_name:"settle-stop"

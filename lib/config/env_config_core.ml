@@ -297,6 +297,9 @@ let masc_http_port_int () =
   Safe_ops.int_of_string_with_default
     ~default:Masc_network_defaults.masc_http_default_port (masc_http_port ())
 
+let masc_http_port_opt () =
+  raw_value_opt http_port_env_key |> trim_opt
+
 let masc_host_opt () =
   raw_value_opt host_env_key |> trim_opt
 

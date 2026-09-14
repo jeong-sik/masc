@@ -11,7 +11,7 @@ let test_parse_text_chunk () =
   let data =
     {|{"id":"chatcmpl-abc","object":"chat.completion.chunk","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     Alcotest.(check string) "id" "chatcmpl-abc" chunk.chunk_id;
     Alcotest.(check string) "model" "gpt-4" chunk.chunk_model;
@@ -19,28 +19,31 @@ let test_parse_text_chunk () =
     Alcotest.(check (option string)) "finish" None chunk.finish_reason;
     Alcotest.(check int) "no tool_calls" 0 (List.length chunk.delta_tool_calls)
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
 let test_parse_done_sentinel () =
-  match S.parse_openai_sse_chunk "[DONE]" with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning "[DONE]" with
   | S.Openai_done -> ()
   | S.Openai_chunk _
   | S.Openai_empty
   | S.Openai_provider_error _
-  | S.Openai_parse_failed _ -> Alcotest.fail "expected Openai_done"
+  | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected Openai_done"
 ;;
 
 let test_parse_finish_reason () =
   let data =
     {|{"id":"c-1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string)) "finish" (Some "stop") chunk.finish_reason;
     Alcotest.(check (option string)) "no content" None chunk.delta_content;
     Alcotest.(check bool) "no timings" true (chunk.chunk_timings = None)
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -51,7 +54,7 @@ let test_parse_final_chunk_llama_server_timings () =
   let data =
     {|{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"created":1786817415,"id":"chatcmpl-csKoSC2O1Q4NOnFgmxNXcgXu8YZWWITo","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","timings":{"cache_n":0,"prompt_n":14,"prompt_ms":572.696,"prompt_per_token_ms":40.90685714285714,"prompt_per_second":24.445779261597774,"predicted_n":2,"predicted_ms":122.729,"predicted_per_token_ms":61.3645,"predicted_per_second":16.296066944243005}}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string)) "finish" (Some "stop") chunk.finish_reason;
     (match chunk.chunk_timings with
@@ -64,6 +67,7 @@ let test_parse_final_chunk_llama_server_timings () =
         | Some ms -> Alcotest.(check bool) "prompt_ms" true (abs_float (ms -. 572.696) < 0.001)
         | None -> Alcotest.fail "expected prompt_ms"))
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -78,7 +82,9 @@ let test_parse_prompt_progress_chunk_yields_no_events () =
   let data =
     {|{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1786821448,"id":"chatcmpl-Fdm6BTycfa2vhBZkSBkKeuDjyviIE2Ve","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","prompt_progress":{"total":15,"cache":0,"processed":11,"time_ms":7}}|}
   in
-  let parsed = S.parse_openai_sse_chunk data in
+  let parsed =
+    S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data
+  in
   (match parsed with
    | S.Openai_chunk chunk ->
      Alcotest.(check (option string)) "no content delta" None chunk.delta_content;
@@ -87,6 +93,7 @@ let test_parse_prompt_progress_chunk_yields_no_events () =
      Alcotest.(check (option string)) "no finish" None chunk.finish_reason;
      Alcotest.(check bool) "no timings" true (chunk.chunk_timings = None)
    | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
      -> Alcotest.fail "expected OpenAI chunk");
   let state = S.create_openai_stream_state ~provider:"openai" ~model:"m" () in
   let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
@@ -97,12 +104,13 @@ let test_parse_final_chunk_timings_cache_hit () =
   let data =
     {|{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"id":"c-9","model":"qwen3.8-27b","object":"chat.completion.chunk","timings":{"cache_n":1741,"prompt_n":26,"prompt_ms":709.5,"predicted_n":512,"predicted_ms":54893.4,"predicted_per_second":9.3}}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk { chunk_timings = Some t; _ } ->
     Alcotest.(check (option int)) "cache_n" (Some 1741) t.cache_n;
     Alcotest.(check (option int)) "prompt_n" (Some 26) t.prompt_n
   | S.Openai_chunk { chunk_timings = None; _ } -> Alcotest.fail "expected timings"
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -110,7 +118,7 @@ let test_parse_tool_call_start () =
   let data =
     {|{"id":"c-2","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     Alcotest.(check int) "1 tool_call" 1 (List.length chunk.delta_tool_calls);
     let tc = List.hd chunk.delta_tool_calls in
@@ -121,6 +129,7 @@ let test_parse_tool_call_start () =
      | Some (S.Args_fragment s) -> Alcotest.(check string) "tc_args" "" s
      | _ -> Alcotest.fail "expected Args_fragment for empty string arguments")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -128,7 +137,7 @@ let test_parse_tool_call_args () =
   let data =
     {|{"id":"c-3","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     let tc = List.hd chunk.delta_tool_calls in
     (match tc.tc_arguments with
@@ -137,6 +146,7 @@ let test_parse_tool_call_args () =
     Alcotest.(check (option string)) "no id" None tc.tc_id;
     Alcotest.(check (option string)) "no name" None tc.tc_name
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -144,7 +154,7 @@ let test_parse_usage () =
   let data =
     {|{"id":"c-4","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_chunk chunk ->
     (match chunk.chunk_usage with
      | Some u ->
@@ -152,24 +162,31 @@ let test_parse_usage () =
        Alcotest.(check int) "output" 5 u.output_tokens
      | None -> Alcotest.fail "expected usage")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
 let test_parse_invalid_json () =
-  match S.parse_openai_sse_chunk "not json" with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning "not json" with
   | S.Openai_parse_failed { raw; reason } ->
     Alcotest.(check string) "raw invalid JSON" "not json" raw;
     Alcotest.(check bool) "typed JSON failure reason" true (String.length reason > 0)
-  | S.Openai_chunk _ | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ ->
-    Alcotest.fail "expected Openai_parse_failed"
+  | S.Openai_chunk _
+  | S.Openai_done
+  | S.Openai_empty
+  | S.Openai_provider_error _
+  | S.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected Openai_parse_failed"
 ;;
 
 let test_parse_empty_choices () =
   let data = {|{"id":"c-5","model":"m","choices":[]}|} in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
   | S.Openai_empty -> ()
-  | S.Openai_chunk _ | S.Openai_done | S.Openai_provider_error _ | S.Openai_parse_failed _
-    -> Alcotest.fail "expected Openai_empty"
+  | S.Openai_chunk _
+  | S.Openai_done
+  | S.Openai_provider_error _
+  | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected Openai_empty"
 ;;
 
 (* ── openai_chunk_to_events ─────────────────────────────── *)
@@ -550,7 +567,11 @@ let test_parse_reasoning_chunk () =
   let data =
     {|{"id":"c-r","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"Let me think"},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match
+    S.parse_openai_sse_chunk
+      ~streaming_reasoning:(RD.Delta_field "reasoning_content")
+      data
+  with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string))
       "reasoning"
@@ -558,53 +579,77 @@ let test_parse_reasoning_chunk () =
       chunk.delta_reasoning;
     Alcotest.(check (option string)) "no content" None chunk.delta_content
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
-let test_parse_ollama_reasoning_fallback () =
-  (* Ollama returns "reasoning" instead of "reasoning_content" *)
+(* ollama.com /v1 spells the member [reasoning]; a row that declares it reads
+   it. There is no second member to fall through to. *)
+let test_parse_declared_ollama_reasoning_member () =
   let data =
-    {|{"id":"c-ollama","model":"qwen3.5:35b","choices":[{"index":0,"delta":{"reasoning":"Ollama thinking"},"finish_reason":null}]}|}
+    {|{"id":"c-ollama","model":"qwen3.5:397b","choices":[{"index":0,"delta":{"reasoning":"Ollama thinking"},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field "reasoning") data with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string))
-      "reasoning fallback"
+      "declared reasoning member"
       (Some "Ollama thinking")
       chunk.delta_reasoning;
     Alcotest.(check (option string)) "no content" None chunk.delta_content
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
-let test_parse_reasoning_content_preferred () =
-  (* reasoning_content wins over reasoning when both present and non-blank *)
+(* F111. The row declares [delta:reasoning] and the wire sends
+   [reasoning_content]. On origin/main the parser fell through to the other
+   documented spelling and accepted the chunk, which is how a misdeclared
+   catalog row stayed misdeclared. Now the declared member is the only one
+   read and the mismatch is the typed [Openai_undeclared_reasoning_member]
+   observation, carrying both names and the raw chunk. *)
+let test_parse_undeclared_reasoning_member_is_typed () =
   let data =
-    {|{"id":"c-both","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"preferred","reasoning":"fallback"},"finish_reason":null}]}|}
+    {|{"id":"c-undeclared","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"pondering"},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
-  | S.Openai_chunk chunk ->
-    Alcotest.(check (option string))
-      "reasoning_content wins"
-      (Some "preferred")
-      chunk.delta_reasoning
-  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-    -> Alcotest.fail "expected OpenAI chunk"
+  let parsed =
+    S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field "reasoning") data
+  in
+  match parsed with
+  | S.Openai_undeclared_reasoning_member { declared; member; raw } ->
+    Alcotest.(check string) "declared member" "reasoning" declared;
+    Alcotest.(check string) "undeclared member" "reasoning_content" member;
+    Alcotest.(check string) "raw chunk kept" data raw;
+    let events, _tel =
+      S.openai_sse_parse_result_to_events (S.create_openai_stream_state ()) parsed
+    in
+    (match events with
+     | [ SSEParseFailed { reason; raw } ] ->
+       Alcotest.(check string)
+         "event reason names both members"
+         "undeclared_reasoning_member:reasoning_content:declared:reasoning"
+         reason;
+       Alcotest.(check string) "event raw" data raw
+     | _ -> Alcotest.fail "expected only SSEParseFailed")
+  | S.Openai_chunk _ | S.Openai_done | S.Openai_empty | S.Openai_provider_error _
+  | S.Openai_parse_failed _ -> Alcotest.fail "expected Openai_undeclared_reasoning_member"
 ;;
 
-let test_parse_blank_reasoning_content_falls_back () =
-  (* blank reasoning_content should fall back to reasoning *)
+(* A blank declared member does not fall through either: the text under the
+   other spelling is the same misdeclaration. *)
+let test_parse_blank_declared_member_does_not_fall_through () =
   let data =
     {|{"id":"c-blank","model":"qwen","choices":[{"index":0,"delta":{"reasoning_content":"  ","reasoning":"actual thinking"},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk data with
-  | S.Openai_chunk chunk ->
-    Alcotest.(check (option string))
-      "blank falls back"
-      (Some "actual thinking")
-      chunk.delta_reasoning
-  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-    -> Alcotest.fail "expected OpenAI chunk"
+  match
+    S.parse_openai_sse_chunk
+      ~streaming_reasoning:(RD.Delta_field "reasoning_content")
+      data
+  with
+  | S.Openai_undeclared_reasoning_member { declared; member; _ } ->
+    Alcotest.(check string) "declared member" "reasoning_content" declared;
+    Alcotest.(check string) "undeclared member" "reasoning" member
+  | S.Openai_chunk _ | S.Openai_done | S.Openai_empty | S.Openai_provider_error _
+  | S.Openai_parse_failed _ -> Alcotest.fail "expected Openai_undeclared_reasoning_member"
 ;;
 
 let test_parse_reasoning_uses_dialect_delta_field () =
@@ -620,6 +665,7 @@ let test_parse_reasoning_uses_dialect_delta_field () =
       (Some "selected")
       chunk.delta_reasoning
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -631,6 +677,7 @@ let test_parse_reasoning_respects_no_streaming_dialect () =
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string)) "no reasoning" None chunk.delta_reasoning
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -657,6 +704,7 @@ let test_parse_minimax_split_reasoning_details () =
         | _ -> Alcotest.fail "expected one reasoning detail")
      | None -> Alcotest.fail "expected typed reasoning_details delta")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -693,6 +741,7 @@ let test_parse_openrouter_encrypted_details_without_text () =
         | _ -> Alcotest.fail "expected one reasoning detail")
      | None -> Alcotest.fail "expected the encrypted item to survive as a typed delta")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -718,6 +767,7 @@ let test_parse_openrouter_reads_declared_field_and_details () =
        Alcotest.(check int) "one detail" 1 (List.length delta_details)
      | None -> Alcotest.fail "expected typed reasoning_details delta")
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -738,6 +788,7 @@ let test_plain_delta_field_drops_openrouter_details () =
       true
       (Option.is_none chunk.delta_reasoning_details)
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
@@ -757,7 +808,11 @@ let expect_split_parse_failed label expected_reason data =
        Alcotest.(check string) (label ^ " event reason") expected_reason reason;
        Alcotest.(check string) (label ^ " event raw") data raw
      | _ -> Alcotest.fail (label ^ ": expected only SSEParseFailed"))
-  | S.Openai_chunk _ | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ ->
+  | S.Openai_chunk _
+  | S.Openai_done
+  | S.Openai_empty
+  | S.Openai_provider_error _
+  | S.Openai_undeclared_reasoning_member _ ->
     Alcotest.fail (label ^ ": expected parse failure")
 ;;
 
@@ -1114,6 +1169,7 @@ let test_events_reasoning_details_accumulates_typed () =
     with
     | S.Openai_chunk chunk -> chunk
     | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
       -> Alcotest.fail "expected OpenAI chunk"
   in
   let events, _tel = S.openai_chunk_to_events (S.create_openai_stream_state ()) chunk in
@@ -1748,7 +1804,10 @@ let test_rejected_chunk_preserves_inline_framing () =
       let wire = `Assoc ["id", `String "fixture-response"; "model", `String "fixture";
         "choices", `List [`Assoc ["delta", `Assoc delta; "finish_reason",
           (if terminal then `String "stop" else `Null)]]] |> Yojson.Safe.to_string in
-      fst (S.openai_sse_parse_result_to_events state (S.parse_openai_sse_chunk wire))
+      fst
+        (S.openai_sse_parse_result_to_events
+           state
+           (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning wire))
     in
     let before = feed prefix (Some None) false in
     let invalid = feed rejected (Some (Some "late-provider-id")) false in
@@ -1793,17 +1852,17 @@ let () =
         ; test_case "empty choices" `Quick test_parse_empty_choices
         ; test_case "reasoning_content" `Quick test_parse_reasoning_chunk
         ; test_case
-            "ollama reasoning fallback"
+            "declared ollama reasoning member"
             `Quick
-            test_parse_ollama_reasoning_fallback
+            test_parse_declared_ollama_reasoning_member
         ; test_case
-            "reasoning_content preferred"
+            "undeclared reasoning member is typed"
             `Quick
-            test_parse_reasoning_content_preferred
+            test_parse_undeclared_reasoning_member_is_typed
         ; test_case
-            "blank reasoning_content falls back"
+            "blank declared member does not fall through"
             `Quick
-            test_parse_blank_reasoning_content_falls_back
+            test_parse_blank_declared_member_does_not_fall_through
         ; test_case
             "reasoning dialect field"
             `Quick

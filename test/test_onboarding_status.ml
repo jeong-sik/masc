@@ -132,9 +132,64 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
        (message "model_connection" dangling)
        "ollama_cloud.deepseek-v4-flash")
 
+let browser_lane_fixture ?(server_argument="") ?(connection_port="") () f =
+  with_workspace @@ fun base ->
+  let root = Filename.concat base ".masc" in
+  List.iter (fun path -> Unix.mkdir path 0o700)
+    [root; Filename.concat root "config"; Filename.concat root "browser-lane";
+     Filename.concat (Filename.concat root "browser-lane") "host"];
+  if connection_port <> "" then
+    write (Filename.concat root "config/connection.toml")
+      ("[server]\nhttp_port = " ^ connection_port ^ "\n");
+  write (Filename.concat (Filename.concat root "browser-lane") "host/launch")
+    ("#!/bin/sh\nexec /unused/masc-browser-host --base-path " ^ base
+     ^ " --token-file /unused/token" ^ server_argument ^ " \"$@\"\n");
+  f base
+
+let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base ->
+  Unix.mkdir (Filename.concat base ".masc") 0o700;
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "an uninstalled lane reports no browser_lane observation" true
+    (List.find_opt (fun (c : Onboarding_status.check) -> c.id = "browser_lane")
+       observed.Onboarding_status.checks = None)
+
+let browser_lane_drift_is_invalid_and_names_both_ports () =
+  browser_lane_fixture
+    ~server_argument:" --server http://127.0.0.1:8935"
+    ~connection_port:"64850" () @@ fun base ->
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a launcher aimed at a stale port is invalid" true
+    (condition "browser_lane" observed = Onboarding_status.Invalid);
+  check bool "the stale port is named" true
+    (String_util.contains_substring (message "browser_lane" observed) "8935");
+  check bool "the workspace port is named" true
+    (String_util.contains_substring (message "browser_lane" observed) "64850")
+
+let browser_lane_aligned_launcher_is_satisfied () =
+  browser_lane_fixture
+    ~server_argument:" --server http://127.0.0.1:64850"
+    ~connection_port:"64850" () @@ fun base ->
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a launcher aimed at the workspace port is satisfied" true
+    (condition "browser_lane" observed = Onboarding_status.Satisfied)
+
+let browser_lane_dynamic_launcher_is_satisfied () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a launcher without --server follows the workspace" true
+    (condition "browser_lane" observed = Onboarding_status.Satisfied)
+
 let () = run "Onboarding observations"
   ["first use", [test_case "missing environment is an actionable state" `Quick absent_workspace;
                  test_case "uninitialized workspace is read-only" `Quick new_location_stays_untouched;
                  test_case "declared imp and concurrent unmet conditions" `Quick declared_is_not_verified;
                  test_case "a load failure names its site and id" `Quick
-                   a_load_failure_says_what_failed]]
+                   a_load_failure_says_what_failed;
+                 test_case "an uninstalled browser lane is not observed" `Quick
+                   browser_lane_absent_launcher_is_unobserved;
+                 test_case "a stale browser lane port is invalid and names both ports" `Quick
+                   browser_lane_drift_is_invalid_and_names_both_ports;
+                 test_case "a browser lane aimed at the workspace port is satisfied" `Quick
+                   browser_lane_aligned_launcher_is_satisfied;
+                 test_case "a browser lane without --server follows the workspace" `Quick
+                   browser_lane_dynamic_launcher_is_satisfied]]

@@ -127,6 +127,10 @@ let write_file path contents =
 let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model_input =
   let runtime_path = Filename.concat base_path "runtime.toml" in
   write_file runtime_path (runtime_toml cli_path);
+  (* #36066: the posture resolve reads the keeper's declaration before the
+     blank-prompt check, so the fixture keeper is declared. *)
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path ~sandbox_profile:None "codex-blank-prompt";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)

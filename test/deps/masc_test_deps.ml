@@ -464,6 +464,45 @@ let fixture_sandbox_profile () =
                Masc.Keeper_types_profile.valid_sandbox_profile_strings)))
 ;;
 
+(* A keeper nothing declares is not configured (#36066, audit F386): the
+   profile loader answers [Declaration_not_found], and every reader that
+   loads the profile first -- the official-client posture resolve, the SSH
+   endpoint resolve, effective meta, the dashboard projections -- refuses
+   the keeper before any meta snapshot is read. A fixture that writes a meta
+   or runs a turn under a base path declares the keeper at the one path
+   [Config_dir_resolver] spells for it, the way [keeper up] does.
+
+   The declaration's instructions are the keeper's profile text, which a
+   turn does not read as its system prompt; the runtime fixtures pass that
+   prompt explicitly, blank ones included, so the text here is fixed and
+   non-blank. [keeper.name] is not written: the loader derives the name from
+   the file name and refuses a key that disagrees with it.
+
+   [sandbox_profile] is a required argument so each suite states what its
+   path reads: [Keeper_meta_contract.effective_meta_result] refuses a
+   declaration with no sandbox_profile, while the posture and endpoint
+   resolves read only the fields they name and take [None]. An existing
+   declaration is overwritten. *)
+let declare_fixture_keeper ~base_path ~sandbox_profile name =
+  let path = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let fields =
+    ("instructions", Otoml.TomlString (name ^ " fixture instructions"))
+    :: (match sandbox_profile with
+        | None -> []
+        | Some profile ->
+          [ ( "sandbox_profile"
+            , Otoml.TomlString
+                (Masc.Keeper_types_profile.sandbox_profile_to_string profile) )
+          ])
+  in
+  Out_channel.with_open_bin path (fun output ->
+    output_string
+      output
+      (Otoml.Printer.to_string
+         (Otoml.TomlTable [ "keeper", Otoml.TomlTable fields ])))
+;;
+
 (* The factory a fixture's guest command is dispatched through.
 
    Typed Shell IR guest dispatch refuses to run without one:

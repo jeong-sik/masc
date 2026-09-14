@@ -721,6 +721,7 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
     match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming live_shape with
     | S.Openai_chunk chunk -> chunk
     | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    | S.Openai_undeclared_reasoning_member _
       -> fail "expected Ollama Cloud OpenAI-compatible reasoning chunk"
   in
   check
@@ -921,6 +922,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
     match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming raw with
     | S.Openai_chunk chunk -> chunk
     | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    | S.Openai_undeclared_reasoning_member _
       -> fail "expected Qwen reasoning_content SSE chunk"
   in
   let chunk1 =

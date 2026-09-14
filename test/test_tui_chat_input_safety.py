@@ -218,8 +218,49 @@ def queued_attachments(binary: str) -> None:
     )
 
 
+def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
+    """Ctrl-Q leaves the chat pane, and only from the chat pane.
+
+    The composer row is drawn on every surface and hands its keys to the same
+    handler the chat pane uses. The quiet leave changes the view, so without a
+    surface guard a Ctrl-Q typed on Overview moved the reader into the Keeper
+    detail the chat would have returned to.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        fd: int,
+        _slave: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # Focus the composer row while Overview is the surface.
+        h.send_and_wait(process, fd, output, b"i", b"\x1b[?25h")
+        h.drain_until_quiet(process, fd, output)
+        os.write(fd, b"\x11")
+        h.drain_until_quiet(process, fd, output)
+        frame = h.screen_text(bytes(output))
+        if b"MASC Overview" not in frame:
+            raise AssertionError(
+                f"Ctrl-Q on the composer row left the surface: {frame[-600:]!r}"
+            )
+        # Release the row before quitting: a focused composer takes "q" as a
+        # letter. The harness supplies the second q that confirms the exit.
+        os.write(fd, b"\x1b")
+        h.drain_until_quiet(process, fd, output)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        binary,
+        description="the quiet leave belongs to the chat surface",
+        interact=interact,
+        http_fixtures=h.overview_event_http_fixtures(),
+    )
+
+
 if __name__ == "__main__":
     executable = str(Path(sys.argv[1]).resolve())
     approval_typing(executable, "approve")
     approval_typing(executable, "deny")
     queued_attachments(executable)
+    quiet_leave_belongs_to_the_chat_surface(executable)

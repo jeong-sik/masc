@@ -552,7 +552,7 @@ let handle_tool_execute_typed
               choose an observation-only path instead of waiting. *)
            let observation_fields =
              match Keeper_tool_execute_observe.outcome observation with
-             | Some (Keeper_gate.Observed_refused { status; stderr }) ->
+             | Some (Keeper_gate.Observed_refused { status; stderr; refusal_kind = _ }) ->
                [ ( "observation"
                  , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
                      (Keeper_gate.observed_refusal ~status ~stderr) )

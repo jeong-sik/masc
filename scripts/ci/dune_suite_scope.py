@@ -13,8 +13,14 @@ Deps and a setenv action are not reasons to skip, because scripts/ci/
 stanza_env.py already reads both and test.yml's targeted path already runs
 suites that way: it builds what --deps names and runs the executable under
 the environment the stanza sets. The caller asks that reader, and skips on
-what it refuses. What is left here is the shapes that mean there is no
-executable to run at all.
+what it refuses. What is left here is the shapes that mean the executable
+cannot be run by hand at all: no executable behind the name, and an action
+whose runner is not the executable -- a suite run through a wrapper
+(python3 test_x.py test_x.exe) needs the wrapper to feed it its arguments,
+and the binary alone dies on its own argv check. test_docker_observe_transport
+died exactly there under #36032 ("expected base_path container
+missing_container receipt_path workdir": the harness's five arguments never
+arrived), which is what this shape check closes.
 
 Usage: dune_suite_scope.py <dir> <name>
 Prints "run" or "skip <reason>" and always exits 0; a scope it cannot
@@ -102,7 +108,35 @@ def scope(directory, name):
     form = stanzas[0]
     if re.search(r"\(\s*enabled_if\b", form):
         return "skip its stanza is conditionally disabled"
+    runner = action_runner(form)
+    if runner is not None and runner != name:
+        return (
+            "skip its action runs the executable through a wrapper "
+            f"({runner}); the arguments come from the rule, not the caller"
+        )
     return "run"
+
+
+def action_runner(form):
+    """The runner the stanza's action invokes, when it is not the executable.
+
+    The two runner shapes in this repository are `(run %{test} ...)`, where
+    the executed program IS the executable and the caller may reproduce the
+    run, and `(run <tool> %{dep:wrapper} %{exe:name} ...)`, where a wrapper
+    program owns the arguments and environment. Only the first is faithful
+    to run by hand; a wrapper's command line is the rule's knowledge.
+    """
+    action = re.search(r"\(\s*action\b", form)
+    if not action:
+        return None
+    body = form[action.end() :]
+    run = re.search(r"\(\s*run\s+([^)\s]+)", body)
+    if not run:
+        return None
+    token = run.group(1)
+    if token.startswith("%"):
+        return None
+    return token
 
 
 def main(argv):

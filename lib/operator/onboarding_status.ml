@@ -106,6 +106,75 @@ let keeper_checks base_path =
        "Check the selected sandbox service and prepare imp's isolated workspace."
        [Configure_sandbox; Start_imp]]
 
+(* install-host.sh writes the launcher as one exec line of shell-quoted words,
+   so the check scans whole words, never substrings. A launcher without
+   --server resolves the workspace connection port at run time; that is the
+   state that cannot drift from the configuration the server itself follows. *)
+type launcher_server = No_server_argument | Server_port of int | Unusable_origin
+
+let launcher_server text =
+  let rec scan = function
+    | "--server" :: origin :: _ ->
+        let uri = Uri.of_string origin in
+        if Uri.scheme uri = Some "http" then
+          match Uri.port uri with
+          | Some port -> Server_port port
+          | None -> Server_port 80
+        else Unusable_origin
+    | _ :: rest -> scan rest
+    | [] -> No_server_argument
+  in
+  scan (List.filter (fun word -> word <> "") (String.split_on_char ' ' text))
+
+let browser_lane_check base_path =
+  let launcher =
+    Filename.concat
+      (Filename.concat (Filename.concat base_path Common.masc_dirname) "browser-lane")
+      "host/launch"
+  in
+  let installed = try Sys.file_exists launcher with Sys_error _ -> false in
+  if not installed then []
+  else
+    let text =
+      try Ok (In_channel.with_open_bin launcher In_channel.input_all)
+      with Sys_error _ -> Error "The browser lane launcher cannot be read."
+    in
+    let workspace_port =
+      match Workspace_connection.read ~base_path with
+      | Error error -> Error (Workspace_connection.error_message error)
+      | Ok None -> Ok Masc_network_defaults.masc_http_default_port
+      | Ok (Some port) -> Ok (Workspace_connection.to_int port)
+    in
+    let observation =
+      match (text, workspace_port) with
+      | Error detail, _ | _, Error detail ->
+          check "browser_lane" Invalid detail [Inspect_configuration]
+      | Ok content, Ok expected ->
+          (match launcher_server content with
+           | Unusable_origin ->
+               check "browser_lane" Invalid
+                 "The browser lane launcher's --server is not an http origin with a usable port."
+                 [Inspect_configuration]
+           | No_server_argument ->
+               check "browser_lane" Satisfied
+                 "The browser lane launcher follows the workspace connection port."
+                 [Inspect_configuration]
+           | Server_port port when port = expected ->
+               check "browser_lane" Satisfied
+                 (Printf.sprintf
+                    "The browser lane launcher targets the workspace connection port %d." expected)
+                 [Inspect_configuration]
+           | Server_port port ->
+               check "browser_lane" Invalid
+                 (Printf.sprintf
+                    "The browser lane launcher targets port %d while the workspace connection \
+                     port is %d. Re-run connectors/browser/install-host.sh without --server so \
+                     the lane follows the workspace."
+                    port expected)
+                 [Inspect_configuration])
+    in
+    [observation]
+
 let inspect ~base_path =
   match base_path with
   | None ->
@@ -125,7 +194,8 @@ let inspect ~base_path =
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check "workspace" Satisfied "Workspace found." [Choose_workspace]
-          :: (models @ keeper_checks base_path @ [persistence_check base_path]) }
+          :: (models @ keeper_checks base_path @ [persistence_check base_path]
+              @ browser_lane_check base_path) }
 
 let optional_string = function None -> `Null | Some value -> `String value
 

@@ -2116,18 +2116,18 @@ let post_sync_once_after_validation
      of guessing a kind; the message is diagnostics only, per the note on
      [provider_failure_to_string] telling consumers to branch on the kind and never
      parse the string. *)
-  let fail_exn exn =
+  let http_error_of_exn exn =
     match classify_network_exn exn with
-    | Some error -> Error error
+    | Some error -> error
     | None ->
       release_connection ();
       Reserved_exn.reraise_if_reserved exn;
-      Error
-        (ProviderFailure
-           { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
-           ; message = "unclassified transport exception"
-           })
+      ProviderFailure
+        { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
+        ; message = "unclassified transport exception"
+        }
   in
+  let fail_exn exn = Error (http_error_of_exn exn) in
   let total_started_at =
     match body_deadline with
     | Unbounded -> None
@@ -2233,35 +2233,60 @@ let post_sync_once_after_validation
       , response_status
       , response_header_evidence
       , retry_after_header ) ->
-    let body_result =
+    let body_outcome =
       try
         match body_deadline, total_started_at with
-        | Unbounded, None -> read_response_body response_body
+        | Unbounded, None ->
+          (match read_response_body response_body with
+           | Ok body -> `Body body
+           | Error error -> `Failed error)
         | Bounded (clock, timeout_s), Some (_, started_at) ->
           let elapsed = Eio.Time.now clock -. started_at in
           let remaining = timeout_s -. elapsed in
           if remaining <= 0.0
-          then Error (total_deadline_error timeout_s)
+          then `Deadline_passed timeout_s
           else (
             match
               Eio.Time.with_timeout clock remaining (fun () ->
                 Ok (read_response_body response_body))
             with
-            | Ok result -> result
-            | Error `Timeout -> Error (total_deadline_error timeout_s))
+            | Ok (Ok body) -> `Body body
+            | Ok (Error error) -> `Failed error
+            | Error `Timeout -> `Deadline_passed timeout_s)
         | Unbounded, Some _ | Bounded _, None ->
           invalid_arg "Http_client.post_sync_once: inconsistent total deadline state"
       with
       | Eio.Time.Timeout as exn ->
         release_connection ();
         raise exn
-      | exn -> fail_exn exn
+      | exn -> `Failed (http_error_of_exn exn)
     in
-    (match body_result with
-     | Error error ->
+    let response_of body =
+      { response =
+          { status = response_status
+          ; body
+          ; retry_after_header
+          ; content_type = content_type_of_response_headers (Cohttp.Response.headers response)
+          }
+      ; response_header_evidence
+      }
+    in
+    (match body_outcome with
+     | `Failed error ->
        release_connection ();
        fail error
-     | Ok response_body ->
+     | `Deadline_passed timeout_s when Cohttp.Code.is_success response_status ->
+       (* The body is the answer; without it there is none. *)
+       release_connection ();
+       fail (total_deadline_error timeout_s)
+     | `Deadline_passed _ ->
+       (* A refusing status line is the provider's answer, and it is already
+          in hand with its headers: a body that does not arrive in time does
+          not turn the refusal into silence. The connection has unread
+          bytes on it and is not parked. *)
+       release_connection ();
+       Ok (response_of "")
+     | `Body response_body ->
        let release_result =
          match
            cache, response_connection_is_reusable ~request_headers:header response
@@ -2281,17 +2306,7 @@ let post_sync_once_after_validation
         | Error error ->
           release_connection ();
           fail error
-        | Ok () ->
-          Ok
-            { response =
-                { status = response_status
-                ; body = response_body
-                ; retry_after_header
-                ; content_type =
-                    content_type_of_response_headers (Cohttp.Response.headers response)
-                }
-            ; response_header_evidence
-            }))
+        | Ok () -> Ok (response_of response_body)))
 ;;
 
 let dispatch_sync_request

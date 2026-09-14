@@ -27,6 +27,10 @@
 - Schedule: a new occurrence supersedes the schedule's earlier pending occurrences in the keeper queue (#36230), and pending occurrences of one schedule collapse into one queue row (#36222).
 - Lanes: the DOS chain packages declare the binding contract their installer and workers already require (#36237).
 - TUI: the `/queue` snapshot reads as a timeline with ages, spans and the reason nothing drains (#36226).
+- Lanes: `e` freezes the marked lane rows and names the Keeper that receives the reference (#36248).
+- TUI: a press opens a call from the Activity pane, and the row marks how that call was dispatched (#36255).
+- TUI: a skill row says how far the skill got, and the help sheet explains every chat mark (#36268).
+- Exec shim: the sandbox probe reports whether seccomp user notification is available (#36229).
 
 ### Fixed
 
@@ -79,6 +83,15 @@
 - Lanes: an action commits its package output once and no longer forces a second observation (#36227).
 - TUI: a slash command's usage wraps on the cheat sheet instead of being cut (#36234), and a labelled field reads the failed word from where the title does (#36225).
 - TUI: the active runtime row states its one timestamp once (#36155); the Context row stops opening with the word its label already said (#36152); the Activity legend stops naming a mark no row draws (#36148); the screen says its timezone once, not on five rows (#36143); and the Overview names each transport path once, marking the one in use (#36136).
+- Agent core: a slot granted in the same instant a waiter's deadline passes is owned by that waiter instead of dropped, so an endpoint declaring one permit no longer stays saturated for the life of the process (#36279); and a refusal's body is read inside the pre-header window (#36261).
+- Keeper: a process with no clock refuses the attempt instead of running it unbounded (#36257); a no-progress threshold shorter than a stream budget the operator declared is refused, while a floored budget is left as the ceiling it is (#36265, #36275); and an out-of-range keeper timeout is refused rather than clamped, so an env override and `runtime.toml` give one answer (#36286).
+- Keeper Owner: metadata faults and operation-store faults hold separate slots, so an operation store under repair no longer refuses the keeper's own metadata commits (#36270); and fence recovery reopens under a non-chat child, not only when idle (#36260).
+- Runtime: `runtime-verify` installs the process clock its deadlines need, so a verification request carrying a body deadline is no longer refused as unenforceable (#36287); and the verify command bounds its HTTP arm on its own clock (#36263).
+- Schedule: one call cancels every pending occurrence of a schedule (#36254), and a `delivery=none` interval wake reads its own clock so occurrences follow consumption (#36249).
+- Keeper: `run_named` injects the stream idle bound itself (#36250), and a redacted thinking block counts as production rather than a carrier frame (#36271).
+- Lane add-ons: the package preview reads only manifests inside the workspace (#36269).
+- Dashboard: the keeper runtime panel stays on screen when the server reports fail-safe floors (#36247).
+- TUI: the Metrics safety block says what failed once instead of twice (#36253); an opened call's facts row leads with the disposition and fits the pane (#36262); the Planning title keeps its clock and badge (#36264); and the title's tab strip leaves room for what sits to its right (#36246).
 
 ### Documentation
 

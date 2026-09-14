@@ -959,6 +959,17 @@ let test_the_sheet_names_every_keeper_mark () =
             (String.length meaning > 0))
         entries
 
+(* The chat's tool and skill rows carry six outcome marks and eight skill
+   phrases, and until the sheet took the transcript's legend nothing on any
+   screen said what one meant. *)
+let test_the_sheet_explains_the_chat_marks () =
+  match List.assoc_opt "Chat marks" (Masc_tui_keys.help_sections ()) with
+  | None -> Alcotest.fail "the sheet has no Chat marks section"
+  | Some entries ->
+      Alcotest.(check int) "every legend row is on the sheet"
+        (List.length Masc_tui_keeper_chat_transcript.legend)
+        (List.length entries)
+
 (* The Keepers header words and the Mode S letters used to take two rows above
    the roster. The sheet holds them now, next to the marks. *)
 let test_the_sheet_explains_the_keeper_columns () =
@@ -2218,6 +2229,8 @@ let () =
             test_the_sheet_names_every_keeper_mark
         ; Alcotest.test_case "the sheet explains the keeper columns" `Quick
             test_the_sheet_explains_the_keeper_columns
+        ; Alcotest.test_case "the sheet explains the chat marks" `Quick
+            test_the_sheet_explains_the_chat_marks
         ; Alcotest.test_case "the sheet says the listing tail once" `Quick
             test_the_sheet_says_the_listing_tail_once
         ; Alcotest.test_case "Config names child hops" `Quick

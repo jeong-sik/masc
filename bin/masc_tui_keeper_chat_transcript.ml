@@ -559,6 +559,21 @@ let tools_for_outcome outcome activities =
        if count = 1 then name else Printf.sprintf "%s %d" name count)
 ;;
 
+(* The word the rollup counts an outcome by. One place, so the sheet's
+   legend prints the word the row does. *)
+let outcome_label = function
+  | Started -> "running"
+  | Awaiting_result -> "awaiting result"
+  | Returned -> "returned"
+  | Failed -> "failed"
+  | Never_returned -> "never returned"
+  | Outcome_unrecorded -> "outcome unrecorded"
+
+(* Every outcome, in the order the rollup lists them: what is still moving
+   first, then what finished, then what nothing can be said about. *)
+let all_outcomes =
+  [ Started; Awaiting_result; Returned; Failed; Never_returned; Outcome_unrecorded ]
+
 let compact_outcome_parts (activities : tool_activity list) =
   let count outcome =
     List.fold_left
@@ -566,13 +581,7 @@ let compact_outcome_parts (activities : tool_activity list) =
         if activity.outcome = outcome then total + 1 else total)
       0 activities
   in
-  [ Started, "running"
-  ; Awaiting_result, "awaiting result"
-  ; Returned, "returned"
-  ; Failed, "failed"
-  ; Never_returned, "never returned"
-  ; Outcome_unrecorded, "outcome unrecorded"
-  ]
+  List.map (fun outcome -> outcome, outcome_label outcome) all_outcomes
   |> List.filter_map (fun (outcome, label) ->
          match count outcome with
          | 0 -> None
@@ -747,27 +756,96 @@ let skill_activity_of_tool (activity : tool_activity) =
    the skill name, the name from the action count, and it used to part a
    state's own two words from each other. So "SERVED ONLY · DELIVERY NOT
    RECORDED" gave a reader no way to tell, from the row, whether that was one
-   state or two.
+   state or two. A phrase with two facts in it uses a comma.
 
-   The row answers one question -- was it handed over, and did anything come
-   of it -- so the phrases answer that question in the words someone would
-   use out loud. Two earlier passes wrote them as nouns instead (쓰임, 도착함,
-   전달됨) and a noun is not what a person says here.
+   A skill's life is three steps -- the model reads it, the server records
+   that the text was delivered, the model then uses a tool because of it --
+   and each phrase names how far along it got, in those three words. The
+   earlier phrases (보냈고 확인 중, 받고 안 씀, 받아서 씀) named the same
+   steps from the server's side, as sending and receiving, and the operator
+   reading the pane could not say who sent what to whom ("받아서 뭘 쓴다는
+   거야", 2026-09-14).
 
-   [Skill_delivered] and [Skill_used] differ by one syllable, 안, which is
-   what makes a column of them scannable. Naming it costs a word and is worth
-   it: the alternative was to leave the action count absent and let the reader
-   notice the absence, and noticing what is not there is not a thing a label
-   may ask for. *)
+   The last three are not steps of that life. [Skill_failed] is the read
+   itself failing. [Skill_evidence_missing] is this pane never seeing the
+   read come back -- the turn ended, or the pane opened after the call --
+   and the old word, 증거 없음, read as a verdict on the skill when it was a
+   fact about the pane. [Skill_evidence_unavailable] is a skill record the
+   server sent in a shape this build cannot read. *)
 let skill_state_label = function
-  | Skill_calling -> "부르는 중"
-  | Skill_served_pending -> "보냈고 확인 중"
-  | Skill_served_only -> "보냈는데 기록 없음"
-  | Skill_delivered -> "받고 안 씀"
-  | Skill_used -> "받아서 씀"
+  | Skill_calling -> "읽는 중"
+  | Skill_served_pending -> "읽음, 전달 확인 중"
+  | Skill_served_only -> "읽음, 전달 기록 없음"
+  | Skill_delivered -> "전달됨, 도구 안 씀"
+  | Skill_used -> "전달됨, 도구 씀"
   | Skill_failed -> "실패"
-  | Skill_evidence_missing -> "증거 없음"
-  | Skill_evidence_unavailable -> "증거 못 읽음"
+  | Skill_evidence_missing -> "결과 못 봄"
+  | Skill_evidence_unavailable -> "기록 형식 안 맞음"
+
+(* Every state, in the order of the skill's life, then the three that are
+   not steps of it. *)
+let all_skill_states =
+  [ Skill_calling
+  ; Skill_served_pending
+  ; Skill_served_only
+  ; Skill_delivered
+  ; Skill_used
+  ; Skill_failed
+  ; Skill_evidence_missing
+  ; Skill_evidence_unavailable
+  ]
+
+(* The two words a full skill row draws beside its ids and its actions,
+   named once so the legend explains the words the row prints. *)
+let proof_word = "proof"
+let observed_action_word = "observed action"
+
+(* What each mark and phrase on a tool or skill row means, for the help
+   sheet, in the shape the other legends take: the mark or phrase as the row
+   draws it, and what it says. Built from the same functions and words the
+   rows use, so the sheet cannot explain a mark the pane no longer draws. *)
+let legend =
+  let outcome_meaning = function
+    | Started -> "arguments still arriving"
+    | Awaiting_result -> "arguments sent, result not back yet"
+    | Returned -> "result came back"
+    | Failed -> "the tool answered with a failure"
+    | Never_returned ->
+        "the result was never seen here: the turn ended, or this pane \
+         opened after the call"
+    | Outcome_unrecorded ->
+        "the stored record has no outcome field; a gap in the record, not \
+         a failure"
+  in
+  let skill_meaning = function
+    | Skill_calling -> "the model asked to read the skill; nothing back yet"
+    | Skill_served_pending ->
+        "the skill text came back; the server's delivery record is not read yet"
+    | Skill_served_only ->
+        "the skill text came back; the server has no record of delivering it"
+    | Skill_delivered ->
+        "the server recorded the delivery; no tool call followed from it"
+    | Skill_used ->
+        "the server recorded the delivery and the tool calls the model made \
+         because of it (the rows marked observed action)"
+    | Skill_failed -> "reading the skill failed"
+    | Skill_evidence_missing ->
+        "this pane never saw the read come back; says nothing about the skill"
+    | Skill_evidence_unavailable ->
+        "the server's skill record is in a shape this build cannot read"
+  in
+  List.map
+    (fun outcome ->
+      marker_of_outcome outcome ^ " " ^ outcome_label outcome, outcome_meaning outcome)
+    all_outcomes
+  @ List.map
+      (fun state -> skill_state_label state, skill_meaning state)
+      all_skill_states
+  @ [ ( proof_word
+      , "the ids behind a skill row: use= the read call, turn= the turn, \
+         runtime= who ran it, rev= the skill text's revision" )
+    ; (observed_action_word, "a tool call the server attributes to the skill above it")
+    ]
 
 let short_proof value =
   let value = safe_line value in
@@ -795,7 +873,7 @@ let skill_rows ~full (activity : skill_activity) =
     let actions =
       List.map
         (fun action ->
-          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 observed action" action)
+          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 %s" action observed_action_word)
         activity.actions
     in
     let proof_parts =
@@ -811,7 +889,7 @@ let skill_rows ~full (activity : skill_activity) =
     let proof =
       match proof_parts with
       | [] -> []
-      | parts -> [ "  proof \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts ]
+      | parts -> [ "  " ^ proof_word ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts ]
     in
     let detail =
       match activity.detail with

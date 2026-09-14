@@ -992,6 +992,59 @@ let test_window_keeps_tool_lines_of_retained_turns () =
           Alcotest.(check string) "oldest retained turn is turn 2" "u2" first.content
       | [] -> Alcotest.fail "expected non-empty window")
 
+let test_window_drops_old_tool_lines_before_the_conversation () =
+  (* Every request to one keeper was answered with a few hundred tool calls,
+     so the window carried 388 tool rows and the 400-row guard left 11 user
+     rows and one assistant row of a two-day transcript (msx-retro-mania,
+     2026-09-14). The guard now bounds tool rows on their own: the oldest
+     tool row goes first, and every user and assistant row stays. *)
+  let base_dir = temp_base_path "keeper-chat-store-tool-cap" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool-cap" in
+      let tools_per_turn = 200 in
+      for turn = 1 to 3 do
+        K.append_turn ~base_dir ~keeper_name
+          ~user_content:(Printf.sprintf "u%d" turn)
+          ~user_attachments:[]
+          ~tool_calls:
+            (List.init tools_per_turn (fun i ->
+               { K.call_id = Printf.sprintf "t%d-%03d" turn i
+               ; execution_id = None
+               ; call_name = "masc_msx_step"
+               ; args = "{}"
+               }))
+          ~assistant_content:(Printf.sprintf "a%d" turn)
+          ()
+      done;
+      let messages = K.load ~base_dir ~keeper_name in
+      let primaries =
+        List.filter (fun (m : K.chat_message) -> not (K.Role.equal m.role K.Role.Tool)) messages
+      in
+      Alcotest.(check (list string)) "every user and assistant row survives 600 tool rows"
+        [ "u1"; "a1"; "u2"; "a2"; "u3"; "a3" ]
+        (List.map (fun (m : K.chat_message) -> m.content) primaries);
+      let tool_rows_of turn =
+        let prefix = Printf.sprintf "t%d-" turn in
+        List.filter
+          (fun (m : K.chat_message) ->
+            K.Role.equal m.role K.Role.Tool
+            && (match m.tool_call_id with
+                | Some id -> String.starts_with ~prefix id
+                | None -> false))
+          messages
+        |> List.length
+      in
+      Alcotest.(check int) "the window holds the newest 300 tool rows" 300
+        (List.length messages - List.length primaries);
+      Alcotest.(check int) "the newest turn keeps every tool row" tools_per_turn (tool_rows_of 3);
+      Alcotest.(check int) "the middle turn keeps its newest 100" 100 (tool_rows_of 2);
+      Alcotest.(check int) "the oldest turn keeps its conversation, not its tools" 0 (tool_rows_of 1);
+      match messages with
+      | first :: _ -> Alcotest.(check string) "the window still opens on the oldest user line" "u1" first.content
+      | [] -> Alcotest.fail "expected non-empty window")
+
 let test_orphan_leading_tool_lines_trimmed () =
   let base_dir = temp_base_path "keeper-chat-store-orphan" in
   Fun.protect
@@ -3392,6 +3445,8 @@ let () =
             test_load_redacts_raw_persisted_secret_rows;
           Alcotest.test_case "window counts primaries only" `Quick
             test_window_keeps_tool_lines_of_retained_turns;
+          Alcotest.test_case "window drops old tool lines before the conversation" `Quick
+            test_window_drops_old_tool_lines_before_the_conversation;
           Alcotest.test_case "orphan leading tool lines trimmed" `Quick
             test_orphan_leading_tool_lines_trimmed;
           Alcotest.test_case "leading failure tool batch is retained" `Quick

@@ -2284,10 +2284,19 @@ let parse_line ~file_path (line : string) : chat_message option =
 
 (* Window bounds for [load]. [max_history] counts user/assistant
    messages only, so tool lines never shrink the visible conversation
-   depth. [max_total_lines] is the absolute guard (tool lines included)
-   against a pathological tool-spam turn blowing up the payload. *)
+   depth. [max_secondary_lines] bounds every other row (tool rows and
+   system receipts) so a tool-heavy turn cannot blow up the payload; the
+   two together keep the window at or under [max_total_lines]. The bound
+   used to be applied to the whole window from its oldest row, which made
+   the tool rows shrink the conversation after all: one keeper whose every
+   request was answered with a few hundred game-controller tool calls
+   carried 388 tool rows in the window, and the 400-row guard left 11 user
+   rows and one assistant row of a two-day transcript (msx-retro-mania,
+   2026-09-14). Now the oldest tool row goes first and the conversation
+   stays. *)
 let max_history = 100
 let max_total_lines = 400
+let max_secondary_lines = max_total_lines - max_history
 
 let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
@@ -2401,14 +2410,31 @@ let load_page ~base_dir ~keeper_name ?before () : page =
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
-       user/assistant messages plus their tool lines. *)
+       user/assistant messages plus the newest [max_secondary_lines] of
+       their tool lines and receipts. A primary over the bound takes the
+       whole front of the window with it, down to and including the oldest
+       primary; a secondary over its bound takes only the oldest secondary,
+       wherever it sits, so the conversation around it stays. *)
     let q = Queue.create () in
     let primary_count = ref 0 in
+    let secondary_count = ref 0 in
     let evicted = ref false in
     let pop_front () =
       evicted := true;
       let popped = Queue.pop q in
-      if is_history_primary popped then decr primary_count
+      if is_history_primary popped then decr primary_count else decr secondary_count
+    in
+    let drop_oldest_secondary () =
+      evicted := true;
+      decr secondary_count;
+      let rec without_first_secondary = function
+        | [] -> []
+        | msg :: rest when is_history_primary msg -> msg :: without_first_secondary rest
+        | _ :: rest -> rest
+      in
+      let kept = Queue.fold (fun acc msg -> msg :: acc) [] q |> List.rev |> without_first_secondary in
+      Queue.clear q;
+      List.iter (fun msg -> Queue.push msg q) kept
     in
     List.iter
       (fun line ->
@@ -2417,12 +2443,12 @@ let load_page ~base_dir ~keeper_name ?before () : page =
           match parse_line ~file_path:path trimmed with
           | Some msg when keep msg ->
               Queue.push msg q;
-              if is_history_primary msg then incr primary_count;
-              while
-                !primary_count > max_history
-                || Queue.length q > max_total_lines
-              do
+              if is_history_primary msg then incr primary_count else incr secondary_count;
+              while !primary_count > max_history do
                 pop_front ()
+              done;
+              while !secondary_count > max_secondary_lines do
+                drop_oldest_secondary ()
               done
           | Some _ | None -> ())
       (slice_lines ~path ~from ~upto);

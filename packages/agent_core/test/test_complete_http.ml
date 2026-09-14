@@ -2778,6 +2778,135 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
   | Exit -> ()
 ;;
 
+(* A frame that projects nothing the classifier names -- a usage-bearing
+   message_delta on its own, the shape of an OpenAI-compatible usage-only
+   final chunk -- must not put the stream back to "awaiting the first
+   delta" once output has been seen: a stall after it is an idle gap in the
+   state the last production left, and the phase, the message and the
+   telemetry all say so. (A content_block_stop is not such a frame: the
+   classifier names it a tool-call completion.) *)
+let anthropic_sse_frame_usage_only =
+  "event: message_delta\n\
+   data: \
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+;;
+
+let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+let timeout_telemetry telemetry =
+  List.filter_map
+    (function
+      | Telemetry_event.Timeout { timeout_type; _ } -> Some timeout_type
+      | _ -> None)
+    !telemetry
+;;
+
+let test_complete_stream_idle_after_output_keeps_the_production_state () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "hello"
+        ; 0.0, anthropic_sse_frame_usage_only
+        ; 0.5, anthropic_sse_frame_message_stop
+        ]
+    in
+    let config = make_config url in
+    let telemetry = ref [] in
+    match
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~stream_idle_timeout_s:0.08
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+        ()
+    with
+    | Error
+        (Http_client.TimeoutError
+           { phase = Http_client.Stream_idle Http_client.Streaming_answer; message }) ->
+      let expected = "stream_idle_timeout_s deadline exceeded while streaming_answer" in
+      check string "the message names the idle knob and the production state" expected message;
+      check
+        (list (testable Telemetry_event.pp_timeout_type ( = )))
+        "the telemetry timeout carries the same state"
+        [ Telemetry_event.Stream_idle Http_client.Streaming_answer ]
+        (timeout_telemetry telemetry);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { phase; message }) ->
+      failf
+        "a stall after output must be an idle gap in streaming_answer, got %s (%s)"
+        (Http_client.timeout_phase_to_label phase)
+        message
+    | Ok _ -> fail "expected the stall after the usage frame to end the stream"
+    | Error _ -> fail "expected TimeoutError{phase=Stream_idle Streaming_answer}"
+  with
+  | Exit -> ()
+;;
+
+(* Before any output the budget that ran out was the one to the first
+   token, and the telemetry says that too, whatever frame last moved the
+   reader's state. *)
+let test_complete_stream_first_event_timeout_telemetry_is_ttft () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.5, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "late"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let config = make_config url in
+    let telemetry = ref [] in
+    match
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ~first_event_timeout_s:0.08
+        ~config
+        ~messages
+        ~on_event:(fun _ -> ())
+        ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
+        ()
+    with
+    | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
+      check
+        (list (testable Telemetry_event.pp_timeout_type ( = )))
+        "the telemetry timeout is the first-token budget"
+        [ Telemetry_event.Ttft_exceeded ]
+        (timeout_telemetry telemetry);
+      Eio.Switch.fail sw Exit
+    | Error (Http_client.TimeoutError { phase; message }) ->
+      failf
+        "a stall before output is First_token, got %s (%s)"
+        (Http_client.timeout_phase_to_label phase)
+        message
+    | Ok _ -> fail "expected the first-event budget to end the stream"
+    | Error _ -> fail "expected TimeoutError{phase=First_token}"
+  with
+  | Exit -> ()
+;;
+
 let test_complete_stream_idle_timeout_still_fires () =
   Eio_main.run
   @@ fun env ->
@@ -4404,6 +4533,14 @@ let () =
             "stream idle timeout still fires"
             `Quick
             test_complete_stream_idle_timeout_still_fires
+        ; test_case
+            "an idle gap after output keeps the production state"
+            `Quick
+            test_complete_stream_idle_after_output_keeps_the_production_state
+        ; test_case
+            "a first-event timeout's telemetry is the first-token budget"
+            `Quick
+            test_complete_stream_first_event_timeout_telemetry_is_ttft
         ; test_case
             "Responses opening frame keeps the first-event budget"
             `Quick

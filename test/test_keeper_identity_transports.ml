@@ -153,12 +153,13 @@ let test_the_mcp_transport_ends_at_its_deadline () =
     | Ok _ -> fail "a server that never answers opened a session")
 ;;
 
-(* [turn.provider_call_deadline_sec] is clamped to [30, 3600] where it is
-   read, so thirty seconds is the shortest deadline a declared threshold can
-   produce. Paid once: it is the proof that the keeper's threshold reaches
+(* [turn.provider_call_deadline_sec] has a declared range whose lower bound
+   is the shortest deadline a declared threshold can produce; a value below
+   it is refused where it is read. Paid once: it is the proof that the keeper's threshold reaches
    the wire through {!Keeper_identity_tools.http_transports}, the transport
    every live identity call is built from. *)
-let shortest_declared_threshold_s = 30.0
+let shortest_declared_threshold_s =
+  Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
 let threshold_slack_s = 5.0
 
 let with_declared_provider_call_deadline seconds f =

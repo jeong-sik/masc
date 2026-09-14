@@ -104,27 +104,36 @@ val first_event_timeout_sec : unit -> float
 val body_timeout_override_sec : unit -> float option
 
 val provider_call_deadline_failsafe_floor_sec : float
-(** Fail-safe no-progress threshold for a provider call attempt, in seconds
-    (900.0 = 15 min). Substituted for [provider_call_deadline_sec] when no
-    explicit value is configured, so a default install runs the attempt
-    watchdog and bounds a tool's provider sub-call instead of holding a
-    keeper on an attempt that never produces a token. Thirty times the
-    longest legitimate progress gap measured in a healthy turn (120 s,
-    2026-08-12) and above the two 600 s stream floors, so a silent prefill is
-    ended by the reader's typed first-token timeout first. A universal
-    liveness ceiling, not a per-provider tuned default; an explicit env/toml
-    value overrides it. *)
+(** Fail-safe no-progress threshold for a provider call attempt, in seconds.
+    Substituted for [provider_call_deadline_sec] when no explicit value is
+    configured, so a default install runs the attempt watchdog and bounds a
+    tool's provider sub-call instead of holding a keeper on an attempt that
+    never produces a token. The value the live workspace has carried since
+    2026-08-07 (#27416), validated by the 2026-08-12 measurement: 7.5 times
+    the longest legitimate progress gap of a healthy turn (120 s) and a
+    quarter of the wedge it caught (65 min); above the two stream floors,
+    so a silent prefill is ended by the reader's typed first-token timeout
+    first. A universal liveness ceiling, not a per-provider tuned default;
+    an explicit env/toml value overrides it. *)
 
-(** The keeper's no-progress threshold for a provider call attempt (#27349,
-    measured against the turn's progress signal since #28417). The attempt
-    watchdog ends an attempt that made no progress for this long while no
-    tool is in flight and no approval is pending; a tool's provider sub-call
-    runs under it ({!Keeper_provider_subcall}). An explicit
+(** The keeper's no-progress threshold for a provider call attempt on the
+    Agent Core HTTP lane (#27349, measured against the turn's progress
+    signal since #28417). The attempt watchdog ends an attempt that made no
+    progress for this long while no tool is in flight and no approval is
+    pending; a tool's provider sub-call runs under it
+    ({!Keeper_provider_subcall}), and so does the identity tools' MCP
+    transport ({!Keeper_identity_tools}). The official-client lanes (Codex,
+    Claude Code, Antigravity) do not pass through it; their turn window and
+    wall-clock ceiling are declared on their bindings. An explicit
     [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
     [turn.provider_call_deadline_sec]) honoured verbatim, or when unset
     {!provider_call_deadline_failsafe_floor_sec}. There is no "off": a
     keeper turn that could not be ended by this threshold would be one only
-    an operator could end.
+    an operator could end. It is never shorter than a stream budget the
+    operator declared: that pair raises {!Env_config_core.Config_error}
+    when the configuration is frozen, since the declared budget could never
+    be reached. A floored budget is a ceiling, not an allowance, so an
+    explicit threshold shorter than one stands.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float

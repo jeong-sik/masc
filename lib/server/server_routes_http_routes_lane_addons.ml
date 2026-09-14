@@ -71,7 +71,24 @@ let get_package_preview request reqd =
         | ["manifest_path",path] when String.trim path<>"" -> Ok path
         | _ -> Error "package preview requires one manifest_path" in
       let config = Mcp_server.workspace_config state in
-      let path = if Filename.is_relative path then Filename.concat config.Workspace.base_path path else path in
+      (* The only filesystem path this API takes from a request. Relative
+         names are read against the workspace, and the result has to stay
+         there: without this an absolute name was opened as given, and a
+         relative one kept its [..], so a read token reached any manifest on
+         the host and the parse error told the caller what sat at a path it
+         could not otherwise see. Symlinks resolve first, so a link inside
+         the workspace cannot point out of it either.
+
+         The refusal names no path and does not say whether one exists,
+         which is why a missing file outside the workspace and a real one
+         read alike. *)
+      let base = Exec_policy_paths.resolve_path config.Workspace.base_path in
+      let resolved =
+        Exec_policy_paths.resolve_path ~base_dir:config.Workspace.base_path path
+      in
+      let* path =
+        if Exec_policy_paths.is_within_dir ~dir:base resolved then Ok resolved
+        else Error "manifest_path must name a file inside the workspace" in
       let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
           |> Result.map_error Lane_addon_manifest.error_to_string in
       let inspection = match state.Mcp_server.proc_mgr with

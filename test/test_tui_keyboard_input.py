@@ -13190,7 +13190,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # The fixture closes the stream right after its one frame, so the
         # row the test can rely on is the closed one; it keeps the count.
         wait_for_output(
-            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+            process, master_fd, output, b"feed: closed 1", start=0, timeout=10.0
         )
         initialize = [body for path, body in requests if path == "/mcp"]
         if len(initialize) != 1:
@@ -13280,7 +13280,7 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         _base_path: str,
     ) -> None:
         wait_for_output(
-            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+            process, master_fd, output, b"feed: closed 1", start=0, timeout=10.0
         )
         send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")

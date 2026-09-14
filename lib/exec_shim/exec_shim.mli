@@ -243,6 +243,21 @@ val child_boundary_of_ack : string -> Exec_ssh_protocol.execution_boundary
     write ruleset). Empty/invalid/incomplete bytes mean unavailable
     evidence, never applied restrictions. *)
 
+exception Sandbox_refused_socket
+(** The child's seccomp socket filter could not be installed: the box did
+    NOT apply. Raised in the forked child before exec, caught by {!spawn}
+    and reported as the "N" acknowledgement. *)
+
+exception Sandbox_refused_write
+(** The child's Landlock write ruleset could not be installed: the box did
+    NOT apply. Reported as the "W" acknowledgement. *)
+
+val refusal_of_rule_bytes : bytes -> exn
+(** Map the C stub's fixed-size rule-name buffer to the refusal exception
+    that names it, trimming trailing NUL padding by content. Pure, so the
+    emission mapping is pinned by a test without a real seccomp/Landlock
+    refusal; an unrecognized rule raises [Failure]. *)
+
 val scratch_env : scratch:string -> (string * string) list -> (string * string) list
 (** The payload environment with HOME and TMPDIR pointing at the scratch. *)
 

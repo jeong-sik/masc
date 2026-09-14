@@ -425,6 +425,24 @@ let scratch_env ~scratch env =
 exception Sandbox_refused_socket
 exception Sandbox_refused_write
 
+(* The C stub writes the rule name into a fixed 8-byte buffer and leaves the
+   rest zeroed, so the raw bytes are never equal to the bare tag. Trim the
+   NUL padding by content -- a hardcoded length is exactly how the "N"/"W"
+   path went dead once (review 5192723206). Pure, so the emission mapping is
+   testable without a real seccomp/Landlock refusal. *)
+let refusal_of_rule_bytes (rule : bytes) =
+  let n = Bytes.length rule in
+  let rec last_non_nul i =
+    if i < 0 then 0
+    else if Bytes.get rule i = '\000' then last_non_nul (i - 1)
+    else i + 1
+  in
+  match Bytes.sub_string rule 0 (last_non_nul (n - 1)) with
+  | "socket" -> Sandbox_refused_socket
+  | "write" -> Sandbox_refused_write
+  | padded -> failwith ("box setup refused by unknown rule: " ^ padded)
+;;
+
 let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
   let opened = ref [] in
   let pipe ?(cloexec = false) () =
@@ -847,21 +865,13 @@ let run () =
                           from the syscall that failed -- the parent never
                           guesses it back out of stderr. The name crosses
                           the boundary pipe as the acknowledgement byte's
-                          companion: "R" + rule. [Bytes.sub] trims the NUL
-                          padding before matching: the C stub writes the
-                          rule name into a fixed 8-byte buffer and leaves
-                          the rest zeroed, so the raw bytes are never
-                          equal to the bare tag. *)
+                          companion: "R" + rule. [refusal_of_rule_bytes]
+                          trims the NUL padding by content; the mapping is
+                          pure so the emission path is testable without a
+                          real seccomp/Landlock refusal. *)
                        if restrict_self scratch deny_fs deny_net refusing_rule = 0
                        then ()
-                       else begin
-                         match Bytes.sub_string refusing_rule 0 6 with
-                         | "socket" -> raise Sandbox_refused_socket
-                         | "write" -> raise Sandbox_refused_write
-                         | padded ->
-                           failwith
-                             ("box setup refused by unknown rule: " ^ padded)
-                       end)
+                       else raise (refusal_of_rule_bytes refusing_rule))
                  , (fun () -> remove_tree scratch) ) in
              let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
                try spawn ~before_exec ~argv ~env ~cwd () with

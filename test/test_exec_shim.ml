@@ -468,6 +468,35 @@ let test_child_boundary_acknowledgements () =
      "", Child_ack_unavailable; "E", Child_ack_unavailable;
      "AA", Child_ack_unavailable; "AEX", Child_ack_unavailable]
 
+(* Review 5192723206: the "N"/"W" path once went dead because the raw
+   8-byte buffer never equalled the bare tag. Pin the emission mapping
+   itself -- the C stub's fixed-size buffer with NUL padding -- so the
+   path cannot go dead again without a red test. *)
+let test_refusal_of_rule_bytes () =
+  let padded s =
+    let b = Bytes.make 8 '\000' in
+    Bytes.blit_string s 0 b 0 (String.length s);
+    b
+  in
+  let expect name rule expected =
+    match Exec_shim.refusal_of_rule_bytes (padded rule) with
+    | exn -> check bool name true (exn = expected)
+  in
+  expect "socket rule -> Sandbox_refused_socket" "socket"
+    Exec_shim.Sandbox_refused_socket;
+  expect "write rule -> Sandbox_refused_write" "write"
+    Exec_shim.Sandbox_refused_write;
+  (* A full 8-byte name (no padding) must still match by content. *)
+  let full = Bytes.of_string "socket\000\000" in
+  check bool "socket with two NULs still matches" true
+    (Exec_shim.refusal_of_rule_bytes full = Exec_shim.Sandbox_refused_socket);
+  (* An unrecognized rule is a loud failure, never a silent allow. *)
+  (match Exec_shim.refusal_of_rule_bytes (padded "other") with
+   | exception Failure _ -> ()
+   | exn ->
+     failf "unknown rule should raise Failure, got %s"
+       (Printexc.to_string exn))
+
 let () =
   run "exec shim"
     [ "env", [ test_case "minimal base env" `Quick test_minimal_base_env
@@ -513,6 +542,8 @@ let () =
     ; "probe", [ test_case "identity" `Quick test_probe_identity ]
     ; "box", [ test_case "child-owned boundary acknowledgement" `Quick
                  test_child_boundary_acknowledgements
+             ; test_case "refusal rule emission mapping" `Quick
+                 test_refusal_of_rule_bytes
              ; test_case "plan for mode" `Quick test_plan_for_mode
              ; test_case "scratch env" `Quick test_scratch_env
              ; test_case "scratch_root config" `Quick test_parse_config_scratch_root

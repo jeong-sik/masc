@@ -1,6 +1,15 @@
 (** Source adapters reuse existing lane owners. They acquire observations only;
     packages decide what those observations mean. Files are explicitly bound by
     the installer, never dereferenced from package output. *)
+type browser_selection = Live of Browser_lane.client_id | Automation
+type source =
+  | Snapshot_file of { id : string; path : string }
+  | Msx_capture of { id : string }
+  | Lane_output of { id : string; installation_id : string; output_id : string option }
+  | Browser_document of { id : string; selection : browser_selection;
+      tab_id : int; target_id : string; environment : string; request_id : string }
+val parse : Yojson.Safe.t -> (source list, string) result
+(** Typed source bindings shared by acquisition and read-only presentation. *)
 val validate : Yojson.Safe.t -> (unit, string) result
 type activity = Tool_completed | Msx_changed | Browser_changed
 type refresh_interest

@@ -1362,22 +1362,34 @@ let render_approvals (state : state) =
     | None -> ""
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
-  let type_breakdown =
-    let held_c = List.length state.keeper_tool_approvals in
-    let gate_c = List.length state.gate_pending in
-    let op_c = List.length (operator_approval_items state) in
-    if count > 0 then
-      Printf.sprintf " [%s%d held%s · %s%d gate%s · %s%d op%s]"
-        (Theme.warn ()) held_c Ansi.reset
-        (Theme.bad ()) gate_c Ansi.reset
-        (Theme.info ()) op_c Ansi.reset
-    else ""
+  (* The count and where it came from, naming only the lists that have a row
+     on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
+     with nothing in them, a bracket inside the parenthesis, and a total the
+     one kind that did have rows had already said. With one kind its count is
+     the total; with more, the total leads and the kinds follow it. *)
+  let count_text =
+    let kinds =
+      [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
+      ; (Theme.bad (), List.length state.gate_pending, "gate")
+      ; (Theme.info (), List.length (operator_approval_items state), "op")
+      ]
+      |> List.filter_map (fun (style, kind_count, word) ->
+             if kind_count = 0 then None
+             else
+               Some
+                 (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    match kinds with
+    | [] -> string_of_int count
+    | [ only ] -> only
+    | several ->
+      Printf.sprintf "%d: %s" count (String.concat " \xc2\xb7 " several)
   in
   let header =
     Printf.sprintf
-      "%s (%d%s%s%s)  %s  %s%s"
+      "%s (%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count type_breakdown queue_note held_note timestamp
+      count_text queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 

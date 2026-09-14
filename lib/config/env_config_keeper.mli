@@ -204,9 +204,12 @@ module KeeperKeepalive : sig
   (** Explicit streaming-provider idle-gap timeout as the operator wrote it.
       [None] means no explicit value (the resolved layer substitutes
       {!stream_idle_failsafe_floor_sec}, RFC-0345); MASC does not infer a
-      timeout from provider/model kind. A configured value must be finite and
-      strictly positive or configuration loading raises
-      {!Env_config_core.Config_error}. *)
+      timeout from provider/model kind. A configured value must be finite,
+      strictly positive and at most {!provider_call_deadline_max_sec}: a
+      budget longer than the longest no-progress threshold could never be
+      allowed by any threshold, so it is refused where it is read rather
+      than at every boot by the freeze rule. Otherwise configuration loading
+      raises {!Env_config_core.Config_error}. *)
 
   val first_event_failsafe_floor_sec : float
   (** Resolved runtime fallback used only when the explicit first-event
@@ -220,8 +223,9 @@ module KeeperKeepalive : sig
       {!stream_idle_timeout_sec} bounds inter-line gaps after it
       (RFC-AC-037). [None] means no explicit
       value (the resolved layer substitutes the fail-safe floor). A configured
-      value must be finite and strictly positive or configuration loading
-      raises {!Env_config_core.Config_error}. *)
+      value must be finite, strictly positive and at most
+      {!provider_call_deadline_max_sec}, as for {!stream_idle_timeout_sec},
+      or configuration loading raises {!Env_config_core.Config_error}. *)
 
   val body_timeout_min_sec : float
   val body_timeout_max_sec : float

@@ -275,7 +275,11 @@ let all =
       ~category:"turn"
       "Pass the thinking-mode request to the selected runtime"
   ; setting
-      ~range:(float_range ~min_exclusive:0.0 ())
+      ~range:
+        (float_range
+           ~min_exclusive:0.0
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
       ~env_name:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
       ~exposure:(Toml_and_env "turn.stream_idle_timeout_sec")
       ~value_kind:Float
@@ -287,7 +291,11 @@ let all =
       ~category:"turn"
       "Streaming provider inter-line idle timeout"
   ; setting
-      ~range:(float_range ~min_exclusive:0.0 ())
+      ~range:
+        (float_range
+           ~min_exclusive:0.0
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
       ~env_name:Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key
       ~exposure:(Toml_and_env "turn.first_event_timeout_sec")
       ~value_kind:Float

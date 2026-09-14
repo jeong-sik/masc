@@ -602,15 +602,17 @@ val post_stream
     it can be reused across requests. [f] must consume the full response
     body; leaving unread bytes on the reader will corrupt the next reuse.
 
-    The phase before the response headers -- the connection (TCP, TLS),
-    the request and the wait for the status line -- runs under the
-    narrower of [connect_timeout_s] and [first_event_timeout_s]; either
-    requires [clock], and a budget supplied without it returns
-    [AcceptRejected]. A stall the connect budget ends surfaces as
+    The phase before the first body read -- the connection (TCP, TLS),
+    the request, the wait for the status line and, when the status is not
+    200, the whole refusal body -- runs under the narrower of
+    [connect_timeout_s] and [first_event_timeout_s]; either requires
+    [clock], and a budget supplied without it returns [AcceptRejected]. A
+    stall the connect budget ends surfaces as
     [TimeoutError { phase = Http_operation; _ }]; one the first-event
     budget ends surfaces as [TimeoutError { phase = First_token; _ }], the
-    provider having been silent for the whole time allowed before a first
-    token. With neither supplied the phase is unbounded. DNS resolution runs
+    provider having sent neither a first token nor a complete refusal in
+    the whole time allowed before a first token. With neither supplied the
+    phase is unbounded. DNS resolution runs
     in a systhread the window cannot cancel: a closed window is observed
     once the lookup returns, and until then the resolver's own timeout is
     the bound. [f] still arms the first-event budget on the reader itself

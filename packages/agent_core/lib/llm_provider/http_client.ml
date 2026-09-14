@@ -2581,14 +2581,15 @@ let with_post_stream
     | Some c -> c.sw
     | None -> sw
   in
-  (* Phase 1a: the connection, the request and the response headers, one
-     window under [deadline] (see [pre_header_deadline]). The connection is
-     made inside the window: the TCP connect and the TLS handshake are the
-     first things a dead or blackholed endpoint stalls on. Cohttp_eio.Client.post
-     returns once headers are parsed (body is a lazy flow), so wrapping only
-     this stage in [catch_network] keeps a pre-header stall as a
-     [TimeoutError] named for its budget without absorbing body-phase
-     timeouts (first-token / prefill wait, inter-chunk idle).
+  (* Phase 1a: the connection, the request, the response headers and, for a
+     status other than 200, the refusal body, one window under [deadline]
+     (see [pre_header_deadline]). The connection is made inside the window:
+     the TCP connect and the TLS handshake are the first things a dead or
+     blackholed endpoint stalls on. Cohttp_eio.Client.post returns once
+     headers are parsed (body is a lazy flow), so a 200's body is left to
+     [f]: wrapping only this stage in [catch_network] keeps a pre-header
+     stall as a [TimeoutError] named for its budget without absorbing
+     body-phase timeouts (first-token / prefill wait, inter-chunk idle).
 
      Streaming is handled manually rather than through [with_client] so the
      connection is NOT parked until [f] has fully consumed the reader. *)
@@ -2600,7 +2601,7 @@ let with_post_stream
         :: maybe_add_connection_close ?cache headers
       in
       let hdr = Http.Header.of_list headers_with_length in
-      let* conn, transport_eof_seen, resp, resp_body =
+      let* answer =
         with_explicit_deadline deadline (fun () ->
           let* conn =
             match cache with
@@ -2625,7 +2626,34 @@ let with_post_stream
               ~body:(Cohttp_eio.Body.of_string body)
               origin.uri
           with
-          | resp, resp_body -> Ok (conn, transport_eof_seen, resp, resp_body)
+          | resp, resp_body ->
+            let status = Cohttp.Response.status resp in
+            Option.iter
+              (fun observe -> observe (Cohttp.Code.code_of_status status))
+              on_response_status;
+            (match status with
+             | `OK -> Ok (`Stream_headers (conn, transport_eof_seen, resp, resp_body))
+             | _ ->
+               (* A refusal's body is the provider's whole answer, and it is
+                  read inside the window: a peer that sends a status line and
+                  then nothing runs out the same budget a silent prefill
+                  does, instead of holding the caller until something outside
+                  this client gives up. The window closing arrives here as
+                  cancellation, as it does for the request above. *)
+               (match read_response_body resp_body with
+                | Ok refusal_body -> Ok (`Refusal (conn, resp, refusal_body))
+                | Error err ->
+                  Eio.Resource.close conn;
+                  Error err
+                | exception (Eio.Cancel.Cancelled _ as exn) ->
+                  Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
+                  raise exn
+                | exception exn ->
+                  Eio.Resource.close conn;
+                  (match classify_network_exn exn with
+                   | Some e -> Error e
+                   | None when !transport_eof_seen -> Error (eof_error exn)
+                   | None -> raise exn)))
           | exception (Eio.Cancel.Cancelled _ as exn) ->
             (* The window closing arrives here as cancellation, and so does
                an outer cancel; either way the socket must not outlive the
@@ -2644,49 +2672,40 @@ let with_post_stream
              | None when !transport_eof_seen -> Error (eof_error exn)
              | None -> raise exn))
       in
-      try
-        let status = Cohttp.Response.status resp in
-        Option.iter
-          (fun observe -> observe (Cohttp.Code.code_of_status status))
-          on_response_status;
-        match status with
-        | `OK ->
-          (* EOF proves the body was drained; it does not prove the connection
-             may be reused. A response with neither content-length nor chunked
-             framing is delimited BY the close, so its EOF arrives precisely
-             because the peer went away. The same predicate the synchronous
-             path uses answers the second question. *)
-          let reusable = response_connection_is_reusable ~request_headers:hdr resp in
-          let safe_body = safe_cohttp_response_flow resp_body in
-          let reader =
-            Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body
-          in
-          Ok (origin, conn, reusable, transport_eof_seen, reader)
-        | status ->
-          let code = Cohttp.Code.code_of_status status in
-          let resp_headers = Cohttp.Response.headers resp in
-          let retry_after_header = retry_after_header_of_response_headers resp_headers in
-          (match read_response_body resp_body with
-           | Ok body_str ->
-             profile_opaque_client_error
-               ~url
-               ~code
-               ~resp_headers
-               ~request_headers:headers_with_length
-               ~request_body:body
-               ~response_body:body_str;
-             Eio.Resource.close conn;
-             Error (HttpError { code; body = body_str; retry_after_header })
-           | Error err ->
-             Eio.Resource.close conn;
-             Error err)
-      with
-      | exn ->
+      match answer with
+      | `Refusal (conn, resp, refusal_body) ->
+        let code = Cohttp.Code.code_of_status (Cohttp.Response.status resp) in
+        let resp_headers = Cohttp.Response.headers resp in
+        let retry_after_header = retry_after_header_of_response_headers resp_headers in
+        profile_opaque_client_error
+          ~url
+          ~code
+          ~resp_headers
+          ~request_headers:headers_with_length
+          ~request_body:body
+          ~response_body:refusal_body;
         Eio.Resource.close conn;
-        (match classify_network_exn exn with
-         | Some e -> Error e
-         | None when !transport_eof_seen -> Error (eof_error exn)
-         | None -> raise exn))
+        Error (HttpError { code; body = refusal_body; retry_after_header })
+      | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
+        (try
+           (* EOF proves the body was drained; it does not prove the connection
+              may be reused. A response with neither content-length nor chunked
+              framing is delimited BY the close, so its EOF arrives precisely
+              because the peer went away. The same predicate the synchronous
+              path uses answers the second question. *)
+           let reusable = response_connection_is_reusable ~request_headers:hdr resp in
+           let safe_body = safe_cohttp_response_flow resp_body in
+           let reader =
+             Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body
+           in
+           Ok (origin, conn, reusable, transport_eof_seen, reader)
+         with
+         | exn ->
+           Eio.Resource.close conn;
+           (match classify_network_exn exn with
+            | Some e -> Error e
+            | None when !transport_eof_seen -> Error (eof_error exn)
+            | None -> raise exn)))
   in
   (* [catch_network] names every [Eio.Time.Timeout] [Http_operation]. When
      the window that closed was the first-event budget, the provider was
@@ -2699,7 +2718,9 @@ let with_post_stream
     | Error (TimeoutError { phase = Http_operation; _ }), First_event_budget ->
       Error
         (TimeoutError
-           { message = "no response headers before the first-event budget ran out"
+           { message =
+               "no response headers, or no complete refusal body, before the \
+                first-event budget ran out"
            ; phase = First_token
            })
     | (Ok _ | Error _), (Connect_budget | First_event_budget) -> post_result

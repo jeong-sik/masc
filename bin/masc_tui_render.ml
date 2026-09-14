@@ -5496,11 +5496,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
+          (screen_title " MASC Config / Runtime / Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") shown timestamp
+          (screen_title " MASC Config / Runtime / Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;

@@ -8,7 +8,9 @@
     held it the same way, past the headers. These cases run the real client
     against loopback listeners that stall at one of those points, and read
     the elapsed time off the clock, so a hang is a failure at
-    [outer_budget_s] and not a wait. *)
+    [outer_budget_s] and not a wait. The last group crosses the headers: the
+    reader arms what the pre-header phase left of the first-event budget,
+    not a second full one. *)
 
 module Http_client = Llm_provider.Http_client
 
@@ -298,9 +300,16 @@ let test_a_complete_refusal_is_still_the_typed_http_error () =
    The accounting is split between [with_post_stream], which spends the
    pre-header part and hands over what is left, and the streaming
    completion, which arms that remainder on the reader; only the streaming
-   completion observes both halves, so this case drives it. *)
-let late_headers_after_s = 0.4
-let one_window_budget_s = 0.5
+   completion observes both halves, so this case drives it.
+
+   Two things separate "the reader ended it" from "the pre-header window
+   ended it at the same instant", which a loaded runner can otherwise blur:
+   the headers are late by [slack_s], the same allowance the other cases
+   grant a loaded runner, so the pre-header window closing first would need
+   the headers delayed past that; and the reader's entry is observed, since
+   [Types.Connected] is emitted only once [f] is entered. *)
+let late_headers_after_s = slack_s
+let one_window_budget_s = slack_s +. 0.5
 let two_windows_total_s = late_headers_after_s +. one_window_budget_s
 
 let test_the_first_event_budget_is_one_window_across_the_headers () =
@@ -317,6 +326,7 @@ let test_the_first_event_budget_is_one_window_across_the_headers () =
       ()
   in
   let started = Eio.Time.now clock in
+  let reader_entered = ref false in
   let outcome =
     try
       Eio.Time.with_timeout_exn clock outer_budget_s (fun () ->
@@ -330,7 +340,9 @@ let test_the_first_event_budget_is_one_window_across_the_headers () =
                 ~first_event_timeout_s:one_window_budget_s
                 ~config
                 ~messages:[ Llm_provider.Types.user_msg "hello" ]
-                ~on_event:(fun _ -> ())
+                ~on_event:(function
+                  | Llm_provider.Types.Connected -> reader_entered := true
+                  | _ -> ())
                 ())))
     with
     | Eio.Time.Timeout -> Hung
@@ -340,6 +352,12 @@ let test_the_first_event_budget_is_one_window_across_the_headers () =
    | Ended (Error (Http_client.TimeoutError { phase = Http_client.First_token; _ })) -> ()
    | other ->
      Alcotest.failf "expected TimeoutError phase=first_token, got %s after %.2fs" (describe other) elapsed);
+  if not !reader_entered
+  then
+    Alcotest.failf
+      "the pre-header window ended the call at %.2fs before the reader was entered; the case \
+       proves nothing about the reader's budget"
+      elapsed;
   if elapsed < one_window_budget_s || elapsed >= two_windows_total_s
   then
     Alcotest.failf

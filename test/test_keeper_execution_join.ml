@@ -625,16 +625,16 @@ let test_input_capacity_projection_preserves_evidence () =
     (Some "input_rejected")
     (string_of_field (member "kind" reason_json))
 
-(* [Retry.Timeout] carries a typed phase that separates an admission or queue
-   wait from a streaming stall. The arm bound only [message], so every timeout
-   reached the wire indistinguishable from every other one. *)
+(* [Retry.Timeout] carries a typed phase that separates a queue wait from a
+   streaming stall. The arm bound only [message], so every timeout reached
+   the wire indistinguishable from every other one. *)
 let test_timeout_projection_preserves_phase () =
   let projection =
     Error_json.agent_failed_error_projection
       (Agent_core.Error.Api
          (Agent_core.Retry.Timeout
             { message = "per-provider timeout after 90.0s"
-            ; phase = Some Llm_provider.Http_client.Admission
+            ; phase = Some Llm_provider.Http_client.Queue
             }))
   in
   check
@@ -647,7 +647,7 @@ let test_timeout_projection_preserves_phase () =
     "typed phase"
     (Some
        (Llm_provider.Http_client.timeout_phase_to_label
-          Llm_provider.Http_client.Admission))
+          Llm_provider.Http_client.Queue))
     (string_of_field (member "timeout_phase" projection.error_detail))
 
 (* An absent phase stays absent on the wire. Naming one would report a phase

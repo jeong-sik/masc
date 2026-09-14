@@ -48,13 +48,13 @@ let api_timeout phase =
 
 let test_timeout_threads_phase () =
   Alcotest.(check (option string))
-    "an admission-phase timeout stays an admission-phase timeout"
+    "a queue-phase timeout stays a queue-phase timeout"
     (Some
        (Llm_provider.Http_client.timeout_phase_to_label
-          Llm_provider.Http_client.Admission))
+          Llm_provider.Http_client.Queue))
     (timeout_phase_label_of_outcome
        (KRA.core_error_to_runtime_outcome
-          (api_timeout (Some Llm_provider.Http_client.Admission))))
+          (api_timeout (Some Llm_provider.Http_client.Queue))))
 
 let test_timeout_without_phase_is_unknown () =
   Alcotest.(check (option string))

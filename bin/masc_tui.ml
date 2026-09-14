@@ -16907,22 +16907,15 @@ and is loaded on demand through keeper_skill.
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Some detail})
                       | _ -> ())
+                 (* A line that takes letters owns them. This branch answered
+                    "3", "q", "r" and "s" as surface commands first, so typing
+                    a file name with one of those letters in it lost the letter
+                    and ran the command: "terminal.toml" refreshed the surface
+                    at its "r" and arrived as "al.toml". Esc closes the line and
+                    every one of those keys is there. *)
                  | None,None, Some draft ->
                      (match key with
-                      | "3" -> update {view with focus=Addons.Configurations;scroll=0}
                       | "esc" -> update { view with draft = None }
-                      | "q" ->
-                          (* q always leaves the add-on surface while keeping
-                             the editable draft available on reopen. *)
-                          state.lane_addons_cached <- view;
-                          state.lane_addons <- None
-                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
-                      | "s" ->
-                          (match Addons.selected_document view with
-                           | None -> update {view with error=Some "Open a TOML declaration before saving"}
-                           | Some session ->
-                               launch_lane_declaration state ~mailbox:async_messages
-                                 ~edit:false (Masc_tui_lane_declaration.Save session))
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with

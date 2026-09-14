@@ -69,6 +69,14 @@ type config =
         has one deadline for its whole call (a verification probe, a fusion
         panelist) sets this together with [body_timeout_s]; the streaming
         path does not read it. *)
+  ; admission_timeout_s : float option
+    (** Bound on the wait for the provider's admission permit before a
+        streaming completion. A keeper turn queued behind other keepers'
+        streams on the same binding ends the wait as
+        [TimeoutError { phase = Queue }] when it runs out, and rotates, instead
+        of the attempt watchdog ending it as no progress; a granted stream
+        runs under its own budgets. The keeper passes its no-progress
+        threshold. *)
   ; max_tokens : int option
     (** Caller-level output-token override. [None] adds no override, so an
         explicit [provider_cfg.max_tokens] remains authoritative; when both are
@@ -161,6 +169,7 @@ let default_config
   ; first_event_timeout_s = None
   ; body_timeout_s = None
   ; call_timeout_s = None
+  ; admission_timeout_s = None
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
   ; hooks = None
@@ -293,6 +302,11 @@ let builder
   let builder =
     match config.call_timeout_s with
     | Some s -> Agent_core.Builder.with_call_timeout s builder
+    | None -> builder
+  in
+  let builder =
+    match config.admission_timeout_s with
+    | Some s -> Agent_core.Builder.with_admission_timeout s builder
     | None -> builder
   in
   let builder =
@@ -440,6 +454,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; first_event_timeout_s = config.first_event_timeout_s
     ; body_timeout_s = config.body_timeout_s
     ; call_timeout_s = config.call_timeout_s
+    ; admission_timeout_s = config.admission_timeout_s
     ; context_injector = config.context_injector
     ; tool_approval = config.tool_approval
     ; event_bus = config.event_bus

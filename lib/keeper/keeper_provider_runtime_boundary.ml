@@ -37,6 +37,7 @@ type timeout_phase =
   | Caller_budget
   | Wall_clock
   | Capacity_backpressure
+  | Queue
   | Unknown_timeout
 
 let timeout_phase_of_label label =
@@ -71,6 +72,7 @@ let timeout_phase_of_label label =
       Some Wall_clock
     | "capacity_backpressure" | "client_capacity" | "client_capacity_full" ->
       Some Capacity_backpressure
+    | "queue" -> Some Queue
     | "unknown_timeout" -> Some Unknown_timeout
     | _ -> None
 ;;
@@ -120,9 +122,12 @@ let timeout_phase_of_agent_core_phase :
   | Wall_clock -> Some Wall_clock
   | Capacity_backpressure -> Some Capacity_backpressure
   | Unknown_timeout -> Some Unknown_timeout
-  (* MASC's vocabulary has no pre-request phases; the label path dropped
-     them to [None] and the typed map preserves that. *)
-  | Admission | Queue -> None
+  (* [Queue] is the wait for a provider admission permit that ran out of its
+     bound with nothing sent: the keeper's sub-call, and since the stream
+     admission bound its turn attempts, produce it. [Admission] is Agent
+     Core's pre-flight vocabulary with no producer on a keeper path. *)
+  | Queue -> Some Queue
+  | Admission -> None
 ;;
 
 let suffix_after_prefix text prefix =

@@ -54,6 +54,7 @@ type options = Agent_types.options =
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
   ; call_timeout_s : float option
+  ; admission_timeout_s : float option
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

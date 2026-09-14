@@ -27,6 +27,9 @@ type timeout_phase =
   | Caller_budget
   | Wall_clock
   | Capacity_backpressure
+  | Queue
+      (** The wait for a provider admission permit ran out of its bound
+          before the permit was granted; nothing was sent. *)
   | Unknown_timeout
 
 type timeout_source =

@@ -364,11 +364,21 @@ val complete_serialized
     the non-streaming path. On the streaming path it is the fallback bound for
     the first-event wait when [first_event_timeout_s] is [None] — the common
     production shape (callers wire [body_timeout_s], not
-    [first_event_timeout_s]). *)
+    [first_event_timeout_s]).
+
+    [admission_timeout_s] bounds the one part of a stream call that is not the
+    stream: the wait for the provider's admission permit
+    ([max_concurrent_requests]). A call still queued when it runs out ends as
+    [TimeoutError { phase = Queue }] with nothing sent; once the permit is
+    granted the stream runs under its own budgets and this value plays no
+    further part. Requires [clock]; omitted, the wait is unbounded. The same
+    parameter is on {!complete_stream_admitted} and
+    {!complete_stream_serialized}. *)
 val complete_stream
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
+  -> ?admission_timeout_s:float
   -> ?stream_idle_timeout_s:float
   -> ?first_event_timeout_s:float
   -> ?body_timeout_s:float
@@ -395,6 +405,7 @@ val complete_stream_admitted
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
+  -> ?admission_timeout_s:float
   -> ?transport:Llm_transport.t
   -> ?wire_observer:Wire_observer.try_observe
   -> ?request_wire_observer:Request_wire_observer.try_observe
@@ -411,6 +422,7 @@ val complete_stream_serialized
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
+  -> ?admission_timeout_s:float
   -> ?transport:Llm_transport.t
   -> ?wire_observer:Wire_observer.try_observe
   -> ?request_wire_observer:Request_wire_observer.try_observe

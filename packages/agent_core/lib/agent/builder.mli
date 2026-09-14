@@ -109,6 +109,15 @@ val with_body_timeout : float -> t -> t
     not read it. Requires a clock on the underlying request. @since 0.231.15 *)
 val with_call_timeout : float -> t -> t
 
+(** Set the bound on the wait for a provider admission permit before a
+    streaming completion. A call still queued when it runs out ends as
+    [TimeoutError { phase = Queue }] with nothing sent; a granted stream runs
+    under its own budgets ([with_stream_idle_timeout],
+    [with_first_event_timeout]). The non-streaming path's whole-call bound is
+    [with_call_timeout]. Requires a clock on the underlying request.
+    @since 0.231.15 *)
+val with_admission_timeout : float -> t -> t
+
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 val with_description : string -> t -> t

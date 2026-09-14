@@ -353,6 +353,7 @@ let dispatch_stream
            ~sw
            ~net:agent.net
            ?clock
+           ?admission_timeout_s:agent.options.admission_timeout_s
            ?transport:agent.options.transport
            serialized
            ~on_event
@@ -392,6 +393,7 @@ let dispatch_stream
                     ~sw
                     ~net:agent.net
                     ?clock
+                    ?admission_timeout_s:agent.options.admission_timeout_s
                     ?transport:agent.options.transport
                     admitted
                     ~on_event

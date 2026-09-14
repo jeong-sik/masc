@@ -671,12 +671,16 @@ val with_post_stream
     so it must not be cut by the short [idle_timeout] value. The reader
     cannot tell output from a provider's opening frame, so it does not try:
     the consumer returns [Continue Output] or [Continue Prelude] from
-    [on_data] and the reader switches budgets on the first [Output]. An
-    [event] field, a bare blank line and a [Prelude] event all leave the
-    first-event wait armed. Ending it on any of them would replace the
-    caller's first-event bound with the shorter inter-token one before the
-    model produced anything — and when only [first_event_timeout] is wired,
-    it would leave the read unarmed entirely.
+    [on_data] and the reader switches budgets on the first [Output]. The
+    first-event budget is one window from the first body read to that
+    [Output]: an [event] field, a bare blank line, a keepalive comment and a
+    [Prelude] event neither end it nor extend it, so it bounds the whole wait
+    for the first token, as its name says. Ending it on any of them would
+    replace the caller's first-event bound with the shorter inter-token one
+    before the model produced anything, and when only [first_event_timeout]
+    is wired it would leave the read unarmed entirely; extending it on any of
+    them would let a provider that never produces hold the stream open with
+    one prelude frame per budget.
     The effective bound is resolved from caller-supplied values only, in the
     order [first_event_timeout] > [body_timeout] (the caller's total body
     budget) > [idle_timeout] (the pre-RFC bound, kept so callers that wired
@@ -732,10 +736,12 @@ type stream_continuation =
     bound, so without this a provider that never sends the blank dispatch
     boundary grows the accumulator without limit.
 
-    The armed deadline is anchored to the last payload-bearing line, not to the
-    last line read: comments, [id]/[retry]/unknown fields and bare delimiters
-    do not renew it, so a provider cannot hold the stream open by emitting one
-    ignorable line per budget. *)
+    The armed deadline is anchored, not per read. Until the first [Output] the
+    anchor is the first body read and no line moves it; after it the anchor is
+    the last payload-bearing line. Comments, [id]/[retry]/unknown fields and
+    bare delimiters never renew a budget, so a provider cannot hold the stream
+    open by emitting one ignorable line per budget, and a prelude frame cannot
+    do it before the first token either. *)
 
 val read_sse
   :  ?clock:_ Eio.Time.clock
@@ -753,9 +759,10 @@ val read_sse
     yield an empty payload. Returns normally on [End_of_file].
 
     When both [clock] and [idle_timeout] are supplied, raises
-    [Eio.Time.Timeout] if no line arrives within [idle_timeout]
-    seconds. The deadline resets after each successful line, so this
-    bounds inter-line idle — not total stream duration. Supplying
+    [Eio.Time.Timeout] if, once the stream has produced, no line arrives
+    within [idle_timeout] seconds of the last non-blank line, so this bounds
+    inter-line idle, not total stream duration; a blank line does not renew
+    it. Supplying
     [idle_timeout] WITHOUT [clock] raises [Invalid_argument] (silent
     disarm removed). The raised timeout should be caught by the caller
     and surfaced as [TimeoutError { phase = Stream_idle state; _ }] so
@@ -764,9 +771,10 @@ val read_sse
     Agent Core contract: [first_event_timeout], when supplied (with [clock]),
     bounds the wait for the first line the consumer reports as [Output] — the
     time-to-first-token (prefill) window — separately from [idle_timeout],
-    which arms only after that first output for inter-token idle. A leading
-    blank line and a line reported as [Prelude] do NOT end the first-event
-    wait. Omitting [first_event_timeout] falls back to
+    which arms only after that first output for inter-token idle. The
+    first-event budget is one window from the first body read to that
+    [Output]: a blank line and a line reported as [Prelude] neither end it
+    nor extend it. Omitting [first_event_timeout] falls back to
     [body_timeout], then to [idle_timeout]; with none supplied the wait stays
     unarmed, as before this change. Inter-token idle still guards once the
     stream produces. Supplying [first_event_timeout] or [body_timeout] WITHOUT

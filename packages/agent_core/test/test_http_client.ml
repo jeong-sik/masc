@@ -452,6 +452,94 @@ let test_read_ndjson_idle_without_clock_raises () =
       (Util.contains_substring_ci ~haystack:msg ~needle:"idle_timeout")
 ;;
 
+(* The first-event budget is one window to the first [Output] line, not one
+   per prelude line. Four prelude lines 0.3 s apart keep every gap under the
+   1.0 s budget; the line the consumer would report as [Output] is written at
+   1.2 s, past the window, so the read must time out before it arrives. A
+   reader that re-armed the window on each prelude line would deliver it. *)
+let test_read_ndjson_prelude_lines_do_not_extend_the_first_event_budget () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let delivered = ref [] in
+  let timed_out = ref false in
+  let output_line = "{\"out\":1}" in
+  Eio.Fiber.both
+    (fun () ->
+       List.iter
+         (fun line ->
+            Eio.Flow.copy_string line sink;
+            Eio.Time.sleep clock 0.3)
+         [ "{\"prelude\":1}\n"; "{\"prelude\":2}\n"; "{\"prelude\":3}\n"; "{\"prelude\":4}\n" ];
+       Eio.Flow.copy_string (output_line ^ "\n") sink;
+       Eio.Flow.close sink)
+    (fun () ->
+       match
+         Http_client.read_ndjson
+           ~clock
+           ~first_event_timeout:1.0
+           ~reader
+           ~on_line:(fun line ->
+             delivered := line :: !delivered;
+             Http_client.Continue
+               (if String.equal line output_line then Http_client.Output else Http_client.Prelude))
+           ()
+       with
+       | () -> ()
+       | exception Eio.Time.Timeout -> timed_out := true);
+  if not !timed_out
+  then
+    Alcotest.failf
+      "prelude lines extended the first-event budget: read to EOF with %d lines"
+      (List.length !delivered);
+  Alcotest.(check bool)
+    "the output line was never delivered"
+    false
+    (List.mem output_line !delivered)
+;;
+
+(* Control for the case above: the same prelude cadence with the output line
+   inside the window is read to the end, so the case above fails on the
+   window and not on how prelude lines are handled. *)
+let test_read_ndjson_prelude_lines_keep_the_first_event_budget () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let delivered = ref [] in
+  let output_line = "{\"out\":1}" in
+  Eio.Fiber.both
+    (fun () ->
+       List.iter
+         (fun line ->
+            Eio.Flow.copy_string line sink;
+            Eio.Time.sleep clock 0.2)
+         [ "{\"prelude\":1}\n"; "{\"prelude\":2}\n" ];
+       Eio.Flow.copy_string (output_line ^ "\n") sink;
+       Eio.Flow.close sink)
+    (fun () ->
+       Http_client.read_ndjson
+         ~clock
+         ~first_event_timeout:1.0
+         ~reader
+         ~on_line:(fun line ->
+           delivered := line :: !delivered;
+           Http_client.Continue
+             (if String.equal line output_line then Http_client.Output else Http_client.Prelude))
+         ());
+  Alcotest.(check (list string))
+    "every line was read"
+    [ "{\"prelude\":1}"; "{\"prelude\":2}"; output_line ]
+    (List.rev !delivered)
+;;
+
 let test_post_stream_invalid_url_returns_network_error () =
   Eio_main.run
   @@ fun env ->
@@ -1155,6 +1243,14 @@ let () =
             "Stop leaves the rest of the body unread"
             `Quick
             test_read_ndjson_stop_leaves_the_rest_of_the_body_unread
+        ; Alcotest.test_case
+            "prelude lines do not extend the first-event budget"
+            `Quick
+            test_read_ndjson_prelude_lines_do_not_extend_the_first_event_budget
+        ; Alcotest.test_case
+            "prelude lines keep the first-event budget"
+            `Quick
+            test_read_ndjson_prelude_lines_keep_the_first_event_budget
         ] )
     ; ( "timeout_phase"
       , [ Alcotest.test_case "policy labels" `Quick test_timeout_phase_policy_labels

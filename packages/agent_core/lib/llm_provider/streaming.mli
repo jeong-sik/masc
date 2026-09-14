@@ -20,13 +20,16 @@ val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
     is [Complete] §publish_summary. *)
 
 (** [true] when the SSE event represents the first generated
-    token delta. That means a [ContentBlockDelta] carrying a
+    content. That means a [ContentBlockDelta] carrying a
     non-empty [TextDelta] / [TextSnapshot] / [ThinkingDelta] / [ReasoningDetailsDelta] /
-    [InputJsonDelta] / [InputJsonSnapshot] payload. Prelude events
-    ([MessageStart], [ContentBlockStart], [ThinkingSignatureDelta] and
-    [RedactedThinkingSnapshot] carriers,
-    [Ping]), terminator events ([MessageStop], [MessageDelta] with no usage),
-    and error events return [false].
+    [InputJsonDelta] / [InputJsonSnapshot] / [MediaDelta] /
+    [RedactedThinkingSnapshot] payload, or the [ContentBlockStart] of a
+    [redacted_thinking] block carrying its data: a redacted block is
+    generated content the caller receives, so the model has produced.
+    Prelude events ([MessageStart], every other [ContentBlockStart],
+    [ThinkingSignatureDelta] carriers, [Ping]), terminator events
+    ([MessageStop], [MessageDelta] with no usage), and error events return
+    [false].
 
     @stability Internal *)
 val sse_event_is_first_token_signal : sse_event -> bool

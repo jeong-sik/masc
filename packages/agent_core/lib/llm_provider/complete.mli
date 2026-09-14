@@ -330,13 +330,15 @@ val complete_serialized
     (CLI subprocess) ignore
     [stream_idle_timeout_s].
 
-    Agent Core contract: [first_event_timeout_s], when set, bounds the wait for the
-    first token-bearing streaming event separately from
-    [stream_idle_timeout_s]. Until a text, thinking, tool-argument or media
-    delta arrives the read is bounded by [first_event_timeout_s];
+    Agent Core contract: [first_event_timeout_s], when set, bounds the whole
+    wait for the first token-bearing streaming event separately from
+    [stream_idle_timeout_s]. Until a text, thinking, tool-argument, media or
+    redacted-thinking payload arrives the read is bounded by one
+    [first_event_timeout_s] window from the first body read;
     [stream_idle_timeout_s] arms for inter-token idle only after it. A
     provider's opening frame (Responses [response.created], Anthropic
-    [message_start]) arrives before prefill and does not end that wait. This
+    [message_start]) arrives before prefill and neither ends that window nor
+    extends it. This
     prevents a slow-but-alive silent prefill on a large context (no
     keepalives) from being cancelled as [phase=first_token] under the short
     inter-token idle value. When omitted the first-event wait falls back

@@ -2900,17 +2900,21 @@ let read_sse
      With nothing wired the wait stays unarmed, as before. Inter-token idle
      still guards once the stream produces. *)
   let first_output_seen = ref false in
-  (* The armed budget is anchored to the last PAYLOAD-bearing line, not to the
-     last line read. Comments are consumed inside one window for exactly this
-     reason; [id]/[retry]/unknown fields and bare dispatch delimiters carry no
-     payload either, and a per-read window lets a provider hold the stream open
+  (* The armed budget is anchored, never per read. Before the first [Output]
+     the anchor is the first body read and nothing moves it: the first-event
+     budget bounds the whole wait for the first token, so an opening frame, a
+     keepalive payload or any other line the consumer reports as [Prelude]
+     does not buy the provider another full budget, which is what the knob's
+     name promises the operator. After the first [Output] the anchor is the
+     last PAYLOAD-bearing line: comments are consumed inside one window,
+     [id]/[retry]/unknown fields and bare dispatch delimiters carry no payload
+     either, and a per-read window would let a provider hold the stream open
      forever by emitting one ignorable line just under each budget. A blank
-     delimiter cannot simply be swallowed inside the window — it must still
-     reach [loop] to dispatch and to reset the event type — so the anchor, not
-     the filter, is what closes that shape. A payload line renews whichever
-     budget is armed; the switch from the first-event budget to inter-token
-     idle happens at dispatch, when the consumer reports the first [Output],
-     and measures from the payload line that carried it. *)
+     delimiter cannot simply be swallowed inside the window (it must still
+     reach [loop] to dispatch and to reset the event type), so the anchor, not
+     the filter, is what closes that shape. The switch happens at dispatch,
+     when the consumer reports the first [Output], and the inter-token budget
+     measures from that dispatch. *)
   let budget_anchor = ref None in
   let first_line = ref true in
   let read_protocol_line () =
@@ -2958,15 +2962,17 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* Only a payload line renews the armed budget. The switch to the
-       inter-token idle budget is not made here: a data field is provider
-       bytes, not necessarily model output, and only the consumer can tell an
-       opening frame from a token. [dispatch_event] flips [first_output_seen]
-       when [on_data] reports [Output].
+    (* Only a payload line renews the armed budget, and only once the stream
+       has produced: before the first [Output] the first-event budget runs
+       from its anchor to the first token whatever arrives in between. The
+       switch is not made here either: a data field is provider bytes, not
+       necessarily model output, and only the consumer can tell an opening
+       frame from a token. [dispatch_event] flips [first_output_seen] when
+       [on_data] reports [Output].
        [Sse_comment] is already filtered inside [inner]; the only non-field
        line [inner] can return is [Sse_blank]. *)
     (match parsed with
-     | Sse_data _ -> budget_anchor := None
+     | Sse_data _ -> if !first_output_seen then budget_anchor := None
      | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
      | Sse_comment -> () (* unreachable: filtered in [inner] *));
     parsed
@@ -2984,7 +2990,13 @@ let read_sse
         Buffer.clear data_buffer;
         data_seen := false;
         (match continuation with
-         | Continue Output -> first_output_seen := true
+         | Continue Output ->
+           if not !first_output_seen
+           then (
+             (* The inter-token budget measures from this dispatch, not from
+                the first body read the first-event anchor was taken at. *)
+             first_output_seen := true;
+             budget_anchor := None)
          | Continue Prelude | Stop -> ());
         continuation)
       else Continue Prelude
@@ -3003,7 +3015,7 @@ let read_sse
          consumer's decision and the socket's lifetime are the same event. *)
       (match dispatch_event () with
        | Stop -> ()
-       | Continue _ -> loop ())
+       | Continue (Output | Prelude) -> loop ())
     | Sse_comment ->
       (* Filtered inside [read_meaningful_line]. *)
       loop ()
@@ -3047,17 +3059,18 @@ let read_sse
     Skips blank lines so a trailing newline does not yield an empty payload.
     Returns normally on [End_of_file].
 
-    When [clock] and [idle_timeout] are both set, each line read is
-    wrapped in [Eio.Time.with_timeout_exn] so a stalled stream raises
-    [Eio.Time.Timeout] after [idle_timeout] seconds of silence.
+    When [clock] and [idle_timeout] are both set, a stalled stream raises
+    [Eio.Time.Timeout] after [idle_timeout] seconds of silence measured from
+    the last non-blank line; a blank line does not renew it.
 
-    Agent Core contract: the wait for the FIRST line is the time-to-first-event
-    (TTFT / prefill) window, bounded by [first_event_timeout] when set;
+    Agent Core contract: the wait for the first line the consumer reports as
+    [Output] is the time-to-first-event (TTFT / prefill) window, one window
+    from the first body read, bounded by [first_event_timeout] when set;
     otherwise it falls back to [body_timeout], then to [idle_timeout] (the
     pre-RFC bound), and stays unarmed when the caller wired none of them.
-    [idle_timeout] arms only after the first line the consumer reports as
-    [Output]; a blank line or an opening frame does not switch budgets (SSE
-    parity). *)
+    [idle_timeout] arms only after that first [Output]; a blank line or a
+    line reported as [Prelude] neither switches budgets nor extends the
+    window (SSE parity). *)
 let read_ndjson
       ?clock
       ?idle_timeout
@@ -3071,6 +3084,12 @@ let read_ndjson
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
   let first_output_seen = ref false in
+  (* Anchored like [read_sse]: the first-event budget runs from the first
+     body read to the first line the consumer reports as [Output], and a
+     [Prelude] line or a blank line in between does not extend it; after that
+     the inter-line budget measures from the last non-blank line, so a blank
+     line does not renew it either. *)
+  let budget_anchor = ref None in
   let read_line () =
     let active_timeout =
       if !first_output_seen
@@ -3079,13 +3098,27 @@ let read_ndjson
     in
     let line =
       match clock, active_timeout with
-      | Some c, Some t ->
-        Eio.Time.with_timeout_exn c t (fun () -> Eio.Buf_read.line reader)
+      | Some c, Some budget ->
+        let anchored_at =
+          match !budget_anchor with
+          | Some t -> t
+          | None ->
+            let t = Eio.Time.now c in
+            budget_anchor := Some t;
+            t
+        in
+        let remaining = anchored_at +. budget -. Eio.Time.now c in
+        if Float.compare remaining 0. <= 0
+        then raise Eio.Time.Timeout
+        else Eio.Time.with_timeout_exn c remaining (fun () -> Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is
          best-effort rather than a loud failure here. *)
       | None, _ -> Eio.Buf_read.line reader
     in
+    (match line with
+     | "" -> ()
+     | _ -> if !first_output_seen then budget_anchor := None);
     line
   in
   let rec loop () =
@@ -3095,7 +3128,10 @@ let read_ndjson
       (match on_line line with
        | Stop -> ()
        | Continue Output ->
-         first_output_seen := true;
+         if not !first_output_seen
+         then (
+           first_output_seen := true;
+           budget_anchor := None);
          loop ()
        | Continue Prelude -> loop ())
     | exception End_of_file -> ()

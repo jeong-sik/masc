@@ -130,12 +130,13 @@ let test_event_fields_do_not_end_first_event_budget () =
 ;;
 
 let test_prelude_event_keeps_the_first_event_budget () =
-  (* A Responses stream opens with [response.created] before prefill. The
-     consumer reports it as [Prelude], so the first-event budget (1.0) stays
-     armed across the following gap and "out" is delivered; "out" is
-     [Output], so the inter-token budget (0.3) arms and the next gap trips
-     it. A reader that switched budgets on the first data line trips on the
-     blank after "created" and delivers nothing. *)
+  (* A Responses stream opens with [response.created] before prefill. Each
+     event arrives whole, one per gap: "created" at 0.4 is [Prelude], so the
+     first-event budget (1.0, anchored at the first read) stays armed and
+     "out" at 0.8 is delivered; "out" is [Output], so the inter-token budget
+     (0.3) arms at that dispatch and the read for "more" at 1.2 trips it. A
+     reader that switched budgets on the first data line would have armed
+     0.3 at "created" and tripped before "out". *)
   let classify data =
     if String.equal data "created" then Http_client.Prelude else Http_client.Output
   in
@@ -143,7 +144,7 @@ let test_prelude_event_keeps_the_first_event_budget () =
     read_sse_over
       ~classify
       ~budget_kind:`Both
-      [ "data: created\n"; "\n"; "data: out\n"; "\n"; "data: more\n"; "\n" ]
+      [ "data: created\n\n"; "data: out\n\n"; "data: more\n\n" ]
   with
   | Error (`Timed_out delivered) ->
     check
@@ -154,6 +155,34 @@ let test_prelude_event_keeps_the_first_event_budget () =
   | Ok events ->
     failf
       "prelude stream ran to EOF instead of tripping the inter-token budget (%d events)"
+      (List.length events)
+;;
+
+let test_prelude_events_do_not_extend_the_first_event_budget () =
+  (* The first-event budget is one window to the first token, not one per
+     prelude frame. Prelude events every 0.4 keep each gap under the 1.0
+     budget, and the read after the second one lands at 1.2, past the anchor
+     taken at the first read: the budget trips with two prelude events
+     delivered and the token never read. A reader that re-anchored on every
+     payload line would read "out" at 1.6 and run to EOF. *)
+  let classify data =
+    if String.equal data "out" then Http_client.Output else Http_client.Prelude
+  in
+  match
+    read_sse_over
+      ~classify
+      ~budget_kind:`First_event
+      [ "data: created\n\n"; "data: ping\n\n"; "data: ping\n\n"; "data: out\n\n" ]
+  with
+  | Error (`Timed_out delivered) ->
+    check
+      (list (pair (option string) string))
+      "prelude events delivered before the first-event budget tripped"
+      [ None, "created"; None, "ping" ]
+      delivered
+  | Ok events ->
+    failf
+      "prelude frames extended the first-event budget: ran to EOF with %d events"
       (List.length events)
 ;;
 
@@ -210,6 +239,10 @@ let () =
             "a prelude event keeps the first-event budget"
             `Quick
             test_prelude_event_keeps_the_first_event_budget
+        ; test_case
+            "prelude events do not extend the first-event budget"
+            `Quick
+            test_prelude_events_do_not_extend_the_first_event_budget
         ] )
     ; ( "idle"
       , [ test_case

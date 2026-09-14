@@ -332,9 +332,9 @@ call that began before the feed opened shows none.
 turn to one row while leaving internal agent runs and approvals separate.
 `actions` shows the flat calls, returns, turn boundaries, settlements, and chat
 events. `everything` additionally shows heartbeats, composite/snapshot pushes,
-chat stream frames, waiting-queue changes, and telemetry. Its quiet gray `·`
-rows are state observations, not failures; `composite` specifically means the
-Keeper composite snapshot changed. `agent start`/`agent done` are internal
+chat stream frames, waiting-queue changes, and telemetry. Its quiet gray rows
+carry no mark at all, and are state observations rather than failures;
+`composite` specifically means the Keeper composite snapshot changed. `agent start`/`agent done` are internal
 agent runs rather than Keeper turn boundaries. The current scope and these
 meanings are printed above the table, not hidden in this guide. An event kind
 this build was not taught always draws by its wire name, so a new kind is

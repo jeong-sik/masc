@@ -21,7 +21,13 @@ let filter_explanation = function
   | Actions ->
       "scope actions · flat calls/returns/turn/chat · state pushes hidden"
   | Everything ->
-      "scope everything · gray · = state/telemetry · composite = Keeper snapshot changed"
+      (* The middle dot left this line with the mark it named. #33691 took the
+         dot off a quiet row -- it read as the roster's idle glyph -- so
+         [glyph_text Quiet] draws a blank cell and gray is the only cue a
+         quiet row still carries. The legend went on naming the dot, on a row
+         whose own separator is that same dot, so the reader could not tell
+         which of the three was being explained. *)
+      "scope everything · gray = state/telemetry · composite = Keeper snapshot changed"
 ;;
 
 (* One feed event as the screen holds it. The arrival time is here rather than

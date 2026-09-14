@@ -131,6 +131,64 @@ let format_context_tokens tokens =
   else
     Printf.sprintf "%d" tokens
 
+let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
+  let default_target =
+    match state.runtime_surface with
+    | Some s -> s.rss_resolved.rrs_default_runtime_id
+    | None -> None
+  in
+  state.keepers
+  |> List.filter (fun (k : Tui_decode.keeper) ->
+       match
+         List.find_opt
+           (fun (a : Tui_decode.runtime_assignment) ->
+              String.equal a.ra_keeper k.k_name)
+           state.runtime_assignments
+       with
+       | Some a ->
+           (match a.ra_target_id with
+            | Some target -> String.equal target lane_id
+            | None ->
+                match default_target with
+                | Some def -> String.equal def lane_id
+                | None -> false)
+       | None ->
+           match default_target with
+           | Some def -> String.equal def lane_id
+           | None -> false)
+
+let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keeper list =
+  let default_target =
+    match state.runtime_surface with
+    | Some s -> s.rss_resolved.rrs_default_runtime_id
+    | None -> None
+  in
+  state.keepers
+  |> List.filter (fun (k : Tui_decode.keeper) ->
+       match
+         List.find_opt
+           (fun (a : Tui_decode.runtime_assignment) ->
+              String.equal a.ra_keeper k.k_name)
+           state.runtime_assignments
+       with
+       | Some a ->
+           (match a.ra_target_id with
+            | Some target -> String.equal target runtime_id
+            | None ->
+                match default_target with
+                | Some def -> String.equal def runtime_id
+                | None -> false)
+       | None ->
+           match default_target with
+           | Some def -> String.equal def runtime_id
+           | None -> false)
+
+let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
+  let turns = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_turns) 0 keepers in
+  let tokens = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_tokens) 0 keepers in
+  let cost = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc +. k.k_total_cost_usd) 0.0 keepers in
+  turns, tokens, cost
+
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -4562,6 +4620,36 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
   in
+  let run_stats =
+    let total = lane.sl_retained_run_count in
+    if total > 0 then
+      let rate =
+        float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
+      in
+      let p50_str =
+        match lane.sl_p50_elapsed_s with
+        | Some s -> Printf.sprintf " · p50 latency %.2fs" s
+        | None -> ""
+      in
+      Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
+        total lane.sl_succeeded_count lane.sl_failed_count
+        lane.sl_cancelled_count rate p50_str
+    else "Runs: no runs retained yet"
+  in
+  let slot_distribution =
+    match lane.sl_selected_slots with
+    | [] -> []
+    | scs ->
+        let dist =
+          String.concat ", "
+            (List.map
+               (fun (sc : Tui_decode.standalone_lane_slot_count) ->
+                  Printf.sprintf "%s: %d"
+                    (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
+               scs)
+        in
+        wrap Ansi.reset ("Slot selection history: " ^ dist)
+  in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
@@ -4571,6 +4659,9 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
+  @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
+      run_stats
+  @ slot_distribution
   @ wrap Ansi.reset
       ("Catalog attempts (admitted order): " ^ ordered lane.sl_admitted_slots)
   @ wrap Ansi.reset
@@ -5911,6 +6002,68 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Runtime section *)
     add_section "Runtime Stats";
+    let assignment =
+      List.find_opt
+        (fun (a : Tui_decode.runtime_assignment) ->
+           String.equal a.ra_keeper k.k_name)
+        state.runtime_assignments
+    in
+    let target_str, is_lane =
+      match assignment with
+      | Some a ->
+          let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
+          let is_l =
+            match a.ra_target_id with
+            | Some tid ->
+                List.exists
+                  (fun (l : Tui_decode.runtime_resolved_lane) ->
+                     String.equal l.rrl_id tid)
+                  state.runtime_lanes
+            | None -> false
+          in
+          Printf.sprintf "%s (%s, %s)" target
+            (if is_l then "lane" else "model")
+            (Terminal_text.single_line a.ra_source),
+          is_l
+      | None -> "default (inherited)", false
+    in
+    add_row "Runtime Target:" target_str;
+    (match assignment with
+     | Some { ra_target_id = Some tid; _ } when is_lane ->
+         (match
+            List.find_opt
+              (fun (l : Tui_decode.runtime_resolved_lane) ->
+                 String.equal l.rrl_id tid)
+              state.runtime_lanes
+          with
+          | Some lane ->
+              let hops =
+                String.concat " \xe2\x86\x92 "
+                  (List.map
+                     (fun id ->
+                        match String.split_on_char '.' id with
+                        | [ _prov; m ] -> m
+                        | _ -> id)
+                     lane.rrl_runtime_ids)
+              in
+              add_row "Failover Chain:" hops;
+              (match lane.rrl_preferred_candidate with
+               | Some pref ->
+                   let short_p =
+                     match String.split_on_char '.' pref with
+                     | [ _prov; m ] -> m
+                     | _ -> pref
+                   in
+                   add_row "Active Candidate:"
+                     (Printf.sprintf "%s (sticky winner)" short_p)
+               | None ->
+                   match lane.rrl_runtime_ids with
+                   | first :: _ ->
+                       add_row "Active Candidate:"
+                         (Printf.sprintf "%s (head)" first)
+                   | [] -> ())
+          | None -> ())
+     | _ -> ());
     (match k.k_origin with
      | Tui_decode.Persisted_keeper -> ()
      | Declared_keeper requirements ->
@@ -9976,7 +10129,34 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
-      fields @ candidate @ blocker @ sticky @ quota @ probe_lines
+      let keeper_lines =
+        let target_keepers =
+          match target with
+          | Runtime_lane_candidate { lane_id; runtime_id = _ } ->
+              keepers_for_lane state lane_id
+          | Runtime_catalog_entry { runtime_id } ->
+              let direct = keepers_for_runtime state runtime_id in
+              let via_lanes = List.concat_map (keepers_for_lane state) lanes in
+              List.fold_left
+                (fun acc (k : Tui_decode.keeper) ->
+                   if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
+                   else k :: acc)
+                direct via_lanes
+        in
+        match target_keepers with
+        | [] ->
+            runtime_detail_field ~width ~style:Ansi.dim "Bound keepers" "none"
+        | ks ->
+            let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
+            let turns, tokens, cost = aggregate_keeper_stats ks in
+            let activity_str =
+              Printf.sprintf "%d turns \xc2\xb7 %s tokens \xc2\xb7 $%.4f" turns
+                (format_context_tokens tokens) cost
+            in
+            runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
+            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
+      in
+      fields @ candidate @ blocker @ sticky @ quota @ keeper_lines @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10113,9 +10293,17 @@ let render_runtime (state : state) =
           | 0 -> ""
           | count -> Printf.sprintf "  %d probe-only" count
         in
+        let fleet_note =
+          let total_keepers = List.length state.keepers in
+          if total_keepers > 0 then
+            let turns, tokens, cost = aggregate_keeper_stats state.keepers in
+            Printf.sprintf "  fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
+              total_keepers turns (format_context_tokens tokens) cost
+          else ""
+        in
         Printf.sprintf
-          "  SSOT: runtime.toml  projections: resolved + probe  %s  %s%s%s"
-          summary_text config probe_only_note probe_note
+          "  SSOT: runtime.toml  projections: resolved + probe  %s%s  %s%s%s"
+          summary_text fleet_note config probe_only_note probe_note
   in
   let chrome_rows = runtime_surface_listing_chrome state in
   let content_height = max 0 (rows - chrome_rows) in
@@ -10232,6 +10420,31 @@ let render_runtime (state : state) =
                  | [ one ] -> one
                  | many -> Printf.sprintf "%d lanes" (List.length many)
                in
+               let bound_keepers =
+                 let direct = keepers_for_runtime state runtime.ro_id in
+                 let via_lanes = List.concat_map (keepers_for_lane state) lanes in
+                 List.fold_left
+                   (fun acc (k : Tui_decode.keeper) ->
+                      if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
+                      else k :: acc)
+                   direct via_lanes
+               in
+               let keeper_fact =
+                 match bound_keepers with
+                 | [] -> []
+                 | [ one ] -> [ Printf.sprintf "keeper: %s" one.k_name ]
+                 | many ->
+                     [ Printf.sprintf "%d keepers (%s)" (List.length many)
+                         (String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many)) ]
+               in
+               let activity_fact =
+                 if List.length bound_keepers > 0 then
+                   let turns, tokens, cost = aggregate_keeper_stats bound_keepers in
+                   if turns > 0 then
+                     [ Printf.sprintf "%d turns (%s tok, $%.2f)" turns (format_context_tokens tokens) cost ]
+                   else []
+                 else []
+               in
                let detail =
                  String.concat " \xc2\xb7 "
                    ((if runtime.ro_is_default then [ "default" ] else [])
@@ -10241,6 +10454,7 @@ let render_runtime (state : state) =
                        | Some reason -> [ "blocked: " ^ reason ]
                        | None -> [])
                     @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
+                    @ keeper_fact @ activity_fact
                     @ runtime_probe_detail
                         (Option.bind state.runtime_surface (fun snapshot ->
                            Tui_decode.runtime_probe_for_id snapshot ~runtime_id:runtime.ro_id)))
@@ -10286,20 +10500,42 @@ let render_runtime (state : state) =
               | Some reason -> [ "blocked: " ^ reason ]
               | None -> []
           in
+          let lane_keepers = keepers_for_lane state candidate.rcr_lane_id in
+          let keeper_fact =
+            if candidate.rcr_position = 1 then
+              match lane_keepers with
+              | [] -> []
+              | [ one ] -> [ Printf.sprintf "keeper: %s" one.k_name ]
+              | many ->
+                  [ Printf.sprintf "%d keepers (%s)" (List.length many)
+                      (String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many)) ]
+            else []
+          in
+          let activity_fact =
+            if candidate.rcr_position = 1 then
+              let turns, tokens, cost = aggregate_keeper_stats lane_keepers in
+              if turns > 0 then
+                [ Printf.sprintf "%d turns (%s tok, $%.2f)" turns (format_context_tokens tokens) cost ]
+              else []
+            else []
+          in
           let lane_fact =
             match candidate.rcr_preferred_at_ts with
             | Some at ->
-                [ "last success "
+                [ "\xe2\x98\x85 active (sticky since "
                   ^ Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds at)
+                  ^ ")"
                 ]
             | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
-            | None -> []
+            | None ->
+                if candidate.rcr_position = 1 then [ "head" ]
+                else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
           in
           let default_fact = if runtime.ro_is_default then [ "default" ] else [] in
           let detail =
             String.concat " \xc2\xb7 "
-              (route_detail @ default_fact @ lane_fact
+              (route_detail @ default_fact @ lane_fact @ keeper_fact @ activity_fact
                @ runtime_probe_detail candidate.rcr_probe)
           in
           let line =

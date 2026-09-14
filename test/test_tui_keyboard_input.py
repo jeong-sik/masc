@@ -23,20 +23,6 @@ import threading
 import time
 from typing import Any, cast
 
-# The sources this walk stands over. scripts/ci/run-edited-tests.sh runs a
-# suite when a pull request changes a path the suite names. This file named
-# none, so a change to the chrome every surface draws through ran no screen at
-# all: #36290 narrowed the tab strip to the width it was given, which cut the
-# current entry's own name, and the scenario below has read that name off the
-# row since it was written. It merged green and main was red until #36327.
-#
-# One module, the one every scenario here shares: masc_tui_ansi holds the tab
-# strip, the frame and box row builders, the width helpers and the status
-# glyphs, so every row of every surface below is partly its output. Of main's
-# last 200 commits, 4 touch it. The surface modules stay out -- each has a
-# focused scenario of its own, and this walk takes minutes.
-SOURCE_MODULES = ("bin/masc_tui_ansi.ml",)
-
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpResponse = tuple[int, object]
 Needle = bytes | re.Pattern[bytes]

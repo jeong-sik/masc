@@ -2262,6 +2262,23 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
+(* A keeper nothing declares is not configured (#36066): the profile loader
+   refuses it before the turn runs. A fixture declares the keeper it is about
+   to run under the base path the turn reads, with the instructions the turn
+   is given. *)
+let declare_keeper ~base_path ~keeper_name ~instructions =
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun output ->
+    output_string
+      output
+      (Otoml.Printer.to_string
+         (Otoml.TomlTable
+            [ "keeper", Otoml.TomlTable [ "instructions", Otoml.TomlString instructions ] ])))
+;;
+
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
@@ -2272,6 +2289,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
   in
+  declare_keeper ~base_path ~keeper_name ~instructions:system_prompt;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->

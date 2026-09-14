@@ -10127,6 +10127,61 @@ def keeper_lanes_ia_interaction(
                     f"{lanes_plain!r}"
                 )
 
+        # The list is a table under one header, not five rows each carrying
+        # its own labels: the labels cost some forty cells a row, so beside
+        # the roster pane every row was cut at "runs 12", and the name column
+        # was a literal fifteen that "Workspace Curator" overran, pushing its
+        # whole row two cells right of the others. The header's words and the
+        # column each begins at are read in cells (one code point each here),
+        # and the lane whose name overran must start its status, its counts
+        # and its slots where the running lane and the header do.
+        lane_rows = {
+            row: text.decode("utf-8")
+            for row, text in screen_rows(bytes(output)).items()
+        }
+        header_row = screen_row_of(
+            screen_rows(bytes(output)), b"OK/FAIL/CANCEL"
+        )
+        if header_row < 0:
+            raise AssertionError(f"Lanes drew no column header: {lanes_plain!r}")
+        header = lane_rows[header_row]
+        column_words = (
+            "LANE", "STATUS", "ACTIVE", "RUNS", "OK/FAIL/CANCEL", "P50",
+            "SLOTS", "OBSERVED",
+        )
+        word_columns = [header.find(word) for word in column_words]
+        if word_columns != sorted(word_columns) or -1 in word_columns:
+            raise AssertionError(
+                f"Lanes header does not carry {column_words} in order: "
+                f"{header!r}"
+            )
+        status_column = header.index("STATUS")
+        counts_column = header.index("OK/FAIL/CANCEL")
+        slots_column = header.index("SLOTS")
+        for lane_name, status_word in (
+            ("Board Attention", "running "),
+            ("Workspace Curator", "idle "),
+        ):
+            row = lane_rows[
+                screen_row_of(screen_rows(bytes(output)), lane_name.encode())
+            ]
+            for column, cell in (
+                (status_column, status_word),
+                (counts_column, "12/0/0 "),
+                (slots_column, "glm-coding.glm-5-turbo "),
+            ):
+                if row.find(cell) != column:
+                    raise AssertionError(
+                        f"{lane_name} row puts {cell!r} at {row.find(cell)}, "
+                        f"header column is {column}: {row!r}"
+                    )
+        for own_label in ("slots glm", "runs 12", "ok/fail/cancel"):
+            if own_label in lanes_plain:
+                raise AssertionError(
+                    f"a lane row still carries its own label {own_label!r}: "
+                    f"{lanes_plain!r}"
+                )
+
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
         banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")

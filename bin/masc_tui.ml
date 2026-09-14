@@ -7456,13 +7456,6 @@ let queue_keeper_steer state ~causal_parent_request_id request =
       Ok waiting
 ;;
 
-let interactive_target_for state keeper_name =
-  match working_chat_for_keeper state keeper_name with
-  | Some entry -> Some (Keeper_chat.Direct_operation_id
-      (Keeper_chat_transcript.execution_id entry.log.tl_transcript))
-  | None -> Option.map (fun (_, token) -> Keeper_chat.Observed_turn_token token)
-      (keeper_observed_turn state keeper_name)
-
 let launch_waiting_interactive state ~mailbox ~keeper_name =
   match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
   | None -> ()
@@ -7640,11 +7633,20 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
           let attachments, references = take_pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
-        let observed_target = interactive_target_for state target in
+        (* Enter admits the line to run next and interrupts nothing: the
+           server's interactive admission moves it to the front of the queue
+           and signals only the target it is given, and the target is none.
+           Until 2026-09-14 this derived the running chat operation or the
+           observed autonomous turn as the target, so every line typed while
+           the Keeper worked cancelled that work -- the footer promised "Enter
+           queues your line" while the send did the opposite, and a Keeper
+           mid-game lost minutes of tool work per question. Stopping a turn is
+           an explicit act: Esc, or /steer. *)
+        let observed_target = None in
         (* Staging keeps the accepted text and attachments together. A control
            receipt can arrive after Enter; hold only until that receipt, never
            until the previous model turn finishes. A later Esc revokes this
-           pending intervention while retaining the queued message itself. *)
+           pending admission while retaining the queued message itself. *)
         (match queue_keeper_message state request with
          | Error detail -> add_event state "error" detail
          | Ok _ ->
@@ -11983,7 +11985,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Enter sends a conversation update; Esc stops the current turn and pauses queue consumption."])
+              "Enter queues your line to run next; Esc stops the current turn and pauses queue consumption."])
       in
       chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines);
       drain_queued_message state ~base_path ~mailbox

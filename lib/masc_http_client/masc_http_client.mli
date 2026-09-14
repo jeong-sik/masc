@@ -45,8 +45,9 @@ val default_request_timeout_sec : float
       propagates); wrap any other exception as
       [Error (Printexc.to_string exn)].
     - When [?clock] {b and} [?timeout_sec > 0.0] are both supplied,
-      race the request against an {!Eio.Time.sleep} fiber.  On
-      timeout, return [Error "timeout after %.1fs"]. *)
+      the request runs under that window, armed once in {!Pool.request}:
+      a response that arrived as the window passed is the result; when
+      none has, [Error "Pool.request: timeout after %.1fs"]. *)
 
 val post_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

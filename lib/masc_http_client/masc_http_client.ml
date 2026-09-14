@@ -36,27 +36,10 @@ type response = {
 
 let default_request_timeout_sec = 10.0
 
-(** Apply an optional Eio wall-clock timeout around a request. When both
-    [clock] and [timeout_sec] are supplied, a sleep fiber races the request
-    fiber; whichever finishes first wins and the loser is cancelled. On
-    timeout the caller receives [Error "timeout after ..."] instead of the
-    underlying HTTP result. When either argument is omitted the behaviour
-    is identical to the pre-timeout implementation, so existing callers
-    need not be updated.
-
-    We use [Eio.Fiber.first] instead of [Eio.Time.with_timeout] because the
-    latter requires the inner function's Error constructor to be a
-    polymorphic variant compatible with [> `Timeout], while our callers use
-    plain [string] error payloads. *)
-let with_optional_timeout ?clock ?timeout_sec f =
-  match clock, timeout_sec with
-  | Some clock, Some timeout_sec when timeout_sec > 0.0 ->
-      Eio.Fiber.first
-        (fun () -> f ())
-        (fun () ->
-          Eio.Time.sleep clock timeout_sec;
-          Error (Printf.sprintf "timeout after %.1fs" timeout_sec))
-  | _ -> f ()
+(* The request's wall-clock window is [Pool.request]'s, armed once there
+   with the same [clock] and [timeout_sec]. These entry points used to arm a
+   second copy of it around the pool call: it started first, so it always
+   fired first, and the pool's own window never decided anything. *)
 
 (* ── Per-domain pool via Domain.DLS ───────────────────────────────── *)
 
@@ -148,7 +131,6 @@ let ensure_default_headers headers =
 
 let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   let headers = ensure_default_headers headers in
-  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
           ~method_:`POST ~url ~headers ~body () with
@@ -160,7 +142,6 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
     opening a session has nothing to read from [post_sync]. *)
 let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
   let headers = ensure_default_headers headers in
-  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
           ~method_:`POST ~url ~headers ~body () with
@@ -170,7 +151,6 @@ let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
   let headers = ensure_default_headers headers in
-  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
           ~method_:`PATCH ~url ~headers ~body () with
@@ -180,7 +160,6 @@ let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
 (** GET with structured error handling. *)
 let get_response_sync ?clock ?timeout_sec ~url ~headers () =
   let headers = ensure_default_headers headers in
-  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
           ~method_:`GET ~url ~headers () with
@@ -196,8 +175,8 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
 
 (** POST that hands each response body chunk to [on_chunk] as it arrives.
 
-    No [with_optional_timeout] wrapper: a wall-clock cap would cancel a stream
-    that is still delivering bytes, which is the case this exists to serve.
+    No wall-clock window: it would cancel a stream that is still delivering
+    bytes, which is the case this exists to serve.
     The bound is [idle_timeout_sec], enforced per chunk inside the pool.
 
     [idle_timeout_sec] is required rather than defaulted. A tolerable silence
@@ -223,7 +202,7 @@ let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () 
 
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =
-    with_optional_timeout ~clock ~timeout_sec f
+    Pool.For_testing.with_request_timeout ~clock ~timeout_seconds:timeout_sec f
 end
 
 (* ── Observability ────────────────────────────────────────────────── *)

@@ -1,12 +1,5 @@
-(** macOS Notification via terminal-notifier (with osascript fallback)
-    Sends native macOS notifications for MASC events with custom icons *)
-
-(** Notification event types *)
-type event =
-  | Mention of { from_agent: string; target_agent: string option; message: string }
-  | Interrupt of { agent: string; action: string }
-  | TaskCompleted of { agent: string; task_id: string }
-  | Custom of { title: string; subtitle: string; message: string }
+(** macOS notification for a keeper mention, posted through
+    terminal-notifier or, without it, osascript. See notify.mli. *)
 
 (** Focus payload for click actions *)
 type focus_payload = {
@@ -15,36 +8,40 @@ type focus_payload = {
   task_id: string option;
 }
 
-(** {1 Non-blocking Shell Execution} *)
+(* A post returns in well under a second: three terminal-notifier posts
+   measured on this machine on 2026-09-14 took 0.38 s, 0.38 s and 0.45 s. The
+   slow failure is a notifier that never returns, blocked on a permission
+   dialog or started where no window session can show it. This runs inside
+   the keeper's masc_broadcast tool call, and while a tool call is active the
+   turn's no-progress watchdog is off, so without a bound nothing ends that
+   wait but an operator. A spent budget is logged as the failed notification
+   it is; the tool call it rode on is not affected. *)
+let notifier_timeout_sec = 10.
 
-(** Run argv and get single line (Eio-native, no shell) *)
-let run_argv_line argv =
-  let output =
-    Process_eio.run_argv argv
-  in
-  match String.split_on_char '\n' output with
-  | [] -> ""
-  | h :: _ -> String.trim h
-
-let string_of_process_status = function
-  | Unix.WEXITED n -> Printf.sprintf "exited %d" n
-  | Unix.WSIGNALED n -> Printf.sprintf "signaled %d" n
-  | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n
-
-let run_argv_ignore argv =
+(* The one process this module starts. Anything but a clean exit is a log
+   line: a desktop notification that did not post has no other consequence,
+   and the keeper's tool call must not inherit one. *)
+let run_notifier argv =
+  let command () = String.concat " " argv in
   (try
      let status, _output =
-       Process_eio.run_argv_with_status argv
+       Process_eio.run_argv_with_status ~timeout_sec:notifier_timeout_sec argv
      in
-     match status with
-     | Unix.WEXITED 0 -> ()
-     | _ ->
-         Log.Misc.warn "notify command exited with status %s: %s"
-           (string_of_process_status status)
-           (String.concat " " argv)
+     match Process_eio.exit_reason_of_status status with
+     | Process_eio.Completed 0 -> ()
+     | Process_eio.Timed_out ->
+       Log.Misc.warn
+         "notify command did not return within %.0fs and was stopped: %s"
+         notifier_timeout_sec (command ())
+     | Process_eio.Completed code ->
+       Log.Misc.warn "notify command exited %d: %s" code (command ())
+     | Process_eio.Signaled signal ->
+       Log.Misc.warn "notify command was killed by signal %d: %s" signal (command ())
+     | Process_eio.Stopped signal ->
+       Log.Misc.warn "notify command was stopped by signal %d: %s" signal (command ())
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn -> Log.Misc.error "run_argv_ignore failed: %s" (Printexc.to_string exn))
+   | exn -> Log.Misc.error "notify command failed to run: %s" (Printexc.to_string exn))
 
 (** Get non-empty environment variable *)
 let getenv_nonempty name =
@@ -71,11 +68,6 @@ let is_truthy value =
   | "1" | "true" | "yes" | "on" | "y" -> true
   | _ -> false
 
-let focus_on_osascript () =
-  match getenv_nonempty "MASC_NOTIFY_FOCUS_ON_OSASCRIPT" with
-  | Some value -> is_truthy value
-  | None -> false
-
 let shell_execute_clicks_enabled () =
   match getenv_nonempty "MASC_NOTIFY_ALLOW_SHELL_EXECUTE" with
   | Some value -> is_truthy value
@@ -90,19 +82,19 @@ let render_focus_template template payload =
   |> replace "{{from}}" (token_value payload.from_agent)
   |> replace "{{task}}" (token_value payload.task_id)
 
-(** Check if running on macOS *)
-let is_macos () =
-  try
-    let os = run_argv_line ["uname"; "-s"] in
-    os = "Darwin"
-  with End_of_file | Unix.Unix_error _ -> false
+type notifier =
+  | Terminal_notifier
+  | Osascript
 
-(** Check if terminal-notifier is available *)
-let has_terminal_notifier =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let result = run_argv_line ["which"; "terminal-notifier"] in
-    result <> ""
-  )
+(* Both programs exist only on macOS, so finding one is the platform check
+   as well; a host with neither posts nothing and starts no process. The
+   lookup is a PATH scan, not a spawned [which]: a probe that runs a program
+   to ask whether a program can run puts a second unbounded process on the
+   turn's path for an answer the scan already gives. *)
+let available_notifier () =
+  if Executable_path.command_available "terminal-notifier" then Some Terminal_notifier
+  else if Executable_path.command_available "osascript" then Some Osascript
+  else None
 
 (** Escape string for shell *)
 let escape_shell s =
@@ -206,7 +198,7 @@ let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =
     | Some cmd when shell_execute_clicks_enabled () -> base @ ["-execute"; cmd]
     | Some _ | None -> base
   in
-  run_argv_ignore argv
+  run_notifier argv
 
 (** Send notification via osascript (fallback) *)
 let send_via_osascript ~title ~subtitle ~message =
@@ -217,79 +209,29 @@ let send_via_osascript ~title ~subtitle ~message =
     "display notification \"%s\" with title \"%s\" subtitle \"%s\""
     message title subtitle
   in
-  run_argv_ignore ["osascript"; "-e"; script]
+  run_notifier ["osascript"; "-e"; script]
 
-(** Send macOS notification - uses terminal-notifier if available *)
-let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
-  if not (is_macos ()) then
-    (* Silently skip on non-macOS *)
-    ()
-  else if Eio.Lazy.force has_terminal_notifier then
+(** Post the notification through whichever notifier this host has. *)
+let send_notification ~sound ~focus_cmd ~title ~subtitle ~message =
+  match available_notifier () with
+  | None -> ()
+  | Some Terminal_notifier ->
     send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd
-  else begin
-    send_via_osascript ~title ~subtitle ~message;
-    (try let _ = focus_on_osascript () in ()
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "focus_on_osascript failed: %s" (Printexc.to_string exn));
-    (* NOTE: For osascript fallback, we intentionally do not execute focus_cmd.
-       focus_cmd can contain arbitrary shell snippets (user-configured) and would
-       require `sh -c` execution. terminal-notifier handles click actions. *)
-  end
+  | Some Osascript ->
+    (* The osascript path takes no focus_cmd: it can hold an operator's
+       shell snippet, which would need `sh -c`. terminal-notifier runs click
+       actions itself. *)
+    send_via_osascript ~title ~subtitle ~message
 
-(** Send notification for MASC event *)
-let notify event =
-  match event with
-  | Mention { from_agent; target_agent; message } ->
-      let emoji = agent_emoji from_agent in
-      let focus_cmd = build_focus_command {
-        target_agent;
-        from_agent = Some from_agent;
-        task_id = None;
-      } in
-      send_notification
-        ~title:(Printf.sprintf "%s MASC" emoji)
-        ~subtitle:(Printf.sprintf "@%s mentioned you" from_agent)
-        ~message
-        ?focus_cmd
-        ~sound:true  (* Sound for mentions! *)
-        ()
-
-  | Interrupt { agent; action } ->
-      let focus_cmd = build_focus_command {
-        target_agent = Some agent;
-        from_agent = Some agent;
-        task_id = None;
-      } in
-      send_notification
-        ~title:"MASC - Approval Needed"
-        ~subtitle:agent
-        ~message:(Printf.sprintf "Action: %s" action)
-        ?focus_cmd
-        ~sound:true  (* Sound for interrupts! *)
-        ()
-
-  | TaskCompleted { agent; task_id } ->
-      let emoji = agent_emoji agent in
-      let focus_cmd = build_focus_command {
-        target_agent = Some agent;
-        from_agent = Some agent;
-        task_id = Some task_id;
-      } in
-      send_notification
-        ~title:(Printf.sprintf "%s MASC" emoji)
-        ~subtitle:"Task Completed"
-        ~message:(Printf.sprintf "%s finished %s" agent task_id)
-        ?focus_cmd
-        ()
-
-  | Custom { title; subtitle; message } ->
-      let focus_cmd = build_focus_command {
-        target_agent = None;
-        from_agent = None;
-        task_id = None;
-      } in
-      send_notification ~title ~subtitle ~message ?focus_cmd ()
-
-(** Convenience functions for common notifications *)
 let notify_mention ?target_agent ~from_agent ~message () =
-  notify (Mention { from_agent; target_agent; message })
+  let emoji = agent_emoji from_agent in
+  let focus_cmd =
+    build_focus_command { target_agent; from_agent = Some from_agent; task_id = None }
+  in
+  send_notification
+    ~title:(Printf.sprintf "%s MASC" emoji)
+    ~subtitle:(Printf.sprintf "@%s mentioned you" from_agent)
+    ~message
+    ~focus_cmd
+    ~sound:true
 

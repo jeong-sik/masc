@@ -13,10 +13,14 @@
 
 ### Fixed
 
+- Keeper chat: Esc cancels the exact request that owns the turn, including one stalled in its HTTP reader, and Enter submits an interactive update in one admission instead of needing a separate priority command. Waiting inputs run together in accepted order, a stop acknowledgement still pending holds new input, and a reconnect does not repeat a control effect (#36035).
+- Keeper chat: `/queue` shows waiting inputs with sender and order and can pause, resume, edit, cancel and reorder them; an edited input keeps its identity and the media it was sent with. A cooperative continuation keeps its original identity, and Codex and Claude sessions carry updated instructions without losing their vendor session (#36035).
+- Runtime: an Antigravity tool step that runs longer than `turn-timeout-s` completes instead of ending the turn; the wall-clock ceiling still bounds it (#36056).
 - Keeper: the Codex app server, Claude Code and Antigravity runtimes return a served turn without waiting for a background child to release stderr, which an orphaned MCP server could hold open indefinitely (#36017).
 - Keeper: a long Claude Code turn is no longer ended as a protocol error after 256 informational frames, or 32 before admission; the idle and wall-clock deadlines bound the turn, and an unknown frame type is still refused (#36019).
 - Keeper: a failed stream is reported once. A stream timeout quarantines its open tool block like every other attempt failure, an incomplete or repeating stream no longer adds a second diagnostic, and a close cancelled while the event bus is full leaves the bus closable (#36027, #36048, #36024).
 - Keeper: a keeper with no `keepers/<name>.toml` fails to load with `Declaration_not_found` instead of booting on empty defaults, and a `tools.deny` entry that names no model-visible tool refuses the load instead of logging a warning at turn setup (#36066).
+- Runtime: a Gemini or Vertex Gemini provider's capabilities are looked up only under its declared provider id. An operator's own catalog row is no longer hidden by the bare `gemini` row, and a Gemini provider with no row of its own now stops at the boot capability check like every other API format instead of borrowing that row (#36080).
 - Runtime: setup reads `masc runtime-verify` output through the verification type instead of comparing string fields, and keeps the reason a verification child process failed (#36065).
 - Sandbox: a declaration error says whether `imp.toml` could not be read or is invalid, with the underlying reason, instead of one of two fixed sentences; a microVM profile that names no backend is refused rather than given `Apple_container` because of the host (#36053).
 - Keeper: a lifecycle reservation that is gone when a removal releases it is reported as a removal conflict rather than as removed (#36033).
@@ -25,6 +29,7 @@
 - TUI: control keys, the tool approval mode and a schedule's wake status and actor kind are spelled the way the key table and the server contracts spell them (#36037, #36031, #36008, #36004).
 - TUI: the Board draft footers come from the key table and its pane row stays on the draft; the Task Review title states a full page's count once; the Planning rollup counts only phases that have goals (#36049, #36047, #36015).
 - TUI: the Fusion detail footer names `K` and `B`, which the detail already answered, and the run list row states only the run's own progress, failure or retained evidence (#36055).
+- Browser Lane TUI: a paragraph with two or more inline elements reads as one row again (#36077).
 - TUI: the Overview names its cluster and project without padding, the Config paths row keeps the binary age and the tail of each path, and the acting pane stays off both Activity tabs (#36012, #36025, #36018).
 
 ### Documentation

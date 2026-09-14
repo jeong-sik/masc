@@ -323,7 +323,15 @@ val planning_goal_history_summary : unlisted:int -> ended:int -> string
     how many of those left the list with no outcome recorded. *)
 
 val planning_workspace_title :
-  Masc_tui_types.state -> cols:int -> tab:planning_tab -> window:string -> string
+  Masc_tui_types.state ->
+  cols:int ->
+  tab:planning_tab ->
+  window:string ->
+  after:string ->
+  string
+(** [after] is what the caller draws past this title on the same row. The strip
+    inside leaves room for it; without it the strip took the row and the frame
+    cut the clock and the badge off the end. *)
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
@@ -392,7 +400,20 @@ val runtime_all_rows :
 val tools_scrolled_for_lines :
   Masc_tui_types.state -> 'a list -> Masc_tui_types.scrolled
 
-val config_pane_strip : cols:int -> before:string -> Masc_tui_types.state -> string
+val config_pane_strip :
+  cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
+
+val config_pane_title :
+  cols:int ->
+  before:string ->
+  ?note:string ->
+  ?clock:string ->
+  Masc_tui_types.state ->
+  string
+(** The whole title row a Config pane draws: its name, the strip, and the badge,
+    with the file it is reading and the clock between them where the pane has
+    those. Ten panes spelled this row and nine of them spelled it identically,
+    which is also why none could tell the strip to leave room for the badge. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

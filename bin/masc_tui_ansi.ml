@@ -373,11 +373,25 @@ let tab_strip ~width (tabs : (string * bool) list) =
   end
 
 (* The cells a row leaves its strip: the frame's inner width less everything
-   the row draws before the strip, gap included. Callers hand over the text
-   they draw rather than a number, so the two cannot disagree. *)
-let tab_strip_width ~cols ~before =
+   the row draws around the strip, gaps included. Callers hand over the text
+   they draw rather than a number, so the two cannot disagree.
+
+   [after] is what the row draws to the strip's right on the same line -- the
+   clock and the connection badge, mostly. It was not asked for, so the strip
+   took every cell the row had left and the frame cut whatever followed: at a
+   hundred columns the Planning title lost its badge and half its clock, and
+   the Config panes lost both and half of "(load failed)" as well. A strip has
+   its own way of giving cells back (it drops tabs and marks the cut), and the
+   badge has none, so the badge is what the row must keep.
+
+   Required rather than optional, so a row that draws something after its
+   strip cannot forget to say so: the compiler asks every caller, including
+   the ones whose strips are short enough to fit today. A strip that owns its
+   whole row passes "". *)
+let tab_strip_width ~cols ~before ~after =
   Masc_tui_frame.inner_width ~cols
   - Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr before)
+  - Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr after)
 
 (** One owner for the visual distinction between conversation roles.
 

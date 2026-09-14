@@ -653,7 +653,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let pills =
           Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
-              ~width:(tab_strip_width ~cols ~before:keys)
+              ~width:(tab_strip_width ~cols ~before:keys ~after:"")
               (List.map
                  (fun filt ->
                    ( Printf.sprintf "%s %d" (memory_category_filter_label filt)

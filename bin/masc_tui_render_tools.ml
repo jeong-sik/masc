@@ -319,7 +319,7 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source 
    row read "▸호출 범위 | 비동기 작업" under strips spelled two cells apart. *)
 let tools_pane_strip ~cols (state : state) =
   tab_strip
-    ~width:(tab_strip_width ~cols ~before:" ")
+    ~width:(tab_strip_width ~cols ~before:" " ~after:"")
     (List.map
        (fun (pane, label) -> (label, state.tools_pane = pane))
        [ (Masc_tui_types.Tools_surface, "호출 범위")

@@ -37,8 +37,10 @@ assert args[1]=='--base-path'
 if args[0]=='runtime-default-set':
     assert args[4:6]==['--setup-lanes','--setup-imp']
 elif args[0]=='runtime-verify':
-    print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],
-      'status':'verified','checks':{'response':True,'tool_roundtrip':True}}))
+    # The shape Runtime_verification.to_json writes; of_json refuses any other key set.
+    print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':args[3],'model':'fixture-model',
+      'observed_model':'fixture-model','status':'verified',
+      'checks':{'response':True,'tool_called':True,'tool_roundtrip':True},'failure':None}))
 else: raise AssertionError(args)
 |}); Unix.chmod binary 0o700;
   test base runtime binary (Eio.Stdenv.net env)))

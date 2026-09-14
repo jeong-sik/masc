@@ -175,8 +175,17 @@ test/test_tools_coverage.ml"
     stem=${stem#masc_}
     # Both spellings, in both test roots: the suite named for the module, and
     # the family under it.
+    #
+    # And the same two spellings one directory down. A suite with its own
+    # directory is the same claim about the same module -- test/voice_catalog
+    # is what test_voice_catalog.ml would have been -- but the flat glob never
+    # reached it, so no edit to the module it is named for selected it.
+    # Measured 2026-09-14: 57 suites live under test/<dir>/, 33 of them named
+    # for their directory. The per-module cap below applies to these too, so a
+    # directory holding a family of suites is attributed or skipped as one.
     matches=$( { ls \
       "test/test_${stem}.ml" "test/test_${stem}"_*.ml \
+      "test/${stem}/test_${stem}.ml" "test/${stem}/test_${stem}"_*.ml \
       "packages/agent_core/test/test_${stem}.ml" \
       "packages/agent_core/test/test_${stem}"_*.ml 2>/dev/null \
       || true; } | sort -u)
@@ -423,6 +432,14 @@ self_test() {
   check "a package source selects its suites in both test roots" \
     "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
     "packages/agent_core/lib/event_bus.ml"
+  # A suite with its own directory is named for its module the same way, and
+  # the flat glob never looked there. The fixture is voice_wizard because that
+  # is where it was measured: #36098 and #36124 both changed lib/voice_setup
+  # and lib/voice_wizard, both merged green, and both had to have these suites
+  # run by hand afterwards -- the first time, after main was already red.
+  check "a module with its own test directory selects the suite in it" \
+    "test/voice_wizard/test_voice_wizard.ml" \
+    "lib/voice_wizard/voice_wizard.ml"
   # The path matters: "docs/x.md" used to be the fixture here and stopped
   # meaning "no suite names this" -- test_tui_memory_facts_explorer carries it
   # as a source-fact path in its own fixture data. That is the coincidence any

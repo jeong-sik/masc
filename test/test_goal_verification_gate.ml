@@ -1007,7 +1007,8 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
     "the world observation keeps the verifying goal"
     [ goal_id ]
     (match observation.Keeper_world_observation.active_goals with
-     | Ok ids -> ids | Error detail -> fail detail);
+     | Ok ids -> ids
+     | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable));
   (* The subject here is how a [Verifying] goal renders, not which goals a
      turn is given: the summary is stated so the annotation is what the check
      depends on. *)

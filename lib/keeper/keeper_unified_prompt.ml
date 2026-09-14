@@ -1290,8 +1290,22 @@ let active_goal_summaries_for_task
              ; summary_review_note = goal.last_review_note
              }
          else None)
-      ) (Result.map_error Goal_store.unavailable_to_string
-           (Goal_store.list_goals_result config ()))
+      ) (Goal_store.list_goals_result config ())
+;;
+
+(* RFC-0444 §2.3 row 6: the one projection of an unreadable goal store onto
+   the prompt. Each variable is the exhaustive renderer masc_types keeps
+   beside the type, so a new reason, mirror state or reset step is a compile
+   error there and never a silent blank here. The prompt is where the value
+   becomes text; nothing reads the text back. *)
+let goal_store_unavailable_fragment_vars
+      ({ file; reason; mirror; reset_step } : Goal_store.unavailable)
+  =
+  [ "reason", Goal_store_unavailable.reason_to_string reason
+  ; "file", file
+  ; "mirror", Goal_store_unavailable.mirror_status_to_string mirror
+  ; "reset", Goal_store_unavailable.reset_step_to_string reset_step
+  ]
 ;;
 
 let constitution_unreadable_reported : (string, unit) Hashtbl.t =
@@ -1571,14 +1585,14 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     | Keeper_context_layers.Active_goals ->
       let source =
         match observation.active_goals, active_goal_summaries with
-        | Error detail, _ | _, Some (Error detail) -> Error detail
+        | Error unavailable, _ | _, Some (Error unavailable) -> Error unavailable
         | Ok _, Some (Ok summaries) -> Ok summaries
         | Ok _, None -> Ok []
       in
       (match source with
-       | Error detail ->
+       | Error unavailable ->
          Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
-                 [ "detail", detail ] ^ "\n\n")
+                 (goal_store_unavailable_fragment_vars unavailable) ^ "\n\n")
        | Ok [] -> None
        | Ok summaries ->
          Some

@@ -120,7 +120,17 @@ let current_task_of id =
   Keeper_world_observation_inputs.Current_task (task_named id)
 ;;
 
-let get_ok = function Ok value -> value | Error detail -> fail detail
+let get_ok = function
+  | Ok value -> value
+  | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable)
+;;
+
+let goal_store_unavailable : Goal_store.unavailable testable =
+  testable
+    (fun fmt unavailable ->
+       Format.pp_print_string fmt (Goal_store.unavailable_to_string unavailable))
+    ( = )
+;;
 
 let summary_ids summaries =
   let summaries = get_ok summaries in
@@ -344,10 +354,11 @@ max-concurrent = 1
   let check_unavailable () =
     let observation = Keeper_world_observation.observe
       ~pending_board_events:(Some []) ~config ~meta in
-    let detail = match observation.active_goals with
-      | Error detail -> detail
+    let unavailable = match observation.active_goals with
+      | Error unavailable -> unavailable
       | Ok _ -> fail "an unreadable Goal source became an available list" in
-    check bool "read failure carries its cause" true (String.length detail > 0);
+    check string "read failure names the file it could not read" primary
+      unavailable.Goal_store.file;
     let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
       ~config ~current_task:(current_task_of "task-linked") in
     (match summaries with
@@ -394,14 +405,68 @@ max-concurrent = 1
   Sys.remove mirror;
   let fresh = Keeper_world_observation.observe
     ~pending_board_events:(Some []) ~config ~meta in
-  check (result (list string) string) "fresh store is genuinely empty"
+  check (result (list string) goal_store_unavailable) "fresh store is genuinely empty"
     (Ok []) fresh.active_goals
+;;
+
+(* RFC-0444 §2.3 row 6. The 2026-09-08 shape: every row lacks
+   [criterion_revision], the mirror still decodes. The Active Goals layer must
+   say which member the decoder refused and which file, and must not draw a
+   Goal count or heading, because a store that cannot be read holds an
+   unknown number of Goals, not zero. *)
+let test_schema_rejected_store_renders_reason_and_file_not_zero_goals () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let primary = Goal_store.goals_path config in
+  let stripped =
+    match Yojson.Safe.from_string (Fs_compat.load_file primary) with
+    | `Assoc members ->
+      `Assoc
+        (List.map
+           (function
+             | "goals", `List goals ->
+               ( "goals"
+               , `List
+                   (List.map
+                      (function
+                        | `Assoc goal ->
+                          `Assoc
+                            (List.filter
+                               (fun (key, _) -> not (String.equal key "criterion_revision"))
+                               goal)
+                        | other -> other)
+                      goals) )
+             | member -> member)
+           members)
+    | _ -> fail "goals.json is not an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string stripped);
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  (match observation.active_goals with
+   | Error { Goal_store.reason = Goal_store.Schema_rejected { field; _ }; file; _ } ->
+     check string "the refused member is named" "criterion_revision" field;
+     check string "the file is named" primary file
+   | Error _ -> fail "the reason is not the refused schema member"
+   | Ok _ -> fail "rows without criterion_revision read as a Goal list");
+  let world = rendered_world_state config in
+  check bool "the layer names the refused member" true
+    (contains_in world "schema_rejected field=criterion_revision");
+  check bool "the layer names the file" true (contains_in world primary);
+  check bool "the layer says the source is unavailable" true
+    (contains_in world "Active Goals — source unavailable");
+  check bool "no Goal count is drawn" false (contains_in world "Active Goals (0)");
+  check bool "no Goal heading is drawn" false (contains_in world "### Active Goals (")
 ;;
 
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
-      , [ test_case "unavailable Goal source preserves independent turn and frame" `Quick
+      , [ test_case "schema-rejected rows render reason and file, never zero goals" `Quick
+            test_schema_rejected_store_renders_reason_and_file_not_zero_goals
+        ; test_case "unavailable Goal source preserves independent turn and frame" `Quick
             test_unreadable_goals_preserve_context_and_independent_turn
         ; test_case "the turn surface drops terminal goals" `Quick
             test_turn_surface_drops_terminal_goals

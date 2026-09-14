@@ -99,8 +99,10 @@ type goal_summary = {
 val active_goal_summaries_for_task :
   config:Workspace.config ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  (goal_summary list, string) result
+  (goal_summary list, Goal_store.unavailable) result
 (** The Goals this turn's task is linked to and still open enough to progress.
+    [Error] is the typed store failure (RFC-0444 §2.3 row 6); the Active
+    Goals layer renders it with reason, file, mirror and reset step.
 
     A Goal is shared intent and names no keeper, so the store answers the same
     list for everyone; the task the keeper holds is what makes a subset of it

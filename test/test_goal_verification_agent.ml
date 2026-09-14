@@ -257,7 +257,7 @@ let with_lane_and_reviewer ~slots ~reviewer f =
 let drain config =
   match Agent.drain_once config with
   | Ok () -> ()
-  | Error msg -> fail ("drain_once: " ^ msg)
+  | Error failure -> fail ("drain_once: " ^ Agent.scan_failure_to_string failure)
 ;;
 
 (* (a) A pending proof drains to a proven verdict: the goal completes, the
@@ -578,7 +578,7 @@ let test_lane_unavailable_keeps_the_pending_row () =
        let work =
          match Agent.collect_pending config with
          | Ok work -> work
-         | Error msg -> fail msg
+         | Error failure -> fail (Agent.scan_failure_to_string failure)
        in
        let outcomes = List.map (Agent.process_pending_work config) work in
        List.iter
@@ -739,6 +739,125 @@ let has_completion_work goal_id work =
   List.exists (fun item -> String.equal item.Agent.goal_id goal_id) work
 ;;
 
+let reviews_of_goal registry goal_id =
+  Goal_verification_run_registry.list_runs registry
+  |> List.filter_map (function
+    | Goal_verification_run_registry.Review (run : Goal_verification_run_registry.run)
+      when String.equal run.goal_id goal_id -> Some run
+    | Goal_verification_run_registry.Review _
+    | Goal_verification_run_registry.Scan_skipped _ -> None)
+;;
+
+(* The skipped-scan rows this workspace's store produced. The registry is
+   process-global, so rows are told apart by the file they name. *)
+let skipped_scans_of_store path =
+  Goal_verification_run_registry.list_runs (Goal_verification_run_registry.global ())
+  |> List.filter_map (function
+    | Goal_verification_run_registry.Scan_skipped { unavailable; _ }
+      when String.equal unavailable.Goal_store.file path -> Some unavailable
+    | Goal_verification_run_registry.Scan_skipped _
+    | Goal_verification_run_registry.Review _ -> None)
+;;
+
+(* [since_seq] is exclusive and the ring's first entry carries seq 0. *)
+let ring_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+let skipped_scan_lines_since cursor =
+  Log.Ring.recent ~since_seq:cursor ~module_filter:"Misc" ~order:`Oldest_first ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    String.starts_with ~prefix:Goal_verification_agent.scan_skipped_log_prefix
+      entry.message)
+;;
+
+(* goals.json as the 2026-09-08 hard cut left it: JSON, rows, no
+   [criterion_revision]. The mirror written by the upsert still decodes. *)
+let strip_criterion_revision path =
+  let stripped =
+    match Yojson.Safe.from_string (Fs_compat.load_file path) with
+    | `Assoc members ->
+      `Assoc
+        (List.map
+           (function
+             | "goals", `List goals ->
+               ( "goals"
+               , `List
+                   (List.map
+                      (function
+                        | `Assoc goal ->
+                          `Assoc
+                            (List.filter
+                               (fun (key, _) -> not (String.equal key "criterion_revision"))
+                               goal)
+                        | other -> other)
+                      goals) )
+             | member -> member)
+           members)
+    | _ -> fail "goals.json is not an object"
+  in
+  Fs_compat.save_file path (Yojson.Safe.to_string stripped)
+;;
+
+(* RFC-0444 §2.3 row 7, criterion 3: every scan the store refuses leaves one
+   durable [Scan_skipped] row carrying the typed value and exactly one WARN
+   line that starts with the counted literal. Two cycles, two of each. *)
+let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
+  with_workspace @@ fun config ->
+  (match Goal_store.upsert_goal config ~title:"Rows without criterion_revision"
+      ~metric:"cases" ~target_value:"1" () with
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
+  let path = Goal_store.goals_path config in
+  strip_criterion_revision path;
+  let bytes = Fs_compat.load_file path in
+  let mirror = Fs_compat.load_file (path ^ ".last-good") in
+  let rows_before = List.length (skipped_scans_of_store path) in
+  let cursor = ring_cursor () in
+  let cycle () =
+    match Agent.drain_once config with
+    | Error (Agent.Scan_skipped { Goal_store.reason = Goal_store.Schema_rejected { field; _ }
+                                ; reset_step = Goal_store.Repair_field repair; _ }) ->
+      check string "the scan names the refused member" "criterion_revision" field;
+      check string "the scan names the repair" "criterion_revision" repair
+    | Error (Agent.Scan_skipped _) -> fail "the reason is not the refused schema member"
+    | Error (Agent.Ledger_reconcile_failed _) ->
+      fail "an unreadable store was reported as a ledger reconcile failure"
+    | Ok () -> fail "rows without criterion_revision drained as a healthy store"
+  in
+  cycle ();
+  cycle ();
+  let rows = skipped_scans_of_store path in
+  check int "one durable row per skipped scan" (rows_before + 2) (List.length rows);
+  List.iter
+    (fun (unavailable : Goal_store.unavailable) ->
+       match unavailable.reason, unavailable.mirror with
+       | Goal_store.Schema_rejected { field; _ }, Goal_store.Mirror_decodes { goal_count; _ } ->
+         check string "the row keeps the refused member" "criterion_revision" field;
+         check int "the row keeps the mirror evidence" 1 goal_count
+       | _ -> fail "the row lost the reason or the mirror evidence")
+    rows;
+  check int "one WARN line per skipped scan" 2
+    (List.length (skipped_scan_lines_since cursor));
+  check string "the scan does not repair the primary" bytes (Fs_compat.load_file path);
+  check string "the scan does not touch the mirror" mirror
+    (Fs_compat.load_file (path ^ ".last-good"))
+;;
+
+let test_healthy_store_scan_records_no_skipped_row () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  ignore (create_goal ctx "Healthy store");
+  let path = Goal_store.goals_path config in
+  let cursor = ring_cursor () in
+  drain config;
+  check int "a readable store leaves no skipped-scan row" 0
+    (List.length (skipped_scans_of_store path));
+  check int "a readable store writes no skipped-scan line" 0
+    (List.length (skipped_scan_lines_since cursor))
+;;
+
 let test_scan_preserves_source_failure () =
   with_workspace @@ fun config ->
   (match Goal_store.upsert_goal config ~title:"Review source"
@@ -748,7 +867,10 @@ let test_scan_preserves_source_failure () =
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
   Fs_compat.save_file path "unreadable primary";
   (match Agent.collect_pending config with
-   | Error detail -> check bool "scan preserves source cause" true (String.length detail > 0)
+   | Error (Agent.Scan_skipped unavailable) ->
+     check string "scan names the file it could not read" path unavailable.Goal_store.file
+   | Error (Agent.Ledger_reconcile_failed _) ->
+     fail "an unreadable store was reported as a ledger reconcile failure"
    | Ok _ -> fail "unavailable source was reported as a successful scan");
   check string "scan does not repair primary" "unreadable primary"
     (Fs_compat.load_file path);
@@ -768,7 +890,7 @@ let test_committed_proven_proof_reconciles_without_review () =
   let work =
     match Agent.collect_pending config with
     | Ok work -> work
-    | Error msg -> fail msg
+    | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "reconciliation does not call the model again" false
     (has_completion_work goal_id work);
@@ -883,7 +1005,7 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
   let work =
     match Agent.collect_pending config with
     | Ok work -> work
-    | Error msg -> fail msg
+    | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "refutation is not overwritten by a re-armed request" false
     (has_completion_work goal_id work);
@@ -916,8 +1038,7 @@ let test_superseded_review_keeps_the_evaluated_original_criterion () =
       [ "verifier-a", Stub_approve "three verified services meet target three" ])
     (fun () -> drain config);
   let registry = Goal_verification_run_registry.global () in
-  let runs = Goal_verification_run_registry.list_runs registry
-    |> List.filter (fun (run : Goal_verification_run_registry.run) -> String.equal run.goal_id goal_id) in
+  let runs = reviews_of_goal registry goal_id in
   (match runs with
    | [ { request_id; criterion; status = Goal_verification_run_registry.Completed
        { outcome;
@@ -960,8 +1081,7 @@ let test_wake_after_deferred_persist_survives_active_scan () =
   let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
   let observer () =
     try
-      let runs = Goal_verification_run_registry.list_runs registry
-        |> List.filter (fun (run : Goal_verification_run_registry.run) -> String.equal run.goal_id goal_id) in
+      let runs = reviews_of_goal registry goal_id in
       let has_outcome matches = List.exists
         (fun (run : Goal_verification_run_registry.run) -> match run.status with
          | Goal_verification_run_registry.Running -> false
@@ -1185,6 +1305,10 @@ let () =
         ] )
     ; ( "non-verdicts keep evidence"
       , [ test_case "scan preserves source failure" `Quick test_scan_preserves_source_failure
+        ; test_case "skipped scan records one row and one WARN per cycle" `Quick
+            test_skipped_scan_records_one_row_and_one_warn_per_cycle
+        ; test_case "healthy store scan records no skipped row" `Quick
+            test_healthy_store_scan_records_no_skipped_row
         ; test_case "lane unavailable keeps the pending row" `Quick
             test_lane_unavailable_keeps_the_pending_row
         ; test_case "malformed reply fails over to the next slot" `Quick

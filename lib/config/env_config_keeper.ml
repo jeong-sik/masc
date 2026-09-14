@@ -621,6 +621,27 @@ module KeeperKeepalive = struct
     | declared -> declared
   ;;
 
+  (* The declared range of the provider-call no-progress threshold, ahead of
+     the two stream budgets because their own ceiling is its upper bound: a
+     budget no threshold can cover is refused where it is read, instead of
+     at every boot by the freeze rule with advice the range then rejects. *)
+  let provider_call_deadline_min_sec = 30.0
+  let provider_call_deadline_max_sec = 3600.0
+
+  let declared_stream_budget_seconds env_key =
+    match declared_timeout_seconds env_key with
+    | Some seconds when Float.compare seconds provider_call_deadline_max_sec > 0 ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "invalid %s=%g (expected at most %g seconds, the longest \
+               provider_call_deadline_sec can cover)"
+              env_key
+              seconds
+              provider_call_deadline_max_sec))
+    | declared -> declared
+  ;;
+
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
   let stream_idle_failsafe_floor_sec = 600.0
 
@@ -634,7 +655,7 @@ module KeeperKeepalive = struct
 
       Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
-  let stream_idle_timeout_sec () = declared_timeout_seconds stream_idle_timeout_env_key
+  let stream_idle_timeout_sec () = declared_stream_budget_seconds stream_idle_timeout_env_key
 
   let first_event_timeout_env_key = "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
 
@@ -662,7 +683,7 @@ module KeeperKeepalive = struct
 
       Env: [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
-  let first_event_timeout_sec () = declared_timeout_seconds first_event_timeout_env_key
+  let first_event_timeout_sec () = declared_stream_budget_seconds first_event_timeout_env_key
 
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
@@ -732,9 +753,6 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
-  let provider_call_deadline_min_sec = 30.0
-  let provider_call_deadline_max_sec = 3600.0
-
   let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
 
   let provider_call_deadline_sec_override () =

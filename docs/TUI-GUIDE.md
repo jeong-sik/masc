@@ -441,13 +441,21 @@ process holding a connection is still an `lsof` question.
 
 ```
  MASC Lanes · Standalone (4 lanes)  17:02:53  [connected]
-  Standalone LLM lanes · READ-ONLY OBSERVATION · observed 17:02:52
- >● Librarian       running 12s    slots librarian-exact  active 1  runs 50  ok/fail/cancel 47/2/1
+  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed 17:02:52
+    LANE       STATUS          ACTIVE  RUNS  OK/FAIL/CANCEL  P50     SLOTS            OBSERVED
+ >◒ Librarian  running 12s          1    50  47/2/1          8.0s    librarian-exact  librarian-exact×50
 ```
 
-Rows come from `GET /api/v1/dashboard/standalone-lanes`. They show admission slots,
-current activity, retained run counts, execution outcomes, latency, and the
-slots actually selected. This build projects four fixed consumers:
+Rows come from `GET /api/v1/dashboard/standalone-lanes`. One dim header
+carries the column names; a row carries the lane's mark and name, its status
+(with the elapsed time of a running lane), the running count, retained run
+count, execution outcomes, latency, the admitted slots, and the slots actually
+selected. The name and slot columns are as wide as the widest row needs, so
+a long name moves every row's columns together rather than one row's. The
+counts come before the slots because they are what a reader compares down
+the column; beside the Activity pane the slot column is the one cut, and the
+block under the list prints the selected lane's slots in full. This build
+projects four fixed consumers:
 `Board Attention` judges one durable Board attention candidate, `HITL Auto
 Judge` judges one held approval, `Librarian` selects the next Memory OS
 snapshot from immutable Keeper history, and `Verifier` reviews Task completion

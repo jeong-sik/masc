@@ -608,7 +608,9 @@ let composer_cursor state ~rows ~cols =
    that had not been made or had been refused. The shared words say which. *)
 let overview_pulse_text (state : state) ~now =
   match state.keeper_turns_observed_at with
-  | None -> title_missing_reading ~error:state.keeper_turns_error
+  (* The row draws this behind "Pulse:", so the label already says these
+     words are the state of a reading rather than a count. *)
+  | None -> field_missing_reading ~error:state.keeper_turns_error
   | Some _ ->
       let buckets = Array.make 8 0 in
       List.iter

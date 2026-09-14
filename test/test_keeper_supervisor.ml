@@ -1176,6 +1176,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
             (fun () -> ())
         with
         | Ok (`Busy _) -> ()
+        | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"
         | Ok (`Ran ()) -> fail "autonomous work overtook the ready operation drain"
        | Error error ->
           fail (Masc.Keeper_owner_registry.command_error_to_string error));

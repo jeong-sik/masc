@@ -15,8 +15,13 @@
 #                                         # continue-on-error)
 set -uo pipefail
 
-mode="${1:?usage: run-lint-suite.sh <blocking|blocking-pr|advisory> [base-sha]}"
+mode="${1:?usage: run-lint-suite.sh <blocking|blocking-pr|advisory> [base-sha] [head-sha]}"
 base_sha="${2:-}"
+# Optional, and only blocking-pr reads it. Left empty the PR lints fall back to
+# HEAD, which is what they did before and is right for a checkout of the branch
+# itself; a pull_request checkout is the merge ref, where HEAD is not the pull
+# request. See blocking_pr_lints.
+head_sha="${3:-}"
 
 failures=()
 ran=0
@@ -260,6 +265,14 @@ blocking_lints() {
 
 blocking_pr_lints() {
   local base="$1"
+  # The pull request's own head, when the caller knows it. A pull_request
+  # checkout is refs/pull/N/merge, so HEAD carries whatever main held when
+  # GitHub built that merge -- which can be newer than the base sha the event
+  # reported. Anything merged to main in that window then reads as one of this
+  # pull request's commits. Measured 2026-09-14: the squash of #36190 landed
+  # empty, and the next pull request to run this suite failed "empty commits
+  # detected" on it while two others passed.
+  local head="${2:-HEAD}"
   run_lint "Fun.protect finalizer guard" \
     python3 scripts/ci/check-fun-protect-finally-guard.py --base "${base}" --head HEAD
   run_lint "ignore justification self-test" \
@@ -285,7 +298,8 @@ blocking_pr_lints() {
   # (#4186), which a planted `~priority:()` reports.
   run_lint "Release train guard" \
     bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
-  run_lint "PR hygiene" bash scripts/check-pr-hygiene.sh --base "${base}"
+  run_lint "PR hygiene" \
+    bash scripts/check-pr-hygiene.sh --base "${base}" --head "${head}"
   # The companion to the boundary guard wired above: a new .mli whose paired
   # .ml is already in that guard's allow-list has to be added alongside it,
   # or every later PR fails on docstrings this one exposed. That is PR #11248
@@ -504,7 +518,7 @@ case "${mode}" in
       exit 2
     fi
     blocking_lints
-    blocking_pr_lints "${base_sha}"
+    blocking_pr_lints "${base_sha}" "${head_sha:-HEAD}"
     ;;
   advisory)
     advisory_lints

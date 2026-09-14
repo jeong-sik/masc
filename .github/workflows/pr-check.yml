@@ -127,8 +127,25 @@ jobs:
 
       - name: Blocking lints
         run: |
-          bash scripts/ci/run-lint-suite.sh blocking-pr \
-            "${{ github.event.pull_request.base.sha }}"
+          # base.sha is main as it stood when the event fired. The checkout is
+          # refs/pull/N/merge, whose first parent is main as it stands now, so
+          # anything merged in between is reachable from HEAD and not excluded
+          # by base.sha -- and the PR lints read it as this pull request's own.
+          # Measured 2026-09-14: #36190's squash landed empty, and the next
+          # pull request to run this suite failed "empty commits detected" on
+          # that commit while two others, whose runs missed the window,
+          # passed.
+          #
+          # The first parent answers the same question without the window.
+          # Taken only when the second parent is this pull request's head,
+          # which is what makes the checkout the merge ref rather than a
+          # branch that happens to end in a merge.
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if [ "$(git rev-parse -q --verify 'HEAD^2' || true)" = "${head}" ]; then
+            base="$(git rev-parse 'HEAD^1')"
+          fi
+          bash scripts/ci/run-lint-suite.sh blocking-pr "${base}" "${head}"
 
       - name: Advisory lints
         # Recorded, not enforced -- the driver's own contract for this mode.

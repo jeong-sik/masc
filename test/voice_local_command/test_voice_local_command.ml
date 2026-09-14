@@ -37,6 +37,7 @@ let endpoint ?command ~kind id =
   ; timeout_seconds = None
   ; default_voice = None
   ; command
+  ; model = None
   }
 
 let argv_of = function

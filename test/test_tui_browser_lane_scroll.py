@@ -28,7 +28,7 @@ def run(executable: str) -> None:
                 "text": f"BROWSER SCENE ROW {index:03d}",
                 "rects": [{"x": 0, "y": index * 20, "width": 100, "height": 20}],
                 "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400",
-                "whiteSpace": "normal"}
+                "whiteSpace": "normal", "sourceContext": None}
 
     def read(_body):
         return 200, {"ok": True, "data": {"source": "live", "clientId": CLIENT,

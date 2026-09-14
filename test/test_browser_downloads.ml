@@ -36,6 +36,21 @@ let test_malformed_completion () =
   check bool "missing download ID cannot fall back to null navigation" true
     (Result.is_error (D.event model ~method_:"browsingContext.downloadWillBegin"
       (`Assoc ["context",`String "tab";"navigation",`Null])))
+(* Proves F297: a BiDi method outside the three subscribed names is refused
+   with that name, so the session interrupts with a reason instead of the
+   model silently answering Ok as if the event had been handled. On
+   origin/main the wildcard arm returns Ok () here. *)
+let test_unsubscribed_event_is_refused () =
+  let model = D.create () in
+  (match D.event model ~method_:"browsingContext.navigationStarted"
+     (`Assoc ["context",`String "tab";"url",`String "https://example.org/"]) with
+   | Ok () -> fail "unknown BiDi method was accepted as handled"
+   | Error reason -> check string "refusal names the method"
+       "unsubscribed BiDi event: browsingContext.navigationStarted" reason);
+  check bool "refused event leaves no download evidence" true (D.for_context model "tab" = []);
+  check bool "subscription list and event handler share one method table" true
+    (List.map snd D.subscribed_methods = ["browsingContext.contextCreated";
+      "browsingContext.downloadWillBegin";"browsingContext.downloadEnd"])
 let with_dir f =
   let root = Filename.temp_file "masc-download-test" "" in
   Sys.remove root; Unix.mkdir root 0o700;
@@ -82,4 +97,5 @@ let test_download_artifact_reader () =
 let () = run "browser downloads" ["evidence",[
   test_case "download UUID and descendant frame correlation" `Quick test_download_identity_and_frames;
   test_case "malformed completion remains unresolved" `Quick test_malformed_completion;
+  test_case "unsubscribed BiDi event is refused by name" `Quick test_unsubscribed_event_is_refused;
   test_case "download reaches the real paged artifact reader" `Quick test_download_artifact_reader]]

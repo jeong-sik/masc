@@ -294,7 +294,7 @@ let test_scoped_refresh_failure_retains_read_intent () =
         "role",`String "main";"tag",`String "main";"text",`String "Region";
         "rects",`List [`Assoc ["x",`Float 0.;"y",`Float 0.;"width",`Float 100.;"height",`Float 20.]];
         "color",`String "black";"fontSize",`Float 16.;"fontWeight",`String "400";
-        "whiteSpace",`String "normal"]]]] in
+        "whiteSpace",`String "normal";"sourceContext",`Null]]]] in
   let scoped = success (decode_scene (scene_json ~document_id:target.document_id ~view:"content"
     ~scope:(`Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id]))) in
   let focus = Scene_focus {tab_id=2;target} in

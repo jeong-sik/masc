@@ -741,7 +741,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ( "active_goals_tree",
                 if (not compact) && include_goals then
                   match Goal_store.list_goals_result config () with
-                  | Error detail -> Dashboard_goals.goal_store_unavailable_json detail
+                  | Error detail -> Goal_unavailable_envelope.to_yojson detail
                   | Ok all_goals ->
                   let linked =
                     List.filter

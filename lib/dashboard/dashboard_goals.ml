@@ -300,18 +300,10 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ("updated_at", `String goal.updated_at);
     ]
 
-
-
-(* RFC-0444 PR-3 extends this envelope with reason, field, file, mirror and
-   reset_step members; PR-1 renders the value into the existing [error]
-   line. *)
-let goal_store_unavailable_json (unavailable : Goal_store.unavailable) =
-  `Assoc
-    [ "ok", `Bool false
-    ; "error_code", `String "goal_store_unavailable"
-    ; "error", `String (Goal_store.unavailable_to_string unavailable)
-    ]
-
+(* A Goal store this build cannot read is answered with the one wire
+   projection the MCP goal tools also send, [Goal_unavailable_envelope]
+   (RFC-0444 §2.3 row 4); the dashboard renders no line of its own. The
+   Goal–Task link registry is a different source and keeps its own envelope. *)
 let goal_task_links_unavailable_json detail =
   `Assoc
     [ "ok", `Bool false
@@ -323,7 +315,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
     ~(pending_approvals : Yojson.Safe.t list) ~goal_id :
     (Yojson.Safe.t, string) result =
   match Goal_store.list_goals_result config () with
-  | Error detail -> Ok (goal_store_unavailable_json detail)
+  | Error detail -> Ok (Goal_unavailable_envelope.to_yojson detail)
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
@@ -414,7 +406,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id =
 let dashboard_goals_tree_json_ready ~(config : Workspace.config)
     ~(pending_approvals : Yojson.Safe.t list) : Yojson.Safe.t =
   match Goal_store.list_goals_result config () with
-  | Error detail -> goal_store_unavailable_json detail
+  | Error detail -> Goal_unavailable_envelope.to_yojson detail
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in

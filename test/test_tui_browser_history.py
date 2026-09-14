@@ -27,7 +27,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
     def node(text):
         return {"nodeId": "text", "kind": "text", "tag": "p", "text": text,
                 "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal",
-                "rects": [{"x": 0, "y": 0, "width": 400, "height": 20}]}
+                "sourceContext": None, "rects": [{"x": 0, "y": 0, "width": 400, "height": 20}]}
 
     def scene(name):
         return {"schema": "masc.browser.scene.v1", "view": "content", "scope": None,

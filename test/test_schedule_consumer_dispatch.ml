@@ -899,10 +899,18 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
      |> to_string);
 ;;
 
-let test_recurring_wakes_keep_distinct_occurrence_ids () =
+(* Each recurrence is its own occurrence with its own identity. While the
+   keeper does not consume, the newer occurrence supersedes the earlier
+   pending one: the queue holds the current occurrence only, and the earlier
+   one is a durable cancellation naming what superseded it -- not a second
+   pending row and not a silent drop. Until 2026-09-14 both stayed queued and
+   one 5-minute schedule reached 31 pending occurrences on a busy keeper. *)
+let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
   with_workspace
   @@ fun config ->
-  ignore (persist_keeper_meta config "schedule-keeper" : Keeper_meta_contract.keeper_meta);
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let _request =
     create_keeper_wake_schedule
       ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
@@ -912,13 +920,40 @@ let test_recurring_wakes_keep_distinct_occurrence_ids () =
   let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
   check bool "recurrences have distinct identities" false (String.equal first_id second_id);
   let queued =
-    Keeper_registry_event_queue.snapshot
-      ~base_path:config.Workspace_utils.base_path
-      "schedule-keeper"
+    Keeper_registry_event_queue.snapshot ~base_path keeper_name
     |> Keeper_event_queue.to_list
   in
-  check int "both occurrences remain queued" 2 (List.length queued);
-  check (list string) "queue preserves occurrence order" [ first_id; second_id ]
+  check (list string) "only the current occurrence is pending" [ second_id ]
+    (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued);
+  let state =
+    match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  let cancellation =
+    List.find_map
+      (function
+        | Keeper_event_queue_state.Current_receipt
+            { transition = Keeper_event_queue_state.Cancel_accepted cancellation; _ }
+          when String.equal cancellation.source.post_id first_id ->
+          Some cancellation
+        | Keeper_event_queue_state.Current_receipt _
+        | Keeper_event_queue_state.Projected_witness _ -> None)
+      (Keeper_event_queue_state.projected_dispositions state)
+  in
+  (match cancellation with
+   | None -> fail "the superseded occurrence left no durable cancellation"
+   | Some cancellation ->
+     check bool "the cancellation names the occurrence that superseded it" true
+       (String_util.contains_substring cancellation.reason second_id));
+  (* A third recurrence supersedes the second the same way: the pending set
+     never grows past one per schedule. *)
+  let third_id = tick_ok config ~now:321.0 |> single_occurrence_id in
+  let queued =
+    Keeper_registry_event_queue.snapshot ~base_path keeper_name
+    |> Keeper_event_queue.to_list
+  in
+  check (list string) "still one pending occurrence" [ third_id ]
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
@@ -1787,15 +1822,15 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
    | Some (Keeper_event_queue_state.Projected_witness _) -> ()
    | Some (Keeper_event_queue_state.Current_receipt _) | None ->
      fail "older schedule terminal did not become a compact witness");
-  let conflicting_stimulus =
+  let conflicting_wake, conflicting_stimulus =
     match original_stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
-      { original_stimulus with
-        arrived_at = 201.9
-      ; payload =
-          Keeper_event_queue.Schedule_due
-            { wake with message = "changed message for the same occurrence" }
-      }
+      let changed = { wake with message = "changed message for the same occurrence" } in
+      ( changed
+      , { original_stimulus with
+          arrived_at = 201.9
+        ; payload = Keeper_event_queue.Schedule_due changed
+        } )
     | _ -> fail "expected the original schedule stimulus"
   in
   (match
@@ -1804,6 +1839,8 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
        ~keeper_name
        ~expected_owner:keeper_name
        ~stimulus_id
+       ~now:201.9
+       ~wake:conflicting_wake
        conflicting_stimulus
    with
    | Error (Schedule_runner.Retryable_dispatch_failure detail) ->
@@ -2801,8 +2838,8 @@ let () =
             test_keeper_wake_consumer_records_wake_receipt
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
             test_routed_schedule_carries_occurrence_destination_to_keeper
-        ; test_case "recurring wakes keep distinct occurrence ids" `Quick
-            test_recurring_wakes_keep_distinct_occurrence_ids
+        ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick
+            test_recurring_wake_supersedes_the_earlier_pending_occurrence
         ; test_case "reused schedule id does not match pruned terminal receipt"
             `Quick
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt

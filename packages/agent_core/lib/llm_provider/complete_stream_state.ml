@@ -343,6 +343,14 @@ let repeating_reasoning_cycle block =
   | Some _ | None -> None
 ;;
 
+(* The kind the provider announced for block [index], whether the block is
+   still open or already closed; [None] for a block never announced. *)
+let block_kind_at state index =
+  match Blocks.find_opt index state.blocks with
+  | Some { header = Announced { kind; _ }; _ } -> Some kind
+  | Some { header = Unannounced; _ } | None -> None
+;;
+
 let guard_repeating_generation ~index state =
   match Blocks.find_opt index state.blocks with
   | None -> state

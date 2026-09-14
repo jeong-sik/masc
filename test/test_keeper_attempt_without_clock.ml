@@ -1,9 +1,13 @@
 (* The attempt watchdog needs the process clock. A process that has none
-   used to run the attempt anyway, with no MASC-side bound at all: the one
-   silent way left for a keeper turn to wait forever. It is now refused
-   before anything is sent, with a typed configuration error. This suite is
-   the only driver suite that installs no clock -- [Eio_main.run] alone does
-   not -- so it is the one place that path is exercised. *)
+   never ran the attempt: [Runtime_agent.build] refuses the stream-idle
+   budget the driver always declares when there is no clock to arm it. The
+   driver now refuses the same condition one layer earlier, in the name of
+   the deadline it could not set, so the two hold one policy. This suite
+   pins that refusal's name: without the driver's arm the same run ends in
+   the runtime's refusal, field [stream_idle_timeout_s], nothing sent
+   either way. It is the only driver suite that installs no clock --
+   [Eio_main.run] alone does not -- so it is the one place that path is
+   exercised. *)
 open Alcotest
 open Masc
 
@@ -89,6 +93,8 @@ max-context = 8192
   (match result with
    | Ok _ -> fail "an attempt with no clock to bound it must not complete"
    | Error error -> refused error);
+  (* Both refusals leave the provider untouched; the field above is what
+     tells them apart. *)
   List.iter refused !attempt_errors;
   check int "no request reached the provider" 0 (Exact_output_fixture.post_count server)
 ;;

@@ -161,7 +161,10 @@ module For_testing : sig
       result is a clock: its output moves on every call while nothing advances,
       so the output fingerprint it uses as no-progress proof never matches.
       This one drops the output and requires the repeats to be adjacent
-      instead. *)
+      instead. A call whose handler declared [Keeper_tool_outcome.Progress]
+      ends the streak and is never the latest of one: a tool that moves a
+      world by a fixed amount looks like a clock on this axis and is the
+      opposite thing; the clock declares nothing. *)
   val repeated_tool_call_input
     :  threshold:int
     -> tool_call_detail list

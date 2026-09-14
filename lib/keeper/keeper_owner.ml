@@ -522,10 +522,15 @@ let request t command =
     with
     | `Closed -> Error Owner_closed
     | `Enqueued ->
+      (* A response that arrived as the owner closed is the answer: the
+         command ran, and its caller must not be told the owner was closed
+         to it. [Fiber.first] kept whichever wake-up was queued first, and a
+         closing owner queues its close ahead of the response it settled in
+         the same pass. *)
       Eio.Cancel.protect (fun () ->
-        Eio.Fiber.first
+        Watched_work.run
           (fun () -> Eio.Promise.await response)
-          (fun () ->
+          ~watcher:(fun () ->
              Eio.Promise.await t.closed_p;
              Error Owner_closed)))
 ;;

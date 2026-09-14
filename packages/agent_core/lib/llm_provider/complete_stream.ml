@@ -493,7 +493,13 @@ let complete_stream_http
          in the message come from one fact. Kept apart from
          [first_token_at_ref], which also needs a latency counter. *)
       let first_output_seen = ref false in
-      let classify_chunk_kind (evt : Types.sse_event) =
+      (* [block_kind_at] answers for a stop event, which carries only the
+         block's index: closing a tool_use block is a tool call completing,
+         closing any other block is that block ending and moves the stream's
+         state nowhere. Every Anthropic turn ends with a content_block_stop,
+         so a stall after a text block's stop is an idle gap in
+         streaming_answer, not one while streaming a tool call. *)
+      let classify_chunk_kind ~block_kind_at (evt : Types.sse_event) =
         match evt with
         | Types.MessageStart _ -> `Skip
         | Types.ContentBlockStart { content_type = "tool_use"; _ } -> `Tool_call_start
@@ -506,7 +512,14 @@ let complete_stream_http
         | Types.ContentBlockDelta { delta = RedactedThinkingSnapshot _; _ } -> `Substrate
         | Types.ContentBlockDelta { delta = InputJsonDelta _ | InputJsonSnapshot _; _ } ->
           `Tool_call_arg_delta
-        | Types.ContentBlockStop _ -> `Tool_call_complete
+        | Types.ContentBlockStop { index } ->
+          (match block_kind_at index with
+           | Some Complete_stream_state.Tool_use_block -> `Tool_call_complete
+           | Some
+               ( Complete_stream_state.Text_block | Thinking_block | Reasoning_details_block
+               | Redacted_thinking_block | Tool_result_block _ | Image_block | Document_block
+               | Audio_block | Unknown_block _ )
+           | None -> `Skip)
         | Types.MessageDelta _ -> `Skip
         | Types.MessageStop -> `Done
         | Types.Ping -> `Heartbeat
@@ -689,7 +702,11 @@ let complete_stream_http
                     if Option.is_none !first_token_at_ref
                     then first_token_at_ref := elapsed_ms);
                   emit_stream_event on_event emitted_evt;
-                  match classify_chunk_kind emitted_evt with
+                  match
+                    classify_chunk_kind
+                      ~block_kind_at:(Complete_stream_acc.block_kind_at acc)
+                      emitted_evt
+                  with
                   | `Skip -> ()
                   | `Thinking ->
                     stream_idle_state := Http_client.Streaming_thinking;

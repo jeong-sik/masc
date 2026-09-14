@@ -40,6 +40,28 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
+# WORKAROUND: production-blocking. One suite is a single walk of 74 PTY
+# scenarios and legitimately takes longer than the bound above. It measures
+# 261s locally and CI killed it at exactly 300.0s on two separate runs
+# (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
+# that edits that file is killed whatever it changed. #36349 is one: it
+# repairs four broken layers of that walk, passes locally with no failures,
+# and is why test/test_tui_keyboard_input is red on main.
+#
+# The bound stays 300s for every other suite. Raising it everywhere would
+# double what a genuinely hung suite costs, which is what that bound is for.
+#
+# Removal target: #36343's split. Once enough of that walk's 69 inline
+# scenarios live in focused suites of their own, the walk fits 300s again and
+# this case goes with it. Nothing else belongs in this list -- a second entry
+# means the split stopped being the plan.
+suite_timeout() {
+  case "$1" in
+    */test_tui_keyboard_input.py) echo 600 ;;
+    *) echo "${per_suite_timeout}" ;;
+  esac
+}
+
 # Which suites this pull request runs, from its changed-file list in
 # ${changed}. Sets ${sources} and returns 1 when there is nothing to run, so
 # --self-test can exercise the same code the pull-request path does rather
@@ -174,13 +196,23 @@ test/test_tools_coverage.ml"
   # package sources, 94 name a suite, 79 of those within the per-module cap,
   # median 1. The 15 over the cap are the namespace modules the cap is for --
   # base/tool.ml names 61 suites, runtime.ml 31.
+  #
+  # An interface edit is an edit to the same module. The scope took .ml only,
+  # so a change to foo.mli alone ran none of test_foo_*: an interface can
+  # change a contract's doc, or a signature the suite exercises through a
+  # different caller, with the implementation untouched. Measured 2026-09-14
+  # over origin/main's last 60 commits: 7 edited an .mli without its .ml and
+  # named a suite within the cap -- among them #36279, whose suite over the
+  # function it re-documented did not run.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.mli?$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
-    stem=$(basename "${changed_source}" .ml)
+    stem=$(basename "${changed_source}")
+    stem=${stem%.mli}
+    stem=${stem%.ml}
     stem=${stem#masc_}
     # Both spellings, in both test roots: the suite named for the module, and
     # the family under it.
@@ -432,6 +464,13 @@ self_test() {
   # out of this file and compares it to the dashboard mirror; the name mapping
   # looks for test_keeper_meta_contract_*, and there is no suite by that name,
   # so before this the only edit that ran the mirror was an edit to itself.
+  # The regression this declaration exists for: #36290 narrowed the tab strip
+  # in this module, and the scenario that reads a tab name off the row lived
+  # only inside the whole-screen walk -- which names no source. Nothing ran.
+  # It merged green and main was red until #36327.
+  check_required "the shared chrome selects the strip scenario" \
+    "test/test_tui_tab_strip_pty.py" \
+    "bin/masc_tui_ansi.ml"
   check "a guard that opens its input is selected too" \
     "test/test_blocker_class_mirror.ml" \
     "lib/keeper/keeper_meta_contract.ml"
@@ -497,6 +536,11 @@ self_test() {
   check "an edited suite under a test directory is selected too" \
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml" \
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml"
+  # An interface is the same module: #36279 re-documented this one and the
+  # suite over the function it documents did not run.
+  check "an interface edit selects the suites named after its module" \
+    "packages/agent_core/test/test_provider_admission.ml" \
+    "packages/agent_core/lib/llm_provider/provider_admission.mli"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
@@ -510,7 +554,10 @@ self_test() {
   # 9s against their 0.7s, so it is attributed instead.
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
-  check "an interface edit selects only its declared PTY scenario" \
+  # tui_browser names five suites, over the per-module cap, so the name
+  # mapping attributes nothing to this interface and the declared scenario
+  # is all that is left.
+  check "an interface over the cap selects only its declared PTY scenario" \
     "test/test_tui_browser_history.py" "bin/masc_tui_browser.mli"
   check "an interface and its edited PTY suite select one entry" \
     "test/test_tui_browser_history.py" \
@@ -585,7 +632,7 @@ while IFS= read -r source; do
   case "${source}" in
     *.py)
       echo "== ${dir}/${name} (dune rule)"
-      if ! timeout "${per_suite_timeout}" \
+      if ! timeout "$(suite_timeout "${source}")" \
         dune build "@${dir}/runtest-${name}" < /dev/null
       then
         failed="${failed}${dir}/${name} (run)\n"

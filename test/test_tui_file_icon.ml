@@ -54,7 +54,9 @@ let plain_fallbacks =
   ; case "no-extension-here" F.Plain
   ]
 
-let all_kinds = [ F.Code; F.Data; F.Prose; F.Script; F.Web; F.Media; F.Plain ]
+(* The module's own list, not a second copy of it here: a kind this file
+   forgot would quietly stop being checked. *)
+let all_kinds = F.kinds
 
 let glyphs_distinct () =
   let glyphs = List.map F.glyph all_kinds in
@@ -74,9 +76,46 @@ let glyphs_distinct () =
 let glyph =
   [ Alcotest.test_case "glyphs are distinct and non-empty" `Quick glyphs_distinct ]
 
+(* The tree draws the mark and then the file name, and the name says the
+   extension the mark was read from, not what the mark means. The words here
+   are the only place that says it, and the help sheet prints them -- so a
+   word that is blank, or one shared by two marks, leaves a reader unable to
+   tell those files apart. *)
+let legend_words_say_one_thing_each () =
+  List.iter
+    (fun (mark, word) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the mark %S has a word" mark)
+        true
+        (String.length (String.trim word) > 0))
+    F.legend;
+  let words = List.map snd F.legend in
+  Alcotest.(check int)
+    "no two marks are given the same word"
+    (List.length words)
+    (List.length (List.sort_uniq String.compare words))
+
+let legend_covers_every_kind () =
+  let explained = List.map fst F.legend in
+  List.iter
+    (fun k ->
+      Alcotest.(check bool)
+        (kind_name k ^ " has a legend row")
+        true
+        (List.mem (F.glyph k) explained))
+    all_kinds
+
+let legend =
+  [ Alcotest.test_case "every mark has its own word" `Quick
+      legend_words_say_one_thing_each
+  ; Alcotest.test_case "the legend covers every kind" `Quick
+      legend_covers_every_kind
+  ]
+
 let () =
   Alcotest.run "tui_file_icon"
     [ ("kind_of_name", kind_of_name)
     ; ("plain_fallbacks", plain_fallbacks)
     ; ("glyph", glyph)
+    ; ("legend", legend)
     ]

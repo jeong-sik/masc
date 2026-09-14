@@ -1652,8 +1652,17 @@ let render_approvals (state : state) =
     match List.nth_opt approvals state.approval_cursor with
     | None -> "", ""
     | Some (Operator_row approval) ->
+        (* The same clock as [created] beside it. This one kept the server's
+           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
+           the local reading next to it -- so a row could show a decision
+           created at 09:03 expiring at 00:03 and read as already gone. It is
+           also the longer of the two spellings, on the row this surface cuts
+           first (#36333). A decision with no deadline still draws "-": that
+           is not a time. *)
         let expires =
-          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
+          match Terminal_text.optional_single_line approval.ap_expires_at with
+          | None -> "-"
+          | Some at -> Terminal_text.short_timestamp at
         in
         let payload =
           Masc_tui_operator_projection.approval_payload_for_terminal
@@ -1918,6 +1927,18 @@ let render_board_compose (state : state) =
     ~cols buf
 
 
+(* A tail this heading can do without. The two rows above the board each end
+   in something atomic -- a key hint, the clause that finishes a sentence --
+   and a cut one says nothing a reader can act on: "H:choo" names no key, and
+   "f narrows once" stops before the condition. So the tail is drawn whole or
+   not at all, the way the footer drops a hint rather than cutting it. What
+   the row drops is under [?], which the footer already points at. *)
+let board_heading_with_tail ~cols head tail =
+  if Message_layout.display_width head + Message_layout.display_width tail
+     <= framed_inner_width cols
+  then head ^ tail
+  else head
+
 (* Every hearth on the board and how many posts it holds, with the one being
    read marked. [f] walked this list and drew none of it, so narrowing was a
    press into the dark: a reader could not see which hearths existed, which
@@ -1936,7 +1957,8 @@ let board_hearth_census_line ~cols (state : state) =
          that f walks hearths once something is. It used to open with
          "H:choose hearth" too, which put that key on two adjacent rows
          whenever the board had no counted hearth. *)
-      ^ "  f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
+      ^ board_heading_with_tail ~cols "  f/F:next/previous · none counted yet"
+          " \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -2048,8 +2070,10 @@ let render_board_list (state : state) =
                was invisible while the key to change it was not. H is in the
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
-              (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
-                 (board_sort_explanation state.board_sort)))
+              (board_heading_with_tail ~cols
+                 (Printf.sprintf "  Sort [s]: %s"
+                    (board_sort_explanation state.board_sort))
+                 " · H:choose hearth"))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; c.push_divider
         ; (fun () ->
@@ -4737,10 +4761,12 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      | Some error ->
        wrap (Theme.bad ())
          ("Admission error: " ^ Terminal_text.single_line error))
-  @ wrap Ansi.dim
-      "TOML spec: slots = required non-empty catalog-ref array; cli_slots = optional official-client runtime-id array."
-  @ wrap Ansi.dim
-      "Lane configuration is TOML. Run Input/Output is retained JSON evidence. Press e to open this section in the preview-checked runtime.toml editor."
+  (* The file's shape and the editor [e] opens are the same two sentences on
+     every lane, so they cost four of this pane's rows to say what no lane
+     answers. They are under [?] with the key that acts on them, the move the
+     Keeper columns and the Memory ST words already made. What stays here is
+     what this lane answers: the section it configures is on the Config row
+     above, and the evidence line below says what its runs retain. *)
   @ wrap Ansi.reset output_meaning
   @ wrap Ansi.dim evidence_contract
 
@@ -13944,6 +13970,23 @@ let render_config (state : state) =
            let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
            let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
            let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
+           (* On a workspace that follows the convention the masc root is the
+              base path with one segment added, so drawing it whole spends the
+              base path's cells saying the base path again. Under /var/folders
+              both were cut to "/var/fold\xe2\x80\xa6" and neither could be read.
+              Named against the label beside it the nested case costs twelve
+              cells and the base keeps the rest. A root that is not under the
+              base is the reading worth the room, and still draws whole. *)
+           let masc =
+             let prefix = base ^ "/" in
+             let prefix_len = String.length prefix in
+             if String.length masc > prefix_len
+                && String.starts_with ~prefix masc
+             then
+               "<base>/"
+               ^ String.sub masc prefix_len (String.length masc - prefix_len)
+             else masc
+           in
            let labels = "  base " ^ "   masc " ^ "   binary " in
            let room =
              framed_inner_width cols

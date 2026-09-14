@@ -73,8 +73,10 @@ val first_event_failsafe_floor_sec : float
 
 val first_event_timeout_sec : unit -> float option
 (** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. Bounds
-    only the wait for the FIRST provider event; [stream_idle_timeout_sec] arms
-    the inter-line gaps after it (RFC-AC-037). Always [Some] at runtime: an
+    only the wait for the provider's first token-bearing event (an opening
+    frame such as Responses [response.created] does not end it);
+    [stream_idle_timeout_sec] arms the inter-line gaps after it
+    (RFC-AC-037). Always [Some] at runtime: an
     explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] (or runtime.toml
     [turn.first_event_timeout_sec]) is honoured verbatim; when unset,
     {!first_event_failsafe_floor_sec} is substituted. The [float option]

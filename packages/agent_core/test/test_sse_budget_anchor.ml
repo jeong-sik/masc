@@ -31,7 +31,15 @@ let emit_after_gap ~clock ~now line () =
   line
 ;;
 
-let read_sse_over ~budget_kind lines =
+(* For the [`Both] shape: an inter-token budget shorter than one line gap, so
+   it trips on the very next read after it arms, beside a first-event budget
+   that admits any single gap. Which budget is armed at each read then shows
+   in how many events are delivered before the trip. *)
+let inter_token_budget_under_one_gap_s = 0.3
+
+(* [classify] is what the consumer tells the reader about each dispatched
+   event; every event is [Output] unless a test says otherwise. *)
+let read_sse_over ?(classify = fun (_ : string) -> Http_client.Output) ~budget_kind lines =
   Eio_mock.Backend.run
   @@ fun () ->
   let clock = Eio_mock.Clock.make () in
@@ -54,7 +62,17 @@ let read_sse_over ~budget_kind lines =
         ~reader
         ~on_data:(fun ~event_type data ->
           events := (event_type, data) :: !events;
-          Http_client.Continue)
+          Http_client.Continue (classify data))
+        ()
+    | `Both ->
+      Http_client.read_sse
+        ~clock
+        ~first_event_timeout:first_event_budget_s
+        ~idle_timeout:inter_token_budget_under_one_gap_s
+        ~reader
+        ~on_data:(fun ~event_type data ->
+          events := (event_type, data) :: !events;
+          Http_client.Continue (classify data))
         ()
     | `Idle ->
       Http_client.read_sse
@@ -63,17 +81,17 @@ let read_sse_over ~budget_kind lines =
         ~reader
         ~on_data:(fun ~event_type data ->
           events := (event_type, data) :: !events;
-          Http_client.Continue)
+          Http_client.Continue (classify data))
         ()
   in
   match read () with
   | () -> Ok (List.rev !events)
-  | exception Eio.Time.Timeout -> Error `Timed_out
+  | exception Eio.Time.Timeout -> Error (`Timed_out (List.rev !events))
 ;;
 
 let check_timed_out label result =
   match result with
-  | Error `Timed_out -> ()
+  | Error (`Timed_out _) -> ()
   | Ok events ->
     failf
       "%s: stream ran to EOF instead of tripping its budget (%d events delivered)"
@@ -109,6 +127,34 @@ let test_event_fields_do_not_end_first_event_budget () =
     ~budget_kind:`First_event
     [ "event: message\n"; "\n"; "event: future\n"; "\n" ]
   |> check_timed_out "event fields without data"
+;;
+
+let test_prelude_event_keeps_the_first_event_budget () =
+  (* A Responses stream opens with [response.created] before prefill. The
+     consumer reports it as [Prelude], so the first-event budget (1.0) stays
+     armed across the following gap and "out" is delivered; "out" is
+     [Output], so the inter-token budget (0.3) arms and the next gap trips
+     it. A reader that switched budgets on the first data line trips on the
+     blank after "created" and delivers nothing. *)
+  let classify data =
+    if String.equal data "created" then Http_client.Prelude else Http_client.Output
+  in
+  match
+    read_sse_over
+      ~classify
+      ~budget_kind:`Both
+      [ "data: created\n"; "\n"; "data: out\n"; "\n"; "data: more\n"; "\n" ]
+  with
+  | Error (`Timed_out delivered) ->
+    check
+      (list (pair (option string) string))
+      "events delivered before the inter-token budget tripped"
+      [ None, "created"; None, "out" ]
+      delivered
+  | Ok events ->
+    failf
+      "prelude stream ran to EOF instead of tripping the inter-token budget (%d events)"
+      (List.length events)
 ;;
 
 let test_ignored_fields_do_not_renew_idle_budget () =
@@ -158,6 +204,12 @@ let () =
             "event fields without data do not end first-event budget"
             `Quick
             test_event_fields_do_not_end_first_event_budget
+        ] )
+    ; ( "prelude"
+      , [ test_case
+            "a prelude event keeps the first-event budget"
+            `Quick
+            test_prelude_event_keeps_the_first_event_budget
         ] )
     ; ( "idle"
       , [ test_case

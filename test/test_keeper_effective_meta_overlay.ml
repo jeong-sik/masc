@@ -1456,6 +1456,49 @@ instructions = "Missing sandbox profile"
             (Some true)
             (json_bool_field "keepalive_running" row))
 
+(* A turn-failure streak moves the registry phase to Failing, in which the
+   keepalive is alive and still executing turns. keepalive_running answers
+   liveness, so it stays true there, and the health must not fall to
+   "offline": the phase field already says "failing". Read through
+   [Keeper_registry.is_running] (Running only) the row said both. *)
+let test_keeper_list_row_in_failing_phase_is_not_offline () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "failing-not-offline" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "Fails a turn and keeps running"
+|};
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+  Fun.protect
+    ~finally:Masc.Keeper_registry.For_testing.clear
+    (fun () ->
+      Masc.Keeper_registry.increment_turn_failures ~base_path:config.base_path meta.name;
+      ignore
+        (Masc.Keeper_registry.dispatch_event
+           ~base_path:config.base_path
+           meta.name
+           (Keeper_state_machine.Turn_failed { consecutive = 1 }));
+      (match Masc.Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+       | Some phase ->
+         Alcotest.(check string) "phase after the failure" "failing"
+           (Keeper_state_machine.phase_to_string phase)
+       | None -> Alcotest.fail "expected a registered phase");
+      Alcotest.(check bool) "a failing keepalive is still running" true
+        (Masc.Keeper_status_bridge.runtime_keepalive_running config meta);
+      match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
+      | None -> Alcotest.fail "expected a keeper row"
+      | Some row ->
+          Alcotest.(check (option bool)) "row keepalive_running" (Some true)
+            (json_bool_field "keepalive_running" row);
+          Alcotest.(check (option string)) "row phase" (Some "failing")
+            (json_string_field "phase" row);
+          Alcotest.(check bool) "row health is not offline" false
+            (json_string_field "health" row = Some "offline"))
+
 (* The turn path's own entry point. Durable keeper JSON carries no config
    fields, so the raw store read below is [Local] no matter what the TOML says
    -- the assertion is that one call gets both the snapshot and a meta that
@@ -1579,5 +1622,8 @@ let () =
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;
+          Alcotest.test_case
+            "keeper list row in failing phase is not offline"
+            `Quick test_keeper_list_row_in_failing_phase_is_not_offline;
         ] );
     ]

@@ -2663,7 +2663,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
        failed read, and a file that matches its last commit. *)
     let empty =
       match (ds.ds_diff, ds.ds_error) with
-      | (Some _ | None), Some _ -> "  (the read failed; nothing here is a reading)"
+      | (Some _ | None), Some _ -> page_failed_note
       | None, None -> "  (reading the tree)"
       | Some diff, None ->
           if diff.Masc.Tui_decode.gd_has_changes then

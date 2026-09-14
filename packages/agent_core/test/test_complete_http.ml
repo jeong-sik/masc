@@ -2611,7 +2611,7 @@ let test_complete_stream_stops_reading_a_repeating_generation () =
 
 (* The same wiring for a reasoning block: the cycle guard lives in the state
    machine, and the socket has to stop when it fires. The provider chants one
-   43-byte unit; the guard fires on the 24th copy (1,034 bytes of periodic
+   43-byte unit; the guard fires on the 24th copy (1,032 bytes of periodic
    tail), and the client must not wait out the quiet gap for the frame after
    it. *)
 let test_complete_stream_stops_reading_a_chanting_reasoning_block () =

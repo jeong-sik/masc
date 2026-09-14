@@ -7723,8 +7723,18 @@ def chat_visibility_modes_interaction(
             # The skill row names an outcome now, not a chain of receipts.
             # "DELIVERED · USED" was the evidence path; the label says what
             # came of it, and the mark above already carries the state.
+            #
+            # The phrase names the model's side of the step now. 받아서 씀
+            # said who received without saying who sent, and an operator
+            # could not read the row from it (#36268). Each Korean piece
+            # is matched on its own so the comma and space the label
+            # carries, or an SGR run between them, does not hide it.
             re.compile(
-                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
+                "전달됨".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "도구".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"

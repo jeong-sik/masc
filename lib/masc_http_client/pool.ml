@@ -240,9 +240,13 @@ let client_is_live client =
 (* A protocol fiber may fail before Piaf registers a response callback.
    Scope teardown then closes the socket but cannot settle Piaf's promise.
    Observe that teardown during every network wait. The watcher must end
-   before normal release, which can itself close the client scope. *)
+   before normal release, which can itself close the client scope. The
+   three watchers of this module -- this one, the request window and the
+   idle window -- run through [Watched_work.run]: a request that finished
+   as its watcher fired is the request's result, not the watcher's
+   verdict. *)
 let with_client_scope client ~on_error f =
-  Eio.Fiber.first f (fun () ->
+  Watched_work.run f ~watcher:(fun () ->
     match Eio.Promise.await client.closed with
     | Ok () -> Error (on_error Client_scope_closed)
     | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -828,17 +832,17 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
              release_once ~close_only:false;
              Ok { status; headers = headers_list; body = body_str }))
 
-(* Optional wall-clock timeout race; mirrors masc_http_client pattern. *)
+(* The request's wall-clock window, when the caller gave one. The one
+   window over a request: [Masc_http_client]'s sync entry points call
+   [request] and arm nothing of their own. *)
 let with_optional_timeout
     (type a) ?clock ?timeout_seconds (f : unit -> (a, string) result) :
   (a, string) result =
   match clock, timeout_seconds with
   | Some clock, Some t when t > 0.0 ->
-    Eio.Fiber.first
-      (fun () -> f ())
-      (fun () ->
-         Eio.Time.sleep clock t;
-         Error (Printf.sprintf "Pool.request: timeout after %.1fs" t))
+    Watched_work.run f ~watcher:(fun () ->
+      Eio.Time.sleep clock t;
+      Error (Printf.sprintf "Pool.request: timeout after %.1fs" t))
   | _ -> f ()
 
 let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
@@ -864,10 +868,11 @@ let empty_body_progress = {
 (* Read [body] chunk-by-chunk, tracking progress, with a watchdog fiber
    that cancels when no chunk has arrived for [idle_timeout_sec].
 
-   The body iter fiber and the idle watcher race via [Eio.Fiber.first].
-   Whichever finishes first wins; the loser is auto-cancelled. The
-   [progress] ref is shared between fibers but only the body fiber
-   writes it (Eio is single-domain, no atomic needed). *)
+   The body iter fiber and the idle watcher race through
+   [Watched_work.run]: a body that ended as the window passed is the
+   body, not an idle stream. The [progress] ref is shared between fibers
+   but only the body fiber writes it (Eio is single-domain, no atomic
+   needed). *)
 let read_body_with_idle
     ?progress_ref
     ?on_chunk
@@ -904,13 +909,13 @@ let read_body_with_idle
       bytes_received = !progress.bytes_received + String.length chunk;
     }
   in
-  Eio.Fiber.first
+  Watched_work.run
     (fun () ->
        match Piaf.Body.iter_string ~f:observe body with
        | Ok () -> Ok (Buffer.contents buf, !progress)
        | Error err ->
          Error (piaf_error_message (err :> Piaf.Error.t), !progress))
-    (fun () ->
+    ~watcher:(fun () ->
        (* Idle watcher: sleep one idle window, then compare the last
           observed chunk timestamp. If the body fiber did not record a
           new chunk during the sleep, we declare idle and return Error.
@@ -1081,6 +1086,9 @@ let stats t : stats =
 (* ── Test-only ─────────────────────────────────────────────────── *)
 
 module For_testing = struct
+  let with_request_timeout ~clock ~timeout_seconds f =
+    with_optional_timeout ~clock ~timeout_seconds f
+
   let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
     establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create
     |> Result.map_error connect_failure_to_string

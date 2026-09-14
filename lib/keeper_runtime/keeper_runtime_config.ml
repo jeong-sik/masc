@@ -376,35 +376,36 @@ let configured_value doc (row : Keeper_runtime_setting_registry.setting) =
   | None -> None
 ;;
 
-let effective_source env_name =
-  match Config_boot_overrides.source env_name with
-  | "boot_override" -> "toml"
-  | "env" -> "env"
-  | "default" -> "default"
-  | _ -> "unknown"
+let effective_source env_name = Config_boot_overrides.source env_name
+
+(* The panel's label for the layer in effect; a boot override is the
+   runtime file's value, so it reads "toml". *)
+let effective_source_label = function
+  | Config_boot_overrides.Boot_override -> "toml"
+  | Config_boot_overrides.Env -> "env"
+  | Config_boot_overrides.Default -> "default"
 ;;
 
 let application_status doc (row : Keeper_runtime_setting_registry.setting) =
   match configured_value doc row, effective_source row.env_name with
-  | Some _, "env" -> "preempted_by_env"
-  | Some configured, "toml" ->
+  | Some _, Config_boot_overrides.Env -> "preempted_by_env"
+  | Some configured, Config_boot_overrides.Boot_override ->
     (match toml_value_opt row.env_name with
      | Some applied when String.equal applied configured -> "applied"
      | Some _ | None -> "pending_restart")
-  | Some _, ("default" | "unknown") ->
+  | Some _, Config_boot_overrides.Default ->
     if Keeper_runtime_setting_registry.requires_restart row
     then "pending_restart"
     else "pending_effect_boundary"
-  | None, "toml" ->
+  | None, Config_boot_overrides.Boot_override ->
     (* The boot snapshot still serves the removed TOML value until restart.
        Absence in the edited document is therefore a pending removal, not
        "not configured". *)
     "pending_restart"
-  | None, _ ->
+  | None, (Config_boot_overrides.Env | Config_boot_overrides.Default) ->
     (match row.exposure with
      | Keeper_runtime_setting_registry.Env_only -> "environment_only"
      | Keeper_runtime_setting_registry.Toml_and_env _ -> "not_configured")
-  | Some _, _ -> "pending_restart"
 ;;
 
 let display_bool value = if value then "true" else "false"
@@ -619,7 +620,7 @@ let settings_projection_to_yojson doc =
   in
   let project (row : Keeper_runtime_setting_registry.setting) =
     let configured_value = configured_value doc row in
-    let source = effective_source row.env_name in
+    let source = effective_source_label (effective_source row.env_name) in
     let effective_value = effective_setting_value row in
     let application_status = application_status doc row in
     `Assoc
@@ -660,7 +661,7 @@ let overlay_application_to_yojson doc =
     Keeper_runtime_setting_registry.toml_settings
     |> List.filter (fun row ->
       Option.is_some (configured_value doc row)
-      || String.equal (effective_source row.env_name) "toml")
+      || effective_source row.env_name = Config_boot_overrides.Boot_override)
   in
   let classified =
     List.map

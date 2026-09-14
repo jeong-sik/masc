@@ -26,9 +26,16 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+type evidence_prompt = {
+  evidence : Yojson.Safe.t; owner_title : string; row_count : int;
+  keepers : string list; choice : int;
+}
+(** Marked rows about to be frozen under [owner_title]. [choice] 0 preserves
+    only; [choice] n sends the reference to the n-th Keeper of [keepers]. *)
 type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
+  evidence_prompt : evidence_prompt option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -80,3 +87,14 @@ val overview_hints : t -> string
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t
 val evidence_request : t -> (request, string) result
+val open_evidence : keepers:string list -> t -> (t, string) result
+(** Open the export choice for the marked rows. Fails like [evidence_request]
+    when the rows span owners or left the view. *)
+val move_evidence : t -> int -> t
+val submit_evidence : t -> (t * request, string) result
+(** Close the choice and build the exact request: the frozen bundle alone, or
+    with [keeper_name] when a Keeper was chosen. *)
+val evidence_receipt_lines : Yojson.Safe.t -> string list
+(** What an evidence receipt says in one or two readable lines: rows frozen
+    and, separately, whether the optional Keeper delivery succeeded. Empty for
+    receipts of other operations. *)

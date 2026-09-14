@@ -458,6 +458,64 @@ let object_array_fields () =
   check bool "primitive array JSON remains valid" true
     ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
 
+(* Marked rows are frozen with `e`. The choice of Keeper is made by name from
+   the workspace roster; before this prompt the only way to name one was the
+   raw `:evidence {...,"keeper_name"}` command. The bundle is preserved either
+   way, and a failed delivery is reported apart from the frozen bundle. *)
+let evidence_export_chooses_a_keeper_by_name () =
+  let row ~owner id : UI.Row.row = {id;lane_id=owner ^ "/events";kind=UI.Row.Event;
+    title=id;observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let worker id : UI.instance = {id;incarnation=id;run_id="project";
+    addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty} in
+  let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
+    output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
+    complete=Some true;configuration=None} in
+  let view = {UI.initial with focus=UI.Timeline;snapshot=Some snapshot;selected=["second";"chosen"]} in
+  let opened = UI.open_evidence ~keepers:["researcher";"imp"] view |> ok in
+  let prompt = Option.get opened.evidence_prompt in
+  check (list string) "keepers are offered by name in a stable order" ["imp";"researcher"] prompt.keepers;
+  check int "preserve only is the default" 0 prompt.choice;
+  let lines = UI.lines ~width:100 opened in
+  check bool "the prompt names the owner and the count" true
+    (List.mem "Preserve 2 marked rows from Observed value changes" lines);
+  check bool "the default is marked" true (List.mem "> Preserve only" lines);
+  check bool "each Keeper is a choice" true
+    (List.mem "  Preserve and send the reference to imp" lines
+     && List.mem "  Preserve and send the reference to researcher" lines);
+  let bundle = ["instance_id",`String "worker";"row_ids",`List [`String "second";`String "chosen"]] in
+  let closed, request = UI.submit_evidence opened |> ok in
+  check bool "preserve only sends no keeper" true (request = UI.Evidence (`Assoc bundle));
+  check bool "the prompt closes on submit" true (Option.is_none closed.evidence_prompt);
+  let moved = UI.move_evidence (UI.move_evidence opened 1) 1 in
+  let _, request = UI.submit_evidence moved |> ok in
+  check bool "the second choice names the second keeper" true
+    (request = UI.Evidence (`Assoc (bundle @ ["keeper_name",`String "researcher"])));
+  check int "the choice stops at the last keeper" 2 (Option.get (UI.move_evidence moved 5).evidence_prompt).choice;
+  check int "the choice stops at preserve only" 0 (Option.get (UI.move_evidence moved (-5)).evidence_prompt).choice;
+  let alone = UI.open_evidence ~keepers:[] view |> ok in
+  check bool "without a roster the prompt says so" true
+    (List.mem "No workspace Keeper is in the roster; preserve only." (UI.lines ~width:100 alone));
+  check int "without a roster the choice cannot move" 0 (Option.get (UI.move_evidence alone 1).evidence_prompt).choice;
+  check bool "rows of two owners are refused before any request" true
+    (Result.is_error (UI.open_evidence ~keepers:["imp"] {view with selected=["chosen";"foreign"]}));
+  check bool "nothing marked opens nothing" true
+    (Result.is_error (UI.open_evidence ~keepers:["imp"] {view with selected=[]}));
+  check bool "submit without an open prompt is refused" true (Result.is_error (UI.submit_evidence view));
+  let evidence = `Assoc ["sha256",`String "abc"] in
+  check (list string) "a failed delivery is reported apart from the frozen bundle"
+    ["Evidence preserved: 1 row · sha256 abc";
+     "Keeper delivery failed: keeper not found: imp · the bundle stays preserved"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 1;
+      "delivery",`Assoc ["status",`String "failed";"error",`String "keeper not found: imp"]]));
+  check (list string) "a receipt without delivery says so"
+    ["Evidence preserved: 2 rows · sha256 abc";"Not sent to a Keeper."]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2]));
+  check (list string) "other receipts add nothing" [] (UI.evidence_receipt_lines (`Assoc ["instance_id",`String "x"]))
+
 let refresh_preserves_operator_target () =
   let row id : UI.Row.row = {id;lane_id="worker/events";kind=UI.Row.Event;
     title=id;observed_at=1.;subject_id="project";clock=None;actor=None;
@@ -529,6 +587,7 @@ let refresh_preserves_operator_target () =
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
+  test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
   test_case "edit object array items through nested schema forms" `Quick object_array_fields;
   test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;

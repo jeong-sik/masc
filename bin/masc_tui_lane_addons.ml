@@ -26,9 +26,19 @@ type action_menu = {
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
+(* Marked rows leave the view as one frozen bundle under their owning worker.
+   Handing the bundle's reference to a Keeper is a separate choice made here by
+   name, so the operator neither types JSON nor delivers by accident. [choice] 0
+   preserves only; [choice] n selects [List.nth keepers (n-1)]. Delivery is an
+   optional message the Keeper may use, defer or ignore. *)
+type evidence_prompt = {
+  evidence : Yojson.Safe.t; owner_title : string; row_count : int;
+  keepers : string list; choice : int;
+}
 type t = {
   installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
+  evidence_prompt : evidence_prompt option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -36,7 +46,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;subscription_panel=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { installer=None;subscription_panel=None;evidence_prompt=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Timeline; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -244,7 +254,7 @@ let selected_instance view = Option.bind view.snapshot (fun snapshot ->
       Option.bind declaration.instance_id (fun id ->
         List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
   | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor)
-let evidence_request view =
+let evidence_target view =
   let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
   let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in
   let rec owners = function
@@ -254,12 +264,61 @@ let evidence_request view =
           (List.find_opt (fun (row : Row.row) -> row.id=id) snapshot.output.rows) in
         let* owner = Option.to_result ~none:"Selected evidence owner unavailable"
           (row_owner snapshot.instances row) in
-        let* rest=owners rest in Ok (owner.id::rest) in
+        let* rest=owners rest in Ok (owner::rest) in
   let* owners=owners view.selected in
-  match List.sort_uniq String.compare owners with
-  | [instance_id] -> Ok (Evidence (`Assoc ["instance_id",`String instance_id;
-      "row_ids",`List (List.map (fun id -> `String id) view.selected)]))
+  match List.sort_uniq (fun (a : instance) (b : instance) -> String.compare a.id b.id) owners with
+  | [owner] -> Ok (owner, `Assoc ["instance_id",`String owner.id;
+      "row_ids",`List (List.map (fun id -> `String id) view.selected)])
   | _ -> Error "Selected evidence spans multiple instances; select one owner at a time"
+let evidence_request view =
+  let* _, evidence = evidence_target view in Ok (Evidence evidence)
+let open_evidence ~keepers view =
+  let* owner, evidence = evidence_target view in
+  Ok {view with evidence_prompt=Some {evidence;owner_title=owner.title;
+    row_count=List.length view.selected;keepers=List.sort_uniq String.compare keepers;choice=0};
+    error=None;scroll=0}
+let move_evidence view delta = match view.evidence_prompt with
+  | None -> view
+  | Some prompt ->
+      let choice = max 0 (min (List.length prompt.keepers) (prompt.choice + delta)) in
+      {view with evidence_prompt=Some {prompt with choice}}
+let evidence_keeper prompt = if prompt.choice=0 then None else List.nth_opt prompt.keepers (prompt.choice-1)
+let submit_evidence view = match view.evidence_prompt with
+  | None -> Error "No evidence export is open"
+  | Some prompt ->
+      let fields = match prompt.evidence with `Assoc fields -> fields | _ -> [] in
+      let request = match evidence_keeper prompt with
+        | None -> prompt.evidence
+        | Some keeper -> `Assoc (fields @ ["keeper_name",`String keeper]) in
+      Ok ({view with evidence_prompt=None}, Evidence request)
+let evidence_lines prompt =
+  let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
+  [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
+     (if prompt.row_count=1 then "" else "s") prompt.owner_title;
+   "The bundle is frozen under this worker either way; a Keeper receives only its reference.";
+   "j/k:choose  Enter:preserve  Esc:back"]
+  @ [choice 0 "Preserve only"]
+  @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers
+  @ (if prompt.keepers=[] then ["No workspace Keeper is in the roster; preserve only."] else [])
+(* The receipt names what was frozen and, separately, whether the optional
+   message reached its Keeper. A failed delivery leaves the bundle preserved. *)
+let evidence_receipt_lines json =
+  let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
+  match member "evidence" json with
+  | None -> []
+  | Some evidence ->
+      let text value = match value with Some (`String s) -> Some s | _ -> None in
+      let count = match member "row_count" json with Some (`Int n) -> Printf.sprintf "%d row%s" n (if n=1 then "" else "s") | _ -> "rows" in
+      let frozen = "Evidence preserved: " ^ count
+        ^ (match text (member "sha256" evidence) with Some sha -> " · sha256 " ^ sha | None -> "") in
+      let delivery = match member "delivery" json with
+        | None -> ["Not sent to a Keeper."]
+        | Some delivery ->
+            (match text (member "status" delivery), text (member "error" delivery) with
+             | Some "failed", Some error -> ["Keeper delivery failed: " ^ error ^ " · the bundle stays preserved"]
+             | Some status, _ -> ["Keeper delivery " ^ status]
+             | None, _ -> ["Keeper delivery status unknown"]) in
+      frozen :: delivery
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
     Option.bind snapshot.configuration (fun config ->
@@ -431,7 +490,8 @@ let visual_lines ?(failed_note = "") ~height ~width view =
     | false, Some _, _ -> [line ~tone:Dim "Recorded observations · r:refresh"] in
   let notifications =
     (match view.draft with None -> [] | Some draft -> wrap ((if view.naming then "New TOML filename: " else ":") ^ draft))
-    @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document)) in
+    @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document))
+    @ (match view.receipt with None -> [] | Some json -> List.concat_map wrap (evidence_receipt_lines json)) in
   match view.focus with
   | Configurations | Instances | Rows -> None
   | Timeline | Connections ->
@@ -720,7 +780,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
             @ (match snapshot.complete with None -> [] | Some complete -> [if complete then "Slice complete within reported coverage" else "Slice partial"]) in
         summary @ content in
   let receipt = match view.receipt with None -> [] | Some json ->
-    "Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json) in
+    evidence_receipt_lines json @ ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json)) in
   let draft = match view.draft with None -> [] | Some draft -> [(if view.naming then "New TOML filename: " else ":") ^ draft] in
   let documents = match selected_document view with None -> [] | Some document -> Document.summary document in
   let action = action_lines view in
@@ -992,6 +1052,11 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
        @ Masc_tui_lane_installer.lines installer)
       |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
         (Masc.Tui_decode.sanitize_terminal_text line))
+  | None -> match view.evidence_prompt with
+  | Some prompt ->
+      (Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error) @ evidence_lines prompt)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+           (Masc.Tui_decode.sanitize_terminal_text line))
   | None -> match view.subscription_panel,view.action_menu with
   | Some panel,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)

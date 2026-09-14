@@ -22,21 +22,28 @@ let decode = function
 
 let encode pairs = `Assoc [ "history_pairs", `Int pairs ]
 
-let restore ~source ~target =
-  match Agent_core.Context.get_scoped source Agent_core.Context.Session context_key with
-  | None ->
-    Agent_core.Context.delete_scoped target Agent_core.Context.Session context_key;
-    Ok 0
-  | Some json ->
-    (match decode json with
-     | Ok pairs ->
-       Agent_core.Context.set_scoped target Agent_core.Context.Session context_key json;
-       Ok pairs
-     | Error _ as error -> error)
+let held context =
+  match Agent_core.Context.get_scoped context Agent_core.Context.Session context_key with
+  | None -> Ok 0
+  | Some json -> decode json
 ;;
 
 let record context pairs =
   Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (encode pairs)
+;;
+
+(* The larger of the two, and only ever written up: the durable one is what
+   an AGENT_CORE checkpoint carried, the live one what a yield on a lane
+   that persists no checkpoint recorded into the loop-lived context since.
+   Pairs are only appended, so the larger is the later fact. *)
+let restore ~source ~target =
+  match held source, held target with
+  | Error _ as error, _ -> error
+  | Ok _, (Error _ as error) -> error
+  | Ok durable, Ok live ->
+    let pairs = max durable live in
+    if pairs > live then record target pairs;
+    Ok pairs
 ;;
 
 (* The history pair count the next setup will see for this run's calls:

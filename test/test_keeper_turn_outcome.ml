@@ -1048,13 +1048,25 @@ let test_judged_boundary_rides_the_context () =
    | Error error -> fail (Judged.error_to_string error));
   check bool "the boundary rides into the run's context" true
     (Option.equal ( = ) (held source) (held target));
-  (* Restored through a context that then records anew: what the checkpoint
-     will carry is the newer count. *)
+  (* A yield on a lane that persists no checkpoint records into the live
+     context only. The durable count behind it must not pull the boundary
+     back down: restore keeps the larger. *)
   Judged.record target 7;
-  (match Judged.restore ~source:target ~target:(Context.create_sync ()) with
+  (match Judged.restore ~source ~target with
    | Ok 7 -> ()
-   | Ok n -> failf "the newer boundary read as %d" n
+   | Ok n -> failf "the live boundary was pulled back to %d" n
    | Error error -> fail (Judged.error_to_string error));
+  check bool "and the live context keeps its own" true
+    (Option.equal ( = ) (Some (`Assoc [ ("history_pairs", `Int 7) ])) (held target));
+  (* When the durable count is the larger, it is what the run's context
+     ends up holding. *)
+  Judged.record source 9;
+  (match Judged.restore ~source ~target with
+   | Ok 9 -> ()
+   | Ok n -> failf "the durable boundary read as %d" n
+   | Error error -> fail (Judged.error_to_string error));
+  check bool "the run's context is raised to it" true
+    (Option.equal ( = ) (held source) (held target));
   let malformed = Context.create_sync () in
   Context.set_scoped malformed Context.Session Judged.context_key
     (`Assoc [ ("history_pairs", `String "five") ]);

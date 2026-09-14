@@ -13,19 +13,31 @@
     evidence again.
 
     The boundary is a count of history pairs, as the seeder counts them,
-    kept in the agent context's Session scope under {!context_key}. Setup
-    restores it on both lanes, so every checkpoint either lane persists
-    carries it, and the autonomous seed keeps only the pairs past it. It
+    kept in the agent context's Session scope under {!context_key}. It
     moves at the yield itself: when the guard's decision is a
     [Repeated_tool_call], the run records the pairs it was set up over plus
-    its own fingerprinted calls -- exactly the pairs that yield judged --
-    and the Yielded checkpoint AGENT_CORE takes after the boundary probe
-    carries the record. A turn that stops for any other reason moves
-    nothing, so the 2+2 case #26057 measured still seeds; pairs a direct
-    turn appends afterwards sit past the boundary and seed too. Pairs are
-    only ever appended, so the oldest [judged] pairs are the ones the
-    yield saw; a history since cut shorter seeds nothing rather than
-    something it cannot name. *)
+    its own fingerprinted calls -- the pairs that yield judged -- into the
+    keeper's loop-lived context. A turn that stops for any other reason
+    moves nothing, so the 2+2 case #26057 measured still seeds; pairs a
+    direct turn appends afterwards sit past the boundary and seed too.
+
+    Where it lasts. An AGENT_CORE lane takes its Yielded checkpoint after
+    the boundary probe, so the record rides to disk with it, and setup on
+    both lanes restores it from there -- a direct turn runs on a context of
+    its own that its checkpoints persist whole, so the key has to be on it
+    too. An official-client lane (claude_code, codex, antigravity) persists
+    no AGENT_CORE checkpoint: there the boundary lives in the loop-lived
+    context, restore keeps the larger of the durable and the live count,
+    and the next AGENT_CORE turn of the same keeper writes it to disk. A
+    restart forgets what only the live context held; the next repetition
+    yield sets it again.
+
+    The count is the post-tool hook's: a call the hook never saw -- a
+    validation failure, an unknown tool -- still leaves a pair the seeder
+    counts, so a boundary can fall short by that many and re-seed as many
+    of the judged run's newest pairs. Pairs are only ever appended, so the
+    oldest [judged] pairs are the ones the yield saw; a history since cut
+    shorter seeds nothing rather than something it cannot name. *)
 
 type error = Invalid_record of string
 
@@ -33,9 +45,9 @@ val error_to_string : error -> string
 
 val context_key : string
 
-(** [restore ~source ~target] is the boundary the durable context holds,
-    copied into the run's context so it rides with the next checkpoint; [0]
-    when the context holds none, which clears any stale copy on [target]. A
+(** [restore ~source ~target] is the larger of the boundary the durable
+    context holds and the one the run's context already holds, written into
+    the run's context when that raises it; [0] when neither holds one. A
     present record that does not decode is the error, not [0]. *)
 val restore
   :  source:Agent_core.Context.t

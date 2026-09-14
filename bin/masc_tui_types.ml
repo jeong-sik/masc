@@ -8896,6 +8896,13 @@ let gate_mode_label = function
 type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
+  (* Connectors draws two screens: the transport list, and the Browser Lane
+     that [show_browser_lane] opens under the same view. A plain
+     [Palette_goto Connectors] lands on whichever the lane's visibility says,
+     so the list -- the half with no key of its own -- would still be
+     unreachable whenever the lane had been opened once. This one names the
+     list and closes the lane to get there. *)
+  | Palette_connectors
   | Palette_msx
   | Palette_lane_addons
   | Palette_goto of surface
@@ -9013,6 +9020,12 @@ let palette_entries (state : state) =
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
+  (* The transport list had no way in at all between #32242 and now: the one
+     place that sets [view <- Connectors] is [show_browser_lane], which opens
+     the lane in the same breath, and neither the surface ring nor Esc comes
+     back to the list. The palette is where a destination is reached by name
+     when there is no key path to it. *)
+  @ [ "go Connectors", Palette_connectors ]
   @ [ "go MSX", Palette_msx ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
@@ -9080,7 +9093,8 @@ let palette_action_words = function
       | Approvals | Planning | Schedules | Verification | Harness | Fusion
       | Repositories | Code | Changes | Connectors | Runtime | Config
       | Resources | Tools | System_logs )
-  | Palette_browser_lane | Palette_hide_browser_lane | Palette_msx
+  | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+  | Palette_msx
   | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->

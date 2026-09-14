@@ -7239,9 +7239,13 @@ let render_verification_list (state : state) =
       16 requests
     |> min 26
   in
+  let title_width =
+    Render_schedule.verification_title_width
+      ~inner_width:(max 1 (framed_inner_width cols - 2))
+      ~submitter_width
+  in
   let col_hdr =
-    Printf.sprintf "  %-14s %-*s %-9s %s" "Task" submitter_width
-      "Submitted by" "Evidence" "What it asks for"
+    "  " ^ Render_schedule.verification_header_row ~submitter_width ~title_width
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -7310,12 +7314,15 @@ let render_verification_list (state : state) =
              that this task be verified, so the title is what it asks for. *)
           let asks = r.vr_task_title in
           let line =
-            Printf.sprintf "  %-14s %s %-9s %s"
-              (Terminal_text.single_line r.vr_task_id)
-              (fit_width (Terminal_text.single_line r.vr_submitted_by)
-                 submitter_width)
-              evidence
-              (Terminal_text.single_line asks)
+            "  "
+            ^ Render_schedule.verification_row ~submitter_width ~title_width
+                { Render_schedule.vrow_task =
+                    Terminal_text.single_line r.vr_task_id
+                ; vrow_submitted_by =
+                    Terminal_text.single_line r.vr_submitted_by
+                ; vrow_evidence = evidence
+                ; vrow_title = Terminal_text.single_line asks
+                }
           in
           let style =
             (* Evidence that cannot be read is the one row that cannot be

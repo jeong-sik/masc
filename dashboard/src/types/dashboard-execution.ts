@@ -59,16 +59,23 @@ export interface DashboardRuntimeDiagnostic {
   message: string
 }
 
-export type KeeperRuntimeSource = 'env' | 'toml' | 'default'
+// Wire labels of `Keeper_runtime_resolved.source` (lib/keeper/keeper_runtime_resolved.ml).
+// The normalizer derives its guard from this array instead of repeating the literal set.
+export const KEEPER_RUNTIME_SOURCES = ['env', 'toml', 'default', 'failsafe_floor'] as const
+export type KeeperRuntimeSource = (typeof KEEPER_RUNTIME_SOURCES)[number]
 
 export interface KeeperRuntimeField<T> {
   value: T
   source: KeeperRuntimeSource
 }
 
+// The three thresholds are always numbers: an explicit value or the server's
+// fail-safe floor. Only the body override has a real "not configured" (null).
 export interface KeeperRuntimeResolved {
-  stream_idle_timeout_sec: KeeperRuntimeField<number | null>
+  stream_idle_timeout_sec: KeeperRuntimeField<number>
+  first_event_timeout_sec: KeeperRuntimeField<number>
   body_timeout_override_sec: KeeperRuntimeField<number | null>
+  provider_call_deadline_sec: KeeperRuntimeField<number>
 }
 
 export interface DashboardRuntimeResolution {

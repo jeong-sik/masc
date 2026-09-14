@@ -337,8 +337,10 @@ describe('ConfigResolutionPanel', () => {
             uptime_seconds: 42,
           },
           keeper_runtime: {
-            stream_idle_timeout_sec: { value: null, source: 'default' },
+            stream_idle_timeout_sec: { value: 75, source: 'toml' },
+            first_event_timeout_sec: { value: 180, source: 'toml' },
             body_timeout_override_sec: { value: 120, source: 'env' },
+            provider_call_deadline_sec: { value: 900, source: 'failsafe_floor' },
           },
         }}
       />`,
@@ -374,13 +376,56 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('refreshing stale cache')
     expect(container.textContent).toContain('runpod_mtp.qwen')
     expect(container.textContent).toContain('keeper runtime configuration')
-    expect(container.textContent).toContain('Explicit keeper runtime settings. Disabled timeouts are not inferred from provider/model kind.')
-    expect(container.textContent).toContain('stream idle timeout (opt-in)')
+    expect(container.textContent).toContain('stream idle timeout')
+    expect(container.textContent).toContain('first event timeout')
+    expect(container.textContent).toContain('provider call deadline')
     expect(container.textContent).toContain('response body timeout override')
     expect(container.textContent).not.toContain('bootstrap max active keepers')
+    expect(container.textContent).toContain('2 TOML')
     expect(container.textContent).toContain('1 env')
-    expect(container.textContent).toContain('disabled')
-    expect(container.textContent).toContain('unset')
+    expect(container.textContent).toContain('runtime.toml')
+    expect(container.textContent).toContain('fail-safe floor (unset)')
+  })
+
+  it('keeps the keeper runtime panel on a default install where every threshold is a fail-safe floor', async () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
+          prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
+          keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'env' },
+        }}
+        runtimeResolution=${{
+          ...runtimeResolutionPayload(),
+          keeper_runtime: {
+            stream_idle_timeout_sec: { value: 600, source: 'failsafe_floor' },
+            first_event_timeout_sec: { value: 600, source: 'failsafe_floor' },
+            body_timeout_override_sec: { value: null, source: 'default' },
+            provider_call_deadline_sec: { value: 900, source: 'failsafe_floor' },
+          },
+        }}
+      />`,
+      container,
+    )
+
+    await flush()
+
+    const rows = Array.from(container.querySelectorAll('.v2-lab-row')).map(row => row.textContent ?? '')
+    const rowFor = (label: string) => rows.find(text => text.includes(label))
+
+    expect(container.textContent).toContain('keeper runtime configuration')
+    expect(rowFor('stream idle timeout')).toContain('10.0m')
+    expect(rowFor('stream idle timeout')).toContain('fail-safe floor (unset)')
+    expect(rowFor('first event timeout')).toContain('10.0m')
+    expect(rowFor('first event timeout')).toContain('fail-safe floor (unset)')
+    expect(rowFor('provider call deadline')).toContain('15.0m')
+    expect(rowFor('provider call deadline')).toContain('fail-safe floor (unset)')
+    expect(rowFor('response body timeout override')).toContain('disabled')
+    expect(rowFor('response body timeout override')).toContain('unset')
+    expect(container.textContent).not.toContain('1 env')
+    expect(container.textContent).not.toContain('1 TOML')
   })
 
   it('surfaces provider catalog spec beside provider reachability rows', async () => {

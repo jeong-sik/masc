@@ -11,6 +11,7 @@ import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
 import {
   DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
+  KEEPER_RUNTIME_SOURCES,
 } from './types/dashboard-execution'
 import { MENTION_DELIVERY_STATUSES } from './types/core'
 import type {
@@ -360,9 +361,7 @@ function normalizeKeeperRuntimeField<T>(
   const value = valueNormalize(raw.value)
   if (value === _MISSING) return null
   const source = asString(raw.source)
-  if (!source) return null
-  const validSources: KeeperRuntimeSource[] = ['env', 'toml', 'default']
-  if (!validSources.includes(source as KeeperRuntimeSource)) return null
+  if (!source || !(KEEPER_RUNTIME_SOURCES as readonly string[]).includes(source)) return null
   return {
     value: value as T,
     source: source as KeeperRuntimeSource,
@@ -371,27 +370,27 @@ function normalizeKeeperRuntimeField<T>(
 
 function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | null {
   if (!isRecord(raw)) return null
-  const toNumber = (v: unknown): number | typeof _MISSING => {
-    const n = asNumber(v)
-    return n !== null && n !== undefined ? n : _MISSING
+  const finiteSeconds = (v: unknown): number | typeof _MISSING => {
+    const seconds = asNumber(v)
+    return seconds !== undefined ? seconds : _MISSING
   }
-  const optFloatField = (key: string) => normalizeKeeperRuntimeField<number | null>(
-    (raw as Record<string, unknown>)[key],
-    v => v === null ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
+  const positiveSeconds = (v: unknown): number | typeof _MISSING => {
+    const seconds = finiteSeconds(v)
+    return seconds !== _MISSING && seconds > 0 ? seconds : _MISSING
+  }
+  const streamIdleTimeout = normalizeKeeperRuntimeField<number>(raw.stream_idle_timeout_sec, positiveSeconds)
+  const firstEventTimeout = normalizeKeeperRuntimeField<number>(raw.first_event_timeout_sec, positiveSeconds)
+  const bodyTimeoutOverride = normalizeKeeperRuntimeField<number | null>(
+    raw.body_timeout_override_sec,
+    v => v === null ? null : finiteSeconds(v),
   )
-  const streamIdleTimeout = normalizeKeeperRuntimeField<number | null>(
-    raw.stream_idle_timeout_sec,
-    v => {
-      if (v === null) return null
-      const seconds = toNumber(v)
-      return seconds !== _MISSING && seconds > 0 ? seconds : _MISSING
-    },
-  )
-  const bodyTimeoutOverride = optFloatField('body_timeout_override_sec')
-  if (!streamIdleTimeout || !bodyTimeoutOverride) return null
+  const providerCallDeadline = normalizeKeeperRuntimeField<number>(raw.provider_call_deadline_sec, positiveSeconds)
+  if (!streamIdleTimeout || !firstEventTimeout || !bodyTimeoutOverride || !providerCallDeadline) return null
   return {
     stream_idle_timeout_sec: streamIdleTimeout,
+    first_event_timeout_sec: firstEventTimeout,
     body_timeout_override_sec: bodyTimeoutOverride,
+    provider_call_deadline_sec: providerCallDeadline,
   }
 }
 

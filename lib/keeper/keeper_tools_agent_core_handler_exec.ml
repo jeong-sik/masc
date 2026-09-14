@@ -40,6 +40,12 @@ let execute_with_observers_with_authority
   =
   let t0 = Time_compat.now () in
   let invocation_fields = agent_core_invocation_fields agent_core_invocation in
+  (* #35456: the parent invocation's identity rides into the dispatch context
+     so in-process sub-calls (vision candidate attempts) can join their
+     start/termination rows to this call. *)
+  let parent_tool_use_id =
+    Option.map Agent_core.Tool_contract.Invocation.tool_use_id agent_core_invocation
+  in
   let set_truncation_info ~original_bytes =
     Option.iter
       (fun invocation ->
@@ -69,6 +75,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?tool_use_id:parent_tool_use_id
             ~name
             ~input
             ()
@@ -88,6 +95,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?tool_use_id:parent_tool_use_id
             ~descriptor
             ~input
             ()
@@ -106,6 +114,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?tool_use_id:parent_tool_use_id
             ~name
             ~input
             ()
@@ -124,6 +133,7 @@ let execute_with_observers_with_authority
             ?continuation_channel
             ?gate_context
             ?gate_grant
+            ?tool_use_id:parent_tool_use_id
             ~descriptor
             ~input
             ())

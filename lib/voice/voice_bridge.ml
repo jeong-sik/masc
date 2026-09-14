@@ -707,18 +707,21 @@ let mcp_call_error_to_string = function
     Printf.sprintf "Voice MCP: invalid JSON body: %s" detail
 ;;
 
-(** Timeout helper using Eio.Fiber.first - returns Error after specified seconds *)
+(* One Voice MCP call under its window. An answer that arrived as the window
+   closed is the answer -- a sentence the server spoke is not reported as
+   [Timed_out] for its caller to speak again; [Timed_out] is the outcome only
+   when no answer had arrived. *)
 let with_timeout ~clock ?timeout operation =
   let timeout_sec =
     match timeout with
     | Some t -> t
     | None -> request_timeout_seconds ()
   in
-  Eio.Fiber.first
-    (fun () -> operation ())
-    (fun () ->
-       Eio.Time.sleep clock timeout_sec;
-       Error (Timed_out timeout_sec))
+  Watched_work.run
+    ~watcher:(fun () ->
+      Eio.Time.sleep clock timeout_sec;
+      Error (Timed_out timeout_sec))
+    operation
 ;;
 
 let parse_json_response body =
@@ -1941,3 +1944,7 @@ let record_and_transcribe
                transcribe_audio ~audio_file ?language_code ())
          else transcribe_audio ~audio_file ?language_code ()))
 ;;
+
+module For_testing = struct
+  let with_timeout = with_timeout
+end

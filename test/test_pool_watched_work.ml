@@ -91,6 +91,58 @@ let test_a_body_that_ended_as_the_idle_window_passed_is_the_body () =
   | Error (message, _) -> failf "a body that ended as the window passed was dropped: %s" message
 ;;
 
+(* The same order on the connect window: the client's creation finishes
+   as the window passes, and the client that was created is the client,
+   not a "connect timeout" it is then closed for. *)
+let test_a_client_created_as_the_connect_window_passed_is_the_client () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let created, finish_creating = Eio.Promise.create () in
+  let established =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Pool.For_testing.establish_connection
+        ~clock
+        ~timeout_seconds:window_s
+        ~resolve:(fun () -> [ "the one address" ])
+        ~connect:(fun _address -> ())
+        ~create:(fun _address -> Ok (Eio.Promise.await created)))
+  in
+  (* The window passes first: the timer's wake-up is queued. Creation then
+     finishes, queuing the establishing fiber's wake-up behind it. *)
+  Eio_mock.Clock.set_time clock window_s;
+  Eio.Promise.resolve finish_creating "the client";
+  match Eio.Promise.await_exn established with
+  | Ok client -> check string "the client that was created is the client" "the client" client
+  | Error message -> failf "a client created as the window passed was dropped: %s" message
+;;
+
+let test_a_creation_that_never_finishes_is_a_connect_timeout () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 0.0;
+  Eio.Switch.run
+  @@ fun sw ->
+  let never, _ = Eio.Promise.create () in
+  let established =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Pool.For_testing.establish_connection
+        ~clock
+        ~timeout_seconds:window_s
+        ~resolve:(fun () -> [ "the one address" ])
+        ~connect:(fun _address -> ())
+        ~create:(fun _address -> Ok (Eio.Promise.await never)))
+  in
+  Eio_mock.Clock.set_time clock window_s;
+  match Eio.Promise.await_exn established with
+  | Error message -> check string "the window is the verdict" "connect timeout" message
+  | Ok () -> fail "nothing was created, yet the wait did not end as a connect timeout"
+;;
+
 let () =
   Alcotest.run
     "pool watched work"
@@ -107,6 +159,14 @@ let () =
             "a body that ended as the idle window passed is the body"
             `Quick
             test_a_body_that_ended_as_the_idle_window_passed_is_the_body
+        ; test_case
+            "a client created as the connect window passed is the client"
+            `Quick
+            test_a_client_created_as_the_connect_window_passed_is_the_client
+        ; test_case
+            "a creation that never finishes is a connect timeout"
+            `Quick
+            test_a_creation_that_never_finishes_is_a_connect_timeout
         ] )
     ]
 ;;

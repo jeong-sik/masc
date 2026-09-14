@@ -236,7 +236,9 @@ module For_testing : sig
     ('a, string) result
 
   (** Drive the real establishment sequence with controlled DNS, TCP and
-      client stages, without fabricating a Piaf client. *)
+      client stages, without fabricating a Piaf client. A client whose
+      creation finished as the window closed is the result; "connect
+      timeout" is the result only when no stage had finished. *)
   val establish_connection :
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     timeout_seconds:float ->

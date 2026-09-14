@@ -167,8 +167,16 @@ times" 로 바뀐다. 보이는 곳은 keeper 로그와 TUI 의 turn terminal �
 | `Http_client` | `Provider_wire_error { kind = Repeating_generation }` | `provider_failure_kind` 의 자기 생성자 `Repeating_generation { shape; occurrences; unit_bytes }`. wire kind 목록에서 빠진다 |
 | `Llm_provider.Error` | `ProviderWireError` | `RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail }`. `is_retryable = false` |
 | `Keeper_runtime_failure_route` | `Exhausted_visible_alive Provider_integration` | `Rotate_now Generation_repeated`. `response_observed = true` (모델은 답했다) |
-| `Keeper_turn_driver` | 다음 후보 | 반복한 후보의 `model.id` 를 기억하고, 같은 모델의 뒤 후보는 dispatch 전에 `Attempt_rejected` 로 거절. 마지막까지 같은 모델이면 레인 오류는 거절이 아니라 관측된 반복 |
+| `Keeper_turn_driver` | 다음 후보 | 반복한 후보의 **served name**(`model.api_name`)을 기억하고, 같은 이름의 뒤 후보는 dispatch 전에 `Attempt_rejected` 로 거절. 마지막까지 같은 모델이면 레인 오류는 거절이 아니라 관측된 반복 |
 | 소유권 (`Provider_failure_attribution`) | `Attempt_local` | `Runtime_binding` — 모델 범위 capacity 실패와 같은 자리 |
+
+모델 정체성을 `model.id` 가 아니라 `api_name` 으로 잡는 이유: 라이브 runtime.toml 은
+같은 모델을 공급자마다 다른 `[models.*]` 행으로 선언한다
+(`models.ollama-cloud-glm-5-3-flash` 와 `models."glm-5.3-flash"` 가 둘 다
+`api-name = "glm-5.3-flash"`). id 로 잡으면 어디서도 안 맞는다. 남는 구멍 하나:
+`openrouter` 는 `z-ai/glm-5.3-flash` 로 접두어를 붙여서 이 규칙이 같은 모델로 보지
+못한다. 문자열을 잘라 맞추지 않고 구멍으로 남긴다 — 제대로 닫는 자리는 capability
+catalog 의 canonical id 다.
 
 thinking/reasoning 블록 감지(§8 의 비채택)는 #36193·#36231 이 별도로 들였고, 이 절은
 그 감지 결과의 분류만 다룬다. 임계값(1,024B·3회·64 KiB 창)은 건드리지 않는다.

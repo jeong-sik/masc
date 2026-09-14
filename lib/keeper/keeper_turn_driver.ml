@@ -353,7 +353,15 @@ let attempt_runtime_candidates
      model rather than to its provider: a generation that repeated itself.
      The same model reached through another provider repeats the same way,
      so once a candidate has repeated, every later candidate on that model is
-     refused before dispatch and the walk moves to a different model. The
+     refused before dispatch and the walk moves to a different model.
+
+     The identity is the name the provider serves ([model.api_name]), not the
+     runtime.toml model id: operators declare one [models.*] row per provider
+     for the same model ([models.ollama-cloud-glm-5-3-flash] and
+     [models."glm-5.3-flash"] both serve "glm-5.3-flash"), so ids never meet
+     across providers and a skip keyed on them would fire nowhere. A provider
+     that prefixes the name ("z-ai/glm-5.3-flash") is not recognised as the
+     same model by this rule; that gap is named, not guessed at. The
      id-table default reads the registry; richer callers inject it. *)
   let model_of =
     match model_of with
@@ -361,7 +369,7 @@ let attempt_runtime_candidates
     | None ->
       fun candidate ->
         Runtime.get_runtime_by_id (runtime_id_of candidate)
-        |> Option.map (fun (runtime : Runtime.t) -> runtime.model.id)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.model.api_name)
   in
   let repeated_generation (error : Agent_core.Error.t) =
     match error with

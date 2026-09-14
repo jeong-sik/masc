@@ -3317,6 +3317,88 @@ let test_repeat_on_the_only_model_reports_the_repeat () =
       ("ollama_cloud.flash", 0)
       (terminal.origin_runtime_id, terminal.origin_attempt)
 
+(* The live runtime.toml declares one [models.*] row per provider for the same
+   model, so their ids differ while the served name is the same. The default
+   identity reads the registry's api-name: the walk leaves "glm-5.3-flash"
+   behind whichever id the second provider gave it, and lands on the
+   candidate whose served name differs. *)
+let runtime_toml_same_model_twice =
+  {|
+[runtime]
+default = "ollama_cloud.ollama-cloud-flash"
+
+[runtime.lanes.glm]
+candidates = [ "ollama_cloud.ollama-cloud-flash", "glm_coding.flash", "glm_coding.plus" ]
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.glm_coding]
+display-name = "GLM Coding"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.ollama-cloud-flash]
+api-name = "glm-5.3-flash"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.flash]
+api-name = "glm-5.3-flash"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.plus]
+api-name = "glm-5.3"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[ollama_cloud.ollama-cloud-flash]
+is-default = true
+max-concurrent = 1
+max-request-body-bytes = 65536
+
+[glm_coding.flash]
+max-concurrent = 1
+max-request-body-bytes = 65536
+
+[glm_coding.plus]
+max-concurrent = 1
+max-request-body-bytes = 65536
+|}
+
+let test_registry_identity_is_the_served_name_not_the_model_id () =
+  with_runtime_config runtime_toml_same_model_twice (fun () ->
+    let dispatched = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"glm"
+        ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+          dispatched := !dispatched @ [ candidate ];
+          match candidate with
+          | "ollama_cloud.ollama-cloud-flash" ->
+            attempt_without_effect
+              (Error (repeating_generation_error ~provider:"ollama_cloud"))
+              None
+          | "glm_coding.plus" -> attempt_without_effect (Ok (completed_run_result ())) None
+          | other -> Alcotest.failf "candidate %s must not be dispatched" other)
+        [ "ollama_cloud.ollama-cloud-flash"; "glm_coding.flash"; "glm_coding.plus" ]
+    in
+    (match result with
+     | Ok _ -> ()
+     | Error e -> Alcotest.failf "the differently named model must serve the turn, got %s" (Agent_core.Error.to_string e));
+    Alcotest.(check (list string))
+      "the second provider's row for the same served name is never dispatched"
+      [ "ollama_cloud.ollama-cloud-flash"; "glm_coding.plus" ]
+      !dispatched)
+
 let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
   let deferred = ref [] in
@@ -3914,6 +3996,10 @@ let () =
             "a repeat on the only model reports the repeat"
             `Quick
             test_repeat_on_the_only_model_reports_the_repeat;
+          Alcotest.test_case
+            "the registry identity is the served name, not the model id"
+            `Quick
+            test_registry_identity_is_the_served_name_not_the_model_id;
           Alcotest.test_case
             "checkpoint denial defers exact frozen suffix once"
             `Quick

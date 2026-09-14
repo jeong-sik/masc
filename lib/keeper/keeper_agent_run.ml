@@ -1458,8 +1458,6 @@ let run_turn
                       ~on_runtime_retry_deferred:record_runtime_retry_deferred
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
-                      ?body_timeout_s:
-                        (Keeper_runtime_resolved.body_timeout_override_sec ())
                       ~temperature
                       ~accept:
                         Keeper_tooling.Response.response_has_text_or_tool_progress

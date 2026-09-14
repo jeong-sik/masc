@@ -978,7 +978,6 @@ let run_named
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
-    ?body_timeout_s
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
@@ -1881,14 +1880,16 @@ let run_named
                  [provider_call_deadline_sec] below rather than threaded through
                  run_named as optionals: every entry point that reaches this
                  closure -- the turn runner, the recovery worker, the metric
-                 hooks, the test drivers -- gets the operator's value or the
-                 floor. [Keeper_turn_driver_try_provider] builds the option
-                 AGENT_CORE reads. *)
+                 hooks, the test drivers -- gets the operator's value, or the
+                 floor where one exists. [Keeper_turn_driver_try_provider]
+                 builds the options AGENT_CORE reads. *)
               stream_idle_timeout_s =
                 Keeper_runtime_resolved.stream_idle_timeout_sec ()
             ; first_event_timeout_s =
                 Keeper_runtime_resolved.first_event_timeout_sec ()
-            ; body_timeout_s
+            ; (* The operator's override, or none: the non-streaming body read
+                 has no floor, the attempt watchdog bounds it. *)
+              body_timeout_s = Keeper_runtime_resolved.body_timeout_override_sec ()
             ; provider_call_deadline_sec =
                 Keeper_runtime_resolved.provider_call_deadline_sec ()
             ; (* #28417: the deadline is measured against the keeper's live

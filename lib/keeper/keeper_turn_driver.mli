@@ -147,7 +147,6 @@ val run_named :
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?recovery_view:Keeper_recovery_transmission.t ->
-  ?body_timeout_s:float ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->

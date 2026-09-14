@@ -368,11 +368,12 @@ let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
     (Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
      > Keeper_runtime_resolved.first_event_failsafe_floor_sec)
 
-(* The no-progress threshold must cover both stream budgets. An operator who
-   allows a longer silent prefill than the threshold has written a budget
-   that can never be reached: the watchdog would rotate the lane first. The
-   pair is refused where the configuration is frozen, naming both values
-   and their sources, whether the shorter value was declared or a floor. *)
+(* The no-progress threshold must cover a declared stream budget. An
+   operator who allows a longer silent prefill than the threshold has
+   written a budget that can never be reached: the watchdog would rotate the
+   lane first. The pair is refused where the configuration is frozen, naming
+   both values and their sources. A floored budget is a ceiling, not an
+   allowance, so an explicit threshold shorter than one stands. *)
 let test_a_stream_budget_longer_than_the_threshold_is_refused () =
   with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
   with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
@@ -422,6 +423,27 @@ let test_a_threshold_covering_the_stream_budgets_is_frozen () =
     (Keeper_runtime_resolved.provider_call_deadline_sec ());
   check (float 0.0001) "the budget is frozen as declared"
     allowance
+    (Keeper_runtime_resolved.first_event_timeout_sec ())
+
+let test_an_explicit_threshold_under_the_floored_budgets_stands () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let earlier_cut = Keeper_runtime_resolved.first_event_failsafe_floor_sec /. 2.0 in
+  write_toml
+    base_path
+    (Printf.sprintf "[turn]\nprovider_call_deadline_sec = %g\n" earlier_cut);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  check (float 0.0001) "the operator's earlier cut is frozen as declared"
+    earlier_cut
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check (float 0.0001) "the floored first-event budget is left as the ceiling it is"
+    Keeper_runtime_resolved.first_event_failsafe_floor_sec
     (Keeper_runtime_resolved.first_event_timeout_sec ())
 
 let test_resolved_first_event_timeout_uses_toml () =
@@ -534,6 +556,9 @@ let test_resolved_provider_call_deadline_prefers_env () =
 let test_resolved_stream_idle_timeout_does_not_clamp () =
   with_clean_boot_overrides @@ fun () ->
   with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "3600") @@ fun () ->
+  (* A declared gap this long needs a threshold that covers it; the case is
+     about the value not being clamped, not about the pair. *)
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Some "3600") @@ fun () ->
   Keeper_runtime_resolved.init ();
   check (float 0.0001) "explicit value is preserved"
     3600.0
@@ -858,6 +883,7 @@ let () =
         ; test_case "resolved provider-call threshold defaults to fail-safe floor" `Quick test_resolved_provider_call_deadline_defaults_to_failsafe_floor
         ; test_case "a stream budget longer than the threshold is refused" `Quick test_a_stream_budget_longer_than_the_threshold_is_refused
         ; test_case "a threshold covering the stream budgets is frozen" `Quick test_a_threshold_covering_the_stream_budgets_is_frozen
+        ; test_case "an explicit threshold under the floored budgets stands" `Quick test_an_explicit_threshold_under_the_floored_budgets_stands
         ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error

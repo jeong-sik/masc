@@ -129,10 +129,11 @@ val provider_call_deadline_failsafe_floor_sec : float
     [turn.provider_call_deadline_sec]) honoured verbatim, or when unset
     {!provider_call_deadline_failsafe_floor_sec}. There is no "off": a
     keeper turn that could not be ended by this threshold would be one only
-    an operator could end. It is never shorter than the two stream budgets:
-    a pair where it is (whatever their sources) raises
-    {!Env_config_core.Config_error} when the configuration is frozen, since
-    the longer budget could never be reached.
+    an operator could end. It is never shorter than a stream budget the
+    operator declared: that pair raises {!Env_config_core.Config_error}
+    when the configuration is frozen, since the declared budget could never
+    be reached. A floored budget is a ceiling, not an allowance, so an
+    explicit threshold shorter than one stands.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float

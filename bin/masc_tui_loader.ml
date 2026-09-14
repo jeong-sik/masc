@@ -971,14 +971,16 @@ let load_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("approvals load failed: " ^ err)
   | Ok json -> Masc_tui_operator_projection.decode_snapshot json
 
-(** Load the runtime catalogue and keeper assignments for the picker. *)
+(** Load the runtime catalogue, lanes, and keeper assignments for the picker. *)
 let load_runtime_resolved ~(host : string) ~(port : int) :
-    ( Tui_decode.runtime_option list * Tui_decode.runtime_assignment list,
+    ( Tui_decode.runtime_option list
+      * Tui_decode.runtime_resolved_lane list
+      * Tui_decode.runtime_assignment list,
       string )
     result =
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_resolved json
+  | Ok json -> Tui_decode.decode_runtime_resolved_full json
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;

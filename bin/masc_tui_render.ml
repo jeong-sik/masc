@@ -122,6 +122,15 @@ let acting_pane_columns (state : state) ~terminal_cols =
   then Masc_tui_acting_pane.pane_cols
   else 0
 
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then
+    Printf.sprintf "%dk" (tokens / 1_000)
+  else
+    Printf.sprintf "%d" tokens
+
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -4726,13 +4735,19 @@ let render_lanes_overview (state : state) =
                 then "  (same provider as a current slot)"
                 else ""
               in
-              let mark = if offset = state.runtime_lane_pick_cursor then ">" else " " in
+              let mark = if offset = 0 then ">" else " " in
+              let ctx =
+                Printf.sprintf " [%s ctx]"
+                  (format_context_tokens runtime.ro_effective_max_context)
+              in
+              let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s   %s / %s%s"
+                (Printf.sprintf "  %s %s   %s / %s%s%s%s"
                    mark
                    (Terminal_text.single_line runtime.ro_id)
                    (Terminal_text.single_line runtime.ro_provider)
                    (Terminal_text.single_line runtime.ro_model)
+                   ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
@@ -10171,12 +10186,18 @@ let render_runtime (state : state) =
              then "  (same provider as a current candidate)"
              else ""
            in
+           let ctx =
+             Printf.sprintf " [%s ctx]"
+               (format_context_tokens runtime.ro_effective_max_context)
+           in
+           let def = if runtime.ro_is_default then " [default]" else "" in
            c.push
-             (Printf.sprintf "  %s %s   %s / %s%s"
+             (Printf.sprintf "  %s %s   %s / %s%s%s%s"
                 (if offset = 0 then ">" else " ")
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)
+                ctx def
                 (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
@@ -10939,23 +10960,28 @@ let render_runtime_pick (state : state) =
         state.runtime_assignments
     with
     | Some a ->
-        Printf.sprintf "%s (%s)%s"
-          (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
+        let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
+        let kind =
+          match a.ra_target_id with
+          | Some tid
+            when List.exists
+                   (fun (l : Tui_decode.runtime_resolved_lane) ->
+                     String.equal l.rrl_id tid)
+                   state.runtime_lanes ->
+              "lane"
+          | Some _ -> "model"
+          | None -> "default"
+        in
+        Printf.sprintf "%s (%s, %s)%s"
+          target kind
           (Terminal_text.single_line a.ra_source)
           (match a.ra_unavailable_reason with
            | None -> ""
            | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
     | None -> "-"
   in
-  (* Only what a keeper can actually be pointed at. The catalogue also lists
-     rows the dispatcher refuses; offering one would end in the server's
-     rejection, so the picker does not draw them. *)
-  let options =
-    List.filter
-      (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
-      state.runtime_catalog
-  in
-  let count = List.length options in
+  let items = Masc_tui_types.runtime_picker_items state in
+  let count = List.length items in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -10972,7 +10998,15 @@ let render_runtime_pick (state : state) =
         | None when count = 0 ->
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
-        | None -> 0
+        | None ->
+            let header =
+              Printf.sprintf "  %s  %s  %s"
+                (fit_width "KIND   TARGET" 33)
+                (fit_width "CONFIGURED ROUTE / MODEL" (max 24 (cols - 62)))
+                "PROPERTIES / FAILOVER"
+            in
+            c.push (Ansi.dim ^ header ^ Ansi.reset);
+            1
       in
       let height = max 0 (budget - status_rows) in
       let scroll_offset =
@@ -10981,23 +11015,66 @@ let render_runtime_pick (state : state) =
         else 0
       in
       List.iteri
-        (fun idx (option : Tui_decode.runtime_option) ->
+        (fun idx item ->
           if idx >= scroll_offset && idx < scroll_offset + height then begin
             let line =
-              Printf.sprintf "  %s  %s%s"
-                (fit_width (Terminal_text.single_line option.ro_id) 44)
-                (fit_width
-                   (Terminal_text.single_line
-                      (option.ro_provider ^ " / " ^ option.ro_model))
-                   (max 8 (cols - 56)))
-                (if option.ro_is_default then " [default]" else "")
+              match item with
+              | Masc_tui_types.Pick_lane lane ->
+                  let kind_badge = Ansi.cyan ^ "[LANE] " ^ Ansi.reset in
+                  let target = fit_width (Terminal_text.single_line lane.rrl_id) 24 in
+                  let chain =
+                    String.concat " \xe2\x86\x92 "
+                      (List.map
+                         (fun id ->
+                            match String.split_on_char '.' id with
+                            | [ _prov; model ] -> model
+                            | _ -> id)
+                         lane.rrl_runtime_ids)
+                  in
+                  let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
+                  let pref =
+                    match lane.rrl_preferred_candidate with
+                    | Some p ->
+                        let short_p =
+                          match String.split_on_char '.' p with
+                          | [ _prov; m ] -> m
+                          | _ -> p
+                        in
+                        Printf.sprintf " [active: %s]" short_p
+                    | None -> ""
+                  in
+                  let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
+                  Printf.sprintf "%s%s  %s  %s%s"
+                    kind_badge target route_col hops (Ansi.dim ^ pref ^ Ansi.reset)
+              | Masc_tui_types.Pick_model option ->
+                  let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
+                  let target = fit_width (Terminal_text.single_line option.ro_id) 24 in
+                  let model_desc =
+                    fit_width
+                      (Terminal_text.single_line
+                         (option.ro_provider ^ " / " ^ option.ro_model))
+                      (max 24 (cols - 62))
+                  in
+                  let ctx =
+                    Printf.sprintf "[%s ctx]"
+                      (format_context_tokens option.ro_effective_max_context)
+                  in
+                  let def = if option.ro_is_default then " [default]" else "" in
+                  let quota =
+                    if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
+                    else match option.ro_blocked_reason with
+                    | Some reason -> " " ^ (Theme.bad ()) ^ "[" ^ Terminal_text.single_line reason ^ "]" ^ Ansi.reset
+                    | None -> ""
+                  in
+                  Printf.sprintf "%s%s  %s  %s%s%s"
+                    kind_badge target model_desc ctx def quota
             in
             c.push
               (if idx = state.runtime_pick_cursor then
                  Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
                else "  " ^ line)
           end)
-        options)
+        items)
 
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show

@@ -80,6 +80,23 @@ let test_one_mark_means_one_stage_across_the_two_rows () =
   Alcotest.(check string) "todo waits"
     (progress_waiting ^ " todo") (backlog_label "todo")
 
+(* The retained-history row named two counts, and the goals that reached an
+   end are a subset of the goals no longer listed -- so with every one of them
+   ended it printed the same number twice. *)
+let test_all_ended_says_the_count_once () =
+  Alcotest.(check string) "one count, no second number"
+    "  No longer listed: 3"
+    (Masc_tui_render_prim.planning_goal_history_summary ~unlisted:3 ~ended:3)
+
+(* The server fills closed_at only for a goal whose last phase is terminal, so
+   the difference counts goals that left the list with nothing recorded. That
+   was the one reading the row made an operator subtract. *)
+let test_the_row_names_the_goals_with_no_outcome () =
+  let row = Masc_tui_render_prim.planning_goal_history_summary ~unlisted:5 ~ended:3 in
+  Alcotest.(check bool) "the unlisted count" true (contains "No longer listed: 5" row);
+  Alcotest.(check bool) "the difference, named" true (contains "2 with no outcome" row);
+  Alcotest.(check bool) "not the subset count" false (contains "3" row)
+
 let () =
   Alcotest.run "tui_planning_summary_rows"
     [ ( "planning summary rows"
@@ -91,5 +108,9 @@ let () =
             test_an_empty_phase_is_not_counted
         ; Alcotest.test_case "one mark means one stage across the two rows" `Quick
             test_one_mark_means_one_stage_across_the_two_rows
+        ; Alcotest.test_case "all ended says the count once" `Quick
+            test_all_ended_says_the_count_once
+        ; Alcotest.test_case "the row names the goals with no outcome" `Quick
+            test_the_row_names_the_goals_with_no_outcome
         ] )
     ]

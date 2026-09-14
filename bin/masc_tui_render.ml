@@ -2659,15 +2659,14 @@ let render_planning_list (state : state) =
      match planning.pl_goal_history with
      | [] -> ()
      | history ->
-       let closed =
+       let ended =
          List.length
            (List.filter
               (fun (row : planning_goal_history) -> Option.is_some row.pgh_closed_at)
               history)
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "  No longer listed: %d · reached an end: %d"
-            (List.length history) closed);
+         (planning_goal_history_summary ~unlisted:(List.length history) ~ended);
        let lifetime_label hours =
          if hours >= 48. then Printf.sprintf "%.1fd" (hours /. 24.)
          else Printf.sprintf "%.1fh" hours

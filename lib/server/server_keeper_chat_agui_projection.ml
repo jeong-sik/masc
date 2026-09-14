@@ -17,6 +17,7 @@ type custom_event_name =
   | Thinking_signature_delta
   | Media_delta
   | Stream_protocol_error
+  | Batch_bound
   | Continuation_checkpoint
   | External_effect_completed
   | Reply_details
@@ -53,6 +54,7 @@ let custom_event_name_to_string = function
   | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
   | Media_delta -> "KEEPER_MEDIA_DELTA"
   | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
+  | Batch_bound -> "KEEPER_CHAT_BATCH_BOUND"
   | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
   | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
   | Reply_details -> "KEEPER_REPLY_DETAILS"
@@ -195,6 +197,10 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Reply_details event ->
       state, Some (custom ~timestamp ~redact_json state Reply_details
                      (reply_details_to_json ~redact_text event))
+  | Batch_bound {operation_id; execution_id} ->
+      state, Some (custom ~timestamp ~redact_json state Batch_bound
+        (`Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
+          "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]))
   | Continuation_checkpoint event ->
       state, Some (custom ~timestamp ~redact_json state Continuation_checkpoint
                      (continuation_checkpoint_to_json ~redact_text event))

@@ -154,7 +154,11 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_document of user_media_block
   | User_audio of user_media_block
 
+type admission_intent = Queue_only | Interactive of {
+  control_token : string; target : Keeper_owner_registry.interactive_target option }
+
 type keeper_chat_stream_request = {
+  admission_intent : admission_intent;
   request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
@@ -454,7 +458,7 @@ let handle_keeper_turns_list state request reqd =
               ]
         in
         Tool_args.ok_assoc
-          [ ("keeper_name", `String keeper_name); ("turn", turn_json) ]
+          [ ("keeper_name", `String keeper_name); ("chat_control_token", `String (Keeper_owner.chat_control_token owner)); ("turn", turn_json) ]
     in
     respond_json_value_with_cors ~status:`OK request reqd
       (`Assoc
@@ -615,10 +619,15 @@ let handle_keeper_turn_interrupt state request reqd =
                   | None -> Error "interrupt_token must be a UUID")
                | Some _ -> Error "interrupt_token must be a UUID"
              in
-             (match request_id_result, interrupt_token_result with
-              | Ok (Some _), Ok (Some _) -> Error "choose request_id or interrupt_token, not both"
-              | Ok request_id, Ok interrupt_token -> Ok (String.trim s, request_id, interrupt_token)
-              | Error error, _ | _, Error error -> Error error)
+             let control_result = match List.assoc_opt "expected_control_token" fields with
+               | None -> Ok None
+               | Some (`String token) when String.trim token <> "" -> Ok (Some token)
+               | Some _ -> Error "expected_control_token must be a nonempty string" in
+             (match request_id_result, interrupt_token_result, control_result with
+              | Ok (Some _), Ok (Some _), _ -> Error "choose request_id or interrupt_token, not both"
+              | Ok None, Ok _, Ok (Some _) -> Error "expected_control_token requires an exact request_id"
+              | Ok request_id, Ok interrupt_token, Ok control_token -> Ok (String.trim s, request_id, interrupt_token, control_token)
+              | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error)
            (* A blank name trims to "" and then reads as an unregistered
               keeper, so the caller saw 404 for what is a bad request. The
               request_id check below already worked this way. *)
@@ -632,7 +641,7 @@ let handle_keeper_turn_interrupt state request reqd =
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json msg)
-    | Ok (keeper_name, request_id, interrupt_token) ->
+    | Ok (keeper_name, request_id, interrupt_token, expected_control_token) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
@@ -640,72 +649,35 @@ let handle_keeper_turn_interrupt state request reqd =
       else match interrupt_token with
       | Some token ->
         let fields = match Keeper_owner_registry.pause_observed_turn ~base_path ~keeper_name ~interrupt_token:token with
-          | Ok Keeper_owner.Operation_interrupt_signalled -> ["signalled", `Bool true; "paused", `Bool true]
-          | Ok (Operation_not_current _) -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
-          | Ok (Operation_interrupt_failed detail) ->
-            ["signalled", `Bool false; "paused", `Bool true; "reason", `String "cancel_failed"; "detail", `String detail]
+          | Ok (result, control_token) ->
+            ("chat_control_token", `String control_token) ::
+            (match result with
+             | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
+             | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true; "paused", `Bool true]
+             | Interrupt_result (Operation_not_current _) -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
+             | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "cancel_failed"; "detail", `String detail])
           | Error error -> ["signalled", `Bool false; "reason", `String "pause_failed";
-              "detail", `String (Keeper_owner_registry.command_error_to_string error)]
-        in
-        respond_json_value_with_cors ~status:`OK request reqd
-          (`Assoc (("interrupt_token", `String token) :: fields))
+              "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
+        respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("interrupt_token", `String token) :: fields))
       | None ->
         match request_id with
         | Some request_id ->
           (match Keeper_chat_operation.Operation_id.of_string request_id with
-           | Error detail ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (keeper_chat_stream_error_json detail)
+           | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (keeper_chat_stream_error_json detail)
            | Ok operation_id ->
-             (match
-                Keeper_owner_registry.pause_running_operation ~base_path
-                  ~keeper_name operation_id
-              with
-              | Ok Keeper_owner.Operation_interrupt_signalled ->
-                Log.Keeper.info ~keeper_name
-                  "keeper_turn_interrupt: request_id=%s exact=true"
-                  request_id;
-                respond_json_value_with_cors ~status:`OK request reqd
-                  (`Assoc
-                     [ "signalled", `Bool true
-                     ; "request_id", `String request_id
-                     ])
-              | Ok
-                  (Keeper_owner.Operation_not_current
-                     { running_operation_id }) ->
-                respond_json_value_with_cors ~status:`OK request reqd
-                  (`Assoc
-                     ([ "signalled", `Bool false
-                      ; "reason", `String "operation_not_current"
-                      ; "request_id", `String request_id
-                      ]
-                      @
-                      match running_operation_id with
-                      | None -> []
-                      | Some current ->
-                        [ ( "current_request_id"
-                          , `String
-                              (Keeper_chat_operation.Operation_id.to_string
-                                 current) ) ]))
-              | Ok (Keeper_owner.Operation_interrupt_failed detail) ->
-                respond_json_value_with_cors ~status:`OK request reqd
-                  (`Assoc
-                     [ "signalled", `Bool false
-                     ; "reason", `String "cancel_failed"
-                     ; "request_id", `String request_id
-                     ; "detail", `String detail
-                     ])
-              | Error error ->
-                respond_json_value_with_cors ~status:`OK request reqd
-                  (`Assoc
-                     [ "signalled", `Bool false
-                     ; "reason", `String "owner_unavailable"
-                     ; "request_id", `String request_id
-                     ; ( "detail"
-                       , `String
-                           (Keeper_owner_registry.command_error_to_string error)
-                       )
-                     ])))
+             let fields = match Keeper_owner_registry.pause_running_operation ?expected_control_token ~base_path ~keeper_name operation_id with
+               | Ok (result, control_token) ->
+                 ("chat_control_token", `String control_token) ::
+                 (match result with
+             | Keeper_owner.Pending_admission_paused -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "paused_pending_admission"]
+                  | Keeper_owner.Interrupt_result Operation_interrupt_signalled -> ["signalled", `Bool true; "paused", `Bool true]
+                  | Interrupt_result (Operation_not_current {running_operation_id}) ->
+                    ["signalled", `Bool false; "reason", `String "operation_not_current"] @
+                    Option.fold ~none:[] ~some:(fun id -> ["current_request_id", `String (Keeper_chat_operation.Operation_id.to_string id)]) running_operation_id
+                  | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "paused", `Bool true; "reason", `String "cancel_failed"; "detail", `String detail])
+               | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable";
+                   "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
+             respond_json_value_with_cors ~status:`OK request reqd (`Assoc (("request_id", `String request_id) :: fields)))
         | None ->
         (* The server fails the turn switch and learns nothing more within this
            request: whether the signal reaches the running fiber, and whether
@@ -810,6 +782,7 @@ let parse_keeper_chat_stream_request body_str =
           ; "channel_workspace_id"
           ; "attachments"
           ; "since_seq"
+          ; "admission_intent"
           ]
         in
         let keys = List.map fst fields in
@@ -838,6 +811,30 @@ let parse_keeper_chat_stream_request body_str =
       | Some (`String value) -> Ok value
       | Some _ -> Error (key ^ " must be a string")
     in
+    let* admission_intent = match List.assoc_opt "admission_intent" fields with
+      | None -> Ok Queue_only
+      | Some (`Assoc values) ->
+        let keys = List.map fst values in
+        if List.sort String.compare keys <> List.sort String.compare ["kind"; "control_token"; "interrupt_token"; "operation_id"] then
+          Error "admission_intent requires exactly kind, control_token, interrupt_token, operation_id"
+        else
+        let optional key = match List.assoc_opt key values with
+          | Some `Null -> Ok None
+          | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+          | None | Some _ -> Error ("admission_intent." ^ key ^ " must be nonempty string or null") in
+        let* control_token = match List.assoc_opt "kind" values, List.assoc_opt "control_token" values with
+          | Some (`String "interactive"), Some (`String token) when String.trim token <> "" -> Ok token
+          | _ -> Error "invalid interactive admission kind or control_token" in
+        let* turn = optional "interrupt_token" in
+        let* operation = optional "operation_id" in
+        let* target = match turn, operation with
+          | None, None -> Ok None
+          | Some token, None -> Ok (Some (Keeper_owner_registry.Observed_turn_token token))
+          | None, Some id -> Keeper_chat_operation.Operation_id.of_string id
+              |> Result.map (fun id -> Some (Keeper_owner_registry.Direct_operation_id id))
+          | Some _, Some _ -> Error "interactive admission must name at most one exact interrupt target" in
+        Ok (Interactive {control_token; target})
+      | Some _ -> Error "admission_intent must be an object" in
     let* request_id = required_string "request_id" in
     let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
@@ -934,7 +931,8 @@ let parse_keeper_chat_stream_request body_str =
         |> Result.map_error Keeper_invocation_contract.request_error_to_string
       in
       Ok
-        { request_id
+        { admission_intent
+        ; request_id
         ; name
         ; message
         ; user_blocks
@@ -1051,6 +1049,7 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
       (* Rebuilt from the durable operation for execution, not received from
          a client: there is no reconnect, so the position is the one an
          absent field means. *)
+    ; admission_intent = Queue_only
     ; since_seq = Keeper_chat_event_log.Whole_turn
     }
   in
@@ -1660,7 +1659,7 @@ let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.tra
    caller presents the typed transcript provenance and execution ownership
    selected at its persistence boundary; this function never infers either
    from a connector label or message content. *)
-let process_single_turn ~user_row_origin ~submission
+let process_single_turn ~batch_binding ~user_row_origin ~submission
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
@@ -1672,6 +1671,8 @@ let process_single_turn ~user_row_origin ~submission
   let redact_text = Keeper_secret_redaction.redact_text redaction in
   Keeper_chat_events.publish events
     (Run_started { run_id; thread_id });
+  Option.iter (fun (operation_id, execution_id) ->
+    Keeper_chat_events.publish events (Batch_bound {operation_id; execution_id})) batch_binding;
   Keeper_chat_events.publish events
     (Text_message_start { message_id; role = Assistant });
   let completed_stream_lifecycle =
@@ -2733,6 +2734,31 @@ let operation_execution_of_outcome ~operation_state ~pending_continuation ~outco
   | Ok (Keeper_chat_operation.Succeeded _ | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _) ->
     failed Keeper_chat_operation.Turn_invariant "claimed operation was already terminal"
 
+let persist_batch_user_rows ~base_dir ~keeper_name members =
+  let ( let* ) = Result.bind in
+  match members with
+  | [] | [_] -> Ok ()
+  | _ -> List.fold_left (fun result (operation : Keeper_chat_operation.t) ->
+      let* () = result in
+      let* input = match operation.input with Some input -> Ok input
+        | None -> Error "active batch member has no original input" in
+      let* decoded = operation_payload_of_json ~keeper_name ~operation_id:operation.operation_id
+        ~source:operation.source ~input in
+      let source = decoded.source in
+      match source.user_row_origin with
+      | Keeper_chat_store.Already_persisted _ | Already_persisted_upstream -> Ok ()
+      | Needs_append ->
+        let* request_id = Keeper_chat_delivery_identity.Request_id.of_string
+          (Keeper_chat_operation.Operation_id.to_string operation.operation_id) in
+        Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+          ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+          ~content:decoded.payload.message ~attachments:decoded.payload.attachments
+          ~surface:source.surface ~speaker:(chat_speaker_of_request decoded.payload)
+          ?conversation_id:source.conversation_id ?external_message_id:source.external_message_id
+          ?workspace_id:source.workspace_id ~extra_mentions:source.extra_mentions ()
+        |> Result.map (fun _ -> ())) (Ok ()) members
+;;
+
 let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   fun ~sw ~keeper_name ~claim ->
   let failed ?outcome_ref kind detail =
@@ -2747,6 +2773,15 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
         Keeper_chat_operation.No_queued_operation
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
+      (match Keeper_owner_registry.batch_operations
+        ~base_path:(Mcp_server.workspace_config state).base_path ~keeper_name operation.operation_id with
+       | Error error -> failed Keeper_chat_operation.Store_unavailable
+           (Keeper_owner_registry.command_error_to_string error)
+       | Ok batch_members ->
+      (match persist_batch_user_rows ~base_dir:(Mcp_server.workspace_config state).base_path ~keeper_name batch_members with
+       | Error detail -> failed Keeper_chat_operation.Delivery_failed detail
+       | Ok () ->
+      let member_ids = List.map (fun (member : Keeper_chat_operation.t) -> member.operation_id) batch_members in
       let pending_continuation () =
         Keeper_direct_gate_continuation.pending
           ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2771,21 +2806,32 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             let operation_id =
               Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
             in
-            (* RFC-0412 stage 1 dual-write: every event published on this bus
-               is also appended to the per-operation canonical journal.
-               Fail-open — a journal failure never breaks the live turn. *)
-            let journal =
-              Keeper_chat_event_log.open_journal
+            (* Every request keeps its request-bound live and replay journal. One
+               bus subscriber below projects events to all admitted requests;
+               multiple subscribers would divide, rather than copy, events. *)
+            let journals = List.map (fun member_id ->
+              member_id, Keeper_chat_event_log.open_journal
                 ~base_dir:(Mcp_server.workspace_config state).base_path
-                ~keeper_name
-                ~operation_id
-                ()
-            in
-            let events =
-              Keeper_chat_events.create
-                ~on_publish:(Keeper_chat_event_log.append journal)
-                ()
-            in
+                ~keeper_name ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id) ()) member_ids in
+            let first_seq =
+              let ( let* ) = Result.bind in
+              let* pending = pending_continuation ()
+                |> Result.map_error (fun detail -> Keeper_chat_event_log.Journal_unreadable detail) in
+              List.fold_left (fun result (_, journal) ->
+                let* highest = result in
+                let* next = Keeper_chat_event_log.next_sequence ~require_existing:(Option.is_some pending) journal in
+                Ok (max highest next)) (Ok 0) journals in
+            (match first_seq with
+             | Error Keeper_chat_event_log.Journal_missing ->
+               failed Keeper_chat_operation.Store_unavailable "operation journal cursor disappeared"
+             | Error (Journal_unreadable detail | Journal_corrupt detail) ->
+               failed Keeper_chat_operation.Store_unavailable detail
+             | Ok first_seq ->
+            let events = Keeper_chat_events.create ~first_seq
+              ~on_publish:(fun ~seq ~ts event ->
+                List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
+                  (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
+              () in
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in
             let settle_delivery result =
@@ -2826,40 +2872,26 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  in
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
-                 let rec loop ~terminal_seen projection =
+                 let rec loop ~terminal_seen projections =
                    match Keeper_chat_events.subscribe_published events with
                    | Keeper_chat_events.Closed ->
-                     if not terminal_seen
-                     then settle_delivery (Error no_terminal_before_close)
+                     if not terminal_seen then settle_delivery (Error no_terminal_before_close)
                    | Keeper_chat_events.Next { Keeper_chat_events.seq; ts; event } ->
-                     (* The bus stamped [ts] once at publish; the journal line
-                        carries the same value, so a since_seq replay of this
-                        event reproduces this frame byte for byte. *)
-                     let projection, projected =
-                       Server_keeper_chat_agui_projection.project
-                         ~timestamp:ts
-                         ~redact_text
-                         ~redact_json
-                         projection
-                         event
-                     in
-                     Option.iter
-                       (fun event ->
-                          note_operation_wire_event ~operation_id event;
-                          Keeper_chat_broadcast.operation_event
-                            ~keeper_name
-                            ~operation_id
-                            ~seq:(Some seq)
-                            ~event;
-                          publish_operation_live_event ~operation_id ~seq:(Some seq) event)
-                       projected;
-                     let is_terminal =
-                       Server_keeper_chat_agui_projection.is_terminal event
-                     in
-                     if is_terminal && not terminal_seen then settle_delivery (Ok ());
-                     loop ~terminal_seen:(terminal_seen || is_terminal) projection
+                   let projections = List.map (fun (member_id, projection) ->
+                     let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
+                     let projection, projected = Server_keeper_chat_agui_projection.project
+                       ~timestamp:ts ~redact_text ~redact_json projection member_event in
+                     Option.iter (fun event ->
+                       let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
+                       note_operation_wire_event ~operation_id event;
+                       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:(Some seq) ~event;
+                       publish_operation_live_event ~operation_id ~seq:(Some seq) event) projected;
+                     member_id, projection) projections in
+                   let is_terminal = Server_keeper_chat_agui_projection.is_terminal event in
+                   if is_terminal && not terminal_seen then settle_delivery (Ok ());
+                   loop ~terminal_seen:(terminal_seen || is_terminal) projections
                  in
-                 loop ~terminal_seen:false Server_keeper_chat_agui_projection.initial)
+                 loop ~terminal_seen:false (List.map (fun id -> id, Server_keeper_chat_agui_projection.initial) member_ids))
              | Keeper_continuation_channel.Discord { channel_id; _ } ->
                (match Env_config_discord.bot_token_opt () with
                 | Some token ->
@@ -2960,12 +2992,14 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                fork_adapter (fun () ->
                  let commit terminal =
                    settle_delivery
-                     (Keeper_delegate_completion_wake.deliver
-                        ~base_path:(Mcp_server.workspace_config state).base_path
-                        ~asked_by
-                        ~operation_id
-                        ~delegate:keeper_name
-                        ~terminal)
+                     (List.fold_left (fun prior member_id ->
+                       let delivered = Keeper_delegate_completion_wake.deliver
+                         ~base_path:(Mcp_server.workspace_config state).base_path ~asked_by
+                         ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id)
+                         ~delegate:keeper_name ~terminal in
+                       match prior, delivered with
+                       | Error _, _ -> prior
+                       | Ok (), result -> result) (Ok ()) member_ids)
                  in
                  let rec loop reply =
                    match Keeper_chat_events.subscribe events with
@@ -3013,7 +3047,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             in
             let run_turn () =
               process_single_turn
-                ~user_row_origin:operation_payload.source.user_row_origin
+                ~batch_binding:(Option.map (fun (member : Keeper_chat_operation.batch_membership) ->
+                  operation.operation_id, member.execution_id) operation.batch_membership)
+                ~user_row_origin:(match batch_members with
+                  | [] | [_] -> operation_payload.source.user_row_origin
+                  | _ -> Keeper_chat_store.Already_persisted_upstream)
                 ~submission:
                   (Owner_operation
                      { operation_id = operation.operation_id
@@ -3062,7 +3100,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               |> Result.map_error Keeper_owner_registry.command_error_to_string
               |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
                 | None -> Error "claimed operation disappeared before settlement") in
-            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery))
+            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery)))))
 
   in
   match
@@ -3119,7 +3157,18 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
          | Some (_, _)
          | None -> false)
   ; execute = operation_executor ~state ~clock
-  ; on_execution_settled = on_operation_execution_settled
+  ; on_execution_settled = (fun ~keeper_name ~claimed_operation_id ~execution ->
+      match claimed_operation_id with
+      | None -> ()
+      | Some operation_id ->
+        match Keeper_owner_registry.batch_operations ~base_path ~keeper_name operation_id with
+        | Error error ->
+          Log.Keeper.error "batch terminal projection failed for %s: %s"
+            keeper_name (Keeper_owner_registry.command_error_to_string error);
+          on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution
+        | Ok members -> List.iter (fun (member : Keeper_chat_operation.t) ->
+            on_operation_execution_settled ~keeper_name
+              ~claimed_operation_id:(Some member.operation_id) ~execution) members)
   }
 ;;
 
@@ -3278,7 +3327,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       in
       let unregister = register_operation_live_sink ~operation_id sink in
       Eio.Switch.on_release stream_sw unregister;
-      let publish_acceptance acceptance =
+      let publish_acceptance (acceptance, interactive) =
         let operation = acceptance.Keeper_owner.operation in
         let state =
           match operation.state with
@@ -3292,10 +3341,15 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           Ag_ui.of_custom
             ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
             (`Assoc
-               [ "operation_id", `String operation_id
+               ([ "operation_id", `String operation_id
                ; "state", `String state
                ; "queued_count", `Int acceptance.queued_count
-               ])
+               ] @ match interactive with None -> [] | Some (receipt : Keeper_owner.interactive_receipt) ->
+                 ["interactive", `Assoc [
+                   "outcome", `String (match receipt.outcome with Applied -> "applied" | Stale_control -> "stale_control" | Paused -> "paused" | Replayed -> "replayed");
+                   "chat_control_token", `String receipt.chat_control_token;
+                   "signalled", `Bool receipt.signalled; "resumed", `Bool receipt.resumed;
+                   "interrupt_error", Option.fold ~none:`Null ~some:(fun detail -> `String detail) receipt.interrupt_error]]))
         in
         (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
         ignore (keeper_stream_send_event writer mutex closed event);
@@ -3346,12 +3400,15 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             payload
           |> Result.map_error (fun detail -> `Input detail)
         in
-        Keeper_owner_registry.submit_operation
-          ~base_path
-          ~keeper_name:payload.name
-          ~operation_id:payload.request_id
-          ~source
-          ~input:(operation_input_of_payload payload)
+        (match payload.admission_intent with
+         | Queue_only -> Keeper_owner_registry.submit_operation
+             ~base_path ~keeper_name:payload.name ~operation_id:payload.request_id
+             ~source ~input:(operation_input_of_payload payload)
+             |> Result.map (fun acceptance -> acceptance, None)
+         | Interactive {control_token; target} -> Keeper_owner_registry.submit_interactive_operation
+             ~base_path ~keeper_name:payload.name ~operation_id:payload.request_id
+             ~source ~input:(operation_input_of_payload payload) ~control_token ~target
+             |> Result.map (fun (acceptance, receipt) -> acceptance, Some receipt))
         |> Result.map_error (fun error -> `Owner error)
       in
       (match submit_result with
@@ -3383,6 +3440,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new

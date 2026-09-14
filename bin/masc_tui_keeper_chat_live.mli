@@ -51,6 +51,7 @@ type tool_occurrence =
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
+  | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
   | Runtime_attempt_started of
       { runtime_id : string option
       ; attempt_index : int option
@@ -103,6 +104,7 @@ type delta =
   | Accepted of
       { admission : admission
       ; queue_length : int
+      ; interactive : Masc_tui_keeper_chat_projection.interactive_receipt option
             (** How many operations the keeper's chat queue held when the
                 server accepted this one. The server counts the whole queue,
                 so this is not "how many are ahead of this one" and must not

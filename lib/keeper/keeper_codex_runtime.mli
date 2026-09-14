@@ -17,9 +17,11 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  ?official_task_reference:Keeper_official_task_reference.t ->
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
+  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

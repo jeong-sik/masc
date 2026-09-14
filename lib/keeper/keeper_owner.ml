@@ -35,6 +35,8 @@ type operation_interrupt_result =
       { running_operation_id : Operation_id.t option }
   | Operation_interrupt_failed of string
 
+type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
+
 type interrupt_target =
   | Observed_turn of
       { current : Keeper_registry_types.turn_switch option Atomic.t
@@ -45,6 +47,12 @@ type interrupt_target =
 type run_next_result =
   | Run_next_paused
   | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
+
+type interactive_outcome = Applied | Stale_control | Paused | Replayed
+type interactive_receipt =
+  { outcome : interactive_outcome; chat_control_token : string
+  ; signalled : bool; resumed : bool; interrupt_error : string option }
+type interactive_intent = { control_token : string; target : interrupt_target option }
 
 type turn_lane =
   | Autonomous
@@ -154,6 +162,15 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Direct_checkpoint : Operation_id.t ->
+      (Keeper_semantic_execution.gate_checkpoint option, error) result command
+  | Defer_direct_checkpoint :
+      { operation_id : Operation_id.t; execution_digest : string;
+        checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
+      (Chat_operation.t, error) result command
+  | Resume_direct_checkpoint :
+      { operation_id : Operation_id.t; observed : Keeper_semantic_execution.gate_checkpoint } ->
+      (unit, error) result command
   | Direct_runtime_retry : Operation_id.t ->
       (Keeper_semantic_execution.runtime_retry option, error) result command
   | Defer_direct_runtime_retry :
@@ -179,7 +196,7 @@ type _ command =
       (Chat_operation.t, error) result command
   | Resume_direct_gate : {operation_id:Operation_id.t; waiting:Keeper_semantic_execution.gate_wait;
       resolution:Keeper_semantic_execution.gate_resolution} -> (unit, error) result command
-  | Pause_and_interrupt : interrupt_target -> (operation_interrupt_result, error) result command
+  | Pause_and_interrupt : {target : interrupt_target; expected_control_token : string option} -> (pause_result * string, error) result command
   | Run_next_operation : { operation_id : Operation_id.t; observed : interrupt_target option } ->
       (run_next_result, error) result command
   | Interrupt_running_operation :
@@ -190,6 +207,10 @@ type _ command =
       ; input : Yojson.Safe.t
       }
       -> (operation_acceptance, error) result command
+  | Submit_interactive_operation :
+      { operation_id : Operation_id.t; source : Yojson.Safe.t; input : Yojson.Safe.t
+      ; intent : interactive_intent }
+      -> (operation_acceptance * interactive_receipt, error) result command
   | List_queued_operations :
       { after_sequence : int64 option
       ; limit : int
@@ -206,6 +227,7 @@ type _ command =
       Operation_id.t -> (Chat_operation.t, error) result command
   | Cancel_queued_operation :
       Operation_id.t -> (Chat_operation.t, error) result command
+  | Batch_operations : Chat_operation.Operation_id.t -> (Chat_operation.t list, error) result command
   | Claim_next_operation : (Chat_operation.t option, error) result command
   | Succeed_running_operation :
       { operation_id : Operation_id.t
@@ -259,6 +281,7 @@ type t =
   { keeper_name : string
   ; mailbox : packed_command Eio.Stream.t
   ; projection : Keeper_owner_reducer.projection Atomic.t
+  ; chat_control_token : string Atomic.t
   ; operation_projection : operation_projection Atomic.t
   ; turn_in_flight : turn_in_flight option Atomic.t
   ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
@@ -300,6 +323,7 @@ let operation_error_kind = function
 ;;
 
 let projection t = Atomic.get t.projection
+let chat_control_token t = Atomic.get t.chat_control_token
 let operation_projection t = Atomic.get t.operation_projection
 let turn_in_flight t = Atomic.get t.turn_in_flight
 let shutdown_operation_id t = Atomic.get t.shutdown_operation_id
@@ -469,6 +493,10 @@ let apply_transition t store old_state transition =
       (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed as error) ->
     Error (old_state, error)
   | Ok state ->
+    let before = (Keeper_owner_reducer.projection old_state).meta in
+    let pause_identity = Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused, meta.latched_reason) in
+    if pause_identity before <> pause_identity transition.projection.meta then
+      Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
     Atomic.set t.projection transition.projection;
     Ok state
 ;;
@@ -679,6 +707,7 @@ let start
     { keeper_name
     ; mailbox = Eio.Stream.create mailbox_capacity
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
+    ; chat_control_token = Atomic.make (Random_id.uuid_v7 ())
     ; operation_projection =
         Atomic.make (operation_projection_of_inventory initial_operation_inventory)
     ; turn_in_flight = Atomic.make None
@@ -830,7 +859,10 @@ let start
           | Ok (Some operation) ->
             (match operation.state with
              | Chat_operation.Queued ->
-               (match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
+               (match Chat_operation_store.direct_checkpoint t.operation_store ~operation_id with
+                | Ok (Some _) -> Ok ()
+                | Error error -> Error error
+                | Ok None -> match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
                 | Ok (Some _) -> Ok ()
                 | Ok None ->
                   (match Chat_operation_store.direct_gate_state t.operation_store ~operation_id with
@@ -973,7 +1005,7 @@ let start
         let exact_interrupt target =
           match target with
           | Observed_turn { current; interrupt_token } ->
-            (match Atomic.get current with
+            Ok (match Atomic.get current with
              | Some turn when String.equal turn.interrupt_token interrupt_token ->
                (* The token identifies the observed execution, but its inner
                   agent switch does not own all request/delivery fibers. The
@@ -984,9 +1016,30 @@ let start
                Option.map (fun cancel -> cancel.interrupt) (Atomic.get t.child_cancel)
              | Some _ | None -> None)
           | Direct_operation expected ->
-            (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
-             | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
-             | _ -> None)
+            (* A member can observe Run_started before Batch_bound reaches its
+               socket. Resolve only its immutable durable membership, never
+               substitute whichever operation happens to be running. *)
+            (match run_operation_read t ~label:"resolve exact interrupt execution" (fun () ->
+               Chat_operation_store.get t.operation_store expected) with
+             | Error _ as error -> error
+             | Ok None -> Ok None
+             | Ok (Some operation) ->
+               let expected = match operation.Chat_operation.batch_membership with
+                 | Some member -> member.execution_id
+                 | None -> operation.operation_id in
+               Ok (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with
+                 | Some running, Some cancel when Operation_id.equal running expected -> Some cancel.interrupt
+                 | _ -> None))
+        in
+        let signal_exact target =
+          let resolved = match target with None -> Ok None | Some target -> exact_interrupt target in
+          match resolved with
+          | Error error -> false, Some (error_to_string error)
+          | Ok None -> false, None
+          | Ok (Some interrupt) ->
+            (try interrupt (); true, None with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> false, Some (Printexc.to_string exn))
         in
         let commit_meta state command =
           match !(t.store_error) with
@@ -1037,6 +1090,23 @@ let start
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
           in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Direct_checkpoint operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
+          let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.defer_direct_checkpoint t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~checkpoint) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Resume_direct_checkpoint {operation_id; observed}, resolve) ->
+          let response = run_operation_command t ~label:"resume direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.resume_direct_checkpoint t.operation_store ~now:(t.now ())
+              ~operation_id ~observed) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Direct_runtime_retry operation_id, resolve) ->
@@ -1118,20 +1188,34 @@ let start
             Chat_operation_store.resume_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~waiting ~resolution) |> Result.map fst in
           Eio.Promise.resolve resolve response; loop state shutdown_operation_id
-        | Command (Pause_and_interrupt target, resolve) ->
+        | Command (Pause_and_interrupt {target; expected_control_token}, resolve) ->
           if Option.is_some shutdown_operation_id || (Keeper_owner_reducer.projection state).stopping then (
             Eio.Promise.resolve resolve (Error Owner_stopping);
             loop state shutdown_operation_id)
           else
-          (match exact_interrupt target with
-           | None ->
-             Eio.Promise.resolve resolve
-               (Ok (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }));
+          let authorization =
+            let ( let* ) = Result.bind in
+            let* interrupt = exact_interrupt target in
+            let* pending = match interrupt, target, expected_control_token with
+            | None, Direct_operation operation_id, Some token
+              when String.equal token (chat_control_token t)
+                && not !(t.child_active)
+                && Option.is_none (Atomic.get t.turn_in_flight)
+                && Option.is_none (Atomic.get t.operation_projection).running_operation_id ->
+              run_operation_read t ~label:"authorize exact pending admission stop" (fun () ->
+                Chat_operation_store.get t.operation_store operation_id)
+              |> Result.map (function
+                | None | Some {Chat_operation.state = Queued; _} -> true
+                | Some {Chat_operation.state = (Running _ | Succeeded _ | Failed _ | Cancelled _); _} -> false)
+            | (Some _ | None), (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
+            Ok (interrupt, pending) in
+          (match authorization with
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Ok (None, false) ->
+             Eio.Promise.resolve resolve (Ok
+               (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
-           | Some interrupt ->
-             (* Validate before the durable pause. A finishing child cannot admit its
-                successor until this mailbox command settles. Keep a previous,
-                stronger operator latch: run-next may only release its own pause. *)
+           | Ok (interrupt, _) ->
              let paused = match (Keeper_owner_reducer.projection state).meta with
                | Some meta when meta.paused -> Ok state
                | _ -> commit_meta state
@@ -1141,11 +1225,14 @@ let start
              (match paused with
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
-                let result = try interrupt (); Operation_interrupt_signalled
-                  with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | exn -> Operation_interrupt_failed (Printexc.to_string exn) in
-                Eio.Promise.resolve resolve (Ok result);
+                Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
+                let result = match interrupt with
+                  | None -> Pending_admission_paused
+                  | Some interrupt -> Interrupt_result
+                      (try interrupt (); Operation_interrupt_signalled with
+                       | Eio.Cancel.Cancelled _ as exn -> raise exn
+                       | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
+                Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
                 loop state shutdown_operation_id))
         | Command (Run_next_operation { operation_id; observed }, resolve) ->
           let can_resume = match (Keeper_owner_reducer.projection state).meta with
@@ -1168,36 +1255,20 @@ let start
              (match resumed with
               | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
               | Ok state ->
-                let signalled, interrupt_error = match Option.bind observed exact_interrupt with
-                  | None -> false, None
-                  | Some interrupt ->
-                    (try interrupt (); true, None
-                     with
-                     | Eio.Cancel.Cancelled _ as exn -> raise exn
-                     | exn -> false, Some (Printexc.to_string exn)) in
+                let signalled, interrupt_error = signal_exact observed in
                 Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; resumed = can_resume; interrupt_error }));
                 start_child_if_needed state shutdown_operation_id;
                 loop state shutdown_operation_id))
         | Command (Interrupt_running_operation expected, resolve) ->
-          let inventory = Atomic.get t.operation_projection in
-          let response =
-            match inventory.running_operation_id with
-            | Some running when Operation_id.equal running expected ->
-                (match Atomic.get t.child_cancel with
-                 | None ->
-                     Operation_interrupt_failed
-                       "the exact operation is running without a cancellable child"
-                 | Some cancel ->
-                     (try
-                        cancel.interrupt ();
-                        Operation_interrupt_signalled
-                      with
-                      | exn ->
-                          Operation_interrupt_failed (Printexc.to_string exn)))
-            | running_operation_id ->
-                Operation_not_current { running_operation_id }
-          in
-          Eio.Promise.resolve resolve (Ok response);
+          let response = match exact_interrupt (Direct_operation expected) with
+            | Error _ as error -> error
+            | Ok None -> Ok (Operation_not_current
+                {running_operation_id = (Atomic.get t.operation_projection).running_operation_id})
+            | Ok (Some interrupt) ->
+              Ok (try interrupt (); Operation_interrupt_signalled with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
+          Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
@@ -1224,6 +1295,38 @@ let start
           Eio.Promise.resolve resolve response;
           start_child_if_needed state shutdown_operation_id;
           loop state shutdown_operation_id
+        | Command (Submit_interactive_operation {operation_id; source; input; intent}, resolve) ->
+          let can_resume = match (Keeper_owner_reducer.projection state).meta with
+            | Some { paused = true; latched_reason = Some (Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }); _ } -> true
+            | _ -> false in
+          let current = String.equal intent.control_token (chat_control_token t) in
+          let permitted = current && (turn_admission_open state || can_resume) in
+          let result = reject_if_shutdown shutdown_operation_id (fun () ->
+            reject_if_stopping state (fun () ->
+              run_operation_command t ~label:"admit interactive Keeper message" (fun () ->
+                Chat_operation_store.submit
+                  ?priority:(if permitted then Some Keeper_chat_operation_batch.select else None)
+                  t.operation_store ~now:(t.now ()) ~operation_id ~source ~input))) in
+          (match result with
+           | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
+           | Ok (admission, projection) ->
+             let operation, existing = match admission with
+               | Chat_operation_store.Accepted operation -> operation, false
+               | Existing operation -> operation, true in
+             let acceptance = {operation; existing; queued_count = projection.queued_count} in
+             let outcome = if existing then Replayed else if not current then Stale_control else if not permitted then Paused else Applied in
+             let resumed = if outcome = Applied && can_resume then
+                 commit_meta state (Keeper_owner_reducer.Resume {updated_at = Time_codec.rfc3339_of_unix (t.now ())})
+               else Ok state in
+             let state, resumed, resume_error = match resumed with
+               | Ok state -> state, outcome = Applied && can_resume, None
+               | Error (state, error) -> state, false, Some (error_to_string error) in
+             let signalled, interrupt_error = if outcome <> Applied || Option.is_some resume_error then false, resume_error
+               else signal_exact intent.target in
+             let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed; interrupt_error} in
+             Eio.Promise.resolve resolve (Ok (acceptance, receipt));
+             start_child_if_needed state shutdown_operation_id;
+             loop state shutdown_operation_id)
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let response =
             run_operation_read t ~label:"list queued Keeper chat operations" (fun () ->
@@ -1279,6 +1382,11 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Batch_operations operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read shared chat execution" (fun () ->
+            Chat_operation_store.batch_operations t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Claim_next_operation, resolve) ->
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -1291,6 +1399,7 @@ let start
                     ~label:"claim next Keeper chat operation"
                     (fun () ->
                        Chat_operation_store.claim_next
+                         ~batch:Keeper_chat_operation_batch.select
                          t.operation_store
                          ~now:(t.now ()))
                   |> Result.map fst))
@@ -1523,6 +1632,12 @@ let start
 
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
+let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
+let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
+  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let resume_direct_checkpoint t ~operation_id ~observed =
+  request t (Resume_direct_checkpoint {operation_id; observed})
+
 let direct_runtime_retry t ~operation_id = request t (Direct_runtime_retry operation_id)
 let defer_direct_runtime_retry t ~operation_id ~execution_digest ~continuation =
   request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation})
@@ -1530,13 +1645,16 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
-let pause_and_interrupt t target = request t (Pause_and_interrupt target)
+let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })
 
 let interrupt_running_operation t operation_id =
   request t (Interrupt_running_operation operation_id)
 ;;
 let wake_operation_drain t = request t Wake_operation_drain
+
+let submit_interactive_operation t ~operation_id ~source ~input ~intent =
+  request t (Submit_interactive_operation {operation_id; source; input; intent})
 
 let submit_operation t ~operation_id ~source ~input =
   request t (Submit_operation { operation_id; source; input })
@@ -1559,6 +1677,7 @@ let move_queued_operation_to_end t operation_id =
 ;;
 
 let cancel_queued_operation t operation_id = request t (Cancel_queued_operation operation_id)
+let batch_operations t operation_id = request t (Batch_operations operation_id)
 let claim_next_operation t = request t Claim_next_operation
 
 let succeed_running_operation t ~operation_id ~outcome_ref =

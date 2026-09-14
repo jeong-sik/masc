@@ -55,7 +55,7 @@ let add t ~seq (delta : Live.delta) =
   else begin
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
-     | Live.Run_started | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -101,6 +101,9 @@ let protocol_error_detail (error : E.stream_protocol_error) =
 
 let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   match event with
+  | E.Batch_bound {operation_id; execution_id} -> Some (Live.Batch_bound
+      {operation_id = Keeper_chat_operation.Operation_id.to_string operation_id;
+       execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
   | E.Text_delta text -> Some (Live.Text text)

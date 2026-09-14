@@ -22,7 +22,10 @@ type current_task_observation =
       }
 
 type claimable_task_identity =
-  { task_id : Keeper_id.Task_id.t }
+  { task_id : Keeper_id.Task_id.t
+  ; priority : int
+  ; created_at : string
+  }
 
 type held_task_skills =
   { held_task_id : string
@@ -206,8 +209,22 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
                    honest view of the backlog) but are not offered back to their
                    author as claimable work — that edge is the feedback loop. *)
                 && not (task_is_self_authored_todo ~meta task)
-              then Some { task_id }
+              then Some { task_id; priority = task.priority; created_at = task.created_at }
               else None)
+         (* Claim order -- the same key the auto-claim scheduler sorts by
+            (priority, then created_at, then id). The frame's "next to claim"
+            rows are the head of this list, so what the keeper reads first is
+            what the scheduler would claim first (#29101). *)
+         |> List.sort (fun (left : claimable_task_identity) right ->
+              match Int.compare left.priority right.priority with
+              | 0 ->
+                (match String.compare left.created_at right.created_at with
+                 | 0 ->
+                   String.compare
+                     (Keeper_id.Task_id.to_string left.task_id)
+                     (Keeper_id.Task_id.to_string right.task_id)
+                 | order -> order)
+              | order -> order)
        in
        let failed =
          (* "Failed" here means still-auditable active work. Terminal Cancelled

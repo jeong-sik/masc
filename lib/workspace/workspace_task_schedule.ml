@@ -221,7 +221,9 @@ let claim_next_r
                let priority_cmp = compare a.priority b.priority in
                if priority_cmp <> 0
                then priority_cmp
-               else compare a.created_at b.created_at)
+               else
+                 let created_cmp = compare a.created_at b.created_at in
+                 if created_cmp <> 0 then created_cmp else compare a.id b.id)
             working_tasks
         in
         (* Eligibility and the claim outcome are one decision

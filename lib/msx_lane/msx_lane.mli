@@ -79,8 +79,12 @@ type error =
 
 val error_to_string : error -> string
 
+val frames_per_second : int
+(** The machine's frame rate, 60 (NTSC). The one number a caller multiplies
+    seconds by to name a span in frames. *)
+
 val max_frames_per_call : int
-(** 300 frames = 5 seconds at 60 Hz; about 90 ms of emulation. *)
+(** 300 frames = 5 seconds at {!frames_per_second}; about 90 ms of emulation. *)
 
 val boot_frames : int
 (** Frames run at {!load} before the first observation, so the first picture

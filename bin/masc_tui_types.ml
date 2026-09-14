@@ -6933,7 +6933,14 @@ let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
    The same distinction the body makes with {!page_unread_note} and
    {!page_failed_note}, in the words a title has room for. The Memory header was
    taught it in #35457; every other surface still said "not loaded" for both. *)
-let title_unread = "(not loaded)"
+(* A title has no label to hang the words on, so it brackets them: the
+   parentheses are what says "this is the state of the reading, not a count".
+   A labelled field already says that with its label, and the brackets inside
+   one cost two cells on the keeper chat header -- the narrowest row the TUI
+   draws, which at 120 columns beside the roster has none to spare. Both
+   spellings come from here so the words stay one. *)
+let field_unread = "not loaded"
+let title_unread = "(" ^ field_unread ^ ")"
 let title_failed = "(load failed)"
 
 let title_missing_reading ~error =

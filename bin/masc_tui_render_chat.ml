@@ -553,7 +553,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              the reader to guess whether it meant manual or unread. *)
           (match gate_mode with
            | Some word -> Terminal_text.single_line word
-           | None -> Masc_tui_types.title_unread)
+           | None -> Masc_tui_types.field_unread)
           Ansi.reset
       in
       let status =

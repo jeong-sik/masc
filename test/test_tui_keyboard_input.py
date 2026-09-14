@@ -5948,7 +5948,7 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
-            send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
@@ -5995,7 +5995,7 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             time.sleep(0.08)  # delimit the terminal's lone Escape before typing
             read_available(master_fd, output)
             send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
-            send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
             if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
                 raise AssertionError("double Esc duplicated control or released input before acknowledgement")
             fixture.release_interrupt.set()
@@ -6043,7 +6043,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc acknowledgement was not gated")
             send_and_wait(process, master_fd, output, b"waiting-line", composer_showing(b"waiting-line"))
-            send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
             if fixture.received:
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
@@ -6070,7 +6070,7 @@ def chat_retained_stop_interaction(fixture: AtomicChatFixture) -> Interaction:
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("initial stop never reached the server")
             send_and_wait(process, master_fd, output, b"retained-original", composer_showing(b"retained-original"))
-            send_and_wait(process, master_fd, output, b"\r", b"1 message waiting in this TUI; not sent to the server yet")
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
             send_and_wait(process, master_fd, output, b"\x1b", b"Input retained after Esc")
             if fixture.received:
                 raise AssertionError(f"second Esc dispatched retained input: {fixture.received!r}")

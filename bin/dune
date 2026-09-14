@@ -549,6 +549,7 @@
  (wrapped false)
  (modules masc_tui_keys)
  ; masc_tui_keeper_mark owns the marks the roster draws,
+ ; masc_tui_memory_mark the marks the Memory roster's ST column draws,
  ; masc_tui_planning_proof_mark the marks Planning's JUDGE column draws and
  ; masc_tui_keeper_chat_transcript the marks and phrases on a chat's tool
  ; rows; the sheet this module builds is where a reader looks up what one
@@ -557,6 +558,7 @@
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_board_kind_mark
+  masc_tui_memory_mark
   masc_tui_planning_proof_mark
   masc_tui_keeper_chat_transcript))
 
@@ -878,6 +880,12 @@
  (name masc_tui_board_kind_mark)
  (wrapped false)
  (modules masc_tui_board_kind_mark)
+ (libraries masc_tui_types))
+
+(library
+ (name masc_tui_memory_mark)
+ (wrapped false)
+ (modules masc_tui_memory_mark)
  (libraries masc_tui_types))
 
 (library
@@ -1239,6 +1247,7 @@
   masc
   masc_types
   masc_tui_ansi
+  masc_tui_memory_mark
   masc_tui_context_inspector
   masc_tui_frame
   masc_tui_scroll
@@ -1531,6 +1540,7 @@
   masc_tui_render_metrics
   masc_tui_render_memory
   masc_tui_board_kind_mark
+  masc_tui_memory_mark
   masc_tui_planning_proof_mark
   masc_tui_context_bars
   masc_tui_chart

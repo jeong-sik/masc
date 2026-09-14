@@ -765,6 +765,49 @@ let test_keeper_operations_are_not_top_level_tabs () =
           | Detail_github | Detail_identity -> None)
        keeper_detail_tabs)
 
+(* The Memory roster's ST column used to carry its own legend row, drawn above
+   every roster whether or not the column had anything in it -- including a
+   roster whose read had failed, where the marks it explained were not on
+   screen at all. The Keeper columns left the surface for the sheet for that
+   reason (#36156's neighbours in [help_sections]); this is the same move.
+
+   Both halves are pinned: the sheet has the section, and every state the
+   column can draw has a mark the section explains. A state added to
+   [memory_state] stops [Masc_tui_memory_mark] compiling until it has a mark,
+   and this stops a mark being added without a word beside it. *)
+let test_the_memory_marks_are_in_the_sheet_not_on_the_roster () =
+  Alcotest.(check bool) "the sheet explains the ST column" true
+    (List.exists
+       (fun (label, _) -> String.equal label "Memory marks")
+       (Masc_tui_keys.help_sections ()));
+  let explained = List.map fst Masc_tui_memory_mark.legend in
+  List.iter
+    (fun state ->
+      let mark = Masc_tui_memory_mark.glyph state in
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the mark %S" mark)
+        true
+        (List.mem mark explained))
+    [ Masc_tui_types.Memory_ordinary; Masc_tui_types.Memory_warning
+    ; Masc_tui_types.Memory_degraded; Masc_tui_types.Memory_no_current
+    ; Masc_tui_types.Memory_source_only; Masc_tui_types.Memory_starving
+    ; Masc_tui_types.Memory_read_error ];
+  (* And nothing in the sheet that the column cannot draw. *)
+  let drawable =
+    List.map Masc_tui_memory_mark.glyph
+      [ Masc_tui_types.Memory_ordinary; Masc_tui_types.Memory_warning
+      ; Masc_tui_types.Memory_degraded; Masc_tui_types.Memory_no_current
+      ; Masc_tui_types.Memory_source_only; Masc_tui_types.Memory_starving
+      ; Masc_tui_types.Memory_read_error ]
+  in
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the column can draw %S" mark)
+        true
+        (List.mem mark drawable))
+    Masc_tui_memory_mark.legend
+
 (* Lanes is the operator's top-level concurrent lane workspace. Runtime still
    owns configuration and substrate probes; [p] remains the explicit return
    path from the standalone run browser. *)
@@ -2239,6 +2282,8 @@ let () =
             test_changes_is_a_keeper_child
         ; Alcotest.test_case "Keeper operations are detail tabs" `Quick
             test_keeper_operations_are_not_top_level_tabs
+        ; Alcotest.test_case "the memory marks are in the sheet" `Quick
+            test_the_memory_marks_are_in_the_sheet_not_on_the_roster
         ; Alcotest.test_case "Lanes is a main destination" `Quick
             test_lanes_is_a_main_destination
         ; Alcotest.test_case "Code is a Workspace child" `Quick

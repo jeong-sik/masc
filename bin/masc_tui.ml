@@ -1452,8 +1452,21 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      with printable text. In a viewport too small to draw the composer where input
      is unsupported, printable Q also routes here. In ordinary typing mode,
      printable Q is never swallowed and types into the draft normally. *)
-  | k when (String.equal k "Q" && not (keeper_message_input_supported state))
-           || (String.length k = 1 && Char.code k.[0] = 17) ->
+  | k
+    when state.view = Keepers Keeper_message
+         && state.keeper_message_focus = Right_pane
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture
+         && ((String.equal k "Q" && not (keeper_message_input_supported state))
+             || (String.length k = 1 && Char.code k.[0] = 17)) ->
+    (* The surface guard is the point of this arm, not decoration.
+       [handle_message_key] has a second caller -- the composer row on every
+       other surface -- and this arm leaves the chat pane by changing
+       [state.view]. Without the guard, Ctrl-Q typed into the composer row on
+       Overview moved the reader to the Keeper detail it would have returned
+       to; measured on a pty against the merged binary. Esc settles the
+       innermost thing first, so a recall being replaced or a capture in
+       flight keeps the key too. *)
     leave_keeper_message state ~drain_queue;
     true
   | "\r" ->

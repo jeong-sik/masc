@@ -23,6 +23,8 @@ module Operation_id = Chat_operation.Operation_id
 
 type operation_projection =
   { queued_count : int
+  ; has_claimable_queued : bool
+  ; next_runtime_retry_wake : float option
   ; running_operation_id : Operation_id.t option
   ; terminal_count : int
   ; interrupted_count : int
@@ -333,6 +335,8 @@ let operation_projection_equal
       (right : operation_projection)
   =
   Int.equal left.queued_count right.queued_count
+  && Bool.equal left.has_claimable_queued right.has_claimable_queued
+  && Option.equal Float.equal left.next_runtime_retry_wake right.next_runtime_retry_wake
   && Option.equal Operation_id.equal left.running_operation_id right.running_operation_id
   && Int.equal left.terminal_count right.terminal_count
   && Int.equal left.interrupted_count right.interrupted_count
@@ -522,8 +526,10 @@ let run_operation_store ~label f =
          (Printf.sprintf "%s raised: %s" label (Printexc.to_string exn)))
 ;;
 
-let operation_projection_of_inventory inventory =
+let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_wake inventory =
   { queued_count = inventory.Chat_operation_store.queued_count
+  ; has_claimable_queued
+  ; next_runtime_retry_wake
   ; running_operation_id = inventory.running_operation_id
   ; terminal_count = inventory.terminal_count
   ; interrupted_count = inventory.interrupted_count
@@ -531,9 +537,22 @@ let operation_projection_of_inventory inventory =
   }
 ;;
 
-let read_operation_inventory operation_store =
-  run_operation_store ~label:"keeper chat operation inventory" (fun () ->
-    Chat_operation_store.inventory operation_store)
+let read_operation_projection operation_store ~now =
+  run_operation_store ~label:"keeper chat operation projection" (fun () ->
+    let ( let* ) = Result.bind in
+    let* inventory = Chat_operation_store.inventory operation_store in
+    let* has_claimable_queued =
+      if inventory.Chat_operation_store.queued_count = 0 then Ok false
+      else Chat_operation_store.has_claimable_queued operation_store ~now
+    in
+    (* Read eligibility and its next time transition using the same instant.
+       If the deadline passes before the sleeper is armed, the cached deadline
+       still schedules an immediate wake instead of disappearing from a scan. *)
+    let* next_runtime_retry_wake =
+      Chat_operation_store.next_runtime_retry_wake operation_store ~now
+    in
+    Ok (operation_projection_of_inventory
+          ~has_claimable_queued ~next_runtime_retry_wake inventory))
   |> Result.map_error owner_error_of_operation_error
 ;;
 
@@ -576,16 +595,14 @@ let reopen_operation_store_if_missing t =
            with
            | Error error -> Error (owner_error_of_operation_error error)
            | Ok operation_store ->
-             (match read_operation_inventory operation_store with
+             (match read_operation_projection operation_store ~now:(t.now ()) with
               | Error error ->
                 ignore (Chat_operation_store.close operation_store : (unit, _) result);
                 Error error
-              | Ok inventory ->
+              | Ok projection ->
                 t.operation_store <- operation_store;
                 t.store_error := None;
-                Atomic.set
-                  t.operation_projection
-                  (operation_projection_of_inventory inventory);
+                Atomic.set t.operation_projection projection;
                 Ok ()))))
 ;;
 
@@ -608,14 +625,13 @@ let run_operation_command t ~label f =
        Error error
      | Error _ as error -> error
      | Ok value ->
-       (match read_operation_inventory t.operation_store with
+       (match read_operation_projection t.operation_store ~now:(t.now ()) with
         | Error (Store_unavailable detail as error) ->
           t.store_error := Some detail;
           mark_operation_store_unavailable t;
           Error error
         | Error _ as error -> error
-        | Ok inventory ->
-          let projection = operation_projection_of_inventory inventory in
+        | Ok projection ->
           publish_operation_projection t projection;
           Keeper_waiting_inventory_broadcast.changed
             ~keeper_name:t.keeper_name
@@ -694,14 +710,14 @@ let start
           ~keeper_name
           "restart interrupted %d running chat operation(s)"
           settled;
-      read_operation_inventory operation_store
+      read_operation_projection operation_store ~now:startup_now
   in
   (match startup_result with
    | Error _ as error ->
      (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
-   | Ok initial_operation_inventory ->
+   | Ok initial_operation_projection ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
@@ -709,7 +725,7 @@ let start
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
     ; chat_control_token = Atomic.make (Random_id.uuid_v7 ())
     ; operation_projection =
-        Atomic.make (operation_projection_of_inventory initial_operation_inventory)
+        Atomic.make initial_operation_projection
     ; turn_in_flight = Atomic.make None
     ; shutdown_operation_id = Atomic.make None
     ; operation_store
@@ -749,20 +765,9 @@ let start
      can claim, defer, and cool behind it), and each wake re-arms the next
      earliest one. *)
   let rearm_cooling_retry_wake () =
-    match
-      (* Not [run_operation_read]: a transient store error here must not poison
-         [t.store_error] — this scan is best-effort scheduling, not evidence
-         the store is gone. *)
-      run_operation_store ~label:"scan cooling retry wake" (fun () ->
-        Chat_operation_store.next_runtime_retry_wake t.operation_store ~now:(t.now ()))
-    with
-    | Error error ->
-      Log.Keeper.warn
-        "keeper_owner: cooling retry wake scan failed keeper=%s error=%s"
-        keeper_name
-        (Chat_operation_store.error_to_string error)
-    | Ok None -> ()
-    | Ok (Some not_before) ->
+    match (Atomic.get t.operation_projection).next_runtime_retry_wake with
+    | None -> ()
+    | Some not_before ->
       (match Eio_context.get_clock_opt () with
        | None ->
          Log.Keeper.warn
@@ -907,11 +912,7 @@ let start
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        let claimable = if inventory.queued_count = 0 then false else
-          match run_operation_read t ~label:"read claimable Keeper operations"
-              (fun () -> Chat_operation_store.has_claimable_queued t.operation_store ~now:(t.now ())) with
-          | Ok ready -> ready | Error _ -> false in
-        if claimable && Option.is_none inventory.running_operation_id
+        if inventory.has_claimable_queued && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
           publish_turn_in_flight
@@ -1402,11 +1403,22 @@ let start
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Wake_operation_drain, resolve) ->
-          Eio.Promise.resolve resolve (Ok ());
+          (* Retry deadlines change readiness without a store mutation. Publish
+             before attempting a claim, even while an autonomous turn owns the
+             slot, so its next safe boundary can see the ready successor. *)
+          let response =
+            run_operation_command t ~label:"refresh Keeper operation readiness"
+              (fun () -> Ok ())
+            |> Result.map (fun _ -> ())
+          in
+          Eio.Promise.resolve resolve response;
           start_child_if_needed state shutdown_operation_id;
           (* The wake that just fired may have been the earliest of several
-             cooling retries; arm the next one. *)
-          rearm_cooling_retry_wake ();
+             cooling retries; arm the next one only after a fresh projection.
+             A failed refresh must not re-arm an expired cached deadline. *)
+          (match response with
+           | Ok () -> rearm_cooling_retry_wake ()
+           | Error _ -> ());
           loop state shutdown_operation_id
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with

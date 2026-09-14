@@ -26,6 +26,9 @@ for arm in ${ARMS_CSV//,/ }; do
     # 커맨드"): terminus-2 is retired — kimi-for-coding answers with a
     # reasoning-only payload whose empty assistant message the coding endpoint
     # rejects with 400, 3 recorded attempts. Reward 1.0, 44m35s.
+    # Invariant (measured 2026-09-14): arm A must run kimi-cli. Pointing it
+    # back at terminus-2 silently drops the whole arm's data — the matrix
+    # completes with arm a missing from every summary row.
     uv run harbor run -d terminal-bench@2.0 --agent kimi-cli \
       --model "$MODEL" -k "$K" -n "${CONCURRENCY:-2}" \
       --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \

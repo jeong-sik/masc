@@ -1242,6 +1242,13 @@ let help_sections ?current () =
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)
+          (* The Memory roster's ST column. The words were a literal row the
+             surface drew above every roster -- including a roster that had
+             failed to read, where the column it explained was not on screen.
+             Same move as the Keeper columns above: the row goes, the sheet
+             keeps the words, and the glyphs now come from the function the
+             column draws with. *)
+          ; ("Memory marks", Masc_tui_memory_mark.legend)
           ; ("Board marks", Masc_tui_board_kind_mark.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no

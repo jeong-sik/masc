@@ -146,12 +146,9 @@ type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
   | Memory_source_only | Memory_starving | Memory_read_error
 
-let memory_state_cell = function
-  | Memory_ordinary -> "+"
-  | Memory_warning | Memory_degraded -> "!"
-  | Memory_no_current -> "-"
-  | Memory_source_only -> "s"
-  | Memory_starving | Memory_read_error -> "x"
+(* The glyph and the word for it are one module, so the column below and the
+   [?] sheet cannot spell the same state two ways. *)
+let memory_state_cell = Masc_tui_memory_mark.glyph
 
 let memory_deviation_style (k : memory_keeper_health) =
   let server_error =
@@ -455,8 +452,6 @@ let render_memory_body ~cols ~budget (state : state)
        push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          snapshot.mhs_total_support_invalidations snapshot.mhs_total_librarian_failures));
-  push_styled ~style:(Theme.recede ())
-    "  ST: + ready  ! attention  - no snapshot  s source only  x failed";
   push info_bar;
   let search_bar =
     if query <> "" then

@@ -22,6 +22,17 @@ SOURCE_MODULES = (
     "bin/masc_tui_keeper_chat_transcript.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui_footer.ml",
+    # The composer decides whether a letter reaches the row at all: "i"
+    # focuses only when the row would accept input, and every scenario here
+    # types into it. A change there took this suite red on main while no pull
+    # request ran it, because the list stopped at the files above.
+    "bin/masc_tui_composer.ml",
+    # Draws the composer row and the two hints the scenarios wait for --
+    # "(i to write)" before focus and the capture key after it.
+    "bin/masc_tui_render_prim.ml",
+    # Draws the chat surface the scenarios open, including the breadcrumb
+    # open_chat waits for before it types anything.
+    "bin/masc_tui_render_chat.ml",
 )
 CHAT = "/api/v1/keepers/chat/stream"
 APPROVAL = "/api/v1/keepers/tool-approval"

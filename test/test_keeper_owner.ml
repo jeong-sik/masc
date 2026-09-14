@@ -920,6 +920,7 @@ let test_uncontested_turn_end_signals_nothing () =
     (fun turn ->
       match Owner.run_autonomous_if_idle owner (fun () -> ()) with
       | Ok (`Ran ()) -> ()
+      | Ok `Interrupted -> fail (Printf.sprintf "turn %d was reported interrupted" turn)
       | Ok (`Busy block) ->
         fail
           (Printf.sprintf
@@ -980,6 +981,7 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
    | Ok (`Busy (Owner.Shutdown_requested _)) ->
      fail "autonomous admission reported shutdown instead of the chat holder"
    | Ok (`Ran _) -> fail "autonomous admission ignored the chat holder"
+   | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"
    | Error error -> fail ("autonomous admission failed: " ^ Owner.error_to_string error));
   Eio.Promise.resolve resolve_release ()
 ;;
@@ -1125,6 +1127,7 @@ let test_health_state_change_observer_tracks_owner_projections () =
        let turn_result = Owner.run_autonomous_if_idle owner (fun () -> ()) in
        (match turn_result with
         | Ok (`Ran ()) -> ()
+        | Ok `Interrupted -> fail "the turn was reported interrupted"
         | Ok (`Busy block) -> fail (Owner.autonomous_block_to_string block)
         | Error error -> fail (Owner.error_to_string error));
        check int "turn start and finish each notify" 5 !notifications;
@@ -1242,6 +1245,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
   check bool "approval wait cannot request a yield" false projection.has_claimable_queued;
   (match owner_ok (Owner.run_autonomous_if_idle owner (fun () -> "independent work")) with
    | `Ran value -> check string "waiting released Owner" "independent work" value
+   | `Interrupted -> fail "nothing interrupted the independent work"
    | `Busy _ -> fail "Gate waiting retained Owner slot");
   Owner.resolve_direct_gate owner ~operation_id
     ~resolution:{Keeper_semantic_execution.obligation; decision=Keeper_semantic_execution.Gate_approved}
@@ -1284,6 +1288,7 @@ let test_cooling_retry_readiness_refreshes_on_wake () =
        check bool "due wake publishes readiness while autonomous slot is held" true
          (Owner.operation_projection owner).has_claimable_queued) |> owner_ok with
    | `Ran () -> ()
+   | `Interrupted -> fail "nothing interrupted the cooling-retry turn"
    | `Busy _ -> fail "cooling retry prevented autonomous progress");
   let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
   check bool "wake preserves original execution identity" true
@@ -1653,51 +1658,6 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
   check int "child exception does not stop the actor" 2 !execution_count
 ;;
 
-(* The autonomous lane's counterpart of the chat-lane test below. The Owner
-   interrupts by failing the child switch, so [Switch.run] raises after the
-   body returns; before the translation in [run_autonomous_if_idle] that
-   exception reached the keepalive fiber and the registry recorded a crash. *)
-let test_autonomous_operator_interrupt_is_a_typed_outcome () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let child_started, resolve_child_started = Eio.Promise.create () in
-  let caller_result = Eio.Stream.create 1 in
-  let owner =
-    owner_ok
-      (start_owner
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~keeper_name:"interrupted-autonomous-child"
-         ~initial_meta:(Some (make_meta "interrupted-autonomous-child")))
-  in
-  Eio.Fiber.fork ~sw (fun () ->
-    let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
-        Eio.Promise.resolve resolve_child_started ();
-        (* Mirrors the keepalive cycle: the body sees the interrupt at a
-           cancellation point and returns normally anyway. *)
-        try Eio.Fiber.await_cancel () with
-        | exn when Keeper_registry_types.is_operator_interrupt exn -> ())
-    in
-    Eio.Stream.add caller_result result);
-  Eio.Promise.await child_started;
-  let token = observed_token owner in
-  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
-   | Owner.Operation_interrupt_signalled -> ()
-   | _ -> fail "interrupt was not signalled");
-  (match Eio.Stream.take caller_result with
-   | Ok `Interrupted -> ()
-   | Ok (`Ran ()) -> fail "an interrupted autonomous turn reported success"
-   | Ok (`Busy _) -> fail "an interrupted autonomous turn reported busy"
-   | Error error -> fail ("interrupt surfaced as an error: " ^ Owner.error_to_string error));
-  check bool "the interrupt releases the turn slot" true
-    (Option.is_none (Owner.turn_in_flight owner));
-  (match Owner.run_autonomous_if_idle owner (fun () -> 42) with
-   | Ok (`Ran 42) -> ()
-   | Ok (`Ran _) | Ok `Interrupted | Ok (`Busy _) | Error _ ->
-     fail "the Owner did not admit the next autonomous turn")
-;;
-
 let test_operator_interrupt_settles_as_typed_cancel () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1855,6 +1815,51 @@ let await_slot_released ~clock owner =
   in
   try Eio.Time.with_timeout_exn clock fixture_start_deadline_s loop with
   | Eio.Time.Timeout -> fail "the turn slot was not released within the fixture deadline"
+;;
+
+(* The autonomous lane's counterpart of [test_operator_interrupt_settles_as_typed_cancel]. The Owner
+   interrupts by failing the child switch, so [Switch.run] raises after the
+   body returns; before the translation in [run_autonomous_if_idle] that
+   exception reached the keepalive fiber and the registry recorded a crash. *)
+let test_autonomous_operator_interrupt_is_a_typed_outcome () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let caller_result = Eio.Stream.create 1 in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"interrupted-autonomous-child"
+         ~initial_meta:(Some (make_meta "interrupted-autonomous-child")))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Owner.run_autonomous_if_idle owner (fun () ->
+        Eio.Promise.resolve resolve_child_started ();
+        (* Mirrors the keepalive cycle: the body sees the interrupt at a
+           cancellation point and returns normally anyway. *)
+        try Eio.Fiber.await_cancel () with
+        | exn when Keeper_registry_types.is_operator_interrupt exn -> ())
+    in
+    Eio.Stream.add caller_result result);
+  Eio.Promise.await child_started;
+  let token = observed_token owner in
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_interrupt_signalled -> ()
+   | _ -> fail "interrupt was not signalled");
+  (match Eio.Stream.take caller_result with
+   | Ok `Interrupted -> ()
+   | Ok (`Ran ()) -> fail "an interrupted autonomous turn reported success"
+   | Ok (`Busy _) -> fail "an interrupted autonomous turn reported busy"
+   | Error error -> fail ("interrupt surfaced as an error: " ^ Owner.error_to_string error));
+  check bool "the interrupt releases the turn slot" true
+    (Option.is_none (Owner.turn_in_flight owner));
+  (match Owner.run_autonomous_if_idle owner (fun () -> 42) with
+   | Ok (`Ran 42) -> ()
+   | Ok (`Ran _) | Ok `Interrupted | Ok (`Busy _) | Error _ ->
+     fail "the Owner did not admit the next autonomous turn")
 ;;
 
 let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =

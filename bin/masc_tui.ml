@@ -18317,6 +18317,15 @@ and is loaded on demand through keeper_skill.
                        Masc_tui_lane_addons.Inspect
                  | Some (_, Masc_tui_types.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
+                 | Some (_, Masc_tui_types.Palette_connectors) ->
+                     (* Close the lane first: Connectors renders the lane
+                        whenever it is on screen, so asking for the transport
+                        list has to say the lane is not. [hide_browser_lane]
+                        puts the view back where the lane was opened from,
+                        which [goto_surface] then replaces. *)
+                     hide_browser_lane state;
+                     goto_surface state ~mailbox:async_messages
+                       Masc_tui_types.Connectors
                  | Some (_, Masc_tui_types.Palette_goto destination) ->
                      goto_surface state ~mailbox:async_messages destination
                  | Some (_, Masc_tui_types.Palette_gate_mode (lane, mode)) ->

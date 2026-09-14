@@ -241,16 +241,22 @@ let test_load_and_apply_records_boot_override () =
 
 
 
+(* [Unix] has no unsetenv, and an empty value is not an absent one: the
+   timeout readers reject "" as a malformed setting, as they should. The test
+   stub removes the variable, so a case that set it leaves the process as it
+   found it instead of leaving "" behind for every later case. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env name value f =
   let prev = Sys.getenv_opt name in
   (match value with
    | Some v -> Unix.putenv name v
-   | None -> Unix.putenv name "");
+   | None -> unsetenv name);
   Fun.protect
     ~finally:(fun () ->
       match prev with
       | Some v -> Unix.putenv name v
-      | None -> Unix.putenv name "")
+      | None -> unsetenv name)
     f
 
 let test_explicit_config_dir_wins_over_base_path () =

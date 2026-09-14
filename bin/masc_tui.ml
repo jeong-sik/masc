@@ -1808,6 +1808,10 @@ type async_msg =
      [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
      open session is not waiting on. *)
   | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  (* The keeper-voice screen: the voices its endpoint answers to, and what
+     the setup route said about the one line it writes. *)
+  | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
+  | Voice_agent_voice_saved of (Yojson.Safe.t, string) result
   | Voice_wizard_probed of int * (Yojson.Safe.t, string) result
   | Voice_wizard_reread of int * (string, string) result
   | Voice_config_loaded of
@@ -2826,6 +2830,138 @@ let launch_voice_wizard_save state ~mailbox
          (Voice_wizard_saved
             (request, Masc_tui_types.Save_refused "Eio switch is unavailable"))
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
+;;
+
+(* The voices to choose from. Asked of the first endpoint [voice.tts] names:
+   a section's endpoints are a fallback chain for one voice, and an id is
+   provider vocabulary, so the endpoint in front is the one whose vocabulary
+   an assignment has to speak. *)
+let voice_setup_first_tts_endpoint state =
+  let member path json =
+    List.fold_left
+      (fun acc key ->
+        match acc with
+        | Some (`Assoc fields) -> List.assoc_opt key fields
+        | Some _ | None -> None)
+      (Some json) path
+  in
+  match state.voice_setup with
+  | None -> None
+  | Some json ->
+    (match member [ "tts"; "endpoints" ] json with
+     | Some (`List (`Assoc entry :: _)) ->
+       let text key =
+         match List.assoc_opt key entry with
+         | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+         | Some _ | None -> None
+       in
+       (match text "kind" with
+        | Some kind -> Some (kind, text "api_key_env")
+        | None -> None)
+     | Some _ | None -> None)
+;;
+
+let voice_agent_voice_rows json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "voices" fields with
+     | Some (`List items) ->
+       List.filter_map
+         (function
+           | `Assoc voice ->
+             let text key =
+               match List.assoc_opt key voice with
+               | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+               | Some _ | None -> None
+             in
+             (match text "id" with
+              | None -> None
+              | Some id ->
+                let label =
+                  match text "name", text "language" with
+                  | Some name, Some language -> Printf.sprintf "%s (%s)" name language
+                  | Some name, None -> name
+                  | None, Some language -> Printf.sprintf "%s (%s)" id language
+                  | None, None -> id
+                in
+                Some (id, label))
+           | _ -> None)
+         items
+     | Some _ | None -> [])
+  | _ -> []
+;;
+
+let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
+  let host = server_peer_host in
+  let port = state.port in
+  let payload =
+    Yojson.Safe.to_string
+      (`Assoc
+        ([ "kind", `String kind ]
+         @
+         match api_key_env with
+         | Some variable -> [ "api_key_env", `String variable ]
+         | None -> []))
+  in
+  let run () =
+    let result =
+      match
+        Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/voices"
+          ~body:payload
+      with
+      | Masc_tui_http.Post_answered json -> Ok json
+      | Masc_tui_http.Post_refused message -> Error message
+      | Masc_tui_http.Post_unanswered detail -> Error detail
+    in
+    enqueue_async mailbox (Voice_agent_voices_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox (Voice_agent_voices_loaded (Error "Eio switch is unavailable"))
+;;
+
+let launch_voice_agent_voice_save state ~mailbox
+      (session : Masc_tui_types.voice_agent_session) =
+  match Masc_tui_types.voice_agent_selected session with
+  | None ->
+    state.voice_agent_voices
+      <- Some { session with vas_status = Some "pick a keeper and a voice first" }
+  | Some (agent, voice) ->
+    state.voice_agent_voices
+      <- Some { session with vas_saving = true; vas_status = Some "saving the assignment" };
+    let host = server_peer_host in
+    let port = state.port in
+    let payload =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "expected_revision", `String session.Masc_tui_types.vas_revision
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "change", `String "set_agent_voice"
+                    ; "agent", `String agent
+                    ; "voice", `String voice
+                    ]
+                ] )
+          ])
+    in
+    let run () =
+      let result =
+        match
+          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+            ~body:payload
+        with
+        | Masc_tui_http.Post_answered json -> Ok json
+        | Masc_tui_http.Post_refused message -> Error message
+        | Masc_tui_http.Post_unanswered detail -> Error detail
+      in
+      enqueue_async mailbox (Voice_agent_voice_saved result)
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None ->
+       enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
 ;;
 
 let launch_voice_config_load state ~mailbox =
@@ -11827,6 +11963,54 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   ())
             (Masc_tui_types.voice_wizard_after_save session ~request reply))
         state.voice_wizard
+  | Voice_agent_voices_loaded result ->
+      (match state.voice_agent_voices, result with
+       (* The screen closed while the endpoint was being asked: its answer is
+          about a screen nobody is reading. *)
+       | None, (Ok _ | Error _) -> ()
+       | Some session, Error message ->
+           state.voice_agent_voices <- Some { session with vas_status = Some message }
+       | Some session, Ok json ->
+           let voices = voice_agent_voice_rows json in
+           state.voice_agent_voices
+             <- Some
+                  { session with
+                    vas_voices = voices
+                  ; vas_voice_cursor = 0
+                  ; vas_status =
+                      (match voices with
+                       | [] -> Some "the endpoint answered with no voices"
+                       | _ :: _ -> None)
+                  })
+  | Voice_agent_voice_saved result ->
+      (match state.voice_agent_voices, result with
+       | None, (Ok _ | Error _) -> ()
+       | Some session, Error message ->
+           state.voice_agent_voices
+             <- Some { session with vas_saving = false; vas_status = Some message }
+       | Some session, Ok json ->
+           (* The write moved the configuration on, so the next assignment
+              carries the revision this answer named rather than the one the
+              screen opened with. The pane underneath is reloaded for the same
+              reason. *)
+           let revision =
+             match voice_setup_revision json with
+             | Some revision -> revision
+             | None -> session.vas_revision
+           in
+           state.voice_agent_voices
+             <- Some
+                  { session with
+                    vas_saving = false
+                  ; vas_revision = revision
+                  ; vas_status =
+                      Some
+                        (match Masc_tui_types.voice_agent_selected session with
+                         | Some (agent, voice) ->
+                             Printf.sprintf "%s speaks as %s" agent voice
+                         | None -> "assigned")
+                  };
+           launch_voice_config_load state ~mailbox)
   | Voice_wizard_probed (request, result) ->
       Option.iter
         (fun session ->
@@ -16862,6 +17046,42 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
+       (* The keeper-voice screen owns every key while it is open: it is drawn
+          instead of the pane, so a key that fell through would act on a
+          surface nobody is looking at. *)
+       | Some key when Option.is_some state.voice_agent_voices ->
+           (match state.voice_agent_voices with
+            | None -> ()
+            | Some session ->
+              let set updated = state.voice_agent_voices <- Some updated in
+              (* A save in flight takes nothing but the key that leaves. *)
+              if session.vas_saving && not (String.equal key "esc")
+              then ()
+              else (
+                match key with
+                | "esc" ->
+                    state.voice_agent_voices <- None;
+                    state.config_scroll <- 0
+                | "j" | "down" ->
+                    set (Masc_tui_types.voice_agent_walk_agents session ~ahead:true)
+                | "k" | "up" ->
+                    set (Masc_tui_types.voice_agent_walk_agents session ~ahead:false)
+                | "right" ->
+                    set (Masc_tui_types.voice_agent_walk_voices session ~ahead:true)
+                | "left" ->
+                    set (Masc_tui_types.voice_agent_walk_voices session ~ahead:false)
+                | "pageup" ->
+                    state.config_scroll
+                      <- max 0 (state.config_scroll - surface_page_rows state)
+                | "pagedown" ->
+                    state.config_scroll
+                      <- Masc_tui_types.scroll_down_from state.config_scroll
+                           ~by:(surface_page_rows state)
+                | "home" -> state.config_scroll <- 0
+                | "end" -> state.config_scroll <- Masc_tui_types.clamped_scroll_end
+                | "\r" | "\n" | "enter" ->
+                    launch_voice_agent_voice_save state ~mailbox:async_messages session
+                | _ -> ()))
        | Some key when Option.is_some state.lane_addons ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
@@ -22632,6 +22852,46 @@ and is loaded on demand through keeper_skill.
            if state.prompts_show_runtime_assets
            then add_event state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
            else handle_prompt_clear ()
+       (* [a] on the voice pane: the keepers this workspace has on one axis and
+          the voices the section's first endpoint answers to on the other. The
+          revision the pane read is what the save carries, so a screen opened
+          against one configuration cannot write over another. *)
+       | Some "a" | Some "A"
+         when state.view = Config && state.config_pane = Config_voice
+              && Option.is_none state.voice_wizard ->
+           (match state.voice_setup with
+            | None ->
+                add_event state "system"
+                  "voice setup has not been read yet; press r first"
+            | Some setup ->
+              (match voice_setup_revision setup, voice_setup_first_tts_endpoint state with
+               | None, _ ->
+                   add_event state "system"
+                     "the voice setup answer named no revision to write against"
+               | Some _, None ->
+                   add_event state "system"
+                     "[voice.tts] names no endpoint whose voices could be listed"
+               | Some revision, Some (kind, api_key_env) ->
+                 (match
+                    List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+                  with
+                  (* The roster arrives with the refresh tick. Empty is a
+                     workspace with no keeper yet, or a read that failed; either
+                     way there is nobody to assign a voice to, and a screen with
+                     one empty axis cannot say which. *)
+                  | [] ->
+                      add_event state "system"
+                        (match state.keepers_error with
+                         | Some error ->
+                             Printf.sprintf "the roster could not be read: %s"
+                               (Terminal_text.single_line error)
+                         | None -> "no keeper on the roster to give a voice to")
+                  | agents ->
+                 state.config_scroll <- 0;
+                 state.voice_agent_voices
+                   <- Some (Masc_tui_types.voice_agent_open ~agents ~revision);
+                 launch_voice_agent_voices state ~mailbox:async_messages ~kind
+                   ~api_key_env)))
        | Some "a" | Some "A"
          when state.view = Config && state.config_pane = Config_prompts
               && not state.prompts_show_runtime_assets ->

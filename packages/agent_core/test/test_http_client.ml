@@ -85,7 +85,7 @@ let test_read_sse_basic () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   let events = List.rev !events in
   Alcotest.(check int) "2 events" 2 (List.length events);
@@ -108,7 +108,7 @@ let test_read_sse_joins_multiple_data_fields () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   match List.rev !events with
   | [ (Some "message", "first\nsecond"); (None, "next") ] -> ()
@@ -125,7 +125,7 @@ let test_read_sse_bounds_accumulated_event_payload () =
     Http_client.read_sse
       ~max_event_bytes:10
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> Http_client.Continue)
+      ~on_data:(fun ~event_type:_ _ -> Http_client.Continue Http_client.Output)
       ()
   with
   | exception Http_client.Sse_event_too_large { actual_bytes = 11; limit_bytes = 10 } ->
@@ -149,7 +149,7 @@ let test_read_sse_accepts_event_exactly_at_the_bound () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   match List.rev !events with
   | [ (None, "12345\n6789") ] -> ()
@@ -180,7 +180,7 @@ let test_read_sse_ignored_fields_do_not_extend_first_event_deadline () =
            ~idle_timeout:1.0
            ~first_event_timeout:0.05
            ~reader
-           ~on_data:(fun ~event_type:_ _ -> Http_client.Continue)
+           ~on_data:(fun ~event_type:_ _ -> Http_client.Continue Http_client.Output)
            ());
     Alcotest.fail "ignored SSE fields must not refresh the first-event deadline"
   with
@@ -198,7 +198,7 @@ let test_read_sse_empty_lines () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "1 event" 1 (List.length !events)
 ;;
@@ -214,7 +214,7 @@ let test_read_sse_done_marker () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "1 event (DONE)" 1 (List.length !events);
   Alcotest.(check string) "data is DONE" "[DONE]" (snd (List.hd !events))
@@ -234,7 +234,7 @@ let test_read_sse_no_space_after_colon () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "1 event" 1 (List.length !events);
   let ev = List.hd !events in
@@ -253,7 +253,7 @@ let test_read_sse_eventsource_line_boundaries () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   match List.rev !events with
   | [ (Some "message", "hello"); (None, "next") ] -> ()
@@ -271,7 +271,7 @@ let test_read_sse_empty_event_type_restores_default () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   match List.rev !events with
   | [ (None, "payload") ] -> ()
@@ -289,7 +289,7 @@ let test_read_sse_does_not_dispatch_unterminated_event () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "unterminated event is discarded" 0 (List.length !events)
 ;;
@@ -305,7 +305,7 @@ let test_read_sse_ignores_id_and_retry_fields () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "only the data field dispatches" 1 (List.length !events);
   Alcotest.(check string) "payload intact" "payload" (snd (List.hd !events))
@@ -322,7 +322,7 @@ let test_read_sse_comment_lines_skipped () =
     ~reader
     ~on_data:(fun ~event_type data ->
       events := (event_type, data) :: !events;
-      Http_client.Continue)
+      Http_client.Continue Http_client.Output)
     ();
   Alcotest.(check int) "comments are not events" 1 (List.length !events);
   Alcotest.(check string) "real payload" "real" (snd (List.hd !events))
@@ -424,7 +424,7 @@ let test_read_sse_idle_without_clock_raises () =
   let flow = Eio.Flow.string_source "data: x\n\n" in
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match
-    Http_client.read_sse ~idle_timeout:1.0 ~reader ~on_data:(fun ~event_type:_ _ -> Http_client.Continue) ()
+    Http_client.read_sse ~idle_timeout:1.0 ~reader ~on_data:(fun ~event_type:_ _ -> Http_client.Continue Http_client.Output) ()
   with
   | () -> Alcotest.fail "expected Invalid_argument for idle_timeout without clock"
   | exception Invalid_argument msg ->
@@ -443,7 +443,7 @@ let test_read_ndjson_idle_without_clock_raises () =
 |}
   in
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-  match Http_client.read_ndjson ~idle_timeout:1.0 ~reader ~on_line:(fun _ -> Http_client.Continue) () with
+  match Http_client.read_ndjson ~idle_timeout:1.0 ~reader ~on_line:(fun _ -> Http_client.Continue Http_client.Output) () with
   | () -> Alcotest.fail "expected Invalid_argument for idle_timeout without clock"
   | exception Invalid_argument msg ->
     Alcotest.(check bool)

@@ -413,6 +413,12 @@ let install () =
             ~context:(Agent_core.Context.create ())
             ~output_contract:Keeper_turn_driver.Tool_verdict
             ~tool_requirement:Keeper_required_tools.Required
+            (* The reviewer is program-owned, not operator-declared: its
+               instructions are [system_prompt] above and its native posture
+               is this value. No keepers/<name>.toml is written under
+               [review_root]; the official-client host takes a stated posture
+               as [Runtime_native_tools.Program_defined] and reads no
+               declaration for it (#36066 refuses undeclared keepers). *)
             ~required_native_posture:Runtime_native_tools.Native_none
             (* These bounded authority results have no reader for a disposable
                session blob. Keep their text on the wire, or fail explicitly

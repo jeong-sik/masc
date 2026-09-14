@@ -42,8 +42,31 @@ val load :
     and unreadable, which is not the same thing and must not be read as
     "no tools". *)
 
+(** How the provider is reached: the MCP session, and the two OAuth hops a
+    renewal makes. Every production call goes through {!http_transports};
+    tests inject their own, because a test that needs network is a test that
+    does not run. *)
+type transports = {
+  mcp_post : Mcp_client.post;
+  token_post : Keeper_oauth_flow.post;
+  discover : mcp_url:string -> (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result;
+}
+
+val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> transports
+(** The production transports, bounded by construction. The MCP session runs
+    under {!Keeper_runtime_resolved.provider_call_deadline_sec}, the keeper's
+    no-progress threshold: a tools/call is work the model waits on and the
+    attempt watchdog does not watch a tool in flight, so this deadline is the
+    only liveness the call has ([None] is the operator's declared choice of
+    no bound). Discovery and the token endpoint are short JSON round trips of
+    the same class as the Slack and Discord REST calls and run under
+    {!Masc_http_client.default_request_timeout_sec}. A caller without a clock
+    cannot build these, which is the point: the shared HTTP client's default
+    arm is unbounded, and a server that accepts and never answers used to
+    hold the keeper turn until its wall-clock ceiling. *)
+
 val refresh :
-  ?post:Mcp_client.post ->
+  mcp_post:Mcp_client.post ->
   base_path:string ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
@@ -108,17 +131,10 @@ type call_error =
     }
 
 val run_call :
-  ?post:Mcp_client.post ->
-      (** How a call reaches the provider. Injected for the same reason it is
-          everywhere else here: a test that needs network is a test that does
-          not run. *)
-  ?token_post:Keeper_oauth_flow.post ->
-      (** The OAuth token endpoint, injected so the reactive refresh on a 401
-          can be exercised without a live provider. *)
-  ?discover:
-    (mcp_url:string ->
-     (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
-      (** Discovery for that same reactive refresh. *)
+  transports:transports ->
+      (** {!http_transports} in production; a test's own recorded answers
+          otherwise, including the token endpoint and discovery the reactive
+          refresh on a 401 reaches. *)
   base_path:string ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
@@ -183,8 +199,8 @@ val renewal_error_message : renewal_error -> string
 (** The human-readable reason, without the transient/permanent distinction. *)
 
 val renew_if_needed :
-  ?token_post:Keeper_oauth_flow.post ->
-  ?discover:
+  token_post:Keeper_oauth_flow.post ->
+  discover:
     (mcp_url:string ->
      (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
   base_path:string ->

@@ -234,16 +234,19 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # Focus the composer row while Overview is the surface, and prove the
-        # focus by what the row does with a letter. The voice-key hint would
-        # say the same thing, but it is drawn only once a reachable target has
-        # been read, so waiting for it races the roster load.
-        os.write(fd, b"i")
+        # The row takes a target before it takes letters, so the scenario
+        # picks one the way the keyboard suite does: the Keepers list, a row
+        # selected, and only then the focus key. Pressing i on a surface whose
+        # roster has not arrived focuses a row with nothing to send to, and
+        # the letters below would land nowhere.
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, fd, output, b"alpha")
+        h.send_and_wait(process, fd, output, b"i", b"Ctrl-Y to speak")
         h.send_and_wait(process, fd, output, b"zqx", b"zqx")
         os.write(fd, b"\x11")
         h.drain_until_quiet(process, fd, output)
         frame = h.screen_text(bytes(output))
-        if b"MASC Overview" not in frame:
+        if b"MASC Keepers" not in frame:
             raise AssertionError(
                 f"Ctrl-Q on the composer row left the surface: {frame[-600:]!r}"
             )

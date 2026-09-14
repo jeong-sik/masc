@@ -10,6 +10,21 @@ type posture =
   | Native_read  (** Built-in read tools allowed; effects stay MASC-owned. *)
   | Native_full  (** The full built-in surface, effects included. *)
 
+(** Where an official-client turn takes its native posture from. *)
+type posture_source =
+  | Declared_on_disk
+      (** The operator's [keepers/<name>.toml] states it (or states nothing
+          and the runtime default stands). A keeper nothing declares is
+          refused at profile load (audit F386). *)
+  | Program_defined of posture
+      (** The program that created the keeper states it as a value. Such a
+          keeper has no declaration on disk and none is looked for: the
+          task-completion reviewer is one (RFC-0390, #36066 fallout). *)
+
+val posture_source_of_required : posture option -> posture_source
+(** [None] at the turn driver's [?required_native_posture] means the keeper
+    is declared on disk; [Some posture] is a program-defined one. *)
+
 type action_identity =
   | Call_id of string
   | Provider_step of

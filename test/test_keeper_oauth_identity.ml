@@ -1227,8 +1227,8 @@ let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
 let credentials ?secret ?(scopes = []) client_id =
   { Keeper_oauth_client_store.client_id; client_secret = secret; scopes }
 
-let start_login ?(configured = None) ?discover ?register provider table =
-  Keeper_oauth_session.start ?discover ?register ~provider ~configured
+let start_login ?(configured = None) ~discover ~register provider table =
+  Keeper_oauth_session.start ~discover ~register ~provider ~configured
     ~client_name:"masc" ~redirect_uri ~keeper:"oauth-fixture" ~pending:table
     ~now:0.0 ~ttl_sec:600.0 ()
 

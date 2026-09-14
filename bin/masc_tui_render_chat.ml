@@ -542,7 +542,10 @@ let keeper_message_identity ~max_cells state keeper_name =
             ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
             ~workspace_gate_mode
         in
-        Printf.sprintf " %s%s%s %s\xc2\xb7 gate:%s%s"
+        (* "gate: " with the space every other label on this header uses.
+           Written tight, the stance ran into its value -- "gate:Auto Judge"
+           -- beside "configured: <runtime>" on the same row. *)
+        Printf.sprintf " %s%s%s %s\xc2\xb7 gate: %s%s"
           (if yolo then (Theme.bad ()) else (Theme.info ()))
           chat_mode Ansi.reset Ansi.dim
           (* Nothing observed is said in the words every other surface uses
@@ -550,7 +553,7 @@ let keeper_message_identity ~max_cells state keeper_name =
              the reader to guess whether it meant manual or unread. *)
           (match gate_mode with
            | Some word -> Terminal_text.single_line word
-           | None -> Masc_tui_types.title_unread)
+           | None -> Masc_tui_types.field_unread)
           Ansi.reset
       in
       let status =
@@ -1424,17 +1427,6 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      }
       : Message_layout.entry)
   in
-  let promoted =
-    match promoted_inflight_for_keeper state keeper_name with
-    | None -> []
-    | Some inflight ->
-        (* The status says what the operator can act on: the line left and the
-           running turn is answering it. The compact request id that stood
-           here named a queue internal no reader could resolve. *)
-        [ entry ~at:inflight.submitted_at ~label:"YOU"
-            ~note:"sent · the running turn answers it"
-            ~body:inflight.sent_request.message ]
-  in
   let pending =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> keeper_message_pending_preview
@@ -1460,7 +1452,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
                      Ctrl-P:edit last" omitted)
                ~body:"")
   in
-  promoted @ pending
+  pending
 
 (* One conversation's layout entries, reused per message across a change of
    the conversation.
@@ -1990,7 +1982,6 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
-    let promoted = promoted_inflight_for_keeper state keeper_name in
     let committed_timeline_messages = chat_rows_for state keeper_name in
     let committed_visible_timeline =
       keeper_message_visible_timeline state ~keeper_name
@@ -2224,8 +2215,7 @@ let render_keeper_message (state : state) =
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
       |> List.filter (fun settled -> match state.msg_live with
-        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name
-            && Option.is_none promoted ->
+        | Some live when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name ->
           Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
         | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
@@ -2235,8 +2225,7 @@ let render_keeper_message (state : state) =
     let live_block =
       match state.msg_live with
       | Some live
-        when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name
-             && Option.is_none promoted -> (
+        when String.equal (Masc_tui_types.turn_log_keeper_name live) keeper_name -> (
           match log_projection ~committed:false live with
           | { lb_entries = []; _ } -> None
           | block -> Some block)

@@ -17,6 +17,17 @@ val create : max_slots:int -> t
     Raises the original exception if [f] fails; the permit is still released. *)
 val with_permit : t -> (unit -> 'a) -> 'a
 
+(** [with_permit] whose wait for a slot ends at [deadline_at] on [clock]:
+    [Error `Permit_wait_expired] when no slot was granted by then (the waiter
+    leaves the queue), [Ok (f ())] otherwise. [f] runs without this deadline;
+    the caller bounds it. *)
+val with_permit_until
+  :  clock:_ Eio.Time.clock
+  -> deadline_at:float
+  -> t
+  -> (unit -> 'a)
+  -> ('a, [> `Permit_wait_expired ]) result
+
 (** {2 Capacity Query} *)
 
 (** Point-in-time snapshot of scheduler state.

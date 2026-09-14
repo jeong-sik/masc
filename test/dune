@@ -383,6 +383,7 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_keeper_provider_subcall
+  test_keeper_identity_transports
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -738,6 +739,7 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_keeper_provider_subcall
+  test_keeper_identity_transports
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -3281,6 +3283,10 @@
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_selection
   masc_tui_message_layout
+  masc_tui_render_chat
+  masc_tui_render_schedule
+  masc_tui_frame_presenter
+  masc_tui_ansi
   masc_tui_types
   yojson)
  (deps

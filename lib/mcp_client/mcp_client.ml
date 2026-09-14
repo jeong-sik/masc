@@ -41,8 +41,19 @@ type post =
   body:string ->
   (Masc_http_client.response, string) result
 
-let default_post ~url ~headers ~body =
-  Masc_http_client.post_response_sync ~url ~headers ~body ()
+(* The one production transport. Every request of a session -- initialize,
+   the initialized notification, tools/list, tools/call -- runs under
+   [deadline_s] on [clock]; [None] is the operator's declared choice of no
+   bound. Building one takes a clock, so a caller without one cannot open a
+   session. Before this the default was the shared client's unbounded arm,
+   and a server that accepted the connection and never answered held the
+   keeper turn that called it until the turn's wall-clock ceiling: the
+   attempt watchdog does not watch a tool in flight, so the transport's
+   deadline is the only liveness the call has. *)
+let http_post ~clock ~deadline_s : post =
+  fun ~url ~headers ~body ->
+    Masc_http_client.post_response_sync
+      ~clock ?timeout_sec:deadline_s ~url ~headers ~body ()
 
 type t = {
   url : string;
@@ -238,7 +249,7 @@ let notify ~post t ~method_ =
 let client_info =
   `Assoc [ "name", `String "masc"; "version", `String Build_version.current ]
 
-let connect ?(post = default_post) ~url ~access_token () =
+let connect ~post ~url ~access_token () =
   let offered = Mcp_transport_protocol.default_protocol_version in
   let opening =
     { url
@@ -310,7 +321,7 @@ let tool_of_json json =
     Some { name; description; input_schema; read_only }
   | Some _ | None -> None
 
-let list_tools ?(post = default_post) t =
+let list_tools ~post t =
   let* _, result =
     rpc ~post t ~include_protocol_version:true ~id:2 ~method_:"tools/list"
       ~params:(`Assoc [])
@@ -334,7 +345,7 @@ let text_of_content content =
     |> String.concat "\n"
   | _ -> ""
 
-let call_tool ?(post = default_post) t ~name ~arguments =
+let call_tool ~post t ~name ~arguments =
   let* _, result =
     rpc ~post t ~include_protocol_version:true ~id:3 ~method_:"tools/call"
       ~params:(`Assoc [ "name", `String name; "arguments", arguments ])

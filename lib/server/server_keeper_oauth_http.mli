@@ -17,4 +17,9 @@
     of them currently offers that Keeper. Tool names only: a screen has no
     use for a credential and every use for knowing whether one is there. *)
 
-val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
+val add_routes :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Http_server_eio.Router.t ->
+  Http_server_eio.Router.t
+(** [clock] bounds the code exchange and the catalog refresh the callback
+    performs; see {!Server_keeper_oauth.finish}. *)

@@ -312,7 +312,21 @@ let split_on_double_space text =
    groups print in a fixed order so that the same action sits in the same
    place on every screen, and rescuing an item by moving it would trade one
    of those promises for the other. *)
-let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny" ]
+(* The door in belongs here beside the door out. Measured on the fixture
+   server, Code, Board, Planning, Memory and Workspace all drew an eighty-column
+   footer with no key that opens the row under the cursor; Memory's was three
+   navigation keys and two exits. The cause is structural rather than per
+   surface: [Masc_tui_keys.group_rank] puts every Navigate key ahead of every
+   Act key and this fitter drops from the back, so the surface's own action is
+   the first thing to go once the row is full.
+
+   [Enter] is what that action is called. Every surface in
+   [Masc_tui_keys.for_surface] names exactly one key holding the Enter atom,
+   and on every one of them it opens, reads or sends what the cursor is on --
+   so pinning the atom costs one item per row and buys back the one key the
+   surface exists for. Code names two, and [footer_hints_code] already drops
+   the history overlay's from the panes that have no commits. *)
+let never_dropped_keys = [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the

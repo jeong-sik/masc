@@ -189,8 +189,9 @@ type world_observation = {
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
-  active_goals : (string list, string) result;
-  (** Primary Goal IDs or the source failure; [Error] never means zero Goals. *)
+  active_goals : (string list, Goal_store.unavailable) result;
+  (** Primary Goal IDs or the typed source failure (RFC-0444 §2.3 row 6);
+      [Error] never means zero Goals. {!Goal_store.Uninitialized} is [Ok []]. *)
 
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)

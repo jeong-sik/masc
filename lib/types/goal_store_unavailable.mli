@@ -56,3 +56,18 @@ val to_string : t -> string
     [goal_store: unavailable reason=… file=… mirror=… reset=…]. For surfaces
     whose terminus is a string. Render at the very end; never branch on the
     output. *)
+
+(** {1 Durable codec}
+
+    Lossless, for the store that keeps a skipped verifier scan (RFC-0444
+    PR-5). Every [Unix.error], detail string and the mirror's inner reason
+    round-trips; the wire envelope ({!Goal_unavailable_envelope} in
+    masc_goal) is the lossy projection for tool results and HTTP bodies. The
+    [kind] member of each nested object carries the wire name
+    ({!reason_name} and siblings); a member this build does not know, or a
+    kind it does not name, is refused. A [Unix.error] is an object whose
+    [kind] is its lowercase name; [EUNKNOWNERR] alone adds an integer [code]
+    member, so no member packs two facts into one string. *)
+
+val record_to_yojson : t -> Yojson.Safe.t
+val record_of_yojson : Yojson.Safe.t -> (t, string) result

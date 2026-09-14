@@ -11,22 +11,12 @@ type complete_fn =
 (* A non-streaming call shows no progress until it completes, and a call made
    from inside a tool is outside the attempt watchdog's view
    ([Keeper_turn_driver_try_provider.attempt_stalled] exempts a tool in
-   flight), so this boundary bounds the call itself. A declared body deadline
-   is the narrower statement and wins; otherwise the keeper's own no-progress
-   threshold applies to a call that by construction makes no progress until
-   it ends. Neither declared is the operator's choice of no bound. *)
-let deadline_s ~body_timeout_override_sec ~provider_call_deadline_sec =
-  match body_timeout_override_sec with
-  | Some seconds -> Some seconds
-  | None -> provider_call_deadline_sec
-;;
-
-let resolved_deadline_s () =
-  deadline_s
-    ~body_timeout_override_sec:(Keeper_runtime_resolved.body_timeout_override_sec ())
-    ~provider_call_deadline_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ())
-;;
-
+   flight), so this boundary bounds the call itself. The keeper's no-progress
+   threshold bounds the whole call, the wait for the binding's admission
+   permit included: a call queued behind another keeper's stream makes no
+   progress either. A declared body deadline bounds the round trip inside
+   it, so the narrower of the two fires and names its own setting. With
+   neither declared the call has no bound (#36020). *)
 let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
   match override with
   | Some complete -> complete ~sw ~net ~clock ~config ~messages ?tools ()
@@ -35,7 +25,8 @@ let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
       ~sw
       ~net
       ~clock
-      ?body_timeout_s:(resolved_deadline_s ())
+      ?body_timeout_s:(Keeper_runtime_resolved.body_timeout_override_sec ())
+      ?call_timeout_s:(Keeper_runtime_resolved.provider_call_deadline_sec ())
       ~config
       ~messages
       ?tools

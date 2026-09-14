@@ -3,22 +3,28 @@ let ( let* ) = Result.bind
 let report = function
   | Ok json -> print_endline (Yojson.Safe.to_string json); 0
   | Error error ->
-    let kind, runtime_id = match error with
-      | Batch.Verification_failed { runtime_id; _ } -> "verification_failed", `String runtime_id
-      | Verification_unreadable { runtime_id; _ } -> "verification_unreadable", `String runtime_id
-      | Changed_configuration -> "changed_configuration", `Null
-      | Invalid_selection -> "invalid_selection", `Null
-      | Invalid_configuration -> "invalid_configuration", `Null
-      | Configuration_unavailable -> "configuration_unavailable", `Null
-      | Child_not_started _ -> "child_not_started", `Null
-      | Validation_failed _ -> "validation_failed", `Null
-      | Write_failed -> "write_failed", `Null
-      | Rollback_failed -> "rollback_failed", `Null
-      | Lock_unavailable -> "lock_unavailable", `Null in
-    print_endline (Yojson.Safe.to_string (`Assoc [
-      "schema", `String "masc.runtime_setup_error.v1";
-      "kind", `String kind; "runtime_id", runtime_id;
-      "error", `String (Batch.error_message error)])); 1
+    let kind, runtime_id, failure = match error with
+      | Batch.Verification_failed { runtime_id; code; message; detail } ->
+        ("verification_failed", `String runtime_id,
+         Some (`Assoc [
+           "code", `String code; "message", `String message;
+           ("detail", match detail with None -> `Null | Some detail -> `String detail)]))
+      | Verification_unreadable { runtime_id; _ } -> "verification_unreadable", `String runtime_id, None
+      | Changed_configuration -> "changed_configuration", `Null, None
+      | Invalid_selection -> "invalid_selection", `Null, None
+      | Invalid_configuration -> "invalid_configuration", `Null, None
+      | Configuration_unavailable -> "configuration_unavailable", `Null, None
+      | Child_not_started _ -> "child_not_started", `Null, None
+      | Validation_failed _ -> "validation_failed", `Null, None
+      | Write_failed -> "write_failed", `Null, None
+      | Rollback_failed -> "rollback_failed", `Null, None
+      | Lock_unavailable -> "lock_unavailable", `Null, None in
+    let fields =
+      [ "schema", `String "masc.runtime_setup_error.v1";
+        "kind", `String kind; "runtime_id", runtime_id;
+        "error", `String (Batch.error_message error)]
+      @ match failure with None -> [] | Some failure -> [ "failure", failure ] in
+    print_endline (Yojson.Safe.to_string (`Assoc fields)); 1
 
 let read_json path =
   try Ok (Yojson.Safe.from_file path)

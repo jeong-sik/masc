@@ -5609,7 +5609,7 @@ let keeper_turns_json =
               ; ( "turn"
                 , `Assoc
                     [ ("lane", `String "autonomous")
-                    ; ("interrupt_token", `Null)
+                    ; ("interrupt_token", `String "echo-turn-token")
                     ; ("started_at_unix", `Float 1787828193.5)
                     ] )
               ]
@@ -5634,11 +5634,13 @@ let test_decode_keeper_turns () =
       Alcotest.(check string) "running keeper" "echo"
         running.Tui_decode.ktr_keeper_name;
       (match running.ktr_state with
-       | Tui_decode.Keeper_turn_running { lane; started_at_unix } ->
+       | Tui_decode.Keeper_turn_running
+           { lane; started_at_unix; interrupt_token; _ } ->
            Alcotest.(check bool) "autonomous lane" true
              (lane = Tui_decode.Turn_lane_autonomous);
            Alcotest.(check (float 0.001)) "started at" 1787828193.5
-             started_at_unix
+             started_at_unix;
+           Alcotest.(check string) "stop handle" "echo-turn-token" interrupt_token
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ ->
            Alcotest.fail "running keeper decoded as not running");
       Alcotest.(check bool) "idle keeper" true
@@ -5649,6 +5651,35 @@ let test_decode_keeper_turns () =
        | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_running _ ->
            Alcotest.fail "an owner lookup failure decoded as a turn state")
   | Ok rows -> Alcotest.failf "expected three rows, got %d" (List.length rows)
+
+(* The Owner mints the stop handle together with the turn slot, so a running
+   turn without one is not a state the server can report. The TUI used to
+   accept it and show "no interrupt target yet", which is what the operator saw
+   for 25 minutes on 2026-09-13. *)
+let test_decode_keeper_turns_rejects_a_running_turn_without_a_stop_handle () =
+  let without_token =
+    `Assoc
+      [ ("schema", `String "masc.keeper_turns.v1")
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_name", `String "echo")
+                ; ("status", `String "ok")
+                ; ( "turn"
+                  , `Assoc
+                      [ ("lane", `String "autonomous")
+                      ; ("interrupt_token", `Null)
+                      ; ("started_at_unix", `Float 1787828193.5)
+                      ] )
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_turns without_token with
+  | Ok _ -> Alcotest.fail "a running turn without a stop handle was decoded"
+  | Error err ->
+    Alcotest.(check bool) "the error names the missing field" true
+      (Astring.String.is_infix ~affix:"interrupt_token" err)
 
 let test_decode_keeper_turns_reads_the_preview () =
   let with_preview =
@@ -8917,6 +8948,8 @@ let () =
     ( "decode_keeper_turns",
       [ Alcotest.test_case "running, idle, and unavailable rows" `Quick
           test_decode_keeper_turns
+      ; Alcotest.test_case "rejects a running turn without a stop handle" `Quick
+          test_decode_keeper_turns_rejects_a_running_turn_without_a_stop_handle
       ; Alcotest.test_case "reads the preview when the server sends one" `Quick
           test_decode_keeper_turns_reads_the_preview
       ; Alcotest.test_case "rejects an unknown lane" `Quick

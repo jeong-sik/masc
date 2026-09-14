@@ -48,6 +48,20 @@ class VerificationError(SetupError):
         super().__init__('The selected model did not pass response and tool verification. Configuration was preserved.')
 
 
+def print_verification_reason(failure):
+    # Native verification owns safe fixed diagnostics; never display provider
+    # stderr or HTTP bodies here. The detail line is the official client's own
+    # account of what it looked for (a missing sign-in, a binary that would not
+    # launch), written by the adapter, not by the provider.
+    code = failure.get('code')
+    message = failure.get('message')
+    if model_text(code) and model_text(message):
+        print(terminal_text(code) + ': ' + terminal_text(message), file=sys.stderr)
+    detail = failure.get('detail')
+    if model_text(detail):
+        print('  ' + terminal_text(detail), file=sys.stderr)
+
+
 def native_setup_command(binary, command, payload=None, arguments=()):
     # The compiled renderer is the only identity authority. This helper handles
     # terminal interaction and private IPC; it never renders or edits TOML.
@@ -69,7 +83,7 @@ def native_setup_command(binary, command, payload=None, arguments=()):
     if result.returncode:
         if receipt.get('schema') == 'masc.runtime_setup_error.v1':
             if receipt.get('kind') == 'verification_failed' and model_text(receipt.get('runtime_id')):
-                raise VerificationError(receipt['runtime_id'])
+                raise VerificationError(receipt['runtime_id'], receipt.get('failure'))
             if model_text(receipt.get('error')):
                 raise SetupError(receipt['error'])
         raise SetupError('Runtime setup did not finish. Inspect the workspace before retrying.')
@@ -483,6 +497,11 @@ def pick(title, labels, multiple=False, defaults=()):
                 # space there; single mode types it. Bytes at 0x80 and above
                 # are UTF-8 continuation bytes on their way into the query.
                 query.extend(key)
+    except KeyboardInterrupt:
+        # cbreak keeps ISIG on, so a real terminal delivers Ctrl-C as SIGINT
+        # and it lands here, never as the \x03 byte the key loop handles.
+        # Cancel through the same path that byte would have taken.
+        raise SetupError('setup cancelled; existing connections were preserved')
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 
@@ -1419,15 +1438,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials):
                     return result
                 except VerificationError as error:
                     print('Verification failed: ' + terminal_text(names[error.runtime_id]), file=sys.stderr)
-                    # Native verification owns safe fixed diagnostics; never
-                    # display provider stderr or HTTP bodies here. The detail
-                    # line is the official client's own account of what it
-                    # looked for (a missing sign-in, a binary that would not
-                    # launch), written by the adapter, not by the provider.
-                    if model_text(error.failure.get('code')) and model_text(error.failure.get('message')):
-                        print(terminal_text(error.failure['code']) + ': ' + terminal_text(error.failure['message']), file=sys.stderr)
-                    if model_text(error.failure.get('detail')):
-                        print('  ' + terminal_text(error.failure['detail']), file=sys.stderr)
+                    print_verification_reason(error.failure)
                     login = login_command(binary, error.runtime_id, specs, inventory)
                     actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
                     if login:
@@ -2027,6 +2038,11 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
     except SetupSessionFinished:
         raise SystemExit(0)
+    except KeyboardInterrupt:
+        # A Ctrl-C outside pick()'s cbreak loop (a subprocess, a pause) still
+        # exits as a cancelled setup, not as a traceback. pick() converts its
+        # own interruption; this is the net for every other interruption point.
+        raise SystemExit('runtime setup cancelled; existing connections were preserved')
     except (SetupError, OSError, ValueError, subprocess.SubprocessError) as error:
         raise SystemExit('runtime setup failed: ' + str(error))
 

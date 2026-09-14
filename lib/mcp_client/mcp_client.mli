@@ -62,10 +62,21 @@ type post =
   body:string ->
   (Masc_http_client.response, string) result
 
+val http_post
+  :  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> deadline_s:float option
+  -> post
+(** The production transport: every request of a session runs under
+    [deadline_s] on [clock], and [None] is the operator's declared choice of
+    no bound. It is the only way to reach a server outside a test, and it
+    cannot be built without a clock: a tools/call is work a keeper turn is
+    waiting on with the attempt watchdog off, so a server that accepts the
+    connection and never answers is ended by this deadline or not at all. *)
+
 type t
 
 val connect :
-  ?post:post -> url:string -> access_token:string -> unit -> (t, error) result
+  post:post -> url:string -> access_token:string -> unit -> (t, error) result
 (** Open a session: [initialize], then the [initialized] notification.
 
     A session id, if the server minted one, is carried on every later
@@ -79,10 +90,10 @@ val negotiated_protocol_version : t -> string
 
 val session_id : t -> string option
 
-val list_tools : ?post:post -> t -> (tool list, error) result
+val list_tools : post:post -> t -> (tool list, error) result
 
 val call_tool :
-  ?post:post ->
+  post:post ->
   t ->
   name:string ->
   arguments:Yojson.Safe.t ->

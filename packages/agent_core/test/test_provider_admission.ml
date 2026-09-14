@@ -247,6 +247,171 @@ let test_complete_dispatch_is_admitted () =
     (Atomic.get max_seen <= 2)
 ;;
 
+(* Call deadlines: [call_timeout_s] bounds the wait for a permit and the round
+   trip after it as one span. Values are wide enough that a deadline which
+   restarted after admission, or one that ignored the queue, lands clearly
+   outside the asserted window. *)
+let call_deadline_s = 1.0
+let call_deadline_slack_s = 0.5
+
+let slow_declining_transport ~clock ~on_dispatch ~provider_takes_s : Llm_transport.t =
+  { complete_sync =
+      (fun _ ->
+        on_dispatch ();
+        Eio.Time.sleep clock provider_takes_s;
+        { Llm_transport.response =
+            Error
+              (Http_client.NetworkError
+                 { message = "test transport declines"; kind = Http_client.Unknown })
+        ; latency_ms = None
+        })
+  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> fail "sync test must not stream")
+  }
+;;
+
+let within_call_deadline ~started ~clock =
+  let elapsed = Eio.Time.now clock -. started in
+  elapsed >= call_deadline_s && elapsed < call_deadline_s +. call_deadline_slack_s
+;;
+
+let test_call_deadline_ends_the_wait_for_a_permit () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://call-deadline-queue.test:1" ~max_concurrent_requests:1 ()
+  in
+  let release, resolve_release = Eio.Promise.create () in
+  (* [Fiber.fork] runs the holder until it blocks, so it holds the only permit
+     when the fork returns. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let dispatched = ref false in
+  let started = Eio.Time.now clock in
+  (match
+     Complete.complete
+       ~sw
+       ~net:(Eio.Stdenv.net env)
+       ~clock
+       ~transport:
+         (slow_declining_transport
+            ~clock
+            ~on_dispatch:(fun () -> dispatched := true)
+            ~provider_takes_s:0.0)
+       ~config
+       ~messages:[]
+       ~call_timeout_s:call_deadline_s
+       ()
+   with
+   | Error (Http_client.TimeoutError { phase = Http_client.Queue; message }) ->
+     check
+       bool
+       "the message names the call deadline"
+       true
+       (Agent_core_strings.contains_substring ~needle:"call_timeout_s" ~haystack:message)
+   | Error (Http_client.TimeoutError { phase; _ }) ->
+     failf "the wait ended in phase %s, not Queue" (Http_client.timeout_phase_to_label phase)
+   | Error _ | Ok _ -> fail "expected a queue timeout while the permit was held");
+  check bool "the wait ended at the call deadline" true (within_call_deadline ~started ~clock);
+  check bool "nothing was sent" false !dispatched;
+  (match Provider_admission.snapshot_for ~config with
+   | Some snapshot ->
+     check int "the expired waiter left the queue" 0 snapshot.Slot_scheduler.queue_length;
+     check int "the holder still has its permit" 1 snapshot.Slot_scheduler.active
+   | None -> fail "the scheduler must be registered");
+  Eio.Promise.resolve resolve_release ()
+;;
+
+let test_call_deadline_bounds_the_round_trip_with_what_the_wait_left () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://call-deadline-rest.test:1" ~max_concurrent_requests:1 ()
+  in
+  (* The holder gives the permit up after 0.6 s; the provider then takes far
+     longer than the call has left. A deadline restarted at admission would
+     end near 1.6 s. *)
+  let holder_keeps_permit_s = 0.6 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () ->
+      Eio.Time.sleep clock holder_keeps_permit_s));
+  let dispatched = ref false in
+  let started = Eio.Time.now clock in
+  (match
+     Complete.complete
+       ~sw
+       ~net:(Eio.Stdenv.net env)
+       ~clock
+       ~transport:
+         (slow_declining_transport
+            ~clock
+            ~on_dispatch:(fun () -> dispatched := true)
+            ~provider_takes_s:5.0)
+       ~config
+       ~messages:[]
+       ~call_timeout_s:call_deadline_s
+       ()
+   with
+   | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message }) ->
+     check
+       bool
+       "the message names the call deadline"
+       true
+       (Agent_core_strings.contains_substring ~needle:"call_timeout_s" ~haystack:message)
+   | Error (Http_client.TimeoutError { phase; _ }) ->
+     failf
+       "the round trip ended in phase %s, not Non_streaming_body"
+       (Http_client.timeout_phase_to_label phase)
+   | Error _ | Ok _ -> fail "expected the round trip to end at the call deadline");
+  check bool "the request was sent once the permit came" true !dispatched;
+  check bool "the whole call ended at the call deadline" true (within_call_deadline ~started ~clock)
+;;
+
+let test_a_narrower_body_deadline_fires_inside_the_call_deadline () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://call-deadline-nested.test:1" ~max_concurrent_requests:1 ()
+  in
+  let body_deadline_s = 0.2 in
+  let started = Eio.Time.now clock in
+  (match
+     Complete.complete
+       ~sw
+       ~net:(Eio.Stdenv.net env)
+       ~clock
+       ~transport:
+         (slow_declining_transport ~clock ~on_dispatch:ignore ~provider_takes_s:5.0)
+       ~config
+       ~messages:[]
+       ~body_timeout_s:body_deadline_s
+       ~call_timeout_s:call_deadline_s
+       ()
+   with
+   | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message }) ->
+     check
+       bool
+       "the message names the body deadline that fired"
+       true
+       (Agent_core_strings.contains_substring ~needle:"body_timeout_s" ~haystack:message)
+   | Error (Http_client.TimeoutError { phase; _ }) ->
+     failf "ended in phase %s, not Non_streaming_body" (Http_client.timeout_phase_to_label phase)
+   | Error _ | Ok _ -> fail "expected the body deadline to fire");
+  check
+    bool
+    "the narrower bound fired first"
+    true
+    (Eio.Time.now clock -. started < call_deadline_s)
+;;
+
 let () =
   run
     "provider_admission"
@@ -273,6 +438,20 @@ let () =
             "Complete.complete dispatch is admitted"
             `Quick
             test_complete_dispatch_is_admitted
+        ] )
+    ; ( "call_deadline"
+      , [ test_case
+            "ends the wait for a permit"
+            `Quick
+            test_call_deadline_ends_the_wait_for_a_permit
+        ; test_case
+            "bounds the round trip with what the wait left"
+            `Quick
+            test_call_deadline_bounds_the_round_trip_with_what_the_wait_left
+        ; test_case
+            "a narrower body deadline fires inside it"
+            `Quick
+            test_a_narrower_body_deadline_fires_inside_the_call_deadline
         ] )
     ]
 ;;

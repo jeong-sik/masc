@@ -14,6 +14,24 @@ import {
 export type GoalVerificationReviewKind = 'proof'
 export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised' | 'superseded' | 'review_cancelled'
 
+// RFC-0444 §2.3 row 7: every row names its arm. A review is one Goal proof
+// run; a skipped scan is a verifier pass the goal store refused, which
+// reviewed nothing and carries the goal_store_unavailable envelope's members.
+export type GoalVerificationRowKind = 'review' | 'scan_skipped'
+export type GoalStoreUnavailableReason = 'missing_after_init' | 'unreadable' | 'not_json' | 'schema_rejected'
+export type GoalStoreMirrorStatus = 'mirror_absent' | 'mirror_unreadable' | 'mirror_decodes' | 'mirror_rejected'
+export type GoalStoreResetStep = 'repair_field' | 'reset_goal_store' | 'restore_permission'
+
+export interface GoalVerificationScanSkippedRecord {
+  runId: string
+  startedAt: number
+  reason: GoalStoreUnavailableReason
+  field: string | null
+  file: string
+  mirror: { status: GoalStoreMirrorStatus; goalCount: number | null }
+  resetStep: GoalStoreResetStep
+}
+
 export interface GoalVerificationRunRecord {
   runId: string
   goalId: string
@@ -32,6 +50,7 @@ export interface GoalVerificationRunRecord {
 
 export interface DashboardGoalVerificationRunsResponse {
   runs: GoalVerificationRunRecord[]
+  skippedScans: GoalVerificationScanSkippedRecord[]
   count: number
   generatedAt: string
 }
@@ -68,9 +87,38 @@ function finiteNonNegative(value: unknown, context: string): number {
   return value
 }
 
-function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
-  const context = `runs[${index}]`
-  if (!isRecord(raw)) protocolError(`${context} must be an object`)
+function parseScanSkipped(raw: Record<string, unknown>, context: string): GoalVerificationScanSkippedRecord {
+  exactFields(raw, ['kind', 'run_id', 'started_at', 'reason', 'field', 'file', 'mirror', 'reset_step'], [], context)
+  const reason = raw.reason
+  if (reason !== 'missing_after_init' && reason !== 'unreadable' && reason !== 'not_json' && reason !== 'schema_rejected') {
+    protocolError(`${context}.reason has unknown value ${JSON.stringify(reason)}`)
+  }
+  const field = raw.field
+  if (field !== null && typeof field !== 'string') protocolError(`${context}.field must be a string or null`)
+  if (!isRecord(raw.mirror)) protocolError(`${context}.mirror must be an object`)
+  exactFields(raw.mirror, ['status', 'goal_count'], [], `${context}.mirror`)
+  const mirrorStatus = raw.mirror.status
+  if (mirrorStatus !== 'mirror_absent' && mirrorStatus !== 'mirror_unreadable' && mirrorStatus !== 'mirror_decodes' && mirrorStatus !== 'mirror_rejected') {
+    protocolError(`${context}.mirror.status has unknown value ${JSON.stringify(mirrorStatus)}`)
+  }
+  const goalCount = raw.mirror.goal_count
+  if (goalCount !== null && !Number.isSafeInteger(goalCount)) protocolError(`${context}.mirror.goal_count must be an integer or null`)
+  const resetStep = raw.reset_step
+  if (resetStep !== 'repair_field' && resetStep !== 'reset_goal_store' && resetStep !== 'restore_permission') {
+    protocolError(`${context}.reset_step has unknown value ${JSON.stringify(resetStep)}`)
+  }
+  return {
+    runId: nonEmptyString(raw.run_id, `${context}.run_id`),
+    startedAt: finiteNonNegative(raw.started_at, `${context}.started_at`),
+    reason,
+    field,
+    file: nonEmptyString(raw.file, `${context}.file`),
+    mirror: { status: mirrorStatus, goalCount: goalCount as number | null },
+    resetStep,
+  }
+}
+
+function parseRun(raw: Record<string, unknown>, context: string): GoalVerificationRunRecord {
   const status = raw.status
   if (status !== 'running' && status !== 'reviewed' && status !== 'committed' && status !== 'deferred' && status !== 'raised' && status !== 'superseded' && status !== 'review_cancelled') {
     protocolError(`${context}.status has unknown value ${JSON.stringify(status)}`)
@@ -80,6 +128,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
     protocolError(`${context}.review_kind has unknown value ${JSON.stringify(reviewKind)}`)
   }
   const baseFields = [
+    'kind',
     'run_id',
     'goal_id',
     'request_id',
@@ -149,12 +198,26 @@ export function parseGoalVerificationRunsResponse(
   if (!Number.isSafeInteger(raw.count) || (raw.count as number) < 0) {
     protocolError('root.count must be a non-negative safe integer')
   }
-  const runs = raw.runs.map(parseRun)
-  if (runs.length !== raw.count) {
-    protocolError(`root.count=${String(raw.count)} does not match runs.length=${runs.length}`)
+  const runs: GoalVerificationRunRecord[] = []
+  const skippedScans: GoalVerificationScanSkippedRecord[] = []
+  raw.runs.forEach((row, index) => {
+    const context = `runs[${index}]`
+    if (!isRecord(row)) protocolError(`${context} must be an object`)
+    const kind = row.kind
+    if (kind === 'review') {
+      runs.push(parseRun(row, context))
+    } else if (kind === 'scan_skipped') {
+      skippedScans.push(parseScanSkipped(row, context))
+    } else {
+      protocolError(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
+    }
+  })
+  if (runs.length + skippedScans.length !== raw.count) {
+    protocolError(`root.count=${String(raw.count)} does not match runs.length=${runs.length + skippedScans.length}`)
   }
   return {
     runs,
+    skippedScans,
     count: raw.count as number,
     generatedAt: nonEmptyString(raw.generated_at, 'root.generated_at'),
   }

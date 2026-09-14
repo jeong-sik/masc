@@ -45,6 +45,11 @@ type t = {
     and a test that needs the network cannot say when that happened. *)
 type get = url:string -> (int * string, string) result
 
+val http_get :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> timeout_sec:float -> get
+(** The production [get]: one request bounded by [timeout_sec] on [clock].
+    The only way to read a metadata document outside a test. *)
+
 (** How the MCP endpoint is asked where its metadata is: the response
     headers of one unauthenticated request, or [None] when the request did
     not complete. Injected for the same reason [get] is -- the shape here is
@@ -52,8 +57,13 @@ type get = url:string -> (int * string, string) result
     when it did. *)
 type ask = url:string -> (string * string) list option
 
+val http_ask :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> timeout_sec:float -> ask
+(** The production [ask]: one unauthenticated request bounded by
+    [timeout_sec] on [clock]; a request that does not complete is [None]. *)
+
 val discover :
-  ?get:get -> ?ask:ask -> mcp_url:string -> unit -> (t, error) result
+  get:get -> ask:ask -> mcp_url:string -> unit -> (t, error) result
 (** [discover ~mcp_url] finds where [mcp_url]'s protected-resource metadata
     is, reads it, then asks the authorization server it names for its own.
 

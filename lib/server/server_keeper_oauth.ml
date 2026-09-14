@@ -7,6 +7,18 @@ module Declarations = Keeper_oauth_declarations
 
 let ( let* ) = Result.bind
 
+(* Attach-time hops -- discovery, client registration, the code exchange --
+   are short JSON round trips of the same class as the Slack and Discord REST
+   calls and run under the shared request timeout those use. The MCP session
+   behind a catalog refresh runs under the keeper's no-progress threshold,
+   which {!Keeper_identity_tools.http_transports} owns. *)
+let rest_timeout_sec = Masc_http_client.default_request_timeout_sec
+
+let register_with ~clock ~registration_url ~client_name ~redirect_uri =
+  Keeper_oauth_registration.register
+    ~post:(Keeper_oauth_registration.http_post ~clock ~timeout_sec:rest_timeout_sec)
+    ~registration_url ~client_name ~redirect_uri ()
+
 (* Long enough for an operator to read a consent screen and decide, short
    enough that a verifier nobody came back for does not sit around. *)
 let login_window_sec = 600.
@@ -118,8 +130,9 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
         ])
 ;;
 
-let start ~base_path ~keeper ~provider_id ~now =
+let start ~clock ~base_path ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
+  let transports = Keeper_identity_tools.http_transports ~clock in
   match provider.Provider.credential_source with
   | Provider.Github_cli { hostname } ->
     (match Keeper_github_identity.stored_token ~base_path ~keeper_name:keeper ~hostname with
@@ -130,7 +143,8 @@ let start ~base_path ~keeper ~provider_id ~now =
             keeper problem)
      | Ok _ ->
        let* catalog =
-         Keeper_identity_tools.refresh ~base_path ~keeper_name:keeper ~provider ~now ()
+         Keeper_identity_tools.refresh ~mcp_post:transports.Keeper_identity_tools.mcp_post
+           ~base_path ~keeper_name:keeper ~provider ~now ()
        in
        Ok
          (`Assoc
@@ -151,8 +165,9 @@ let start ~base_path ~keeper ~provider_id ~now =
     let* configured = Store.load ~dir ~provider in
     let* started =
       Result.map_error Session.start_error_to_string
-        (Session.start ~provider ~configured ~client_name ~redirect_uri ~keeper
-           ~pending ~now ~ttl_sec:login_window_sec ())
+        (Session.start ~discover:transports.Keeper_identity_tools.discover
+           ~register:(register_with ~clock) ~provider ~configured ~client_name
+           ~redirect_uri ~keeper ~pending ~now ~ttl_sec:login_window_sec ())
     in
     let* () =
       if started.Session.registered_now
@@ -171,10 +186,12 @@ let start ~base_path ~keeper ~provider_id ~now =
         ])
 ;;
 
-let refresh_tools ~base_path ~keeper ~provider_id ~now =
+let refresh_tools ~clock ~base_path ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
   let* catalog =
-    Keeper_identity_tools.refresh ~base_path ~keeper_name:keeper ~provider ~now ()
+    Keeper_identity_tools.refresh
+      ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
+      ~base_path ~keeper_name:keeper ~provider ~now ()
   in
   Ok
     (`Assoc
@@ -265,10 +282,12 @@ type attached = {
   tool_discovery : (int, string) result;
 }
 
-let finish ~base_path ~state ~code ~now =
+let finish ~clock ~base_path ~state ~code ~now =
   let* finished =
     Result.map_error Session.finish_error_to_string
-      (Session.finish ~pending ~state ~code ~now ())
+      (Session.finish
+         ~post:(Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec)
+         ~pending ~state ~code ~now ())
   in
   (* Which provider is the exchange's own answer, not the URL's: the
      declaration that named where these tokens go is the one that started
@@ -320,7 +339,9 @@ let finish ~base_path ~state ~code ~now =
   let tool_discovery =
     Result.map
       (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
-      (Keeper_identity_tools.refresh ~base_path ~keeper_name ~provider ~now ())
+      (Keeper_identity_tools.refresh
+         ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
+         ~base_path ~keeper_name ~provider ~now ())
   in
   Ok
     { keeper = keeper_name

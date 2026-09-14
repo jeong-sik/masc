@@ -15,6 +15,7 @@ afterEach(() => {
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
+    kind: 'review',
     run_id: '019f-goal-run',
     goal_id: 'goal-a',
     request_id: 'request-a',
@@ -95,6 +96,42 @@ describe('parseGoalVerificationRunsResponse', () => {
       status: 'reviewed',
       tools: [{ toolName: 'verification_read_file' }],
     })
+  })
+
+  it('keeps a skipped scan beside the reviews with the goal_store_unavailable members', () => {
+    const parsed = parseGoalVerificationRunsResponse({
+      generated_at: 'now',
+      count: 2,
+      runs: [row(), {
+        kind: 'scan_skipped',
+        run_id: '019f-scan',
+        started_at: 1786000002,
+        reason: 'schema_rejected',
+        field: 'criterion_revision',
+        file: '/work/.masc/goals.json',
+        mirror: { status: 'mirror_decodes', goal_count: 97 },
+        reset_step: 'repair_field',
+      }],
+    })
+    expect(parsed.runs).toHaveLength(1)
+    expect(parsed.skippedScans).toEqual([{
+      runId: '019f-scan',
+      startedAt: 1786000002,
+      reason: 'schema_rejected',
+      field: 'criterion_revision',
+      file: '/work/.masc/goals.json',
+      mirror: { status: 'mirror_decodes', goalCount: 97 },
+      resetStep: 'repair_field',
+    }])
+    expect(parsed.count).toBe(2)
+  })
+
+  it('rejects a row without a known kind', () => {
+    expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [row({ kind: 'scan' })] })).toThrow('kind has unknown value')
+    const { kind: _kind, ...withoutKind } = row()
+    expect(() => parseGoalVerificationRunsResponse({ generated_at: 'now', count: 1,
+      runs: [withoutKind] })).toThrow('kind has unknown value')
   })
 
   it('rejects an unknown review kind and outcome-specific field drift', () => {

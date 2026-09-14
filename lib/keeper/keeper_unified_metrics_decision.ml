@@ -177,12 +177,19 @@ let append_decision_record
               ("active_goals", (match observation.active_goals with
                 | Ok ids -> `Int (List.length ids)
                 | Error _ -> `Null));
+              (* RFC-0444 §2.3 row 6: the unavailable source carries the
+                 same members as the goal_store_unavailable envelope, so the
+                 decision record names reason, field, file, mirror and reset
+                 step instead of one rendered line. *)
               ("active_goals_source", (match observation.active_goals with
                 | Ok _ -> `Assoc [ "status", `String "available" ]
-                | Error detail -> `Assoc
-                    [ "status", `String "unavailable"
-                    ; "error_code", `String "goal_store_unavailable"
-                    ; "error", `String detail ]));
+                | Error unavailable -> `Assoc
+                    ([ "status", `String "unavailable"
+                     ; "error_code"
+                     , `String
+                         (Tool_args.error_code_to_string
+                            Goal_unavailable_envelope.error_code) ]
+                     @ Goal_unavailable_envelope.fields unavailable)));
               ("idle_seconds", `Int observation.idle_seconds);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int claimable_task_count);

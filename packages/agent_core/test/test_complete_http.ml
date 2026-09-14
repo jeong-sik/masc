@@ -2778,15 +2778,15 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
   | Exit -> ()
 ;;
 
-(* A frame that projects nothing the classifier names -- the usage-only
-   message_delta after the last block -- must not put the stream back to
-   "awaiting the first delta" once output has been seen: a stall after it is
-   an idle gap in the state the last production left, and the phase, the
-   message and the telemetry all say so. *)
-let anthropic_sse_frame_block_stop_and_usage =
-  "event: content_block_stop\n\
-   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
-   event: message_delta\n\
+(* A frame that projects nothing the classifier names -- a usage-bearing
+   message_delta on its own, the shape of an OpenAI-compatible usage-only
+   final chunk -- must not put the stream back to "awaiting the first
+   delta" once output has been seen: a stall after it is an idle gap in the
+   state the last production left, and the phase, the message and the
+   telemetry all say so. (A content_block_stop is not such a frame: the
+   classifier names it a tool-call completion.) *)
+let anthropic_sse_frame_usage_only =
+  "event: message_delta\n\
    data: \
    {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
 ;;
@@ -2815,7 +2815,7 @@ let test_complete_stream_idle_after_output_keeps_the_production_state () =
         [ 0.0, anthropic_sse_frame_message_start
         ; 0.0, anthropic_sse_frame_content_block_start
         ; 0.0, anthropic_sse_frame_delta "hello"
-        ; 0.0, anthropic_sse_frame_block_stop_and_usage
+        ; 0.0, anthropic_sse_frame_usage_only
         ; 0.5, anthropic_sse_frame_message_stop
         ]
     in

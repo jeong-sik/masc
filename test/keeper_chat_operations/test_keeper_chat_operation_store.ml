@@ -554,6 +554,38 @@ let test_interactive_admission_prioritizes_cohort_atomically () =
     (store_ok (Store.get store (id "rejected-message")) = None)
 ;;
 
+(* A sibling writer holding the database must be waited out (busy_timeout),
+   not answered with SQLITE_BUSY whose commit failure fences the Owner's chat
+   for the rest of the process (first-turn install smoke, 2026-09-14). The
+   child takes the EXCLUSIVE lock for one second; the store's write waits it
+   out and commits instead of erroring at first contention. *)
+let test_concurrent_writer_is_waited_out_not_fenced () =
+  let directory = Filename.temp_dir "keeper-chat-operations-busy-wait" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = store_ok (Store.open_or_create ~path) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result))
+    (fun () ->
+      let child = Unix.fork () in
+      if child = 0 then begin
+        (try
+           let db = Sqlite3.db_open path in
+           let rc = Sqlite3.exec db "BEGIN EXCLUSIVE" in
+           if Sqlite3.Rc.is_success rc then Unix.sleep 1 else ()
+         with Sqlite3.Error _ -> ());
+        exit 0
+      end else begin
+        ignore (Unix.select [] [] [] 0.2);
+        match Store.settle_running_after_restart store ~now:1.0 with
+        | Ok settled ->
+          ignore (Unix.waitpid [] child);
+          check int "waited-out writer lets the commit through" 0 settled
+        | Error error ->
+          ignore (Unix.waitpid [] child);
+          fail (Store.error_to_string error)
+      end)
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
@@ -581,5 +613,7 @@ let () =
         ; test_case "terminal SQL immutability" `Quick test_terminal_row_is_sql_immutable
         ; test_case "statement finalize survives GC pressure" `Quick
             test_statement_finalize_survives_gc_pressure
+        ; test_case "concurrent writer is waited out, not fenced" `Quick
+            test_concurrent_writer_is_waited_out_not_fenced
         ] )
     ]

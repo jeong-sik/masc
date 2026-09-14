@@ -3004,6 +3004,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
    | Ok (`Busy _) -> fail "busy result projected the wrong lane"
    | Ok (`Ran _) -> fail "Owner admitted two autonomous children"
+   | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"
    | Error error -> fail (Owner.error_to_string error));
   (match Owner.run_maintenance_if_idle owner (fun () -> fail "busy maintenance ran") with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
@@ -3015,6 +3016,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
    | Ok (`Ran 42) -> ()
    | Ok (`Ran value) -> failf "wrong autonomous result: %d" value
    | Ok (`Busy _) -> fail "first autonomous child was reported busy"
+   | Ok `Interrupted -> fail "first autonomous child was reported interrupted"
    | Error error -> fail (Owner.error_to_string error));
   Eio.Promise.await operation_started;
   let terminal = await_terminal owner operation_id 1_000 in
@@ -3054,6 +3056,7 @@ let test_unready_chat_queue_does_not_block_autonomous () =
           ~input:(operation_input "remain queued")));
   (match Owner.run_autonomous_if_idle owner (fun () -> 7) with
    | Ok (`Ran value) -> check int "autonomous callback ran" 7 value
+   | Ok `Interrupted -> fail "nothing interrupted the autonomous callback"
    | Ok (`Busy block) ->
      fail
        ("unclaimable chat queue blocked autonomous work: "
@@ -3135,6 +3138,7 @@ let test_owner_shutdown_linearizes_and_awaits_child () =
   Eio.Promise.resolve resolve_release_child ();
   (match Eio.Stream.take child_result with
    | Ok (`Ran ()) -> ()
+   | Ok `Interrupted -> fail "admitted child was reported interrupted"
    | Ok (`Busy _) -> fail "admitted child became busy"
    | Error error -> fail (Owner.error_to_string error));
   while not (Atomic.get idle_joined) do
@@ -3239,6 +3243,7 @@ let test_autonomous_children_of_distinct_owners_do_not_cross_block () =
   (match Owner.run_autonomous_if_idle second (fun () -> 7) with
    | Ok (`Ran 7) -> ()
    | Ok (`Ran value) -> failf "wrong second Owner result: %d" value
+   | Ok `Interrupted -> fail "nothing interrupted the second Keeper's autonomous child"
    | Ok (`Busy _) -> fail "one Keeper blocked another Keeper's autonomous child"
    | Error error -> fail (Owner.error_to_string error));
   Eio.Promise.resolve resolve_release_first ()

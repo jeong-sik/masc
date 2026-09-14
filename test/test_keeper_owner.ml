@@ -2720,7 +2720,7 @@ let test_operation_store_failure_is_retried_at_the_next_mutation () =
          ~keeper_name:"operation-store-failure"
          ~initial_meta:(Some (make_meta "operation-store-failure")))
   in
-  let operation_id = operation_id "kmsg-operation-store-failure" in
+  let rolled_back = operation_id "kmsg-operation-store-failure" in
   Fun.protect
     ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
     (fun () ->
@@ -2729,7 +2729,7 @@ let test_operation_store_failure_is_retried_at_the_next_mutation () =
        (match
           Owner.submit_operation
             owner
-            ~operation_id
+            ~operation_id:rolled_back
             ~source:operation_source
             ~input:(operation_input "must rollback")
         with
@@ -2739,7 +2739,7 @@ let test_operation_store_failure_is_retried_at_the_next_mutation () =
        check bool
          "pre-commit failure leaves no operation"
          true
-         (Option.is_none (owner_ok (Owner.exact_operation owner operation_id)));
+         (Option.is_none (owner_ok (Owner.exact_operation owner rolled_back)));
        check bool "the failure is published as an unavailable store" true
          (Owner.operation_projection owner).Owner.store_unavailable;
        (* The store itself is healthy again -- the injected failure rolled

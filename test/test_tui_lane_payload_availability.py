@@ -12,6 +12,15 @@ import zlib
 
 import test_tui_keyboard_input as h
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# The two section headings it reads ("INPUT · PROMPT PAYLOAD",
+# "OUTPUT · MODEL RESPONSE") are masc_tui_render.ml's.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+)
+
 
 def run(executable: str, scenario: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()

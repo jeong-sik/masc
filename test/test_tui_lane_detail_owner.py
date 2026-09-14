@@ -11,6 +11,17 @@ import zlib
 
 import test_tui_keyboard_input as h
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# The run detail's words ("MASC Lane Run", "APPROVED", "NO DECISION YET")
+# are masc_tui_render.ml's; the mismatch this proves is refused by a message
+# masc_tui.ml owns.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui.ml",
+)
+
 
 def run(binary, transition, old_fails):
     fixtures = h.keeper_runtime_http_fixtures()

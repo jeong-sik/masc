@@ -14,6 +14,16 @@ import re
 import sys
 import test_tui_keyboard_input as h
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# The five screen titles this walks between -- "MASC Board", "MASC Keepers",
+# "MASC Memory", "MASC Git Changes", "MASC Cheat Sheet" -- are spelled in
+# masc_tui_render.ml and nowhere else in bin/.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+)
+
 
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()

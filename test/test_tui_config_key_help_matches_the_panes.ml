@@ -13,11 +13,22 @@ let render = "bin/masc_tui_render_prim.ml"
 let panes_the_strip_draws () = List.length Masc_tui_types.config_panes
 
 (* The number above is only the strip's if the strip draws that list. *)
+(* Since #36327 the list reaches the strip through [config_pane_tabs]: the
+   title asks the same function for the tabs when it works out how many cells
+   the strip needs for the one it marks, and two spellings of the tab list
+   would be two answers to that. Both links are held here, so the strip still
+   cannot drift from the list -- the chain is what is pinned, not one hop of
+   it. *)
 let test_the_strip_draws_the_pane_list () =
-  Alcotest.(check bool) "config_pane_strip reads config_panes" true
+  Alcotest.(check bool) "config_pane_tabs reads config_panes" true
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"config_pane_strip" ~callees:[]
+       ~module_path:render ~binding_name:"config_pane_tabs" ~callees:[]
        ~identifiers:[ "config_panes" ]
+     > 0);
+  Alcotest.(check bool) "config_pane_strip draws config_pane_tabs" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:render ~binding_name:"config_pane_strip"
+       ~callee:"config_pane_tabs"
      > 0)
 
 let config_bindings = Masc_tui_keys.for_surface Masc_tui_types.Config

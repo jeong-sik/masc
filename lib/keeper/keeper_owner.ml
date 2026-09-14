@@ -682,18 +682,32 @@ let record_operation_error t error =
   owner_error_of_operation_error error
 ;;
 
+(* Only a Chat_operation child claims operation rows and can leave a Running
+   row mid-settlement; an Autonomous or Maintenance turn reaches the operation
+   store only through this Owner fiber, which reopens serially. The reopen
+   guard is therefore the chat lane, not "any child in flight": fencing
+   recovery behind every lane is what kept msx-retro-mania fenced for 25
+   minutes while its autonomous turn ran without pause (2026-09-14, #36203). *)
+let chat_child_in_flight t =
+  match Atomic.get t.turn_in_flight with
+  | Some { lane = Chat_operation; _ } -> true
+  | Some { lane = Autonomous | Maintenance; _ } | None -> false
+;;
+
 let recover_operation_availability t =
   match !(t.store_error) with
   | None -> Ok ()
   | Some (Metadata_persistence_failure _ | Operation_integrity_failure _
          | Operation_reconciliation_required _ as fault) ->
     Error (Store_unavailable (store_fault_detail fault))
-  | Some (Operation_availability_failure detail) when !(t.child_active) ->
+  | Some (Operation_availability_failure detail) when chat_child_in_flight t ->
     Error (Store_unavailable detail)
   | Some (Operation_availability_failure _) ->
-    (* The Owner mailbox excludes all store commands here, and no child can
-       still deliver effects. Reopening is not permission to replay a command:
-       only authoritative queued/terminal rows determine the next action. *)
+    (* The Owner mailbox excludes all store commands here, and no Chat_operation
+       child holds the handle (an Autonomous or Maintenance turn reaches the
+       store only through this fiber). Reopening is not permission to replay a
+       command: only authoritative queued/terminal rows determine the next
+       action. *)
     let recovered = run_operation_store ~label:"recover Keeper operation store" (fun () ->
       let ( let* ) = Result.bind in
       let path = Chat_operation_store.path t.operation_store in
@@ -709,12 +723,13 @@ let recover_operation_availability t =
         | Ok projection ->
           (match projection.running_operation_id with
            | Some operation_id ->
-             (* [child_active] is cleared in the same mailbox turn that commits
-                the child's settlement, so a Running row seen here has already
-                lost that commit. It may be an uncertain claim or a completed
-                external effect. Neither starting it again nor manufacturing
-                completion is justified, and re-fencing it as an availability
-                fault would reopen the handle on every wake for nothing. *)
+             (* Only a Chat_operation child creates a Running row, and this
+                branch runs when none is in flight, so a Running row seen here
+                lost its settlement commit to the outage. It may be an uncertain
+                claim or a completed external effect. Neither starting it again
+                nor manufacturing completion is justified, and re-fencing it as
+                an availability fault would reopen the handle on every wake for
+                nothing. *)
              let fault = Operation_reconciliation_required operation_id in
              set_store_fault t fault;
              publish_operation_projection t { projection with store_unavailable = true };

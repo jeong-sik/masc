@@ -322,7 +322,18 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
-      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
+        (* The tabs come from the list the strip draws. Named by hand this row
+           said "Info / Settings / Secrets / GitHub" while the strip drew
+           nine, so a reader who trusted the sheet did not know Sandbox,
+           Identity, Channels, Automation or Runs existed -- and Sandbox is
+           the second tab. Config's [p] had the same drift and a test to
+           catch it; this row cannot drift at all now. *)
+      ; b Navigate "[ / ]" "tabs"
+          ~help:
+            ("detail tabs: "
+             ^ String.concat " / "
+                 (List.map Masc_tui_types.keeper_detail_tab_label
+                    Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
       ; b Act "U" "runtime" ~help:"pick a runtime lane"
@@ -1268,6 +1279,11 @@ let help_sections ?current () =
              column draws with. *)
           ; ("Memory marks", Masc_tui_memory_mark.legend)
           ; ("Board marks", Masc_tui_board_kind_mark.legend)
+          (* The Code tree's file marks. A folder takes the arrow and a file
+             takes its kind's mark, and neither carries a word -- the name
+             beside it says the extension the mark was read from, not what the
+             mark means. Seven marks drew with nothing anywhere saying so. *)
+          ; ("File marks", Masc_tui_file_icon.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)

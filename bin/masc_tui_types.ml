@@ -7039,6 +7039,14 @@ let title_failed = "(" ^ field_failed ^ ")"
 let title_missing_reading ~error =
   if Option.is_some error then title_failed else title_unread
 
+(* The same answer for a slot that already has a label in front of it. Two
+   rows reached for the title's words because this had no name: Overview drew
+   "Pulse: (load failed)" and Lanes "Lane Add-ons: (not loaded)", and the
+   brackets there say a second time what the label in front of them already
+   said. *)
+let field_missing_reading ~error =
+  if Option.is_some error then field_failed else field_unread
+
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
    still waiting reads as not loaded, the way a title before any request does. *)

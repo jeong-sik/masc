@@ -88,7 +88,8 @@ val with_stream_idle_timeout : float -> t -> t
     falls back to the body timeout, then to the stream idle timeout, and is
     unarmed only when none of the three is set; inter-token idle still guards
     once the stream produces, and the connect timeout still guards connection
-    setup. @since 0.218.0 *)
+    setup. On the exact-fit path the count-tokens round trip spends from
+    this window first and the stream arms what it left. @since 0.218.0 *)
 val with_first_event_timeout : float -> t -> t
 
 (** Set the per-call total deadline for non-streaming HTTP response body
@@ -115,9 +116,10 @@ val with_call_timeout : float -> t -> t
     streaming completion. A call still queued when it runs out ends as
     [TimeoutError { phase = Queue }] with nothing sent; a granted stream runs
     under its own budgets ([with_stream_idle_timeout],
-    [with_first_event_timeout]). The non-streaming path's whole-call bound is
-    [with_call_timeout]. Requires a clock on the underlying request.
-    @since 0.231.15 *)
+    [with_first_event_timeout]). On the exact-fit path it is one window over
+    both permit waits, the count-tokens request's and the stream's. The
+    non-streaming path's whole-call bound is [with_call_timeout]. Requires a
+    clock on the underlying request. @since 0.231.15 *)
 val with_admission_timeout : float -> t -> t
 
 val with_elicitation : Hooks.elicitation_callback -> t -> t

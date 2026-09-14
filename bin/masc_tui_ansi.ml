@@ -303,6 +303,30 @@ let tab_strip_gap = "  "
 
 let tab_strip_cut = "\xe2\x80\xa6"
 
+(* The cells this strip needs to keep its promise: the current entry whole,
+   with the cut marks its position calls for. Below this the window cannot
+   grow past the current entry and [fit_width] cuts into the entry itself --
+   a row would read "@p@" where it means "prompts", which names nothing. A
+   row that draws a strip asks for this before it spends the width on
+   anything that can give way. *)
+let tab_strip_min_width (tabs : (string * bool) list) =
+  let cells text = Masc_tui_message_layout.display_width text in
+  let entries = Array.of_list tabs in
+  let n = Array.length entries in
+  if n = 0 then 0
+  else begin
+    let current =
+      let rec find i = if i >= n then 0 else if snd entries.(i) then i else find (i + 1) in
+      find 0
+    in
+    let label, _ = entries.(current) in
+    let cut = cells tab_strip_cut + cells tab_strip_gap in
+    cells Masc_tui_theme.Glyph.current_entry
+    + cells label
+    + (if current > 0 then cut else 0)
+    + (if current < n - 1 then cut else 0)
+  end
+
 let tab_strip ~width (tabs : (string * bool) list) =
   let draw (label, current) =
     if current then

@@ -165,23 +165,22 @@ let shortest_declared_threshold_s =
   Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
 let threshold_slack_s = 5.0
 
-(* The process environment outranks the boot override, so an ambient
-   operator value would replace the threshold this installs. *)
+(* The process environment outranks the boot override, so the threshold is
+   declared there; an inherited operator value is replaced for the case and
+   put back after it, not skipped under. *)
 let with_declared_provider_call_deadline seconds f =
-  match Sys.getenv_opt Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key with
-  | Some _ -> skip ()
-  | None ->
-    Config_boot_overrides.reset_for_tests ();
-    Keeper_runtime_resolved.reset_for_tests ();
-    Config_boot_overrides.set
-      Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
-      (Printf.sprintf "%.0f" seconds);
-    Keeper_runtime_resolved.reset_for_tests ();
-    Fun.protect
-      ~finally:(fun () ->
-        Config_boot_overrides.reset_for_tests ();
-        Keeper_runtime_resolved.reset_for_tests ())
-      f
+  Config_boot_overrides.reset_for_tests ();
+  Keeper_runtime_resolved.reset_for_tests ();
+  Masc_test_deps.with_process_env
+    Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
+    (Some (Printf.sprintf "%.0f" seconds))
+    (fun () ->
+      Keeper_runtime_resolved.reset_for_tests ();
+      Fun.protect
+        ~finally:(fun () ->
+          Config_boot_overrides.reset_for_tests ();
+          Keeper_runtime_resolved.reset_for_tests ())
+        f)
 ;;
 
 let test_the_keeper_threshold_reaches_the_wire () =

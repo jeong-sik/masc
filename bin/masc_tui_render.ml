@@ -2659,15 +2659,14 @@ let render_planning_list (state : state) =
      match planning.pl_goal_history with
      | [] -> ()
      | history ->
-       let closed =
+       let ended =
          List.length
            (List.filter
               (fun (row : planning_goal_history) -> Option.is_some row.pgh_closed_at)
               history)
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "  No longer listed: %d · reached an end: %d"
-            (List.length history) closed);
+         (planning_goal_history_summary ~unlisted:(List.length history) ~ended);
        let lifetime_label hours =
          if hours >= 48. then Printf.sprintf "%.1fd" (hours /. 24.)
          else Printf.sprintf "%.1fh" hours
@@ -13429,10 +13428,65 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
 ;;
 
+(* Assigning a voice to a keeper: two lists, the keeper walking under up and
+   down and the voice under the arrows. Drawn instead of the pane rather than
+   over it, because both are lists and a list over a list is two cursors a
+   reader has to keep apart. *)
+let render_voice_agent (state : state) (session : voice_agent_session) =
+  let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
+  let buf = Buffer.create 2048 in
+  let list_block label items cursor draw =
+    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
+    let count = List.length items in
+    if count = 0
+    then box_line buf cols (Printf.sprintf "    %s\xe2\x80\x94%s" Ansi.dim Ansi.reset)
+    else (
+      (* Every entry is laid out; [finish_voice_surface] takes the window and
+         reports where it is, so a list longer than the screen is scrolled
+         rather than cut at the fold. *)
+      List.iteri
+        (fun index item ->
+          box_line buf cols
+            (if index = cursor
+             then
+               Printf.sprintf "    %s%s %s%s" Ansi.bold Masc_tui_theme.Glyph.current_entry
+                 (draw item)
+                 Ansi.reset
+             else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
+        items;
+      box_line buf cols
+        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  in
+  box_top head cols;
+  let before = screen_title " MASC Voice \xc2\xb7 keeper voices" ^ tab_strip_gap in
+  box_line head cols
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+  box_line buf cols "";
+  list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
+    Terminal_text.single_line agent);
+  box_line buf cols "";
+  list_block "voice  (left/right)" session.vas_voices session.vas_voice_cursor
+    (fun (voice_id, label) ->
+      if String.equal voice_id label
+      then Terminal_text.single_line voice_id
+      else Printf.sprintf "%s  %s%s%s" (Terminal_text.single_line label) Ansi.dim
+             (Terminal_text.single_line voice_id) Ansi.reset);
+  (match session.vas_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
+;;
+
 let render_voice (state : state) =
-  match state.voice_wizard with
-  | Some session -> render_voice_wizard state session
-  | None ->
+  match state.voice_agent_voices, state.voice_wizard with
+  | Some session, _ -> render_voice_agent state session
+  | None, Some session -> render_voice_wizard state session
+  | None, None ->
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in

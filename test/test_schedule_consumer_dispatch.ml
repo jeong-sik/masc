@@ -397,7 +397,7 @@ let create_keeper_wake_schedule ?recurrence config =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let create_routed_keeper_wake_schedule config channel =
+let create_routed_keeper_wake_schedule ?recurrence config channel =
   match
     Schedule_service.create
       config
@@ -408,6 +408,7 @@ let create_routed_keeper_wake_schedule config channel =
       ~due_at:200.0
       ~payload:(keeper_wake_payload_with_result_delivery channel)
       ~source:Schedule_domain.Operator_request
+      ?recurrence
       ()
   with
   | Ok request -> request
@@ -906,15 +907,31 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
    pending row and not a silent drop. Until 2026-09-14 both stayed queued and
    one 5-minute schedule reached 31 pending occurrences on a busy keeper. *)
 let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
+  (* A result-delivering interval: it fires on every due even while the
+     previous occurrence is unconsumed, so the new occurrence supersedes the
+     pending one at intake. A delivery=none interval is held back instead
+     (#36249) and never reaches this path. *)
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team-1")
+        ~channel_id:"channel-1"
+        ~thread_ts:(Some "1710000000.100")
+        ~user_id:"user-1"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
   let _request =
-    create_keeper_wake_schedule
+    create_routed_keeper_wake_schedule
       ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
       config
+      channel
   in
   let first_id = tick_ok config ~now:201.0 |> single_occurrence_id in
   let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
@@ -944,8 +961,9 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
   (match cancellation with
    | None -> fail "the superseded occurrence left no durable cancellation"
    | Some cancellation ->
-     check bool "the cancellation names the occurrence that superseded it" true
-       (String_util.contains_substring cancellation.reason second_id));
+     check string "the cancellation names the occurrence that superseded it"
+       (Printf.sprintf "superseded by occurrence %s of the same schedule" second_id)
+       cancellation.reason);
   (* A third recurrence supersedes the second the same way: the pending set
      never grows past one per schedule. *)
   let third_id = tick_ok config ~now:321.0 |> single_occurrence_id in
@@ -955,6 +973,107 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
   in
   check (list string) "still one pending occurrence" [ third_id ]
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
+;;
+
+let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
+  (* The live shape of 2026-09-14 18:20: two occurrences of one schedule
+     pending at once, cancelled in one call. The first tick was refused as an
+     "accepted cancellation operation conflict" because both entries carried
+     the same two-decimal wall-clock operation id; the 22 retries after it
+     were refused with "cannot cancel pending work while an outbox transition
+     exists" because the first commit's receipt sat in the outbox until the
+     maintenance sweep. Both folds now derive the id from the entry's address
+     and project each receipt right after its commit. *)
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let schedule_id = "sched-piled" in
+  let occurrence n : Keeper_event_queue.stimulus =
+    let wake : Keeper_event_queue.scheduled_wake =
+      { occurrence_id = Printf.sprintf "piled-occurrence-%d" n
+      ; schedule_instance_id = "piled-instance"
+      ; schedule_id
+      ; due_at = 200.0 +. float_of_int n
+      ; payload_digest = "piled-digest"
+      ; title = None
+      ; message = "piled wake"
+      ; result_delivery = None
+      }
+    in
+    { post_id = wake.occurrence_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = wake.due_at
+    ; payload = Keeper_event_queue.Schedule_due wake
+    }
+  in
+  let enqueue stimulus =
+    match
+      Keeper_registry_event_queue.enqueue_stimulus_durable_result
+        ~base_path
+        keeper_name
+        stimulus
+    with
+    | Keeper_registry_event_queue.Stimulus_enqueued -> ()
+    | Keeper_registry_event_queue.Stimulus_already_present ->
+      fail "piled occurrence already present in a fresh workspace"
+    | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail
+  in
+  enqueue (occurrence 1);
+  enqueue (occurrence 2);
+  (match
+     Keeper_registry_event_queue.cancel_scheduled_wakes_result
+       ~base_path
+       keeper_name
+       ~applied_at:203.0
+       ~schedule_ids:[ schedule_id ]
+       ~reason:"superseded by occurrence piled-occurrence-3 of the same schedule"
+   with
+   | Ok 2 -> ()
+   | Ok n -> failf "expected both occurrences cancelled in one call, got %d" n
+   | Error detail -> fail ("one-call cancellation failed: " ^ detail));
+  let state =
+    match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  check int "nothing of the schedule stays pending" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending state));
+  (match Keeper_event_queue_state.transition_outbox state with
+   | [] -> ()
+   | _ :: _ ->
+     fail "a cancellation receipt stayed in the outbox; the keeper's next ack would be refused");
+  let cancelled =
+    List.filter_map
+      (function
+        | Keeper_event_queue_state.Current_receipt
+            { transition = Keeper_event_queue_state.Cancel_accepted cancellation; _ } ->
+          Some cancellation.source.post_id
+        | Keeper_event_queue_state.Projected_witness
+            { post_id; kind = Keeper_event_queue_state.Projected_cancel _; _ } ->
+          Some post_id
+        | Keeper_event_queue_state.Current_receipt _
+        | Keeper_event_queue_state.Projected_witness _ -> None)
+      (Keeper_event_queue_state.projected_dispositions state)
+    |> List.sort String.compare
+  in
+  check (list string) "each occurrence left its own durable cancellation"
+    [ "piled-occurrence-1"; "piled-occurrence-2" ]
+    cancelled;
+  (* Nothing of the schedule is pending any more, so a second call has
+     nothing to cancel and refuses nothing. *)
+  match
+    Keeper_registry_event_queue.cancel_scheduled_wakes_result
+      ~base_path
+      keeper_name
+      ~applied_at:204.0
+      ~schedule_ids:[ schedule_id ]
+      ~reason:"superseded again"
+  with
+  | Ok 0 -> ()
+  | Ok n -> failf "second call should cancel nothing, got %d" n
+  | Error detail -> fail ("second one-call cancellation failed: " ^ detail)
 ;;
 
 let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
@@ -1163,24 +1282,39 @@ let test_owner_absent_pending_demand_is_drained_not_retained () =
     ; payload = Keeper_event_queue.Schedule_due wake
     }
   in
-  (match
-     Keeper_registry_event_queue.enqueue_stimulus_durable_result
-       ~base_path
-       orphan_name
-       stimulus
-   with
-   | Keeper_registry_event_queue.Stimulus_enqueued -> ()
-   | Keeper_registry_event_queue.Stimulus_already_present ->
-     fail "orphan stimulus already present in a fresh workspace"
-   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-     fail ("orphan enqueue failed: " ^ detail));
+  (* Two entries, not one: the drain cancels them in one call, and each
+     cancellation must clear the single-slot outbox before the next one or
+     the second is refused (the schedule supersede hit exactly this on
+     2026-09-14). *)
+  let enqueue stimulus =
+    match
+      Keeper_registry_event_queue.enqueue_stimulus_durable_result
+        ~base_path
+        orphan_name
+        stimulus
+    with
+    | Keeper_registry_event_queue.Stimulus_enqueued -> ()
+    | Keeper_registry_event_queue.Stimulus_already_present ->
+      fail "orphan stimulus already present in a fresh workspace"
+    | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+      fail ("orphan enqueue failed: " ^ detail)
+  in
+  enqueue stimulus;
+  enqueue
+    { stimulus with
+      post_id = "orphan-post-2"
+    ; arrived_at = 200.5
+    ; payload =
+        Keeper_event_queue.Schedule_due
+          { wake with occurrence_id = "orphan-occurrence-2"; due_at = 200.5 }
+    };
   let pending_before =
     Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
     |> function
     | Ok state -> Keeper_event_queue.length (Keeper_event_queue_state.pending state)
     | Error detail -> fail detail
   in
-  check int "orphan queue holds one pending stimulus before drain" 1 pending_before;
+  check int "orphan queue holds two pending stimuli before drain" 2 pending_before;
   (match
      Keeper_registry_event_queue.drain_owner_absent_pending_result
        ~base_path
@@ -1188,16 +1322,21 @@ let test_owner_absent_pending_demand_is_drained_not_retained () =
        ~applied_at:201.0
        ~reason:"owner absent from keeper store; pending demand cannot execute"
    with
-   | Ok 1 -> ()
-   | Ok n -> failf "expected exactly one drained stimulus, got %d" n
+   | Ok 2 -> ()
+   | Ok n -> failf "expected both stimuli drained in one call, got %d" n
    | Error detail -> fail ("owner-absent drain failed: " ^ detail));
-  let pending_after =
-    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
-    |> function
-    | Ok state -> Keeper_event_queue.length (Keeper_event_queue_state.pending state)
+  let drained_state =
+    match
+      Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
+    with
+    | Ok state -> state
     | Error detail -> fail detail
   in
-  check int "orphan queue is empty after drain" 0 pending_after;
+  check int "orphan queue is empty after drain" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending drained_state));
+  (match Keeper_event_queue_state.transition_outbox drained_state with
+   | [] -> ()
+   | _ :: _ -> fail "the drain left a cancellation receipt in the outbox");
   (* The drain must be idempotent: a second visit finds nothing to retain. *)
   (match
      Keeper_registry_event_queue.drain_owner_absent_pending_result
@@ -2840,6 +2979,10 @@ let () =
             test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick
             test_recurring_wake_supersedes_the_earlier_pending_occurrence
+        ; test_case
+            "one call cancels every pending occurrence of a schedule"
+            `Quick
+            test_one_call_cancels_every_pending_occurrence_of_a_schedule
         ; test_case "reused schedule id does not match pruned terminal receipt"
             `Quick
             test_reused_schedule_id_does_not_match_pruned_terminal_receipt

@@ -240,8 +240,10 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
          (match config.Voice_config.stt with
           | None -> Alcotest.fail "speech in should be configured"
           | Some stt ->
-            Alcotest.(check string) "the model the wizard was given"
-              "large-v3-turbo" stt.Voice_config.default_model;
+            (* The existing endpoint's fallback is untouched: the new model went
+               on the new endpoint, not over the section's default. *)
+            Alcotest.(check (option string)) "the section's model is the one it had"
+              (Some "scribe_v2") stt.Voice_config.default_model;
             let landed =
               List.find_opt
                 (fun (endpoint : Voice_config.endpoint) ->
@@ -253,6 +255,8 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
              | Some endpoint ->
                Alcotest.(check (option string)) "with the address it was given"
                  (Some "http://127.0.0.1:9000/v1") endpoint.Voice_config.base_url;
+               Alcotest.(check (option string)) "with the model the wizard was given"
+                 (Some "large-v3-turbo") endpoint.Voice_config.model;
                (* A local endpoint the wizard was not given a credential for must
                   not acquire one: the header it would add is what a server that
                   never asked for it answers 401 to. *)

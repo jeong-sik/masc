@@ -27,6 +27,7 @@ let endpoint =
   ; timeout_seconds = None
   ; default_voice = None
   ; command = None
+  ; model = None
   }
 
 (* Korean on purpose. An English sentence would pass on a machine with no

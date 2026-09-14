@@ -4237,14 +4237,23 @@ let render_keeper_list (state : state) =
            Ansi.dim ^ "   " ^ Ansi.reset
            ^ String.concat (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset) parts)
   in
+  (* The roster is the surface an operator watches to see which keepers are
+     up, and it was the one top-level surface whose title never said whether
+     the reading was live: "1 healthy · 1 idle" read the same over a dead
+     coordinator as over a live one. The badge also carries the workspace
+     mismatch, which this screen could not report at all. It sits at the right
+     edge, where the clock was, and the clock moves left of it. *)
+  let badge = connection_badge state in
   (* Style bytes are zero-width to [display_width], so the gap is measured on
      the styled string rather than on a plain copy that could drift from it. *)
   let gap =
     max 1
-      (inner - Message_layout.display_width heading - String.length timestamp)
+      (inner - Message_layout.display_width heading - String.length timestamp
+       - 2 - Message_layout.display_width badge)
   in
   box_line buf cols
-    (heading ^ String.make gap ' ' ^ Ansi.dim ^ timestamp ^ Ansi.reset);
+    (heading ^ String.make gap ' ' ^ Ansi.dim ^ timestamp ^ Ansi.reset ^ "  "
+     ^ badge);
 
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);

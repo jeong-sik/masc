@@ -59,6 +59,31 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   Alcotest.(check int) "and asks that same line for its height" 1
     (calls "approval_detail_rows")
 
+(* Whether the reading is live. Forty-two surface renderers in this file end
+   their title with [connection_badge]; the roster was the one that did not,
+   and it is the surface an operator watches to see which keepers are up. "1
+   healthy · 1 idle" read the same over a dead coordinator as over a live one,
+   and the badge also carries the workspace mismatch, which this screen could
+   not report at all. *)
+let test_the_roster_title_says_whether_the_reading_is_live () =
+  (* Asked as "at least once", because a surface whose title has two branches
+     -- one for the reading, one for the failure -- draws it in each. *)
+  let draws binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+      ~callee:"connection_badge"
+    > 0
+  in
+  Alcotest.(check bool) "the roster title carries the badge" true
+    (draws "render_keeper_list");
+  (* Beside neighbours that already carried it, so the case says a rule rather
+     than one surface's habit. *)
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check bool)
+        (binding_name ^ " carries the badge")
+        true (draws binding_name))
+    [ "render_schedule_list"; "render_repository_list"; "render_fusion_list" ]
+
 (* Where a command runs decides what it means: [git clone] into a container is
    not [git clone] onto the host. The decoder carries both, and the detail
    pane is the only surface with room for them. *)
@@ -633,6 +658,8 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "the roster title says whether it is live" `Quick
+            test_the_roster_title_says_whether_the_reading_is_live
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
         ; Alcotest.test_case "Repositories show the server-resolved path"

@@ -21,15 +21,20 @@ val create : max_slots:int -> t
     Raises the original exception if [f] fails; the permit is still released. *)
 val with_permit : t -> (unit -> 'a) -> 'a
 
-(** Whether the caller is waiting for a slot. Told to a bounded wait's
-    [on_wait] as the wait begins and again as it ends, however it ends
-    (granted, expired, cancelled); a slot granted at once is no wait and is
-    not told. Only a bounded wait reports, so a caller that stands its own
-    watchdog down while [Waiting_for_permit] never stands it down for a wait
-    nothing else ends. The observer must not raise. *)
-type wait_state =
+(** A bounded wait for a slot as its caller sees it. The caller owns the
+    cell and starts it at [Before_any_wait]; the wait writes
+    [Waiting_for_permit] as it begins and [Wait_settled_at now] as it ends,
+    however it ends (granted, expired, cancelled), [now] read on the wait's
+    clock. A slot granted at once is no wait and writes nothing. Only a
+    bounded wait writes, so a caller that stands its own watchdog down while
+    [Waiting_for_permit] never does so for a wait nothing else ends, and
+    [Wait_settled_at] is the instant that watchdog counts from again. A
+    write is an [Atomic.set]: it cannot raise or block, so the cell cannot
+    cost the wait its slot or its place in the queue. *)
+type permit_wait =
+  | Before_any_wait
   | Waiting_for_permit
-  | Not_waiting
+  | Wait_settled_at of float
 
 (** [with_permit] whose wait for a slot ends at [deadline_at] on [clock]:
     [Error `Permit_wait_expired] when no slot was granted by then (the waiter
@@ -38,7 +43,7 @@ type wait_state =
     bounds is over, and the slot is the caller's. [f] runs without this
     deadline; the caller bounds it. *)
 val with_permit_until
-  :  ?on_wait:(wait_state -> unit)
+  :  ?wait:permit_wait Atomic.t
   -> clock:_ Eio.Time.clock
   -> deadline_at:float
   -> t

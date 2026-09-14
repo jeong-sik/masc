@@ -76,16 +76,17 @@ let with_admission ~(config : Provider_config.t) f =
     Slot_scheduler.with_permit scheduler f
 ;;
 
-type wait_state = Slot_scheduler.wait_state =
+type permit_wait = Slot_scheduler.permit_wait =
+  | Before_any_wait
   | Waiting_for_permit
-  | Not_waiting
+  | Wait_settled_at of float
 
-let with_admission_until ?on_wait ~clock ~deadline_at ~(config : Provider_config.t) f =
+let with_admission_until ?wait ~clock ~deadline_at ~(config : Provider_config.t) f =
   match config.max_concurrent_requests with
   | None -> Ok (f ())
   | Some max ->
     let scheduler = entry_for ~key:(key_of_config config) ~max in
-    Slot_scheduler.with_permit_until ?on_wait ~clock ~deadline_at scheduler f
+    Slot_scheduler.with_permit_until ?wait ~clock ~deadline_at scheduler f
 ;;
 
 type deadline_expiry =
@@ -93,9 +94,9 @@ type deadline_expiry =
   | Permit_granted_as_deadline_passed
   | Work_expired
 
-let with_admission_and_work_until ?on_wait ~clock ~deadline_at ~config f =
+let with_admission_and_work_until ?wait ~clock ~deadline_at ~config f =
   match
-    with_admission_until ?on_wait ~clock ~deadline_at ~config (fun () ->
+    with_admission_until ?wait ~clock ~deadline_at ~config (fun () ->
       let remaining = deadline_at -. Eio.Time.now clock in
       if Float.compare remaining 0.0 <= 0
       then Error Permit_granted_as_deadline_passed

@@ -36,7 +36,7 @@ type t =
   ; body_timeout_s : float option
   ; call_timeout_s : float option
   ; admission_timeout_s : float option
-  ; permit_wait_observer : (Llm_provider.Provider_admission.wait_state -> unit) option
+  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
   ; hooks : Hooks.hooks
   ; tracer : Tracing.t
   ; raw_trace : Raw_trace.t option
@@ -87,7 +87,7 @@ let create ~net ~model =
   ; body_timeout_s = None
   ; call_timeout_s = None
   ; admission_timeout_s = None
-  ; permit_wait_observer = None
+  ; permit_wait = None
   ; hooks = Hooks.empty
   ; tracer = Tracing.null
   ; raw_trace = None
@@ -211,7 +211,7 @@ let with_first_event_timeout s b = { b with first_event_timeout_s = Some s }
 let with_body_timeout s b = { b with body_timeout_s = Some s }
 let with_call_timeout s b = { b with call_timeout_s = Some s }
 let with_admission_timeout s b = { b with admission_timeout_s = Some s }
-let with_permit_wait_observer observe b = { b with permit_wait_observer = Some observe }
+let with_permit_wait cell b = { b with permit_wait = Some cell }
 let with_context_injector injector b = { b with context_injector = Some injector }
 let with_skill_registry reg b = { b with skill_registry = Some reg }
 let with_elicitation cb b = { b with elicitation = Some cb }
@@ -260,7 +260,7 @@ let build b =
     ; body_timeout_s = b.body_timeout_s
     ; call_timeout_s = b.call_timeout_s
     ; admission_timeout_s = b.admission_timeout_s
-    ; permit_wait_observer = b.permit_wait_observer
+    ; permit_wait = b.permit_wait
     ; hooks = b.hooks
     ; guardrails_async = Guardrails_async.empty
     ; tracer = b.tracer

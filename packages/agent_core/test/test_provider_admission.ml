@@ -529,12 +529,13 @@ let test_one_deadline_over_the_permit_wait_and_the_work () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
-(* What a bounded wait tells its observer: nothing when the permit is
-   granted at once; [Waiting_for_permit] then [Not_waiting] when it waits,
-   however the wait ends -- expired, granted late, or cancelled from
-   outside. A caller stands its watchdog down on the first and back up on
-   the second, so the second must come on every path. *)
-let test_a_bounded_wait_tells_its_observer_on_every_path () =
+(* What a bounded wait writes to its caller's cell: nothing when the permit
+   is granted at once; [Waiting_for_permit] while it waits, then
+   [Wait_settled_at] the instant the wait ended, however it ended -- granted
+   late, expired, or cancelled from outside. A caller stands its watchdog
+   down on the first and counts again from the second, so the second must
+   come on every path, and before the work runs. *)
+let test_a_bounded_wait_writes_its_callers_cell_on_every_path () =
   Eio_main.run
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -543,52 +544,70 @@ let test_a_bounded_wait_tells_its_observer_on_every_path () =
   let config =
     make_config ~base_url:"http://wait-observer.test:1" ~max_concurrent_requests:1 ()
   in
-  let told = ref [] in
-  let on_wait state = told := state :: !told in
-  let told_so_far () = List.rev !told in
+  let wait = Atomic.make Provider_admission.Before_any_wait in
   let deadline_at () = Eio.Time.now clock +. call_deadline_s in
-  let wait_states = testable (fun fmt -> function
-    | Provider_admission.Waiting_for_permit -> Format.pp_print_string fmt "Waiting_for_permit"
-    | Provider_admission.Not_waiting -> Format.pp_print_string fmt "Not_waiting") ( = ) in
-  (* Granted at once: no wait, nothing told. *)
+  let describe = function
+    | Provider_admission.Before_any_wait -> "Before_any_wait"
+    | Provider_admission.Waiting_for_permit -> "Waiting_for_permit"
+    | Provider_admission.Wait_settled_at at -> Printf.sprintf "Wait_settled_at %.3f" at
+  in
+  (* A settle instant: after the wait began, and not after now. *)
+  let check_settled ~label ~began_at =
+    match Atomic.get wait with
+    | Provider_admission.Wait_settled_at at ->
+      let now = Eio.Time.now clock in
+      if at < began_at || at > now
+      then failf "%s: settled at %.3f, outside [%.3f, %.3f]" label at began_at now
+    | other -> failf "%s: expected Wait_settled_at, got %s" label (describe other)
+  in
+  (* Granted at once: no wait, nothing written. *)
   (match
-     Provider_admission.with_admission_until ~on_wait ~clock ~deadline_at:(deadline_at ()) ~config (fun () -> ())
+     Provider_admission.with_admission_until ~wait ~clock ~deadline_at:(deadline_at ()) ~config (fun () -> ())
    with
    | Ok () -> ()
    | Error `Permit_wait_expired -> fail "a free permit expired");
-  check (list wait_states) "a permit granted at once is no wait" [] (told_so_far ());
-  (* Held until released before the deadline: waited, then granted. *)
+  check string "a permit granted at once is no wait" "Before_any_wait" (describe (Atomic.get wait));
+  (* Held until released before the deadline: waited, then granted. The
+     holder's release fiber reads the cell while the wait is on. *)
   let release, resolve_release = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let seen_while_held = ref None in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Time.sleep clock (call_deadline_s /. 4.0);
+    seen_while_held := Some (Atomic.get wait);
     Eio.Promise.resolve resolve_release ());
-  let ran = ref false in
+  let began_at = Eio.Time.now clock in
+  let seen_by_the_work = ref None in
   (match
      Provider_admission.with_admission_until
-       ~on_wait
+       ~wait
        ~clock
        ~deadline_at:(deadline_at ())
        ~config
-       (fun () -> ran := true)
+       (fun () -> seen_by_the_work := Some (Atomic.get wait))
    with
    | Ok () -> ()
    | Error `Permit_wait_expired -> fail "a permit released before the deadline expired");
-  check bool "the work ran once the permit came" true !ran;
   check
-    (list wait_states)
-    "a wait that was granted was told twice"
-    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
-    (told_so_far ());
-  told := [];
+    (option string)
+    "the cell said Waiting_for_permit while the permit was held"
+    (Some "Waiting_for_permit")
+    (Option.map describe !seen_while_held);
+  (match !seen_by_the_work with
+   | Some (Provider_admission.Wait_settled_at _) -> ()
+   | Some other -> failf "the work ran with the cell at %s, not settled" (describe other)
+   | None -> fail "the work did not run once the permit came");
+  check_settled ~label:"granted late" ~began_at;
   (* Held past the deadline: waited, then expired. *)
+  Atomic.set wait Provider_admission.Before_any_wait;
   let release, resolve_release = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let began_at = Eio.Time.now clock in
   (match
      Provider_admission.with_admission_until
-       ~on_wait
+       ~wait
        ~clock
        ~deadline_at:(deadline_at ())
        ~config
@@ -596,19 +615,16 @@ let test_a_bounded_wait_tells_its_observer_on_every_path () =
    with
    | Error `Permit_wait_expired -> ()
    | Ok () -> fail "a held permit was granted");
-  check
-    (list wait_states)
-    "a wait that expired was told twice"
-    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
-    (told_so_far ());
-  told := [];
-  (* Cancelled from outside while waiting: still told twice. *)
+  check_settled ~label:"expired" ~began_at;
+  (* Cancelled from outside while waiting: still settled. *)
+  Atomic.set wait Provider_admission.Before_any_wait;
+  let began_at = Eio.Time.now clock in
   (match
      Eio.Fiber.first
        (fun () ->
           match
             Provider_admission.with_admission_until
-              ~on_wait
+              ~wait
               ~clock
               ~deadline_at:(deadline_at ())
               ~config
@@ -621,11 +637,7 @@ let test_a_bounded_wait_tells_its_observer_on_every_path () =
    with
    | `Cancelled_from_outside -> ()
    | `Wait_ended -> fail "the wait ended before the outside cancel");
-  check
-    (list wait_states)
-    "a wait cancelled from outside was told twice"
-    [ Provider_admission.Waiting_for_permit; Provider_admission.Not_waiting ]
-    (told_so_far ());
+  check_settled ~label:"cancelled from outside" ~began_at;
   Eio.Promise.resolve resolve_release ()
 ;;
 
@@ -678,9 +690,9 @@ let () =
             `Quick
             test_one_deadline_over_the_permit_wait_and_the_work
         ; test_case
-            "a bounded wait tells its observer on every path"
+            "a bounded wait writes its caller's cell on every path"
             `Quick
-            test_a_bounded_wait_tells_its_observer_on_every_path
+            test_a_bounded_wait_writes_its_callers_cell_on_every_path
         ] )
     ]
 ;;

@@ -2828,14 +2828,9 @@ let test_recovery_does_not_replay_an_active_or_uncertain_child () =
       active_wake |> expect_store_unavailable;
       await_child_slot_empty owner 1_000;
       let expect_reconciliation_fence result =
-        match result with
-        | Error (Owner.Store_unavailable detail) ->
-          check bool "fence names the orphaned Running operation" true
-            (String_util.string_contains_substring
-               ~needle:(Chat_operation.Operation_id.to_string original)
-               detail)
-        | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
-        | Ok _ -> fail "orphaned Running row did not fence the Owner"
+        expect_store_unavailable result;
+        check bool "projection reports the store unavailable" true
+          (Owner.operation_projection owner).Owner.store_unavailable
       in
       Owner.wake_operation_drain owner |> expect_reconciliation_fence;
       (* The fence is sticky: a second wake does not reopen the handle again

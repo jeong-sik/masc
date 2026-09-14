@@ -342,6 +342,24 @@ let test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen () =
   Alcotest.(check string) "the name survives the move" "kept"
     moved.Voice_wizard.endpoint_id
 
+(* Toggling the side on the first step is how most drafts start, and each
+   command kind serves one side only. Landing on the other side's command
+   rather than on a provider that needs an account is what keeps the toggle
+   cheap. *)
+let test_moving_lands_on_the_command_the_other_side_runs () =
+  let heard =
+    Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli
+  in
+  Alcotest.(check bool) "speech in's command becomes speech out's" true
+    ((Voice_wizard.with_section heard Voice_setup.Tts).Voice_wizard.provider
+     = Voice_wizard.Macos_say);
+  let spoken =
+    Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say
+  in
+  Alcotest.(check bool) "and back" true
+    ((Voice_wizard.with_section spoken Voice_setup.Stt).Voice_wizard.provider
+     = Voice_wizard.Whisper_cli)
+
 let test_moving_keeps_a_provider_that_serves_both () =
   let draft =
     Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Openai_compatible
@@ -366,6 +384,8 @@ let () =
             test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen
         ; Alcotest.test_case "moving keeps a provider that serves both" `Quick
             test_moving_keeps_a_provider_that_serves_both
+        ; Alcotest.test_case "moving lands on the command the other side runs" `Quick
+            test_moving_lands_on_the_command_the_other_side_runs
         ] )
     ; ( "when a draft is complete"
       , [ Alcotest.test_case "a local endpoint may go without a credential" `Quick

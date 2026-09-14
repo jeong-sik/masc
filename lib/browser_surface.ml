@@ -1,6 +1,7 @@
 type source = Live | Automation
 type request = { source : source; tab_id : int option; client_id : Browser_lane.client_id option }
 type tab = { id : int; title : string; url : string; active : bool }
+type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let parse_client_id = function
@@ -49,6 +50,14 @@ let rec decode_tabs = function
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
 let source_name = function Live -> "live" | Automation -> "automation"
+let select ~tab_id tabs = match tab_id with
+  | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with
+      | Some tab -> Ok (Requested tab)
+      | None -> Error "selected tab is closed or absent from this browser source")
+  | None -> Ok (match List.find_opt (fun tab -> tab.active) tabs with
+      | Some tab -> Active tab | None -> None_active)
+let selection_json = function
+  | Requested _ -> `String "requested" | Active _ -> `String "active" | None_active -> `String "none_active"
 let resolved_target request = Browser_lane.resolve_target
   ~lane_name:(source_name request.source) ~client_id:request.client_id
 let client_id_json target = match Browser_lane.target_client_id target with
@@ -60,16 +69,13 @@ let read request =
   let issue verb = Browser_lane.issue_for ~target ~verb ~timeout_sec:20. |> decode_answer in
   let* raw_tabs = issue Browser_lane.Tabs_list in
   let* tabs = match raw_tabs with `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list" in
-  let* selected = match request.tab_id with
-    | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with
-        | Some tab -> Ok (Some tab)
-        | None -> Error "selected tab is closed or absent from this browser source")
-    | None ->
-      Ok (match List.find_opt (fun tab -> tab.active) tabs with
-          | Some tab -> Some tab | None -> List.nth_opt tabs 0) in
-  let* page = match selected with
-    | None -> Ok `Null
-    | Some tab ->
+  (* Without a requested tab and without an active tab no page is read: the
+     answer says [selection = none_active] and [page = null] instead of the
+     caller receiving whichever tab the browser listed first. *)
+  let* selection = select ~tab_id:request.tab_id tabs in
+  let* page = match selection with
+    | None_active -> Ok `Null
+    | Requested tab | Active tab ->
       let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some 50_000}) in
       (match field "url" data, field "title" data, field "text" data,
              field "chars" data, field "truncated" data with
@@ -79,7 +85,7 @@ let read request =
            "text",`String text;"chars",`Int chars;"truncated",`Bool truncated])
        | _ -> Error "browser page lacks URL/title/text/length metadata; update the browser connector") in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
-  Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"page",page;
+  Ok (`Assoc ["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
     "source",`String lane_name; "clientId", client_id_json target;
     "elapsed_ms",`Float elapsed_ms])
 

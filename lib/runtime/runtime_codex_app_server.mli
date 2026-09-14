@@ -36,8 +36,14 @@ type config =
     (** Finite bound for post-spawn subscription/account checks, thread
         creation, history injection, and the complete [turn/start] write. *)
   ; timeout_s : float option
-    (** Maximum silence between app-server protocol messages. Each received
-        message resets the deadline; a progressing turn has no wall limit.
+    (** Maximum silence between app-server protocol messages while the model
+        turn is running. Each received message resets the deadline; a
+        progressing turn has no wall limit. It is not armed while an item the
+        app-server started is still open (a [commandExecution], [fileChange],
+        [mcpToolCall] or [sleep] item between its [item/started] and its
+        [item/completed]): the app-server writes nothing while such an item
+        runs, so that silence is the protocol and only [wall_clock_ceiling_s]
+        bounds it.
         [None] removes the deadline after the complete [turn/start] dispatch —
         the spawned client decides when its own turn ends, which is the posture
         of running the CLI directly. Setup and dispatch remain bounded by
@@ -46,8 +52,9 @@ type config =
   ; wall_clock_ceiling_s : float option
     (** Whole-turn wall-clock ceiling measured from spawn ([None] selects the
         shared hours-scale default). The idle timeout above resets on every
-        received message, so this is the only bound a turn of continuous
-        thin progress cannot outlive (#31242). *)
+        received message and is off while a tool item is open, so this is the
+        only bound that a turn of continuous thin progress (#31242) or a tool
+        item that never completes cannot outlive. *)
   ; output_schema : Yojson.Safe.t option
     (** JSON Schema for the turn's final assistant message, sent as
         [outputSchema] on the v2 [turn/start] request. The flag documented for

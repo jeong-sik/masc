@@ -63,8 +63,10 @@ let test_filter_explanations_name_scope_and_quiet_rows () =
   check string "actions says state is hidden"
     "scope actions · flat calls/returns/turn/chat · state pushes hidden"
     (Acting.filter_explanation Acting.Actions);
-  check string "everything explains gray composite rows"
-    "scope everything · gray · = state/telemetry · composite = Keeper snapshot changed"
+  (* The dot this line used to name is not drawn on any row: #33691 gave a
+     quiet row a blank mark cell, and this legend's own separator is a dot. *)
+  check string "everything names the only cue a quiet row carries"
+    "scope everything · gray = state/telemetry · composite = Keeper snapshot changed"
     (Acting.filter_explanation Acting.Everything)
 ;;
 

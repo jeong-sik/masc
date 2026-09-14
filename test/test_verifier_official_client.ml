@@ -29,7 +29,9 @@ if 'auth' in sys.argv:
     emit({'loggedIn':True,'authMethod':'claude.ai','subscriptionType':'team','apiProvider':'firstParty'})
     sys.exit(0)
 declarations = sorted(os.path.relpath(os.path.join(d, f), os.getcwd()) for d, _, fs in os.walk(os.getcwd()) for f in fs if f.endswith('.toml'))
-record({'argv':sys.argv,'cwd':os.getcwd(),'declarations':declarations})
+system_prompt_file = next((sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--system-prompt-file'), None)
+system_prompt = open(system_prompt_file).read() if system_prompt_file else None
+record({'argv':sys.argv,'cwd':os.getcwd(),'declarations':declarations,'system_prompt':system_prompt})
 assert sys.argv[sys.argv.index('--tools')+1] == ''
 assert '--setting-sources=' in sys.argv
 session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
@@ -174,7 +176,15 @@ candidates = ["forbidden.verifier", "official.verifier"]
   let invocation = List.find (fun row -> member "argv" row <> `Null) rows in
   let argv = member "argv" invocation |> Yojson.Safe.Util.to_list in
   let managed = Prompt_registry.render_prompt_template Prompt_names.verification_system [] |> Result.get_ok in
-  check bool "managed verifier contract reaches client" true (List.mem (`String managed) argv);
+  (* The contract travels in a file the client is told to read, not in argv:
+     [Runtime_claude_code.command] writes it before the spawn and passes
+     [--system-prompt-file <path>] so no prompt bytes sit in the process list
+     (#36035). This case read argv for the text and so stopped reading the
+     contract at all. *)
+  check bool "the client is told where to read the contract" true
+    (List.mem (`String "--system-prompt-file") argv);
+  check string "managed verifier contract reaches client" managed
+    (member "system_prompt" invocation |> Yojson.Safe.Util.to_string);
   let client_root = member "cwd" invocation |> Yojson.Safe.Util.to_string in
   check bool "client does not run in workspace" false (String.equal root client_root);
   check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);

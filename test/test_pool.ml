@@ -219,10 +219,9 @@ let mock_body_with_producer ~clock ~chunks =
   in
   body, producer
 
-(* Tests use the real clock with sub-second delays so the suite stays
-   under ~1s wall-clock total. mock_clock isn't available in this Eio
-   version; idle timer logic is generic over [clock] so real time is a
-   faithful test fixture. *)
+(* These cases use the real clock with sub-second delays so the suite
+   stays under ~1s wall-clock total; the scheduler-order case that needs a
+   mock clock is test_pool_watched_work. *)
 
 let test_idle_steady_stream_completes () =
   Eio_main.run @@ fun env ->
@@ -379,7 +378,7 @@ let test_request_timeout_bounds_never_returning_transport () =
      Alcotest.(check bool)
        "timeout is explicit"
        true
-       (Astring.String.is_prefix ~affix:"timeout after" message)
+       (Astring.String.is_prefix ~affix:"Pool.request: timeout after" message)
    | Ok () -> Alcotest.fail "never-returning transport must time out");
   Alcotest.(check bool) "deadline settles promptly" true (elapsed < 0.5)
 

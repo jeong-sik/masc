@@ -174,7 +174,7 @@ let complete_prepared_sync
               Http_client.with_explicit_deadline body_deadline run_transport
             | Http_client.Bounded (clock, timeout_s) ->
               (match
-                 Eio.Time.with_timeout clock timeout_s (fun () -> Ok (run_transport ()))
+                 Under_deadline.run clock timeout_s run_transport
                with
                | Ok result -> result
                | Error `Timeout ->

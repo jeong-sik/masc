@@ -1488,6 +1488,13 @@
  (modules test_voice_noise_reduction_cleanup)
  (libraries alcotest masc_test_deps unix))
 
+; Mock clock as the Voice MCP call's clock: an answer that arrived as the
+; window closed is the answer, not Timed_out.
+(test
+ (name test_voice_bridge_watched_work)
+ (modules test_voice_bridge_watched_work)
+ (libraries alcotest eio eio.mock masc))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 
@@ -1938,8 +1945,9 @@
  (modules test_keeper_stream_idle_floor)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
-; A process with no clock refuses the provider attempt instead of running it
-; unbounded. The only driver suite that installs no clock.
+; A process with no clock in Eio_context refuses the provider attempt in the
+; name of the deadline it could not set. The only driver suite that installs
+; no clock.
 (test
  (name test_keeper_attempt_without_clock)
  (modules test_keeper_attempt_without_clock)
@@ -3432,7 +3440,7 @@
 (test
  (name test_keeper_tool_approval_registry)
  (modules test_keeper_tool_approval_registry)
- (libraries alcotest eio eio_main fmt masc))
+ (libraries alcotest eio eio_main eio.mock fmt masc))
 
 (test
  (name test_tui_keeper_chat_live)
@@ -5067,6 +5075,9 @@
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
+(include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
+(include stanzas/test_tui_sheet_names_every_palette_destination.inc)
+(include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
 (include stanzas/test_tui_board_read_title.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
@@ -5084,6 +5095,7 @@
 (include stanzas/test_tui_theme_contrast.inc)
 
 (include stanzas/test_tui_file_icon.inc)
+(include stanzas/test_tui_memory_mark.inc)
 
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
@@ -5443,6 +5455,13 @@
  (modules test_browser_lane)
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
 
+; Mock clock as the lane's clock: a command taken, and an answer delivered,
+; as their window passed stand.
+(test
+ (name test_browser_lane_watched_work)
+ (modules test_browser_lane_watched_work)
+ (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat))
+
 (include stanzas/test_browser_native_host.inc)
 
 (test
@@ -5654,6 +5673,46 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_board_scroll)))
+
+(rule
+ (alias runtest-test_tui_board_heading_width)
+ (deps test_tui_board_heading_width.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_board_heading_width.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_board_heading_width)))
+
+(rule
+ (alias runtest-test_tui_config_paths_row)
+ (deps test_tui_config_paths_row.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_config_paths_row.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_config_paths_row)))
+
+(rule
+ (alias runtest-test_tui_tab_strip_pty)
+ (deps test_tui_tab_strip_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_tab_strip_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(rule
+ (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)
+ (deps test_tui_lane_detail_says_what_the_lane_answers.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_lane_detail_says_what_the_lane_answers.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_lane_detail_says_what_the_lane_answers)))
 
 (rule
  (alias runtest-test_tui_search_count)
@@ -6084,6 +6143,20 @@
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+; Mock clock orders a watcher's wake-up ahead of the work's: the work's
+; outcome stands.
+(test
+ (name test_watched_work)
+ (modules test_watched_work)
+ (libraries masc.watched_work alcotest eio eio_main eio.mock))
+
+; The same order through the pool: its request window and idle window keep
+; a result the work finished.
+(test
+ (name test_pool_watched_work)
+ (modules test_pool_watched_work)
+ (libraries masc_test_deps masc.http_client piaf eio eio_main eio.mock))
 
 (test
  (name test_lane_addon_skills)

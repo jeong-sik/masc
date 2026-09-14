@@ -518,13 +518,15 @@ let make_hooks
           tool_name;
         incr tool_call_count_ref;
         (* AGENT_CORE exposes the provider-facing tool body here as text.  It is not a
-           semantic authority: JSON-looking bytes must stay opaque.  A future
-           typed AGENT_CORE hook field may carry [Keeper_tool_outcome]; until then the
-           explicit typed value is unavailable rather than reconstructed from
-           content. *)
+           semantic authority: JSON-looking bytes must stay opaque.  The typed
+           outcome comes from the result's [_meta] instead -- the
+           [Tool_outcome_declaration] the handler attached to its result -- so a
+           tool that declares [Progress] is read as such and one that declares
+           nothing stays [None]; nothing is reconstructed from content. *)
         let output_text, typed_outcome =
           match output with
-          | Ok { Agent_core.Types.content; _ } -> content, None
+          | Ok { Agent_core.Types.content; _meta; _ } ->
+            content, Keeper_tool_outcome_metadata.declared _meta
           | Error { Agent_core.Types.message; _ } -> (message, None)
         in
         let input_keys = tool_input_keys_for_log input in

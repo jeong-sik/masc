@@ -555,9 +555,10 @@ let drain_and_join_librarian ~base_path ~keeper_name =
       | None -> `Joined (join ())
       | Some clock ->
         let timeout_sec = current_drain_timeout_sec () in
-        Eio.Fiber.first
+        (* A lane that exited as the drain timeout passed has exited. *)
+        Watched_work.run
           (fun () -> `Joined (join ()))
-          (fun () ->
+          ~watcher:(fun () ->
              Eio.Time.sleep clock timeout_sec;
              `Timed_out timeout_sec)
     in

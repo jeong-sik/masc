@@ -123,10 +123,36 @@ let record_vision_analyze_result ~result ~reason =
     ()
 ;;
 
-let record_vision_candidate_attempt ~runtime_id ~result ~reason =
+(* #35456: candidate start/termination rows join the parent tool call.
+   The parent's [tool_use_id] (and trace id when known) is carried down
+   from the dispatch context; the row names the runtime and the outcome
+   only -- never image bytes, prompt text, or credentials. *)
+let record_vision_candidate_attempt
+      ?tool_use_id
+      ?trace_id
+      ~runtime_id
+      ~result
+      ~reason
+      ~duration_ms
+      ~success
+      () =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string VisionCandidateAttempts)
     ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
+    ();
+  Keeper_tool_call_log.log_call
+    ~keeper_name:"system"
+    ~tool_name:"vision_candidate"
+    ~input:(`Assoc
+              [ "runtime_id", `String runtime_id
+              ; "result", `String result
+              ; "reason", `String reason
+              ])
+    ~output_text:""
+    ~success
+    ~duration_ms
+    ?tool_use_id
+    ?trace_id
     ()
 ;;
 
@@ -543,6 +569,8 @@ let note_candidate_account ~(runtime : Runtime.t) = function
 let run_candidates_outcome
     ?base_path
     ?complete
+    ?tool_use_id
+    ?trace_id
     ~sw
     ~clock
     ~net
@@ -587,8 +615,9 @@ let run_candidates_outcome
               "additionalProperties", `Bool false]) () in
       (match result with
        | Error failure ->
-         record_vision_candidate_attempt ~runtime_id ~result:"error"
-           ~reason:"official_client_error";
+         record_vision_candidate_attempt
+           ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+           ~reason:"official_client_error" ~duration_ms:0.0 ~success:false ();
          if official_failure_can_advance failure then
            loop ~last_error:(Some (Candidate_official_failure { runtime_id; failure }))
              ~attempt_index:(attempt_index + 1) rest
@@ -599,16 +628,19 @@ let run_candidates_outcome
            with Yojson.Json_error detail -> Error detail in
          (match parsed with
           | Ok text when String.trim text <> "" ->
-            record_vision_candidate_attempt ~runtime_id ~result:"ok"
-              ~reason:"provider_response";
+            record_vision_candidate_attempt
+              ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
+              ~reason:"provider_response" ~duration_ms:0.0 ~success:true ();
             Vo_ok { text; runtime_id; requested_model = rt.model.api_name;
                     response_model = response.model }
           | parsed ->
             let detail = match parsed with
               | Error detail -> detail
               | Ok _ -> "empty extraction" in
-            record_vision_candidate_attempt ~runtime_id ~result:"error"
-              ~reason:"invalid_structured_output";
+            record_vision_candidate_attempt
+              ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+              ~reason:"invalid_structured_output" ~duration_ms:0.0
+              ~success:false ();
             if not (List.is_empty rest) then sleep_before_next_candidate ~clock ~attempt_index;
             loop ~last_error:(Some (Candidate_invalid_output
               (Printf.sprintf "%s: %s" runtime_id detail)))
@@ -626,9 +658,9 @@ let run_candidates_outcome
       match Runtime.validate_request_body_cap ~runtime_id config with
       | Error error ->
         record_vision_candidate_attempt
-          ~runtime_id
-          ~result:"error"
-          ~reason:"invalid_request_body_cap";
+          ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+          ~reason:"invalid_request_body_cap" ~duration_ms:0.0
+          ~success:false ();
         Vo_provider
           { failure_class = Tool_result.Runtime_failure
           ; detail = Runtime.request_body_cap_error_to_string error
@@ -637,9 +669,8 @@ let run_candidates_outcome
         (match fit_request_to_cap ~req ~cache ~cap_bytes with
          | Error (actual_bytes, limit_bytes) ->
            record_vision_candidate_attempt
-             ~runtime_id
-             ~result:"skipped"
-             ~reason:"image_exceeds_cap";
+             ?tool_use_id ?trace_id ~runtime_id ~result:"skipped"
+             ~reason:"image_exceeds_cap" ~duration_ms:0.0 ~success:false ();
            (* No call was made, so no backoff and no attempt counted. The
               size failure is kept as the last error so an exhausted walk
               reports why the image went unread. *)
@@ -655,17 +686,16 @@ let run_candidates_outcome
          with
        | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"error"
-              ~reason:"timeout";
+              ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+              ~reason:"timeout" ~duration_ms:0.0 ~success:false ();
             continue_with Candidate_timeout
        | Error err ->
             if candidate_capacity_http_error err
             then (
               record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"candidate_capacity_error";
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"candidate_capacity_error" ~duration_ms:0.0
+                ~success:false ();
               (* Another attempt on this binding cannot change its hard limit;
                  advance without transient-outage backoff or rewriting pixels. *)
               loop
@@ -675,9 +705,9 @@ let run_candidates_outcome
             else if wiring_rejected err
             then (
               record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"terminal_provider_error";
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"terminal_provider_error" ~duration_ms:0.0
+                ~success:false ();
               Vo_provider
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
@@ -686,9 +716,9 @@ let run_candidates_outcome
             then (
               note_candidate_account ~runtime:rt err;
               record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"candidate_policy_error";
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"candidate_policy_error" ~duration_ms:0.0
+                ~success:false ();
               (* The verdict is this binding's; waiting changes nothing about
                  it, so advance without the transient-outage backoff. *)
               loop
@@ -698,15 +728,15 @@ let run_candidates_outcome
             else if Runtime_attempt_fsm.should_try_next err
             then (
               record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"transient_provider_error";
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"transient_provider_error" ~duration_ms:0.0
+                ~success:false ();
               continue_with (Candidate_provider_error err))
             else (
               record_vision_candidate_attempt
-                ~runtime_id
-                ~result:"error"
-                ~reason:"runtime_provider_error";
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"runtime_provider_error" ~duration_ms:0.0
+                ~success:false ();
               Vo_provider
                 { failure_class = failure_class_of_http_error err
                 ; detail = Provider_http_error.to_message err
@@ -719,9 +749,9 @@ let run_candidates_outcome
              with
              | Vo_truncated ->
                record_vision_candidate_attempt
-                 ~runtime_id
-                 ~result:"error"
-                 ~reason:"output_token_limit";
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"output_token_limit" ~duration_ms:0.0
+                 ~success:false ();
                (* A typed length stop is candidate-local. Keep the same pixels
                   and query, and let the next serializer enforce its own
                   declared ceiling. Equal ceilings are still worth trying:
@@ -737,9 +767,9 @@ let run_candidates_outcome
                      | RepetitionTruncation | PauseTurn | Compaction
                      | ContextWindowExceeded | UnmatchedToolCalls -> false) ->
                record_vision_candidate_attempt
-                 ~runtime_id
-                 ~result:"error"
-                 ~reason:"invalid_structured_output";
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"invalid_structured_output" ~duration_ms:0.0
+                 ~success:false ();
                (* A finished reply whose JSON broke mid-string is the
                   json_object flake, not a verdict: which backends break
                   escaping differs per model, exactly as token ceilings do
@@ -755,23 +785,23 @@ let run_candidates_outcome
                     (Printf.sprintf "%s: %s" runtime_id detail))
              | Vo_invalid_structured_response _ as final ->
                record_vision_candidate_attempt
-                 ~runtime_id
-                 ~result:"error"
-                 ~reason:"invalid_structured_response";
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"invalid_structured_response" ~duration_ms:0.0
+                 ~success:false ();
                final
              | Vo_empty ->
                record_vision_candidate_attempt
-                 ~runtime_id
-                 ~result:"error"
-                 ~reason:"empty_extraction";
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"empty_extraction" ~duration_ms:0.0
+                 ~success:false ();
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: empty extraction" runtime_id))
              | outcome ->
                record_vision_candidate_attempt
-                 ~runtime_id
-                 ~result:"ok"
-                 ~reason:"provider_response";
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
+                 ~reason:"provider_response" ~duration_ms:0.0
+                 ~success:true ();
                outcome)))
   in
   loop ~last_error ~attempt_index candidates
@@ -779,6 +809,8 @@ let run_candidates_outcome
 let run_vision
     ?base_path
     ?complete
+    ?tool_use_id
+    ?trace_id
     ?runtime_id
     ?(exclude_runtime_ids = [])
     ~sw
@@ -841,6 +873,8 @@ let run_vision
               | Ok candidates -> run_candidates_outcome
                 ?base_path
                 ?complete
+                ?tool_use_id
+                ?trace_id
                 ~sw
                 ~clock
                 ~net
@@ -911,6 +945,8 @@ let runtime_id_of_args args =
 let handle_with_outcome
     ?base_path
     ?complete
+    ?tool_use_id
+    ?trace_id
     ?sw
     ?clock
     ?net
@@ -964,6 +1000,8 @@ let handle_with_outcome
                 run_vision
                   ?base_path
                   ?complete
+                  ?tool_use_id
+                  ?trace_id
                   ?runtime_id
                   ~sw
                   ~clock
@@ -974,10 +1012,12 @@ let handle_with_outcome
                   ()
                 |> execution_of_vision_outcome))))
 
-let handle ?base_path ?complete ?sw ?clock ?net ~meta ~args () =
+let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome
      ?base_path
      ?complete
+     ?tool_use_id
+     ?trace_id
      ?sw
      ?clock
      ?net

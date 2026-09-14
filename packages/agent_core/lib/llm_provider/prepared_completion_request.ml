@@ -225,7 +225,7 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?on_permit_
                | Http_client.Unbounded -> measured ()
                | Http_client.Bounded (clock, first_event_timeout_s) ->
                  (match
-                    Eio.Time.with_timeout clock first_event_timeout_s (fun () -> Ok (measured ()))
+                    Under_deadline.run clock first_event_timeout_s measured
                   with
                   | Ok result -> result
                   | Error `Timeout ->

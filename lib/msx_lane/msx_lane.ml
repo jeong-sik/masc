@@ -33,6 +33,10 @@ let error_to_string = function
   | Unreadable message -> message
 ;;
 
+(* NTSC: the VDP runs 262 lines a frame at 60 Hz, the machine [load] boots.
+   Every "seconds" figure over frames in the lane and its routes divides by
+   this one number. *)
+let frames_per_second = 60
 let max_frames_per_call = 300
 let boot_frames = 45
 

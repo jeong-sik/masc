@@ -243,6 +243,150 @@ let test_encoded_pixel_snapshot () =
     check bool "replacement machine does not inherit cached pixels" false
       (String.equal encoded (pixels replacement)))
 
+(* ---- press: parse at the boundary (audit F442, F212) -----------------------
+   Proves: a press field of the wrong type is a 400 that names the field and
+   presses nothing. On main, hold_frames:"5" ran with the default 5 and
+   sequence:1 ran as a chord, both silently. *)
+let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
+
+let test_press_rejects_wrong_types () =
+  with_tick_machine (fun () ->
+    let before = frame_number (Route.frame_json ()) in
+    List.iter (fun (body, expected) ->
+      let status, response = Route.press_response ~who:"unit-presser" ~body in
+      check bool ("wrong type is a bad request: " ^ body) true (status = `Bad_request);
+      check (option string) ("the refusal names the field: " ^ body) (Some expected)
+        (match member "message" response with Some (`String m) -> Some m | _ -> None);
+      check int ("nothing is pressed: " ^ body) before (frame_number (Route.frame_json ()));
+      check bool ("nothing reaches the ledger: " ^ body) true (ledger_whos () = []))
+      [ {|{"keys":["space"],"hold_frames":"5"}|}, "hold_frames must be a positive integer"
+      ; {|{"keys":["space"],"hold_frames":0}|}, "hold_frames must be a positive integer"
+      ; {|{"keys":["space"],"frames":1.5}|}, "frames must be a positive integer"
+      ; {|{"keys":["space"],"frames":null}|}, "frames must be a positive integer"
+      ; {|{"keys":["space"],"sequence":1}|}, "sequence must be a boolean"
+      ; {|{"keys":["space"],"sequence":"true"}|}, "sequence must be a boolean"
+      ; {|{"keys":["space",1]}|}, "keys must be an array of strings"
+      ; {|{"keys":"space"}|}, "keys must be an array of strings"
+      ; {|{}|}, "keys must name at least one key"
+      ; {|{"keys":[]}|}, "keys must name at least one key" ])
+
+let test_press_defaults_and_identity () =
+  with_tick_machine (fun () ->
+    let before = frame_number (Route.frame_json ()) in
+    let status, response = Route.press_response ~who:"unit-presser" ~body:{|{"keys":["space"]}|} in
+    check bool "a well-typed press succeeds" true (status = `OK);
+    check (option bool) "ok is true" (Some true)
+      (match member "ok" response with Some (`Bool b) -> Some b | _ -> None);
+    check int "absent frames means the named default" Route.press_default_step_frames
+      (frame_number (Route.frame_json ()) - before);
+    check bool "the edge is recorded under the caller's who" true
+      (List.mem "unit-presser" (ledger_whos ()));
+    let before = frame_number (Route.frame_json ()) in
+    let status, _ = Route.press_response ~who:"unit-presser"
+        ~body:{|{"keys":["space","space"],"sequence":true,"hold_frames":1,"frames":2}|} in
+    check bool "a typed sequence press succeeds" true (status = `OK);
+    check int "a sequence advances frames per key" 4
+      (frame_number (Route.frame_json ()) - before);
+    let status, _ = Route.press_response ~who:"unit-presser"
+        ~body:{|{"keys":["space"],"hold_frames":20}|} in
+    check bool "the lane's own bounds still answer 400" true (status = `Bad_request))
+
+(* ---- press route: identity comes from the actor resolver (F321, F437) ------
+   Proves: the ledger names the credential's agent, never a literal. On main the
+   route read x-masc-agent itself and wrote "operator" when the header was
+   absent; now with_tool_actor_auth resolves the actor, so a bearer token with
+   no x-masc-agent lands under the token's agent, and no credential at all is
+   refused before anything is pressed. *)
+let remove_tree path =
+  let rec go path =
+    if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
+      Array.iter (fun name -> go (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else Unix.unlink path
+  in
+  go path
+
+let loopback_request_authority () =
+  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> fail "failed to construct loopback request authority"
+
+(* Drive the real MSX router with one POST and return the raw HTTP response. *)
+let dispatch_press ~state ~authorization ~body =
+  Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
+    let router = Route.add_routes (Masc.Http_server_eio.Router.create ()) in
+    Server_auth.publish_server_state state;
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+    in
+    let request_str =
+      Printf.sprintf
+        "POST /api/v1/msx/press HTTP/1.1\r\n\
+         Host: 127.0.0.1:8935\r\n\
+         Origin: http://127.0.0.1:8935\r\n\
+         %sContent-Type: application/json\r\n\
+         Content-Length: %d\r\n\
+         \r\n\
+         %s"
+        (match authorization with
+         | Some token -> Printf.sprintf "Authorization: Bearer %s\r\n" token
+         | None -> "")
+        (String.length body) body
+    in
+    let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in
+    ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+               Buffer.add_string response_buf
+                 (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+               total + iov.len)
+            0 iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Server_auth.clear_server_state ();
+    Buffer.contents response_buf)
+
+let status_of_response response =
+  match String.split_on_char ' ' response with
+  | _ :: status :: _ -> int_of_string status
+  | _ -> failf "could not parse response status: %S" response
+
+let test_press_route_names_the_resolved_actor () =
+  with_tick_machine (fun () ->
+    let base_path = Filename.temp_dir "msx-press-actor-" "" in
+    Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+      Auth.save_auth_config base_path
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      let token =
+        match Auth.create_token base_path ~agent_name:"tui-presser" ~role:Masc_domain.Admin with
+        | Ok (token, _) -> token
+        | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+      in
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Eio_main.run (fun _env ->
+        let before = frame_number (Route.frame_json ()) in
+        let refused = dispatch_press ~state ~authorization:None ~body:{|{"keys":["space"]}|} in
+        check int "no credential is refused" 401 (status_of_response refused);
+        check bool "a refused press reaches no ledger" true (ledger_whos () = []);
+        check int "a refused press advances nothing" before (frame_number (Route.frame_json ()));
+        let accepted =
+          dispatch_press ~state ~authorization:(Some token) ~body:{|{"keys":["space"]}|} in
+        check int "a bearer press without x-masc-agent succeeds" 200 (status_of_response accepted);
+        check bool "the ledger names the token's agent, not a literal" true
+          (List.mem "tui-presser" (ledger_whos ()));
+        check bool "no edge is attributed to \"operator\"" false
+          (List.mem "operator" (ledger_whos ())))))
+
 let () =
   run "msx frame route"
     [ ( "checkpoint", [test_case "validation, worker, restore and storage failure" `Quick test_checkpoint_route])
@@ -336,6 +480,16 @@ let () =
               (match member "ok" bad with Some (`Bool b) -> Some b | _ -> None);
             check (option string) "and carries the message" (Some "unknown cartridge")
               (match member "message" bad with Some (`String m) -> Some m | _ -> None))
+        ] )
+    ; ( "press_response"
+      , [ test_case "a field of the wrong type is a 400 naming the field" `Quick
+            test_press_rejects_wrong_types
+        ; test_case "absent fields default and the who is the caller's" `Quick
+            test_press_defaults_and_identity
+        ] )
+    ; ( "press_route"
+      , [ test_case "the ledger names the actor the resolver returned" `Quick
+            test_press_route_names_the_resolved_actor
         ] )
     ; ( "tick"
       , [ test_case "retained pixels keep atomic advancement and fresh metadata" `Quick test_retained_tick

@@ -350,15 +350,14 @@ let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~messa
     | [] -> None
     | endpoint :: rest ->
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-      let model =
-        Voice_config.model_at_endpoint ~default_model:tts.Voice_config.default_model endpoint
-      in
-      match model with
-      | None -> try_endpoint rest
-      | Some model ->
       if Voice_runtime_overlay.speaker_of_transport adapter.transport
          = Voice_runtime_overlay.Over_http
       then (
+        match
+          Voice_config.model_at_endpoint ~default_model:tts.Voice_config.default_model endpoint
+        with
+        | None -> try_endpoint rest
+        | Some model ->
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
         in

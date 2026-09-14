@@ -10764,9 +10764,19 @@ let render_runtime (state : state) =
                 else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
           in
           let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
+          (* The lane fact leads. This cell is what is left of the row after
+             the five fixed columns -- eighteen at a hundred -- and the keeper
+             assignment led it until now, which spent the whole cell: three of
+             the four rows read "[unassigned] . si..." and an operator could
+             not tell head from single candidate from fallback #2.
+
+             The lane fact is what this table is for: it says why this
+             candidate is the one the lane walks. Who is bound to the lane is
+             a keeper question, answered in full on Keepers, and it is the
+             half several rows repeat -- so it is the half that can be cut. *)
           let detail =
             String.concat " \xc2\xb7 "
-              (assignment_fact @ lane_fact @ default_fact @ route_detail
+              (lane_fact @ assignment_fact @ default_fact @ route_detail
                @ runtime_probe_detail candidate.rcr_probe)
           in
           let line =

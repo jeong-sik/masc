@@ -2247,6 +2247,7 @@ let surface_ring : (surface * string) list =
   [ (Overview, "Overview");
     (Acting, "Activity");
     (Keepers Keeper_list, "Keepers");
+    (Lanes, "Lanes");
     (Memory, "Memory");
     (Approvals, "Approvals");
     (Board, "Board");
@@ -5092,7 +5093,8 @@ type state = {
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
-  (* The clients roster, off the ring under Runtime the way Lanes is. A
+  (* The clients roster, off the ring under Runtime. Lanes is a top-level
+     workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;
@@ -8204,8 +8206,8 @@ let visible_surface_ring (state : state) : (surface * string) list =
    Task Review and Verdicts collapse onto Planning, Changes collapses onto
    Keepers -- its rows are one keeper's file writes, chosen by the roster
    cursor, so it was never a destination of its own. Channels, Automation, and
-   Runs are selected-Keeper detail tabs; standalone Lanes remain Runtime
-   observation, and Code remains a Workspace child. Resources and Tools
+   Runs are selected-Keeper detail tabs; standalone Lanes is a top-level
+   observation workspace, and Code remains a Workspace child. Resources and Tools
    collapse onto Config: an MCP resource catalog and the tool catalog with its
    receipts and usage are both answers to "what is registered here", read
    rarely and never raced against. System logs collapse onto Activity (the
@@ -8213,7 +8215,8 @@ let visible_surface_ring (state : state) : (surface * string) list =
    readings of the same fleet timeline, and the ring stop that answers "what
    happened" is one. Metrics is a deep-dive telemetry surface that collapses
    onto Overview, off the Tab ring. Connectors is under Config while the
-   Browser Lane reader is on screen, and under Keepers otherwise.
+   Browser Lane reader is on screen, and under Keepers otherwise. Lanes is a
+   top-level observation workspace; Runtime remains the substrate/config view.
 
    One mapping. There were two, one per ring index, and only the tests read
    the one without the Browser Lane arm, so they checked a mapping the strip
@@ -8225,7 +8228,8 @@ let surface_ring_family (state : state) (view : surface) =
   | Verification | Harness -> Planning
   | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
   | Changes | Connectors | Schedules -> Keepers Keeper_list
-  | Runtime | Lanes | Clients -> Config
+  | Runtime | Clients -> Config
+  | Lanes -> Lanes
   | Code -> Repositories
   | Resources | Tools -> Config
   | System_logs -> Acting

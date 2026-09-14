@@ -164,7 +164,7 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
 let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->
   let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
   let ledger_dir = Filename.concat dir "machine" in
-  ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:None));
+  ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
   Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
     let capture () =
       require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")

@@ -1105,6 +1105,11 @@ type chrome_body = {
    one owner. *)
 let surface_chrome_rows = framed_chrome_rows
 
+let surface_chrome_budget state ~terminal_rows =
+  max 1
+    (Masc_tui_types.surface_body_rows state ~terminal_rows
+    - surface_chrome_rows)
+
 (* Which frame the contract draws. A surface is the terminal's whole screen and
    its edge is already the frame, so it draws rules and no box. An overlay is
    opened over a surface and keeps its box, which is how a reader tells the two

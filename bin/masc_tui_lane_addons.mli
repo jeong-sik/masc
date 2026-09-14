@@ -5,8 +5,7 @@ type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option;
-  binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
+  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
@@ -24,7 +23,7 @@ type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
 }
-type focus = Configurations | Instances | Rows
+type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
   subscription_panel : Masc_tui_lane_subscriptions.t option;
@@ -45,7 +44,8 @@ val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
-val lines : width:int -> t -> string list
+val move_lane : t -> int -> t
+val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)
 

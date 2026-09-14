@@ -27,12 +27,33 @@ module For_testing : sig
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
 
+  (** RFC-0436 §4.3/§4.4: what the judge receives of the binary image
+      artifacts in one snapshot. [images] were attached as image blocks;
+      [unread] are the image-format artifacts whose filed body did not come
+      back, each with the store's typed reason. A non-image binary is in
+      neither list. *)
+  type evidence_images =
+    { images : Task.Anti_rationalization.evidence_image list
+    ; unread : (string * Workspace_verification_store.read_binary_error) list
+    }
+
+  val evidence_images_of_snapshot :
+    base_path:string ->
+    Workspace_verification_store.submitted_evidence_access ->
+    evidence_images
+  (** Reads every image-format binary artifact's filed body. An unavailable
+      snapshot yields two empty lists. Item order is preserved in both. *)
+
   val review_notes :
     request:Verification.verification_request ->
     evidence_access:Workspace_verification_store.submitted_evidence_access ->
+    unread_images:(string * Workspace_verification_store.read_binary_error) list ->
     result:Task.Anti_rationalization.review_result ->
     authority:Masc_domain.completion_authority ->
     string
+  (** The notes the verdict commits with. [unread_images] lands under
+      [review.unread_images] as [{reference; reason = {kind; ...}}] so the
+      record names each image the judge did not see and why. *)
 
   (** What one review attempt asks of the retry scheduler. A request, not an
       outcome: whether a retry is armed is known only once the scheduler

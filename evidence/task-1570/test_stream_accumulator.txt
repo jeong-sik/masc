@@ -1,0 +1,62 @@
+Testing `stream_accumulator'.
+This run has ID `Y6IPRU7L'.
+
+  [OK]          create                  0   initial state.
+  [OK]          repeating               0   three identical paragraphs end th...
+  [OK]          repeating               1   two do not.
+  [OK]          repeating               2   short repeated lines are left alone.
+  [OK]          repeating               3   thinking repeats are not guarded.
+  [OK]          repeating               4   a large thinking unit ends the st...
+  [OK]          repeating               5   two large thinking units do not.
+  [OK]          repeating               6   a thinking unit under the floor i...
+  [OK]          repeating               7   a large thinking unit reports the...
+  [OK]          accumulate              0   message_start.
+  [OK]          accumulate              1   message_start no usage.
+  [OK]          accumulate              2   message_start cache.
+  [OK]          accumulate              3   block_start text.
+  [OK]          accumulate              4   block_start tool.
+  [OK]          accumulate              5   text deltas concat.
+  [OK]          accumulate              6   delta without start.
+  [OK]          accumulate              7   repeated text deltas append.
+  [OK]          accumulate              8   text snapshot resolution is canon...
+  [OK]          accumulate              9   text snapshot conflict fails closed.
+  [OK]          accumulate             10   incremental text deltas remain in...
+  [OK]          accumulate             11   thinking delta.
+  [OK]          accumulate             12   thinking signature delta.
+  [OK]          accumulate             13   input_json delta.
+  [OK]          accumulate             14   message_delta.
+  [OK]          accumulate             15   message_delta no stop.
+  [OK]          accumulate             16   message_delta cache.
+  [OK]          accumulate             17   ignores ping/stop/error.
+  [OK]          finalize                0   text response.
+  [OK]          finalize                1   thinking block.
+  [OK]          finalize                2   thinking signature block.
+  [OK]          finalize                3   redacted thinking block.
+  [OK]          finalize                4   redacted thinking snapshot is exp...
+  [OK]          finalize                5   tool_use.
+  [OK]          finalize                6   duplicate tool start before paylo...
+  [OK]          finalize                7   duplicate tool start after payloa...
+  [OK]          finalize                8   conflicting tool start fails closed.
+  [OK]          finalize                9   tool_use rejects non-input deltas.
+  [OK]          finalize               10   tool_use rejects deltas after stop.
+  [OK]          finalize               11   conflicting message start fails c...
+  [OK]          finalize               12   message start replay requires exa...
+  [OK]          finalize               13   terminal state is write-once.
+  [OK]          finalize               14   tool start requires complete iden...
+  [OK]          finalize               15   content kind matches delta kind.
+  [OK]          finalize               16   unknown content kind is rejected ...
+  [OK]          finalize               17   media metadata is frozen.
+  [OK]          finalize               18   tool_use invalid json.
+  [OK]          finalize               19   tool_use invalid json preserves a...
+  [OK]          finalize               20   tool_use non-object json.
+  [OK]          finalize               21   multi block ordering.
+  [OK]          finalize               22   no usage.
+  [OK]          finalize               23   unknown type fails closed.
+  [OK]          map_http_error          0   http error.
+  [OK]          map_http_error          1   network error.
+  [OK]          map_http_error          2   provider parse failure.
+  [OK]          map_http_error          3   empty completion maps to unavaila...
+
+Full test results in `/masc-work/goo-yang-bong/masc/_build/_tests/stream_accumulator'.
+Test Successful in 0.001s. 55 tests run.
+exit=0

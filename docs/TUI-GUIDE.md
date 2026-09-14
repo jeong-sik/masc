@@ -23,6 +23,10 @@ also keep `go <name>` palette entries, and each Config pane has
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
 
+Every clock and date the TUI draws is the terminal's own timezone - header
+clocks, row times, and the dates in every column. One helper makes them all,
+so no row marks its own time with a zone.
+
 ## Quick Start
 
 ```bash
@@ -1703,7 +1707,7 @@ Config Prompts labels whether the effective text comes from an override or the M
 
 ### Following a Fusion run
 
-Fusion lists full start dates in local time. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
+Fusion lists full start dates. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
 
 Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
 
@@ -1721,7 +1725,7 @@ Planning shows net changes in completed Goals, completed Tasks, and pending Goal
 
 ### Memory overview
 
-The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time in the terminal's local timezone; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
+The overview shows fleet totals separately from the filtered Keeper list. `ST` uses ASCII marks: `+` ready, `!` attention, `-` no ordinary snapshot, `s` source only, `x` failed. The inspector spells out the selected state and snapshot revision. `UPDATED` is the ordinary snapshot's stored date and time; missing or unreadable snapshots show `-`. Cycle `s` to Updated for newest-first sorting. Enter opens the same Keeper shown under the cursor after sorting or filtering.
 
 Librarian deferred and failure counts are observations since the server started, not current lane occupancy or a claim that the latest run failed.
 

@@ -8680,7 +8680,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     @ [ ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
+    ; Ansi.dim, "  Started: " ^ started_text
     ; Ansi.reset, "  Duration: " ^ fusion_run_duration ~now run
     ]
     @ (match detail.fud_evidence with
@@ -8903,7 +8903,7 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code";
-          c.push "  DATE (local)      KEEPER             TASK             FILE";
+          c.push "  DATE              KEEPER             TASK             FILE";
           c.push_divider ();
           let room = max 1 (budget - 7) in
           let first = max 0 (cursor - room + 1) in
@@ -9159,7 +9159,7 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s · %s · %d need memory · read %s (local)  %s"
+        Printf.sprintf "%s · %s · %d need memory · read %s  %s"
           (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper") s.mhs_starving_keepers
           (let tm = Unix.localtime s.mhs_generated_at in
            Printf.sprintf "%04d-%02d-%02d %02d:%02d"

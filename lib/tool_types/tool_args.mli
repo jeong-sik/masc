@@ -57,6 +57,10 @@ type error_code =
   | Not_implemented       (** Feature exists in schema but not in runtime. *)
   | Internal_error        (** Unexpected server-side failure. *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
+  | Unavailable
+      (** A store this build cannot read (RFC-0444: the goal store); wire
+          token [goal_store_unavailable]. The envelope names reason, field,
+          file, mirror and reset step. *)
 
 val error_code_to_string : error_code -> string
 

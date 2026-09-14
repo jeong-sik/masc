@@ -3124,6 +3124,62 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
          check (option bool) "provider-qualified preserve policy" None
            (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
+(* Proves F048: a Gemini-format provider resolves capabilities under its own
+   [providers.<id>] label, the same way every other api_format does.
+   [provider_config_from_declared_provider] used to retry a [None] override
+   for Gemini_api | Vertex_gemini_api under the literal label "gemini" with
+   the bare-row fallback on. For a provider named [my_gemini] whose own
+   catalog row exists, the first lookup found that row and returned [None]
+   (no runtime override to lay over it), so the retry then materialized the
+   bare "gemini-probe" row as the override and shadowed the operator's
+   provider-qualified row. Two rows share one id_prefix here and differ only
+   in max_context_tokens: 1024 bare, 4096 under my_gemini. On origin/main the
+   runtime reports 1024; with the retry deleted it reports 4096. *)
+let test_gemini_provider_resolves_capabilities_under_its_own_label () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"gemini-probe\"\n\
+     base = \"gemini\"\n\
+     max_context_tokens = 1024\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"gemini-probe\"\n\
+     provider_name = \"my_gemini\"\n\
+     base = \"gemini\"\n\
+     max_context_tokens = 4096\n"
+  in
+  let runtime_toml =
+    "[providers.my_gemini]\n\
+     protocol = \"gemini-http\"\n\
+     endpoint = \"https://generativelanguage.googleapis.com/v1beta\"\n\
+     \n\
+     [providers.my_gemini.credentials]\n\
+     type = \"env\"\n\
+     key = \"MY_GEMINI_API_KEY\"\n\
+     \n\
+     [models.probe]\n\
+     api-name = \"gemini-probe\"\n\
+     \n\
+     [my_gemini.probe]\n\
+     \n\
+     [runtime]\n\
+     default = \"my_gemini.probe\"\n"
+  in
+  with_model_catalog_content catalog @@ fun () ->
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Error error -> failf "gemini-http runtime should load: %s" error
+    | Ok (_, default, _, _, _) ->
+      check string "default id" "my_gemini.probe" default.id;
+      let config = agent_core_provider_config default in
+      check (option string) "capability label is the provider id"
+        (Some "my_gemini") config.provider_id;
+      (match Llm_provider.Provider_config.capabilities_for_config_model config with
+       | None -> fail "my_gemini.probe must resolve capabilities"
+       | Some caps ->
+         check (option int) "my_gemini row wins over the bare gemini-probe row"
+           (Some 4096) caps.max_context_tokens))
+
 let test_runtime_toml_enabled_defaults_true () =
   let runtime_toml =
     "[providers.local]\n\
@@ -5216,6 +5272,9 @@ let () =
           test_case
             "runtime capability gate uses provider-qualified AGENT_CORE catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
+          test_case
+            "gemini provider resolves capabilities under its own label"
+            `Quick test_gemini_provider_resolves_capabilities_under_its_own_label;
           test_case "runtime locality uses provider schema" `Quick
             test_runtime_locality_uses_provider_schema;
           test_case

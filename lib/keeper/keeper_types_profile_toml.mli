@@ -104,6 +104,10 @@ type keeper_toml_error_kind =
   | Parse_error
   | Profile_error
   | Invalid_name
+  | Declaration_not_found of string
+      (** The keeper name that has no [keepers/<name>.toml]. *)
+  | Unknown_deny_tool of string list
+      (** [keeper.tools.deny] entries no descriptor offers the model. *)
 
 type keeper_toml_load_error =
   Keeper_types_profile_toml_io.keeper_toml_load_error =
@@ -114,6 +118,11 @@ type keeper_toml_load_error =
   }
 
 val keeper_toml_error_kind_to_string : keeper_toml_error_kind -> string
+
+val unknown_deny_tools : string list -> string list
+(** The subset of a [keeper.tools.deny] list that names no model-visible
+    descriptor. Loading refuses a profile for which this is non-empty; a
+    later reader may assert on it, never warn. *)
 val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
 val keeper_toml_load_error_paths : keeper_toml_load_error -> string list
 val inspect_keeper_toml :

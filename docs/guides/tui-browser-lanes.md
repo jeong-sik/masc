@@ -17,12 +17,13 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | --- | --- |
 | `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
+| `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
 | `J` / `K` | Scroll the observed browser page by one viewport, then refresh the same scene |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
-| `N` / `P` | In a regions scene, select the next / previous observed `article` region |
+| `N` / `P` | Select the next / previous observed `article` region or article ancestor |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
@@ -112,6 +113,9 @@ then read the same scene again. The result must retain the observed URL and
 document identity; a viewport resize is reported by the fresh scene rather than
 treated as a pre-action lock. Nested panes still require screenshot pointer
 scroll because their scroll container is selected by the observed hit point.
+The scene context row shows the observed page scroll as `x=… y=…`, so a refresh
+makes the page position explicit without confusing it with pointer coordinates
+or claiming that the scene is a complete document.
 In a regions scene, `N`/`P` move between exact observed `article` regions;
 they leave the selection unchanged on content scenes without article roles.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
@@ -133,6 +137,13 @@ and truncation flag, so a Keeper can preserve the same reading scope.
 The scene status line also reports the observed composition, such as
 `2 articles · 6 links · 1 image`; these are typed node counts, not guesses from
 page text. Use the article count to choose `N`/`P` before reading the full body.
+After a same-document refresh or guarded page scroll it also shows an observed
+delta such as `Δ +3 new · -1 out · =8 same · 2 changed`. `new`, `out`, and
+`same` count unique observed node IDs; `out` means absent from this observation,
+not deleted from the site. Geometry-only movement from scrolling does not count
+as a content change. A different document, URL, view, or scope starts a fresh
+observation and shows no delta. The delta is a compact progress hint for the
+current viewport, not evidence that a feed is complete.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 
@@ -154,6 +165,12 @@ boundary when that context changes, while a scoped article read suppresses the
 duplicate boundary because its scope row already names the article. This is
 observed region identity and label data, not a selector or a guess from page
 text. `y` includes the same ancestor region identity in copied context.
+Adjacent observed text nodes inside the same semantic block are coalesced for
+the reading row when the observed block identity repeats, preserving their
+exact text and each node's selection number. The group closes at that verified
+repeat; an unproven tail stays as separate rows. Crossing a block tag, control,
+raster, heading level, or observed region starts a new row group; the
+projection never merges an action target into prose.
 For eligible observed block-tag nodes, a positive vertical gap from the
 preceding eligible node becomes one blank TUI row. An intervening inline node
 breaks that comparison, zero-gap line fixtures stay compact, and the reader
@@ -206,10 +223,17 @@ region list. A stale reference is rejected once the region is replaced or the
 page reloads. A connector that does not support region reading and returns
 the whole page instead is not treated as success.
 
-In a regions scene, `N`/`P` move directly between observed `article` regions.
-They use the typed landmark role; navigation, suggestions and ordinary text
-remain available through `n`/`p` and `Tab`/`Shift-Tab`. If no article role was
-observed, the shortcut leaves the current selection unchanged.
+`N`/`P` move directly between observed `article` regions. In a content scene,
+they use the first node carrying each typed article ancestor, so a feed can
+jump between posts without opening the region picker first. They use observed
+landmark identity; navigation, suggestions and ordinary text remain available
+through `n`/`p` and `Tab`/`Shift-Tab`. If no article role or article ancestor was
+observed, the shortcut leaves the current selection unchanged. In a content
+scene this selects the first observed node; `Enter` still performs that node's
+observed action, while region scoping remains the explicit `v` → `Enter` path.
+When multiple article ancestors are visible, their compact boundaries include
+the observed ordinal (for example, `[article 2/5]`); this is the current
+viewport's observed count, not a claim that a feed is complete.
 
 Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
 observed from `BrowserRead mode=regions` as `scope`. This path selects an

@@ -293,26 +293,29 @@ type source =
   | Available of state
   | Unavailable of unavailable
 
-and unavailable =
+(* The value itself is defined in masc_types ([Goal_store_unavailable]) so
+   the task-creation contract below this library can carry it; the manifest
+   re-export keeps every constructor addressable as [Goal_store.X]. *)
+and unavailable = Goal_store_unavailable.t =
   { file : string
   ; reason : reason
   ; mirror : mirror_status
   ; reset_step : reset_step
   }
 
-and reason =
+and reason = Goal_store_unavailable.reason =
   | Missing_after_init
   | Unreadable of Unix.error
   | Not_json of string
   | Schema_rejected of { field : string; detail : string }
 
-and mirror_status =
+and mirror_status = Goal_store_unavailable.mirror_status =
   | Mirror_absent
   | Mirror_unreadable of Unix.error
   | Mirror_decodes of { goal_count : int; updated_at : string }
   | Mirror_rejected of reason
 
-and reset_step =
+and reset_step = Goal_store_unavailable.reset_step =
   | Repair_field of string
   | Reset_goal_store
   | Restore_permission
@@ -331,32 +334,7 @@ let reset_step_of_reason = function
   | Missing_after_init -> Reset_goal_store
   | Not_json _ -> Reset_goal_store
 
-let reason_to_string = function
-  | Missing_after_init ->
-      "missing_after_init (goals.json is absent while its .last-good mirror exists)"
-  | Unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
-  | Not_json detail -> "not_json (" ^ detail ^ ")"
-  | Schema_rejected { field; detail } ->
-      Printf.sprintf "schema_rejected field=%s (%s)" field detail
-
-let mirror_status_to_string = function
-  | Mirror_absent -> "absent"
-  | Mirror_unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
-  | Mirror_decodes { goal_count; updated_at } ->
-      Printf.sprintf "decodes goal_count=%d updated_at=%s" goal_count updated_at
-  | Mirror_rejected reason -> "rejected " ^ reason_to_string reason
-
-let reset_step_to_string = function
-  | Repair_field field -> "repair field " ^ field
-  | Reset_goal_store -> "reset the goal store"
-  | Restore_permission -> "restore read permission on the file"
-
-let unavailable_to_string { file; reason; mirror; reset_step } =
-  Printf.sprintf "goal_store: unavailable reason=%s file=%s mirror=%s reset=%s"
-    (reason_to_string reason)
-    file
-    (mirror_status_to_string mirror)
-    (reset_step_to_string reset_step)
+let unavailable_to_string = Goal_store_unavailable.to_string
 
 (* {2 Reading a file with its errno}
 

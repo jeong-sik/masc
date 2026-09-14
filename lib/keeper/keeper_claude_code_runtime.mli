@@ -36,6 +36,7 @@ module For_testing : sig
 end
 
 val run :
+  ?official_task_reference:Keeper_official_task_reference.t ->
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->

@@ -228,6 +228,43 @@ let test_goal_source_failure_blocks_all_bindings () =
     [false; true]
 ;;
 
+(* RFC-0444 PR-2: [masc_add_task] with a goal_id on a store this build cannot
+   read answers the same envelope as the goal tools, as structured data and
+   as the message, with class [Dependency_unavailable]; nothing is written. *)
+let test_add_task_tool_projects_unavailable_envelope () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let primary = Goal_store.goals_path config in
+    let backlog_path = Workspace.backlog_path config in
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let before_backlog = file_bytes backlog_path in
+    let before_links = file_bytes links_path in
+    corrupt primary;
+    let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
+    let result = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+        (`Assoc [ "title", `String "bound"; "goal_id", `String "goal-a" ]) in
+    (match result with
+     | Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; data; message; _ } ->
+       let open Yojson.Safe.Util in
+       check bool "ok is false" false (member "ok" data |> to_bool);
+       check string "error_code" "goal_store_unavailable" (member "error_code" data |> to_string);
+       check string "reason" "not_json" (member "reason" data |> to_string);
+       check string "field" "null" (Yojson.Safe.to_string (member "field" data));
+       check string "file" primary (member "file" data |> to_string);
+       check string "mirror.status" "mirror_decodes"
+         (member "mirror" data |> member "status" |> to_string);
+       check int "mirror.goal_count" 1 (member "mirror" data |> member "goal_count" |> to_int);
+       check string "reset_step" "reset_goal_store" (member "reset_step" data |> to_string);
+       check string "message is the serialized envelope" (Yojson.Safe.to_string data) message
+     | Tool_result.Failed { class_; message; _ } ->
+       failf "expected Dependency_unavailable, got %s: %s"
+         (Tool_result.tool_failure_class_to_string class_) message
+     | Tool_result.Completed _ | Tool_result.Deferred _ ->
+       fail "damaged primary authorized task creation");
+    check (option string) "backlog bytes unchanged" before_backlog (file_bytes backlog_path);
+    check (option string) "link bytes unchanged" before_links (file_bytes links_path))
+;;
+
 let test_unknown_goal_batch_has_no_partial_write () =
   with_test_env (fun config ->
     make_goal config ~id:"goal-a";
@@ -284,6 +321,7 @@ let () =
     "goal_task_assignment"
     [ ( "RFC-0267 Phase 2 — set_task_goal"
       , [ test_case "Goal source failure prevents every binding" `Quick test_goal_source_failure_blocks_all_bindings
+        ; test_case "masc_add_task projects the Unavailable envelope" `Quick test_add_task_tool_projects_unavailable_envelope
         ; test_case "batch unknown Goal has no partial write" `Quick test_unknown_goal_batch_has_no_partial_write
         ; test_case "delete and binding share membership lock" `Quick test_delete_and_binding_share_membership_lock
         ; test_case "unknown task is rejected" `Quick test_unknown_task

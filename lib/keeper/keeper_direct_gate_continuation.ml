@@ -406,6 +406,11 @@ let load ~config ~meta ~operation_id ~session_dir =
 
 type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_client of Semantic.official_client_checkpoint | Checkpoint_reconciliation
 let pending ~base_path ~keeper_name ~operation_id =
+  let* cooperative = Owner.direct_checkpoint ~base_path ~keeper_name ~operation_id |> owner in
+  match cooperative with
+  | Some (Semantic.Agent_core checkpoint) -> Ok (Some (Bound_checkpoint checkpoint))
+  | Some (Semantic.Official_client checkpoint) -> Ok (Some (Bound_official_client checkpoint))
+  | None ->
   let* retry = Owner.direct_runtime_retry ~base_path ~keeper_name ~operation_id |> owner in
   match retry with
   | Some retry -> Ok (Some (Bound_checkpoint retry.Semantic.checkpoint))

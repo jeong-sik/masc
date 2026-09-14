@@ -299,10 +299,13 @@ type store_fault =
          lost to the outage. [settle_running_after_restart] settles it on
          the next boot; this process never fabricates an outcome. *)
 
+(* The integrity prefix matches [owner_error_of_operation_error], so the
+   first refusal and every later one read the same. *)
 let store_fault_detail = function
   | Metadata_persistence_failure detail
-  | Operation_availability_failure detail
-  | Operation_integrity_failure detail -> detail
+  | Operation_availability_failure detail -> detail
+  | Operation_integrity_failure detail ->
+    "Keeper chat operation integrity failure: " ^ detail
   | Operation_reconciliation_required operation_id ->
     Printf.sprintf
       "operation %s is Running with no live child; restart the keeper to settle it before storage recovery"

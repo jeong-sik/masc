@@ -997,6 +997,12 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
         stream_idle_timeout_s = ctx.stream_idle_timeout_s
           ; first_event_timeout_s = ctx.first_event_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
+          ; (* The wait for the binding's admission permit is time in which
+               this attempt makes no progress, so the no-progress threshold
+               is its bound too. Ended here it is a typed [Queue] timeout
+               with nothing sent and the same rotation; left to the attempt
+               watchdog it was "made no progress" with the queue invisible. *)
+            admission_timeout_s = Some ctx.provider_call_deadline_sec
           ; temperature
           ; hooks = hooks_with_gate
           ; tool_approval =

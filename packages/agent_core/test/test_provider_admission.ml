@@ -324,6 +324,65 @@ let test_call_deadline_ends_the_wait_for_a_permit () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
+(* The stream entry: the same held permit, and the admission bound is the
+   only bound a stream call takes before its permit. The transport must not
+   be reached; a stream that was never admitted has no stream budgets to
+   spend. *)
+let test_admission_deadline_ends_the_wait_for_a_stream_permit () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://admission-deadline-queue.test:1" ~max_concurrent_requests:1 ()
+  in
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let dispatched = ref false in
+  let transport : Llm_transport.t =
+    { complete_sync = (fun _ -> fail "stream test must not complete synchronously")
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _ ->
+          dispatched := true;
+          Error
+            (Http_client.NetworkError
+               { message = "test transport declines"; kind = Http_client.Unknown }))
+    }
+  in
+  let started = Eio.Time.now clock in
+  (match
+     Complete.complete_stream
+       ~sw
+       ~net:(Eio.Stdenv.net env)
+       ~clock
+       ~admission_timeout_s:call_deadline_s
+       ~transport
+       ~config
+       ~messages:[]
+       ~on_event:(fun _ -> ())
+       ()
+   with
+   | Error (Http_client.TimeoutError { phase = Http_client.Queue; message }) ->
+     check
+       bool
+       "the message names the admission deadline"
+       true
+       (Agent_core_strings.contains_substring ~needle:"admission_timeout_s" ~haystack:message)
+   | Error (Http_client.TimeoutError { phase; _ }) ->
+     failf "the wait ended in phase %s, not Queue" (Http_client.timeout_phase_to_label phase)
+   | Error _ | Ok _ -> fail "expected a queue timeout while the permit was held");
+  check bool "the wait ended at the admission deadline" true (within_call_deadline ~started ~clock);
+  check bool "the stream was never dispatched" false !dispatched;
+  (match Provider_admission.snapshot_for ~config with
+   | Some snapshot ->
+     check int "the expired waiter left the queue" 0 snapshot.Slot_scheduler.queue_length;
+     check int "the holder still has its permit" 1 snapshot.Slot_scheduler.active
+   | None -> fail "the scheduler must be registered");
+  Eio.Promise.resolve resolve_release ()
+;;
+
 let test_call_deadline_bounds_the_round_trip_with_what_the_wait_left () =
   Eio_main.run
   @@ fun env ->
@@ -452,6 +511,10 @@ let () =
             "a narrower body deadline fires inside it"
             `Quick
             test_a_narrower_body_deadline_fires_inside_the_call_deadline
+        ; test_case
+            "the admission deadline ends the wait for a stream permit"
+            `Quick
+            test_admission_deadline_ends_the_wait_for_a_stream_permit
         ] )
     ]
 ;;

@@ -432,6 +432,7 @@ let complete_prepared_stream
       ~sw
       ~net
       ?clock
+      ?admission_timeout_s
       ?(transport : Llm_transport.t option)
       ?wire_observer
       ?request_wire_observer
@@ -452,9 +453,19 @@ let complete_prepared_stream
     | Some _, None -> Ok ()
     | None, _ | Some _, Some _ -> validate_all config
   in
-  match validation with
+  let preflight =
+    match validation with
+    | Error err -> Error err
+    | Ok () ->
+      Http_client.resolve_explicit_deadline
+        ~operation:"Complete.complete_stream"
+        ~parameter:"admission_timeout_s"
+        ~clock
+        ~timeout_s:admission_timeout_s
+  in
+  match preflight with
   | Error err -> Error err
-  | Ok () ->
+  | Ok admission_deadline ->
     let on_event = emit_stream_event on_event in
     let request_config = config in
     let latency_counter = start_latency_counter ?clock () in
@@ -552,8 +563,32 @@ let complete_prepared_stream
     let result =
       (* The permit spans the entire stream: the provider holds the
          connection open until the final SSE event, so concurrency
-         accounting must too. *)
-      Provider_admission.with_admission ~config:request_config dispatch
+         accounting must too. The wait for the permit is the one part of
+         the call that is not the stream: a stream's length is its own, and
+         nothing here bounds it, but a caller that says how long it will
+         queue ends the wait as [Queue] with nothing sent. *)
+      match admission_deadline with
+      | Http_client.Unbounded ->
+        Provider_admission.with_admission ~config:request_config dispatch
+      | Http_client.Bounded (admission_clock, admission_timeout_s) ->
+        (match
+           Provider_admission.with_admission_until
+             ~clock:admission_clock
+             ~deadline_at:(Eio.Time.now admission_clock +. admission_timeout_s)
+             ~config:request_config
+             dispatch
+         with
+         | Ok stream_result -> stream_result
+         | Error `Permit_wait_expired ->
+           Error
+             (Http_client.TimeoutError
+                { message =
+                    Printf.sprintf
+                      "admission_timeout_s deadline exceeded after %.17gs before a \
+                       provider admission permit was granted (Complete.complete_stream)"
+                      admission_timeout_s
+                ; phase = Http_client.Queue
+                }))
     in
     Result.map
       (fun resp ->
@@ -576,6 +611,7 @@ let complete_stream
       ~sw
       ~net
       ?clock
+      ?admission_timeout_s
       ?stream_idle_timeout_s
       ?first_event_timeout_s
       ?body_timeout_s
@@ -609,6 +645,7 @@ let complete_stream
     ~sw
     ~net
     ?clock
+    ?admission_timeout_s
     ?transport
     ?wire_observer
     ?request_wire_observer
@@ -624,6 +661,7 @@ let complete_stream_admitted
       ~sw
       ~net
       ?clock
+      ?admission_timeout_s
       ?transport
       ?wire_observer
       ?request_wire_observer
@@ -639,6 +677,7 @@ let complete_stream_admitted
     ~sw
     ~net
     ?clock
+    ?admission_timeout_s
     ?transport
     ?wire_observer
     ?request_wire_observer
@@ -655,6 +694,7 @@ let complete_stream_serialized
       ~sw
       ~net
       ?clock
+      ?admission_timeout_s
       ?transport
       ?wire_observer
       ?request_wire_observer
@@ -669,6 +709,7 @@ let complete_stream_serialized
     ~sw
     ~net
     ?clock
+    ?admission_timeout_s
     ?transport
     ?wire_observer
     ?request_wire_observer

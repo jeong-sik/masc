@@ -46,6 +46,7 @@ let canonical_phases =
   ; "caller_budget", KPB.Caller_budget
   ; "wall_clock", KPB.Wall_clock
   ; "capacity_backpressure", KPB.Capacity_backpressure
+  ; "queue", KPB.Queue
   ; "unknown_timeout", KPB.Unknown_timeout
   ]
 

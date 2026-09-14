@@ -54,6 +54,7 @@ type options =
         produces. *)
   ; body_timeout_s : float option
   ; call_timeout_s : float option
+  ; admission_timeout_s : float option
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t
@@ -127,6 +128,7 @@ let default_options =
   ; first_event_timeout_s = None
   ; body_timeout_s = None
   ; call_timeout_s = None
+  ; admission_timeout_s = None
   ; hooks = Hooks.empty
   ; guardrails_async = Guardrails_async.empty
   ; tracer = Tracing.null

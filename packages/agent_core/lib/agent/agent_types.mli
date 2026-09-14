@@ -111,6 +111,16 @@ type options =
         {!Pipeline.stage_route} into {!Llm_provider.Complete.complete_serialized}
         as its [call_timeout_s]; the streaming path does not read it, a
         stream's duration being its own. Requires [clock]. @since 0.231.15 *)
+  ; admission_timeout_s : float option
+    (** Bound on the wait for a provider admission permit before a streaming
+        completion, the one part of a stream call that is not the stream. A
+        call still queued when it runs out ends as
+        [TimeoutError { phase = Queue }] with nothing sent; a granted stream
+        runs under its own budgets. Threaded through {!Pipeline.stage_route}
+        into {!Llm_provider.Complete.complete_stream_serialized} and
+        {!Llm_provider.Complete.complete_stream_admitted}. The non-streaming
+        path's whole-call bound is [call_timeout_s]. Requires [clock].
+        @since 0.231.15 *)
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

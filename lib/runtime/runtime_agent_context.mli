@@ -61,6 +61,14 @@ type config = {
           has one deadline for its whole call (a verification probe, a fusion
           panelist) sets this together with [body_timeout_s]; the streaming
           path does not read it. *)
+  admission_timeout_s : float option;
+      (** Bound on the wait for the provider's admission permit before a
+          streaming completion. A keeper turn queued behind other keepers'
+          streams on the same binding ends the wait as
+          [TimeoutError { phase = Queue }] when it runs out, and rotates,
+          instead of the attempt watchdog ending it as no progress; a granted
+          stream runs under its own budgets. The keeper passes its
+          no-progress threshold. *)
   max_tokens : int option;
       (** Caller-level output-token override. [None] adds no override, so an
           explicit [provider_cfg.max_tokens] remains authoritative; when both

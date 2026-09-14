@@ -38,12 +38,14 @@ type config =
   ; timeout_s : float option
     (** Maximum silence between app-server protocol messages while the model
         turn is running. Each received message resets the deadline; a
-        progressing turn has no wall limit. It is not armed while an item the
-        app-server started is still open (a [commandExecution], [fileChange],
-        [mcpToolCall] or [sleep] item between its [item/started] and its
-        [item/completed]): the app-server writes nothing while such an item
-        runs, so that silence is the protocol and only [wall_clock_ceiling_s]
-        bounds it.
+        progressing turn has no wall limit. It is not armed while the model is
+        waiting on an item the app-server started (a [commandExecution],
+        [fileChange], [mcpToolCall] or [sleep] item between its [item/started]
+        and its [item/completed]): the app-server may write nothing while such
+        an item runs, so that silence is not measured and only
+        [wall_clock_ceiling_s] bounds it. An item of the model stream or a
+        message delta arms it again even while a tool item stays open, as a
+        background command's item does under unified exec.
         [None] removes the deadline after the complete [turn/start] dispatch —
         the spawned client decides when its own turn ends, which is the posture
         of running the CLI directly. Setup and dispatch remain bounded by

@@ -174,6 +174,16 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
       drop 4 lines)
     else drop 3 lines
   in
+  List.iter
+    (fun (index, _) ->
+       if index < 0 || index >= List.length remaining_lines
+       then
+         invalid_arg
+           (Printf.sprintf
+              "line_delays index %d is outside the %d lines after the handshake"
+              index
+              (List.length remaining_lines)))
+    line_delays;
   (* A background child that inherits stdout and stderr and outlives the
      CLI, the shape an orphaned MCP server leaves behind. It starts before
      the terminal lines so the race with termination cannot skip it. *)
@@ -1498,12 +1508,22 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
 ;;
 
 (* The idle window is far shorter than the silent gap, so the window firing
-   and the window being off are distinguishable; admission stays wide because
-   the handshake is measured under it. *)
-let tool_item_idle_window_s = 0.3
-let tool_item_gap_s = 1.0
+   and the window being off are distinguishable; the window itself is no
+   narrower than the narrowest one already in this file (0.75 s), because the
+   handshake echo and the lines after an item are read under it. Admission
+   stays wide because the spawn is measured under it. *)
+let tool_item_idle_window_s = 0.75
+let tool_item_gap_s = 2.0
 let tool_item_admission_s = 5.0
-let tool_item_ceiling_s = 2.0
+let tool_item_ceiling_s = 3.0
+
+let second_command_started =
+  {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-2","command":"ls","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
+;;
+
+let second_command_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-2","command":"ls","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":""}}}|}
+;;
 
 let native_mcp_call_started =
   {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"mcpToolCall","id":"native-mcp-1","server":"fixture","tool":"probe","status":"inProgress"}}}|}
@@ -1575,12 +1595,12 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
             ; Native_tool_started
                 { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
-                ; tool_name = Some "mcpToolCall"
+                ; tool_name = Some "fixture/probe"
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }
             ; Native_tool_finished
                 { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
-                ; tool_name = Some "mcpToolCall"
+                ; tool_name = Some "fixture/probe"
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
@@ -1627,6 +1647,64 @@ let test_idle_window_rearms_when_the_tool_item_completes () =
          check (float 0.001) "the idle window is armed again" tool_item_idle_window_s seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silence after the item completed did not end the turn")
+;;
+
+(* Two items open at once, the first completes, then silence: the window is
+   still off because the second item is what the model is waiting on.
+   Indexes after the handshake: 1 first started, 2 second started, 3 first
+   completed, 4 second completed. *)
+let test_two_open_items_keep_the_window_off_until_both_complete () =
+  with_fixture
+    ~line_delays:[ 4, tool_item_gap_s ]
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; native_command_started
+    ; second_command_started
+    ; native_command_completed
+    ; second_command_completed
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~timeout_s:tool_item_idle_window_s
+           ~admission_timeout_s:tool_item_admission_s
+           path
+       with
+       | Ok turn ->
+         check string "turn completes after the second item" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+(* A background command under unified exec keeps its item open while the
+   model goes on. Once the model speaks, its window applies again: silence
+   after the delta ends the turn even though the item never completed. *)
+let test_the_model_speaking_arms_the_window_while_an_item_stays_open () =
+  with_fixture
+    ~line_delays:[ 3, tool_item_gap_s ]
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; native_command_started
+    ; agent_message_delta
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~timeout_s:tool_item_idle_window_s
+           ~admission_timeout_s:tool_item_admission_s
+           path
+       with
+       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
+         check (float 0.001) "the model turn's window is armed" tool_item_idle_window_s seconds
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "an open background item switched the model turn's window off")
 ;;
 
 let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
@@ -4750,6 +4828,14 @@ let () =
             "the idle window is armed again when the item completes"
             `Quick
             test_idle_window_rearms_when_the_tool_item_completes
+        ; test_case
+            "two open items keep the window off until both complete"
+            `Quick
+            test_two_open_items_keep_the_window_off_until_both_complete
+        ; test_case
+            "the model speaking arms the window while an item stays open"
+            `Quick
+            test_the_model_speaking_arms_the_window_while_an_item_stays_open
         ; test_case
             "the wall-clock ceiling bounds an item that never completes"
             `Quick

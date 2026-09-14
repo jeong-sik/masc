@@ -61,11 +61,14 @@ let default_config () =
 (* The window one [receive] waits under follows where the turn is rather than
    a value set once after dispatch. Before the [turn/start] reply the client
    is being admitted. During the model turn a client that has gone silent is
-   the fault the idle window exists to notice. While an item the app-server
-   started is still open (a command that prints nothing until it exits, an
-   MCP call in flight) the app-server writes nothing until the item
-   completes, so that silence is the protocol and only the wall-clock ceiling
-   bounds it. *)
+   the fault the idle window exists to notice. While the model is waiting on
+   an item the app-server runs outside the model stream (a command, an MCP
+   call, a sleep) the app-server may write nothing until the item completes,
+   so that silence is not measured and only the wall-clock ceiling bounds it.
+   The model speaking again (an item of the model stream, a message or plan
+   delta) ends that wait even if the item stays open: a background command
+   under unified exec keeps its item open until its process exits while the
+   turn goes on. *)
 type receive_phase =
   | Awaiting_admission
   | Model_turn
@@ -711,15 +714,16 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-(* The item vocabulary this tree acts on. [Unmodelled_item] carries a type the
-   app-server announced that nothing here branches on; rejecting it would end
-   the turn on a protocol addition. *)
+(* The item vocabulary this tree acts on. [Unmodelled_item] is a type the
+   app-server announced that nothing here branches on, an item of the model
+   stream as far as this loop is concerned; rejecting it would end the turn on
+   a protocol addition. *)
 type item_kind =
   | Command_execution
   | File_change
   | Mcp_tool_call
   | Sleep
-  | Unmodelled_item of string
+  | Unmodelled_item
 
 let item_kind_of_item ~stage item =
   let* fields = assoc_at stage item in
@@ -728,21 +732,13 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String other) -> Ok (Unmodelled_item other)
+  | Some (`String _) -> Ok Unmodelled_item
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
 ;;
 
-let wire_item_type = function
-  | Command_execution -> "commandExecution"
-  | File_change -> "fileChange"
-  | Mcp_tool_call -> "mcpToolCall"
-  | Sleep -> "sleep"
-  | Unmodelled_item other -> other
-;;
-
 (* An item the app-server executes outside the model stream: it opens with
-   [item/started], writes nothing while it runs, and closes with
+   [item/started], may write nothing while it runs, and closes with
    [item/completed] carrying the same [id]. [observation] is [None] for a
    wait the model asked for (the interruptible [clock.sleep] tool, up to
    twelve hours upstream): not a tool effect, so nothing is projected, but the
@@ -754,24 +750,34 @@ type tool_item =
 
 let tool_item_of_item ~stage item =
   let* kind = item_kind_of_item ~stage item in
+  let* fields = assoc_at stage item in
   let tool_item ~observation =
-    let* fields = assoc_at stage item in
     let* call_id = required_string stage "id" fields in
     Ok (Some { call_id; observation = observation call_id })
   in
-  let native ~origin call_id =
+  let built_in tool_name call_id =
     Some
       { Runtime_native_tools.identity = Some (Call_id call_id)
-      ; tool_name = Some (wire_item_type kind)
-      ; origin
+      ; tool_name = Some tool_name
+      ; origin = Runtime_native_tools.Built_in
       }
   in
   match kind with
-  | Command_execution | File_change ->
-    tool_item ~observation:(native ~origin:Runtime_native_tools.Built_in)
-  | Mcp_tool_call -> tool_item ~observation:(native ~origin:Runtime_native_tools.Mcp_wrapper)
+  | Command_execution -> tool_item ~observation:(built_in "commandExecution")
+  | File_change -> tool_item ~observation:(built_in "fileChange")
+  | Mcp_tool_call ->
+    (* The item names the server and the tool; the observation keeps both,
+       as the Claude Code runtime keeps an MCP tool's own name. *)
+    let* server = required_string stage "server" fields in
+    let* tool = required_string stage "tool" fields in
+    tool_item ~observation:(fun call_id ->
+      Some
+        { Runtime_native_tools.identity = Some (Call_id call_id)
+        ; tool_name = Some (server ^ "/" ^ tool)
+        ; origin = Runtime_native_tools.Mcp_wrapper
+        })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Unmodelled_item _ -> Ok None
+  | Unmodelled_item -> Ok None
 ;;
 
 let active_turn_item ~stage ~thread_id ~turn_id params =
@@ -1033,25 +1039,50 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
+  | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    emit_stream_event on_stream_event (Text_delta delta);
+    let seen_fallback =
+      match seen_fallback with
+      | None -> Some delta
+      | Some text -> Some (text ^ delta)
+    in
+    (* The model is speaking: its window applies again, whatever tool items
+       are still open in the background. *)
+    io.set_receive_phase Model_turn;
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids:[]
+      ~on_stream_event
+  | Notification { method_ = "item/plan/delta" as method_; params } ->
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    io.set_receive_phase Model_turn;
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids:[]
+      ~on_stream_event
   | Notification
       { method_ =
-          (( "item/agentMessage/delta"
-           | "item/commandExecution/outputDelta"
-           | "item/fileChange/outputDelta"
-           | "item/plan/delta" ) as method_)
+          (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
       ; params
       } ->
-    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params
-    in
-    let seen_fallback =
-      if String.equal method_ "item/agentMessage/delta"
-      then (
-        emit_stream_event on_stream_event (Text_delta delta);
-        match seen_fallback with
-        | None -> Some delta
-        | Some text -> Some (text ^ delta))
-      else seen_fallback
-    in
+    (* Output of a running tool item: the item is still running, so the
+       phase stays where it is; the read itself already counted as activity. *)
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
     await_turn_terminal
       io
       ~tools
@@ -1069,14 +1100,19 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     let* tool_item = tool_item_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
-      | None -> open_tool_call_ids
+      | None ->
+        (* An item of the model stream: the model is speaking again, so the
+           tool items still open run in the background and the model turn's
+           window applies until the next tool item starts. *)
+        io.set_receive_phase Model_turn;
+        []
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
              emit_stream_event on_stream_event (Native_tool_started observation))
           observation;
         (* Every receive until this item completes waits under no idle
-           window: the app-server is silent while the item runs. *)
+           window: the app-server may write nothing while the item runs. *)
         io.set_receive_phase Tool_item_running;
         call_id
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
@@ -1090,7 +1126,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     let* tool_item = tool_item_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
-      | None -> open_tool_call_ids
+      | None ->
+        io.set_receive_phase Model_turn;
+        []
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->

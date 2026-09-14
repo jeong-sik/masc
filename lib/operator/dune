@@ -53,6 +53,7 @@
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
+  masc.workspace_connection
   uri
   mtime
   mtime.clock

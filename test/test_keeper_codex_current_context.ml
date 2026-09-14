@@ -63,6 +63,10 @@ let with_fixture ?(reject_context = false) ?(overflow_resume = false) test =
   let root = Filename.temp_file "masc-codex-current-context-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
+  (* #36066: the posture resolve reads the keeper's declaration before the
+     client is spawned, so the fixture keeper is declared. *)
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
   let command, capture = fixture root ~reject_context ~overflow_resume in

@@ -665,7 +665,8 @@ let%test "parse_stream_chunk delegates to openai" =
   | Streaming.Openai_done
   | Streaming.Openai_empty
   | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _ -> false
+  | Streaming.Openai_parse_failed _
+  | Streaming.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "build_request strips chat_template_kwargs from Glm body" =

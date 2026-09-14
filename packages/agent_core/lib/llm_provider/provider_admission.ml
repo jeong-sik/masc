@@ -84,6 +84,26 @@ let with_admission_until ~clock ~deadline_at ~(config : Provider_config.t) f =
     Slot_scheduler.with_permit_until ~clock ~deadline_at scheduler f
 ;;
 
+type deadline_expiry =
+  | Permit_wait_expired
+  | Permit_granted_as_deadline_passed
+  | Work_expired
+
+let with_admission_and_work_until ~clock ~deadline_at ~config f =
+  match
+    with_admission_until ~clock ~deadline_at ~config (fun () ->
+      let remaining = deadline_at -. Eio.Time.now clock in
+      if Float.compare remaining 0.0 <= 0
+      then Error Permit_granted_as_deadline_passed
+      else (
+        match Eio.Time.with_timeout clock remaining (fun () -> Ok (f ())) with
+        | Ok value -> Ok value
+        | Error `Timeout -> Error Work_expired))
+  with
+  | Ok result -> result
+  | Error `Permit_wait_expired -> Error Permit_wait_expired
+;;
+
 let snapshot_for ~(config : Provider_config.t) =
   let key = key_of_config config in
   let snapshot = Stdlib.Mutex.protect state_mutex (fun () -> !state) in

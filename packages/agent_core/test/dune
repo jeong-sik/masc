@@ -461,6 +461,11 @@
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
 
 (test
+ (name test_exact_fit_call_window)
+ (modules test_exact_fit_call_window)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
  (name test_exact_output_single_surface)
  (modules test_exact_output_single_surface)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))

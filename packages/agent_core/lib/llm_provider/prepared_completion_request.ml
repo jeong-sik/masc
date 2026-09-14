@@ -100,7 +100,11 @@ let admit_serialized_body ~stream prepared =
   Ok { prepared; admitted_body = { http_codec; body; evidence } }
 ;;
 
-let measure_prepared ?connection_cache ?clock ?timeout_s ~sw ~net prepared =
+let transport_failure error =
+  Error (Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
+;;
+
+let measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net prepared =
   let config = prepared.request.Llm_transport.config in
   let measured () =
     Count_tokens_sync.measure_completion_request
@@ -119,19 +123,69 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~sw ~net prepared =
           }
       })
   in
-  match Complete_common.validate_all config with
-  | Error (Http_client.AcceptRejected { reason }) ->
-    Error (Count_tokens_sync.Invalid_completion_request reason)
-  | Error error ->
-    Error (Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
-  | Ok () -> Provider_admission.with_admission ~config measured
+  let preflight =
+    match Complete_common.validate_all config with
+    | Error (Http_client.AcceptRejected { reason }) ->
+      Error (Count_tokens_sync.Invalid_completion_request reason)
+    | Error error -> transport_failure error
+    | Ok () ->
+      Http_client.resolve_explicit_deadline
+        ~operation:"Prepared_completion_request.measure"
+        ~parameter:"call_timeout_s"
+        ~clock
+        ~timeout_s:call_timeout_s
+      |> Result.map_error (fun error ->
+        Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
+  in
+  match preflight with
+  | Error error -> Error error
+  | Ok Http_client.Unbounded -> Provider_admission.with_admission ~config measured
+  | Ok (Http_client.Bounded (call_clock, call_timeout_s)) ->
+    (* The measurement takes the endpoint's permit like the completion
+       does, so a caller's call deadline bounds that wait and the count
+       round trip under it the same way; a declared [timeout_s] still arms
+       inside. *)
+    let call_deadline_exceeded ~phase ~stage =
+      transport_failure
+        (Http_client.TimeoutError
+           { message =
+               Printf.sprintf
+                 "call_timeout_s deadline exceeded after %.17gs %s \
+                  (Prepared_completion_request.measure)"
+                 call_timeout_s
+                 stage
+           ; phase
+           })
+    in
+    (match
+       Provider_admission.with_admission_and_work_until
+         ~clock:call_clock
+         ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
+         ~config
+         measured
+     with
+     | Ok result -> result
+     | Error Provider_admission.Permit_wait_expired ->
+       call_deadline_exceeded
+         ~phase:Http_client.Queue
+         ~stage:"before a provider admission permit was granted for the count-tokens request"
+     | Error Provider_admission.Permit_granted_as_deadline_passed ->
+       call_deadline_exceeded
+         ~phase:Http_client.Queue
+         ~stage:
+           "with a provider admission permit for the count-tokens request granted as the \
+            deadline passed"
+     | Error Provider_admission.Work_expired ->
+       call_deadline_exceeded
+         ~phase:Http_client.Non_streaming_body
+         ~stage:"during the count-tokens round trip")
 ;;
 
-let measure ?connection_cache ?clock ?timeout_s ~sw ~net (serialized : serialized) =
+let measure ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net (serialized : serialized) =
   let prepared = serialized.prepared in
   Result.map
     (fun measured -> { measured with admitted_body = Some serialized.admitted_body })
-    (measure_prepared ?connection_cache ?clock ?timeout_s ~sw ~net prepared)
+    (measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net prepared)
 ;;
 
 let attach_measurement

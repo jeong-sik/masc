@@ -55,6 +55,28 @@ val with_admission_until
   -> (unit -> 'a)
   -> ('a, [> `Permit_wait_expired ]) result
 
+(** Why a call under {!with_admission_and_work_until} ended before its work
+    did. *)
+type deadline_expiry =
+  | Permit_wait_expired  (** the endpoint stayed saturated until the deadline *)
+  | Permit_granted_as_deadline_passed
+      (** the permit arrived as the deadline passed; the work never started
+          and the permit went straight back *)
+  | Work_expired  (** the work ran under what the wait left and outran it *)
+
+(** [with_admission_and_work_until ~clock ~deadline_at ~config f] is one
+    deadline over the permit wait and the work under it: the wait ends at
+    [deadline_at] as {!with_admission_until} does, and [f] then runs under
+    what the wait left, cancelled at [deadline_at]. The caller names the
+    phase each expiry is: the first two are queueing, the third is the work.
+    The work's own narrower bounds still arm inside it. *)
+val with_admission_and_work_until
+  :  clock:_ Eio.Time.clock
+  -> deadline_at:float
+  -> config:Provider_config.t
+  -> (unit -> 'a)
+  -> ('a, deadline_expiry) result
+
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or
     [None] when no dispatch has declared admission for it yet.
     Diagnostics only. *)

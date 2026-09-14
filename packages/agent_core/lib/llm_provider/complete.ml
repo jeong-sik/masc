@@ -226,41 +226,28 @@ let complete_prepared_sync
              ; latency_ms = None
              }
            in
-           let queue_expired () =
-             call_deadline_exceeded
-               ~phase:Http_client.Queue
-               ~stage:"before a provider admission permit was granted"
-           in
-           let deadline_at = Eio.Time.now call_clock +. call_timeout_s in
            (match
-              Provider_admission.with_admission_until
+              Provider_admission.with_admission_and_work_until
                 ~clock:call_clock
-                ~deadline_at
+                ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
                 ~config:request_config
-                (fun () ->
-                   let remaining = deadline_at -. Eio.Time.now call_clock in
-                   if Float.compare remaining 0.0 <= 0
-                   then
-                     (* The permit arrived as the deadline passed: nothing was
-                        sent, and the permit goes straight back. Still the
-                        queue phase, said as what happened. *)
-                     call_deadline_exceeded
-                       ~phase:Http_client.Queue
-                       ~stage:
-                         "with a provider admission permit granted as the deadline passed"
-                   else (
-                     match
-                       Eio.Time.with_timeout call_clock remaining (fun () ->
-                         Ok (dispatch ()))
-                     with
-                     | Ok transport_result -> transport_result
-                     | Error `Timeout ->
-                       call_deadline_exceeded
-                         ~phase:Http_client.Non_streaming_body
-                         ~stage:"during the provider round trip"))
+                dispatch
             with
             | Ok transport_result -> transport_result
-            | Error `Permit_wait_expired -> queue_expired ())
+            | Error Provider_admission.Permit_wait_expired ->
+              call_deadline_exceeded
+                ~phase:Http_client.Queue
+                ~stage:"before a provider admission permit was granted"
+            | Error Provider_admission.Permit_granted_as_deadline_passed ->
+              (* Nothing was sent, and the permit went straight back. Still
+                 the queue phase, said as what happened. *)
+              call_deadline_exceeded
+                ~phase:Http_client.Queue
+                ~stage:"with a provider admission permit granted as the deadline passed"
+            | Error Provider_admission.Work_expired ->
+              call_deadline_exceeded
+                ~phase:Http_client.Non_streaming_body
+                ~stage:"during the provider round trip")
        in
        (* HTTP-backed transports bypass complete_http, so emit the status
          here using the transport result. Non-HTTP CLI transports must

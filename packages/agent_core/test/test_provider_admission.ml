@@ -471,6 +471,64 @@ let test_a_narrower_body_deadline_fires_inside_the_call_deadline () =
     (Eio.Time.now clock -. started < call_deadline_s)
 ;;
 
+(* The helper the sync completion and the count-tokens measurement share:
+   one deadline over the permit wait and the work under it, each expiry
+   named for the caller to phase. *)
+let test_one_deadline_over_the_permit_wait_and_the_work () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    make_config ~base_url:"http://permit-and-work.test:1" ~max_concurrent_requests:1 ()
+  in
+  let deadline_at () = Eio.Time.now clock +. call_deadline_s in
+  (* The permit is free: the work runs and outruns the deadline. *)
+  let started = Eio.Time.now clock in
+  (match
+     Provider_admission.with_admission_and_work_until
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> Eio.Time.sleep clock (call_deadline_s *. 4.0))
+   with
+   | Error Provider_admission.Work_expired -> ()
+   | Ok () -> fail "the work outran the deadline and was not cut"
+   | Error
+       ( Provider_admission.Permit_wait_expired
+       | Provider_admission.Permit_granted_as_deadline_passed ) ->
+     fail "a free permit was reported as a wait");
+  check bool "the work was cut at the deadline" true (within_call_deadline ~started ~clock);
+  (* The permit is held: the wait ends at the deadline and the work never runs. *)
+  let release, resolve_release = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
+  let ran = ref false in
+  let started = Eio.Time.now clock in
+  (match
+     Provider_admission.with_admission_and_work_until
+       ~clock
+       ~deadline_at:(deadline_at ())
+       ~config
+       (fun () -> ran := true)
+   with
+   | Error Provider_admission.Permit_wait_expired -> ()
+   | Ok () -> fail "the work ran without the permit"
+   | Error
+       ( Provider_admission.Work_expired
+       | Provider_admission.Permit_granted_as_deadline_passed ) ->
+     fail "a held permit was reported as anything but a wait");
+  check bool "the wait ended at the deadline" true (within_call_deadline ~started ~clock);
+  check bool "the work never ran" false !ran;
+  (match Provider_admission.snapshot_for ~config with
+   | Some snapshot ->
+     check int "the expired waiter left the queue" 0 snapshot.Slot_scheduler.queue_length;
+     check int "the holder still has its permit" 1 snapshot.Slot_scheduler.active
+   | None -> fail "the scheduler must be registered");
+  Eio.Promise.resolve resolve_release ()
+;;
+
 let () =
   run
     "provider_admission"
@@ -515,6 +573,10 @@ let () =
             "the admission deadline ends the wait for a stream permit"
             `Quick
             test_admission_deadline_ends_the_wait_for_a_stream_permit
+        ; test_case
+            "one deadline over the permit wait and the work"
+            `Quick
+            test_one_deadline_over_the_permit_wait_and_the_work
         ] )
     ]
 ;;

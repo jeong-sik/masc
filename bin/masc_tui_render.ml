@@ -3371,15 +3371,17 @@ let render_schedule_list (state : state) =
                Printf.sprintf "  Requests: %d" total
            | None -> "  Requests: ?"
          in
+         (* One row, not two. The count and the next wake are a phrase each,
+            and with nothing due the second row was drawn blank -- a row of
+            the list given up to say nothing. *)
          let next_due_text =
            match snapshot.scs_next_due_iso with
            | Some iso ->
-               Printf.sprintf "  Next due: %s"
-                 (Terminal_text.short_timestamp iso)
+               Printf.sprintf "%s  \xc2\xb7  Next due: %s%s" Ansi.dim
+                 (Terminal_text.short_timestamp iso) Ansi.reset
            | None -> ""
          in
-         c.push (Ansi.bold ^ count_text ^ Ansi.reset);
-         c.push (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text);
          c.push_divider ();
 
          let count = List.length snapshot.scs_rows in

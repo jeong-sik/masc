@@ -324,7 +324,12 @@ streaming = true
 ;;
 
 (* Runs [verify] with [timeout_s] under a guard that turns a hang into a
-   failure, and returns the verdict with the seconds it took. *)
+   failure, and returns the verdict with the seconds it took. The HTTP arm's
+   deadlines are enforced by Agent Core on the clock [Runtime_agent.run]
+   finds in the process context, the one the CLI installs with
+   [Eio_context.set_env] before it verifies; without it the deadline is
+   refused before the request as "supplied without the clock required to
+   enforce it" and the verdict is a rejection, not a timeout. *)
 let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
   let directory = Filename.temp_dir "runtime-verification-silent-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
@@ -334,16 +339,22 @@ let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
     try
       Some
         (Eio.Time.with_timeout_exn clock guard_s (fun () ->
-           Verify.verify
-             ~secure_random:env#secure_random
-             ~sw
+           Eio_context.with_test_env
              ~net:env#net
-             ~mgr:env#process_mgr
              ~clock
-             ~cwd:Eio.Path.(env#fs / directory)
-             ~cwd_path:directory
-             ~timeout_s
-             runtime))
+             ~mono_clock:env#mono_clock
+             ~sw
+             (fun () ->
+               Verify.verify
+                 ~secure_random:env#secure_random
+                 ~sw
+                 ~net:env#net
+                 ~mgr:env#process_mgr
+                 ~clock
+                 ~cwd:Eio.Path.(env#fs / directory)
+                 ~cwd_path:directory
+                 ~timeout_s
+                 runtime)))
     with
     | Eio.Time.Timeout -> None
   in

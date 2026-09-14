@@ -18,7 +18,7 @@ related: ["0373", "0377", "0303"]
 
 그런데 채팅 턴도 자극을 **읽는다** — librarian 이 pending 자극을 컨텍스트에 넣기 때문이다. 즉 모델은 "예약: 삼국지 이어가기 ×N" 을 보고 그 대화에서 실제로 다루는데, 시스템은 그걸 처리한 것으로 세지 않는다. 그 결과 채팅이 계속되면(또는 자율 lane 이 굶거나 펜스되면) 자극이 영원히 안 빠지고 event queue 에 단조 축적된다. msx-retro-mania 는 2026-09-14 에 30개까지 쌓였다.
 
-이 RFC 의 결정: **소비자는 lane 이 아니라 "그 자극을 실제로 다뤘다고 선언한 턴" 이다.** 어느 lane 이든 턴이 자기 컨텍스트에 admit 된 자극 중 **명시적으로 다뤘다고 선언한 것만** ack 한다. 선언은 typed 도구로, admit 된 집합에 대해서만 유효하다 — 못 본 자극은 ack 할 수 없다.
+이 RFC 의 결정: **소비자는 lane 이 아니라 자극이 요구한 효과를 실제로 남긴 턴이다.** 어느 lane 이든, admit 된 자극 중 그 자극이 요구한 durable 효과(답이 그 대화 route 로 전달됨·gate grant 소비·task 정산 등)를 남긴 것을 ack 한다. 효과가 없는 하트비트 wake(`result_delivery=None`)는 잃을 것이 없으니 턴의 관여로 소비하고, 개수는 #36213 이 묶는다. **어느 쪽도 모델의 자기 신고를 신뢰하지 않는다 — 소비는 증거로 판정한다.**
 
 ## 1. 문제
 
@@ -48,34 +48,37 @@ librarian 은 event queue 의 pending 자극과 chat pending 을 **둘 다** 컨
 
 ## 2. 통찰
 
-소비자는 lane 의 이름이 아니라 **그 자극을 실제로 다룬 주체** 다. 채팅 턴이 자극을 다뤘으면 채팅 턴이 소비자다. 빠진 것은 "채팅은 소비 금지" 가 아니라 **"내가 이 자극을 다뤘다" 를 선언할 수단** 이다. 그 선언이 있으면 1.3 의 안전은 그대로 유지된다: 선언 안 한 자극은 절대 ack 되지 않으므로, "몇 시야" 턴은 리포트 자극을 건드리지 않는다.
+소비자는 lane 의 이름이 아니라 **그 자극이 요구한 효과를 실제로 남긴 주체** 다. 채팅 턴이 그 대화로 답을 보냈으면 채팅 턴이 소비자다. 빠진 것은 "채팅은 소비 금지" 가 아니라 **처리의 증거를 소비로 연결하는 배선** 이다. 그리고 그 증거는 이미 durable 하게 남는다(§3.2). 모델이 "했다" 고 말하는지는 보지 않는다 — 효과가 남았는지를 본다. 그래서 1.3 의 안전이 유지될 뿐 아니라 강해진다: 효과 없이 "했다" 는 말만으로는 자극이 사라지지 않는다.
 
 ## 3. 설계
 
 ### 3.1 admit 된 자극 집합을 턴이 들고 있다
 
-이미 있다. `pending_selections`(RFC-0377) 가 이 턴에 admit 된 자극이고 librarian 이 컨텍스트에 넣는다. 이 집합의 자극 id 들이 이 턴이 ack **할 수 있는** 유일한 대상이다.
+이미 있다. `pending_selections`(RFC-0377) 가 이 턴에 admit 된 자극이고 librarian 이 컨텍스트에 넣는다. 이 집합이 이 턴이 소비 **할 수 있는** 유일한 대상이다 — admit 안 된 자극은 어떤 경로로도 ack 되지 않는다.
 
-### 3.2 명시적 선언 도구 (typed)
+### 3.2 소비는 선언이 아니라 durable 효과로 판정한다
 
-모델이 턴 중에 부르는 도구를 추가한다(이름 잠정 `masc_stimulus_handled`). 입력은 자극 id 목록이고, **admit 된 집합에 대해서만 유효** 하다. admit 되지 않은 id 는 거부한다(Result 의 Error). 이로써 "못 본 자극을 ack" 하는 상태가 **표현 불가능** 해진다 — API 가 admit 집합의 부분집합만 받는다.
+소비의 근거는 모델이 "했다" 고 말한 것이 **아니라**, 그 자극이 요구한 효과가 durable 하게 남았는지다. 자극은 이미 타입으로 두 부류다(`result_delivery : Keeper_continuation_channel.t option`, 그리고 `continuation_route` disposition).
 
-도구는 자극을 즉시 소비하지 않는다. "이 턴이 이것을 다뤘다" 는 선언을 턴-로컬로 모을 뿐이다. 실제 durable ack 는 턴 종료 경계에서 한 번에 일어난다(3.3).
+**(a) deliverable 있는 자극** — connector_attention(디스코드/슬랙), board mention, workspace_message, hitl_resolved, delegate_completed, task_outcome, `result_delivery` 가 routable 인 schedule. 처리하면 durable 효과가 남는다:
+- 답장류 → 그 대화 route 로 답이 실제로 나갔다는 `continuation_route` disposition / delivery obligation 충족. 시스템은 "이 턴이 conversation X 로 답했다" 를 이미 안다(`keeper_unified_turn.ml` 의 continuation_route).
+- hitl → gate grant 소비. task/delegate → task 정산.
 
-### 3.3 턴 종료 시, 선언된 것만 ack (모든 lane)
+이 부류의 ack 는 **그 효과 증거로만** 판정한다. 효과가 없으면 모델이 무슨 말을 했든 자극은 pending 으로 남는다.
 
-턴이 끝날 때(채팅이든 자율이든) ack 대상 = (admit 된 자극) ∩ (선언된 자극). 그것만 `ack_pending_result`. 선언 안 된 admit 자극은 pending 으로 남아 다음 턴을 기다린다.
+**(b) deliverable 없는 하트비트** — `result_delivery = None` 인 interval schedule("이어서 플레이" 류). 설계상 결과물을 추적하지 않는다("그냥 깨워라"). 검증할 효과가 없으니 잃을 것도 없다. 이 부류는 **턴이 이 wake 를 admit 하고 실행했다** 로 소비하고, 재증식은 #36213(자기 클럭)이 schedule_instance 당 1개로 막는다.
 
-lane 별 **기본값** 은 다르되 규칙은 하나다:
+"실제 확인" 은 (a) 에서 효과 증거로, (b) 에서는 확인할 효과가 애초에 없음으로 각각 정당하다. 모델의 자기 신고를 신뢰하는 경로는 어디에도 없다.
 
-| lane | 선언 없는 admit 자극의 처리 | 근거 |
-|---|---|---|
-| 자율(keepalive) | 기본 ack (현행 batch 유지) | 자율 턴의 목적이 "큐의 일을 처리" 다. 처리가 곧 존재 이유. |
-| 채팅 | 기본 미ack | 채팅 턴의 목적이 "운영자에게 답" 이다. 자극 처리는 부수적일 수 있다. |
+### 3.3 lane 구분 없이 같은 증거 규칙
 
-즉 자율은 opt-out(선언으로 특정 자극을 "안 했다" 표시), 채팅은 opt-in(선언으로 "했다" 표시). 두 기본값의 차이는 lane 이 아니라 **각 lane 의 목적** 에서 나온다. 규칙 자체("선언이 소비를 정한다")는 하나다.
+턴이 끝날 때(채팅이든 자율이든) ack 대상 = admit 된 자극 중 §3.2 의 증거를 남긴 것. lane 별 예외 없음. 자율 턴도 admit 된 배치를 통째로 ack 하지 않는다 — 효과를 남긴 것만.
 
-> 비목표: 이 문서는 자율 lane 을 opt-in 으로 바꾸지 않는다. 현행 batch-ack 는 그대로 두고, 채팅에 선언-ack 를 추가한다. 자율까지 선언-ack 로 통일하는 것은 선언이 신뢰 가능해진 뒤의 별도 결정으로 남긴다.
+이것은 현행 자율 batch-ack 의 의도된 변경이다:
+
+- 오늘 자율 턴은 admit 된 배치를 완료만 하면 효과와 무관하게 통째로 done 처리한다 — **효과 없이 사라지는 silent loss**(안 했는데 done). 증거 기반은 그걸 닫는다.
+- delivery=none 하트비트는 (b) 규칙(관여)으로 소비되므로, 자율 턴의 흔한 케이스는 회귀가 없다.
+- deliverable 있는 자극을 처리하고도 효과가 안 남는 경우(전달 실패 등)는 pending 으로 남아 재시도된다. 이는 손실이 아니라 재처리(at-least-once)이며 기존 delivery obligation 경계와 같은 성질이다.
 
 ### 3.4 B1(발행 자기 클럭, #36213)과의 관계
 
@@ -85,25 +88,27 @@ lane 별 **기본값** 은 다르되 규칙은 하나다:
 
 ## 4. 경계 (constitution)
 
-- **Gate 아님.** 선언은 처리의 evidence 이지 스케줄링을 강제하는 Gate 가 아니다. 선언이 없어도 턴은 정상 동작한다(자극이 pending 으로 남을 뿐).
-- **텍스트 추론 금지.** 모델의 답변 문장을 스캔해 "했다" 를 추정하지 않는다. 명시적 typed 도구 호출만. semantic string matching 은 이 프로젝트에서 금지다.
-- **새 durable 상태 최소.** 소비는 기존 `ack_pending_result` + reaction ledger 를 그대로 쓴다. 추가되는 것은 턴-로컬 선언 집합(휘발)과 도구 하나뿐. 새 상태·필드·Gate 를 durable truth 에 넣지 않는다.
-- **admit 경계 재사용.** ack 가능 집합은 RFC-0377 의 pending_selections 그대로. 별도 권한 축을 만들지 않는다.
+- **Gate 아님.** 소비는 처리의 evidence 이지 스케줄링을 강제하는 Gate 가 아니다.
+- **모델 자기 신고 금지.** 소비를 모델의 말("했다")에 걸지 않는다. durable 효과에만 건다. 답변 문장을 스캔해 "했다" 를 추정하는 semantic string matching 도 금지(이 프로젝트 규칙).
+- **새 durable 상태 최소.** 소비 판정을 기존 증거에 건다 — `continuation_route` disposition / delivery obligation(deliverable 자극), 기존 engagement 신호(하트비트). ack 는 기존 `ack_pending_result` + reaction ledger 그대로. 새 상태·필드·Gate·선언 도구를 추가하지 않는다.
+- **admit 경계 재사용.** 소비 가능 집합은 RFC-0377 의 pending_selections 그대로. 별도 권한 축을 만들지 않는다.
+- **무거운 검증은 별도.** task/goal 형 자극의 "목표 달성 여부" 검증이 필요하면 RFC-0444 의 goal verifier 경로를 쓴다. 이 RFC 는 "요구한 전달이 일어났는가" 까지만 본다.
 
 ## 5. 검증
 
 테스트(결정론):
 
-1. 채팅 턴이 admit 된 schedule X 를 `masc_stimulus_handled` 로 선언 → 턴 종료 후 X 는 ack, 같은 턴에 admit 된 Y 는 pending 유지.
-2. 채팅 턴이 아무것도 선언 안 함 → 어떤 자극도 ack 안 됨("몇 시야" 안전 케이스).
-3. 채팅 턴이 admit 되지 않은 자극 id 를 선언 → 도구가 Error, 어떤 ack 도 없음.
-4. 자율 턴은 현행 batch-ack 그대로(회귀 없음).
+1. 채팅 턴에 connector 자극(대화 X)이 admit 되고, 턴이 route X 로 답을 전달 → X ack. 같은 턴에 admit 된 다른 대화 Y 는 pending 유지.
+2. 채팅 턴이 대화 X 자극을 admit 했지만 route X 로 답이 안 나감(전달 실패/무시) → X pending 유지. 모델이 답했다고 주장해도 마찬가지("몇 시야" 안전 케이스: 리포트 자극에 아무 전달 없음 → 안 지워짐).
+3. delivery=none schedule 이 admit 되고 턴이 실행 → 소비. (#36213 로 pending 은 애초에 1개.)
+4. admit 되지 않은 자극 → 어떤 효과가 있어도 ack 대상이 아니다.
+5. 자율 턴과 채팅 턴이 같은 증거 규칙(§3.3). delivery=none 자율 케이스는 회귀 없음.
 
 불변식(TLA+ bug model 로도 표현 가능, software-development.md 참조):
 
-> **어떤 자극도, 그 자극을 ack 한 턴의 admit 집합에 없었다면 ack 되지 않는다.**
+> **어떤 deliverable 자극도, 그 자극이 요구한 전달의 durable 증거 없이는 ack 되지 않는다.** 그리고 **어떤 자극도, ack 한 턴의 admit 집합에 없었다면 ack 되지 않는다.**
 
-이 불변식은 3.2 의 타입(도구가 admit 집합의 부분집합만 받음)으로 by-construction 성립한다. `NextBuggy = Next \/ AckUnadmitted` 가 이 불변식을 위반해야 spec 이 유효하다.
+앞 절은 소비를 증거(continuation_route/delivery obligation)에 거는 것으로, 뒤 절은 소비 API 가 admit 집합의 부분집합만 받는 것으로 by-construction 성립한다. `NextBuggy = Next \/ AckWithoutDelivery \/ AckUnadmitted` 가 이 불변식을 위반해야 spec 이 유효하다.
 
 ## 6. 관련
 

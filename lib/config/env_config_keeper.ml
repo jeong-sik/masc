@@ -628,8 +628,9 @@ module KeeperKeepalive = struct
   let first_event_failsafe_floor_sec = 600.0
 
   (** Explicit first-event (TTFT/prefill) timeout for streaming AGENT_CORE
-      provider responses. One window from the first body read to the
-      provider's first token-bearing event (an opening frame such as Responses
+      provider responses. One window from the request to the provider's
+      first token-bearing event, connection and response headers included
+      (an opening frame such as Responses
       [response.created] neither ends it nor extends it);
       [stream_idle_timeout_sec] bounds the gaps after it. Providers that emit
       no keepalives while prefilling are legitimately silent in this phase,

@@ -86,6 +86,40 @@ let start_refusing_server ~sw ~net ~sends_body =
   | `Unix _ -> invalid_arg "expected a TCP listening socket"
 ;;
 
+(* Accepts one connection, reads the request until the blank line that ends
+   its headers, waits [headers_after_s] on [clock], answers with a 200 status
+   line and an event-stream content type, and then sends nothing more. The
+   headers land inside the pre-header window; whatever the first-event
+   budget has left after them is the reader's. *)
+let start_late_headers_server ~sw ~net ~clock ~headers_after_s =
+  let listening =
+    Eio.Net.listen ~sw ~backlog:5 ~reuse_addr:true net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+      let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+      let rec drop_request_headers () =
+        match Eio.Buf_read.line reader with
+        | "" -> ()
+        | _ -> drop_request_headers ()
+      in
+      try
+        drop_request_headers ();
+        Eio.Time.sleep clock headers_after_s;
+        Eio.Flow.copy_string
+          "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+          flow;
+        let buf = Cstruct.create 4096 in
+        while true do
+          ignore (Eio.Flow.single_read flow buf)
+        done
+      with
+      | End_of_file | Eio.Io _ -> ()));
+  match Eio.Net.listening_addr listening with
+  | `Tcp (_, port) -> port
+  | `Unix _ -> invalid_arg "expected a TCP listening socket"
+;;
+
 type outcome =
   | Ended of (unit, Http_client.http_error) result
   | Hung
@@ -104,7 +138,7 @@ let run ~clock ~net ~scheme ~port ?connect_timeout_s ?first_event_timeout_s () =
              ~url:(Printf.sprintf "%s://127.0.0.1:%d/v1/chat/completions" scheme port)
              ~headers:[ "content-type", "application/json" ]
              ~body:"{}"
-             ~f:(fun _reader -> ())
+             ~f:(fun ~pre_header_elapsed_s:_ _reader -> ())
              ()))
     with
     | Eio.Time.Timeout -> Hung
@@ -230,6 +264,35 @@ let test_a_complete_refusal_is_still_the_typed_http_error () =
     Alcotest.failf "expected HttpError 429 with the peer's body, got %s after %.2fs" (describe other) elapsed
 ;;
 
+(* One window. The headers arrive late but inside the first-event budget;
+   the reader is handed what is left of that budget, so the silence after
+   the headers ends at the budget counted from the request, not at a second
+   full budget counted from the first body read. The upper bound of the
+   window is below the two-window total, so the case tells them apart. *)
+let late_headers_after_s = 0.4
+let one_window_budget_s = 0.5
+let two_windows_total_s = late_headers_after_s +. one_window_budget_s
+
+let test_the_first_event_budget_is_one_window_across_the_headers () =
+  with_env @@ fun ~sw ~clock ~net ->
+  let port = start_late_headers_server ~sw ~net ~clock ~headers_after_s:late_headers_after_s in
+  let outcome, elapsed =
+    run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:one_window_budget_s ()
+  in
+  (match outcome with
+   | Ended (Error (Http_client.TimeoutError { phase = Http_client.First_token; _ })) -> ()
+   | other ->
+     Alcotest.failf "expected TimeoutError phase=first_token, got %s after %.2fs" (describe other) elapsed);
+  if elapsed < one_window_budget_s || elapsed >= two_windows_total_s
+  then
+    Alcotest.failf
+      "ended at %.2fs; one %.1fs window from the request should have ended it inside [%.1f, %.1f)"
+      elapsed
+      one_window_budget_s
+      one_window_budget_s
+      two_windows_total_s
+;;
+
 let () =
   Alcotest.run
     "stream pre-header budget"
@@ -250,6 +313,12 @@ let () =
             "the budget covers the TLS handshake"
             `Quick
             test_the_budget_covers_the_tls_handshake
+        ] )
+    ; ( "across the headers"
+      , [ Alcotest.test_case
+            "the first-event budget is one window across the headers"
+            `Quick
+            test_the_first_event_budget_is_one_window_across_the_headers
         ] )
     ; ( "after a refusing status line"
       , [ Alcotest.test_case

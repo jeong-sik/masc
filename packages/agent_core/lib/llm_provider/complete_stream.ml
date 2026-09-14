@@ -602,7 +602,17 @@ let complete_stream_http
           ~url
           ~headers:(config.headers @ auth_headers)
           ~body:body_with_stream
-          ~f:(fun reader ->
+          ~f:(fun ~pre_header_elapsed_s reader ->
+            (* The first-event budget is one window from the request to the
+               first token; the connection, the request and the headers have
+               already spent [pre_header_elapsed_s] of it, and the reader
+               arms the rest. A rest of zero is a budget that ran out as the
+               headers arrived: the first read reports it. *)
+            let first_event_timeout_s =
+              Option.map
+                (fun budget_s -> Float.max 0.0 (budget_s -. pre_header_elapsed_s))
+                first_event_timeout_s
+            in
             emit_stream_event on_event Types.Connected;
             (* AGENT_CORE exposes one redacted provider observation to a caller-owned
                nonblocking offer. Queueing, persistence, capacity, and retries

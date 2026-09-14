@@ -615,9 +615,11 @@ val post_stream
     phase is unbounded. DNS resolution runs
     in a systhread the window cannot cancel: a closed window is observed
     once the lookup returns, and until then the resolver's own timeout is
-    the bound. [f] still arms the first-event budget on the reader itself
-    ({!read_sse}, {!read_ndjson}); this parameter is what stands in front
-    of the headers, where the reader cannot.
+    the bound. [f] receives [pre_header_elapsed_s], the seconds this phase
+    took on [clock] (0 without one), and arms what is left of the
+    first-event budget on the reader ({!read_sse}, {!read_ndjson}): the
+    budget is one window from the request to the first token, not one in
+    front of the headers and another after them.
 
     Body consumption in [f] runs OUTSIDE [catch_network]. A body-phase
     [Eio.Time.Timeout] (first-token / prefill wait, inter-chunk idle)
@@ -645,7 +647,7 @@ val with_post_stream
   -> url:string
   -> headers:(string * string) list
   -> body:string
-  -> f:(Eio.Buf_read.t -> 'a)
+  -> f:(pre_header_elapsed_s:float -> Eio.Buf_read.t -> 'a)
   -> unit
   -> ('a, http_error) result
 

@@ -214,6 +214,10 @@ let ownership_of_provider_failure ~binding = function
   | Http.Response_body_too_large _
   | Http.Empty_completion _
   | Http.Context_overflow _ -> Attempt_local
+  (* The repeat is the bound model's own behaviour, like a model-scoped
+     capacity failure: it belongs to the runtime binding, not to this attempt
+     or the connection. *)
+  | Http.Repeating_generation _ -> Runtime_binding
   | Http.Cli_startup_failed { reason } -> ownership_of_cli_startup ~binding reason
   | Http.Provider_reported_error _ | Http.Unknown_provider_failure _ -> Unclassified
 ;;
@@ -382,6 +386,13 @@ let provider_failure_to_yojson = function
        match limit with
        | Some limit -> [ "limit", `Int limit ]
        | None -> [])
+  | Http.Repeating_generation { shape; occurrences; unit_bytes } ->
+    `Assoc
+      [ "kind", `String "repeating_generation"
+      ; "shape", `String (Llm_provider.Types.repeating_shape_to_string shape)
+      ; "occurrences", `Int occurrences
+      ; "unit_bytes", `Int unit_bytes
+      ]
   | Http.Unknown_provider_failure _ ->
     `Assoc [ "kind", `String "unknown_provider_failure" ]
 ;;

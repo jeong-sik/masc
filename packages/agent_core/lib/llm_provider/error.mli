@@ -47,6 +47,20 @@ type provider_error =
       typed across the boundary so MASC classifies it by variant; an
       overflow is [ContextOverflow] on the [Api] side and an unmodeled
       stop_reason is [InvalidRequest]. *)
+  | RepeatingGeneration of
+      { provider : string
+      ; shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      ; detail : string
+      }
+  (** The model's generation repeated one unit past the threshold and the
+      client ended the stream. The bytes were intact, so this is not a
+      [ProviderWireError]: the failure belongs to the model, and the same
+      model reached through another provider repeats the same way. A caller
+      rotating candidates should leave the model, not only the connection.
+      [is_retryable] is false: the identical request to the same model is the
+      same roll. *)
   | RateLimit of
       { provider : string
       ; retry_after : float option

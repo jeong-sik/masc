@@ -62,6 +62,11 @@ let provider_error_to_http_error = function
       { kind = Llm_provider.Http_client.Provider_wire_error { format; kind }
       ; message = detail
       }
+  | Llm_provider.Error.RepeatingGeneration { shape; occurrences; unit_bytes; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Repeating_generation { shape; occurrences; unit_bytes }
+      ; message = detail
+      }
   | Llm_provider.Error.ProviderReportedError { error_type; detail; _ } ->
     Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Provider_reported_error { error_type }

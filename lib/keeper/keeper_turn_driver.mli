@@ -409,6 +409,7 @@ module For_testing : sig
       unit) ->
     ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
+    ?model_of:('candidate -> string option) ->
     ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->

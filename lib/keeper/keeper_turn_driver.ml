@@ -297,6 +297,7 @@ let attempt_runtime_candidates
     ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
     ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?quota_scope_of
+    ?model_of
     ?candidate_preference_of
     ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
@@ -348,6 +349,34 @@ let attempt_runtime_candidates
       fun candidate ->
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
+  (* The model behind a candidate, for the one failure that belongs to the
+     model rather than to its provider: a generation that repeated itself.
+     The same model reached through another provider repeats the same way,
+     so once a candidate has repeated, every later candidate on that model is
+     refused before dispatch and the walk moves to a different model. The
+     id-table default reads the registry; richer callers inject it. *)
+  let model_of =
+    match model_of with
+    | Some model_of -> model_of
+    | None ->
+      fun candidate ->
+        Runtime.get_runtime_by_id (runtime_id_of candidate)
+        |> Option.map (fun (runtime : Runtime.t) -> runtime.model.id)
+  in
+  let repeated_generation (error : Agent_core.Error.t) =
+    match error with
+    | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _) -> true
+    | Agent_core.Error.Provider _
+    | Agent_core.Error.Api _
+    | Agent_core.Error.Agent _
+    | Agent_core.Error.Mcp _
+    | Agent_core.Error.Config _
+    | Agent_core.Error.Serialization _
+    | Agent_core.Error.Io _
+    | Agent_core.Error.Orchestration _
+    | Agent_core.Error.Internal _
+    | Agent_core.Error.Internal_carried _ -> false
+  in
   let demote_rest rest =
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
@@ -364,7 +393,11 @@ let attempt_runtime_candidates
     on_lane_terminal_error terminal;
     Error terminal.lane_error
   in
-  let rec loop ~(observed_overflow : lane_terminal_error option) idx = function
+  let rec loop
+      ~(observed_overflow : lane_terminal_error option)
+      ~(repeated_models : (string * lane_terminal_error) list)
+      idx
+    = function
     | [] ->
       (match observed_overflow with
        | Some overflow -> lane_terminal overflow
@@ -374,6 +407,43 @@ let attempt_runtime_candidates
               (Printf.sprintf
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
+    | candidate :: rest
+      when (match model_of candidate with
+            | Some model -> List.mem_assoc model repeated_models
+            | None -> false) ->
+      (* This candidate's model already repeated itself earlier in the walk.
+         Refusing it here is the walk's own policy, so it is recorded as a
+         rejection before dispatch, like the reasoning-effort ladder's. If it
+         was the last candidate, the lane's error is the repeat that was
+         observed, not this refusal. *)
+      let attempt_runtime_id = runtime_id_of candidate in
+      let model = Option.get (model_of candidate) in
+      let observed = List.assoc model repeated_models in
+      let error =
+        Agent_core.Error.Api
+          (Llm_provider.Retry.InvalidRequest
+             { reason = Llm_provider.Retry.Attempt_rejected
+             ; message =
+                 Printf.sprintf
+                   "candidate %s refused before dispatch: model %s repeated itself on %s \
+                    in this walk"
+                   attempt_runtime_id
+                   model
+                   observed.origin_runtime_id
+             })
+      in
+      emit_runtime_manifest
+        ~status:"failed"
+        ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
+        Keeper_runtime_manifest.Runtime_failed;
+      on_attempt_error
+        ~runtime_id:attempt_runtime_id
+        ~attempt:idx
+        ~dispatch:Keeper_attempt_dispatch.Rejected_before_dispatch
+        error;
+      if rest = []
+      then lane_terminal observed
+      else loop ~observed_overflow ~repeated_models (idx + 1) rest
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
@@ -540,10 +610,15 @@ let attempt_runtime_candidates
            ; checkpoint_after
            }
          in
+         let repeated_models =
+           match repeated_generation error, model_of candidate with
+           | true, Some model -> (model, this_candidate error) :: repeated_models
+           | true, None | false, _ -> repeated_models
+         in
          if not effect_retry_admitted
          then lane_terminal (this_candidate terminal_error)
          else if retry_admitted && error_is_retryable
-         then loop ~observed_overflow (idx + 1) rest
+         then loop ~observed_overflow ~repeated_models (idx + 1) rest
          else if is_last
          then (
            (* Lane fully exhausted: an overflow seen anywhere in the rotation
@@ -566,7 +641,7 @@ let attempt_runtime_candidates
             | false, _, _ | true, false, _ | true, true, [] -> ());
            lane_terminal (this_candidate terminal_error)))
   in
-  loop ~observed_overflow:None 0 candidates
+  loop ~observed_overflow:None ~repeated_models:[] 0 candidates
 
 let runtime_candidate_missing_error id =
   Agent_core.Error.Internal

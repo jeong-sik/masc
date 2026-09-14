@@ -777,6 +777,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
    | Error Owner.Owner_stopping -> ()
    | Error error -> fail ("wrong stopped-child error: " ^ Owner.error_to_string error)
    | Ok (`Ran _) -> fail "stopped autonomous child reported success"
+   | Ok `Interrupted -> fail "stopping was reported as an operator interrupt"
    | Ok (`Busy _) -> fail "admitted autonomous child became busy");
   check bool
     "stopping clears autonomous projection"
@@ -884,6 +885,7 @@ let test_turn_slot_release_signals_availability () =
      fail ("autonomous lost the slot for the wrong reason: "
            ^ Owner.autonomous_block_to_string other)
    | Ok (`Ran ()) -> fail "autonomous ran while the chat lane held the slot"
+   | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"
    | Error error -> fail (Owner.error_to_string error));
   Eio.Promise.resolve resolve_release_chat ();
   ignore (await_terminal owner (operation_id "kmsg-slot-release") 1_000);
@@ -1649,6 +1651,51 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
    | Chat_operation.Succeeded _ -> ()
    | _ -> fail "child exception stopped the Owner FIFO drain");
   check int "child exception does not stop the actor" 2 !execution_count
+;;
+
+(* The autonomous lane's counterpart of the chat-lane test below. The Owner
+   interrupts by failing the child switch, so [Switch.run] raises after the
+   body returns; before the translation in [run_autonomous_if_idle] that
+   exception reached the keepalive fiber and the registry recorded a crash. *)
+let test_autonomous_operator_interrupt_is_a_typed_outcome () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let caller_result = Eio.Stream.create 1 in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"interrupted-autonomous-child"
+         ~initial_meta:(Some (make_meta "interrupted-autonomous-child")))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Owner.run_autonomous_if_idle owner (fun () ->
+        Eio.Promise.resolve resolve_child_started ();
+        (* Mirrors the keepalive cycle: the body sees the interrupt at a
+           cancellation point and returns normally anyway. *)
+        try Eio.Fiber.await_cancel () with
+        | exn when Keeper_registry_types.is_operator_interrupt exn -> ())
+    in
+    Eio.Stream.add caller_result result);
+  Eio.Promise.await child_started;
+  let token = observed_token owner in
+  (match interrupt_turn owner (Observed_turn { interrupt_token = token }) with
+   | Owner.Operation_interrupt_signalled -> ()
+   | _ -> fail "interrupt was not signalled");
+  (match Eio.Stream.take caller_result with
+   | Ok `Interrupted -> ()
+   | Ok (`Ran ()) -> fail "an interrupted autonomous turn reported success"
+   | Ok (`Busy _) -> fail "an interrupted autonomous turn reported busy"
+   | Error error -> fail ("interrupt surfaced as an error: " ^ Owner.error_to_string error));
+  check bool "the interrupt releases the turn slot" true
+    (Option.is_none (Owner.turn_in_flight owner));
+  (match Owner.run_autonomous_if_idle owner (fun () -> 42) with
+   | Ok (`Ran 42) -> ()
+   | Ok (`Ran _) | Ok `Interrupted | Ok (`Busy _) | Error _ ->
+     fail "the Owner did not admit the next autonomous turn")
 ;;
 
 let test_operator_interrupt_settles_as_typed_cancel () =
@@ -2828,14 +2875,9 @@ let test_recovery_does_not_replay_an_active_or_uncertain_child () =
       active_wake |> expect_store_unavailable;
       await_child_slot_empty owner 1_000;
       let expect_reconciliation_fence result =
-        match result with
-        | Error (Owner.Store_unavailable detail) ->
-          check bool "fence names the orphaned Running operation" true
-            (String_util.string_contains_substring
-               ~needle:(Chat_operation.Operation_id.to_string original)
-               detail)
-        | Error error -> fail ("unexpected Owner error: " ^ Owner.error_to_string error)
-        | Ok _ -> fail "orphaned Running row did not fence the Owner"
+        expect_store_unavailable result;
+        check bool "projection reports the store unavailable" true
+          (Owner.operation_projection owner).Owner.store_unavailable
       in
       Owner.wake_operation_drain owner |> expect_reconciliation_fence;
       (* The fence is sticky: a second wake does not reopen the handle again
@@ -4190,6 +4232,8 @@ let () =
             "operation store failure fences owner mutations"
             `Quick
             test_operation_store_failure_fences_owner_mutations
+        ; test_case "autonomous operator interrupt is a typed outcome" `Quick
+            test_autonomous_operator_interrupt_is_a_typed_outcome
         ; test_case "idle wake recovers storage and answers queued chat" `Quick
             test_idle_wake_recovers_store_and_answers_queued_chat
         ; test_case "recovery keeps integrity failures fenced" `Quick

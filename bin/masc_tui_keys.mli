@@ -196,6 +196,11 @@ val sheet_bindings : Masc_tui_types.surface -> binding list
 val here_marker : string
 (** Marker appended to the current surface section title in {!help_sections}. *)
 
+val help_surfaces : (string * Masc_tui_types.surface) list
+(** One sheet section per surface family, and the surface it answers for. Read
+    by the guard that checks a destination the palette offers by name is named
+    that way on the sheet. *)
+
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section

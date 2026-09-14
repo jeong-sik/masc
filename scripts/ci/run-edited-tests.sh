@@ -172,6 +172,25 @@ test/test_tools_coverage.ml"
     | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
   prompt_guard="test/test_keeper_system_prompt_bytes.ml"
 
+  # config/themes is the same shape a fourth time, and the only one of the
+  # three where the suite is not in doubt. 53 base16 schemes ship out of that
+  # directory; test_tui_theme_contrast measures every one of them through
+  # Catalog.all -- foreground against background, the receding token, the
+  # whole palette -- and it is the only suite that names the directory at all.
+  # An edit there selected nothing, so a scheme could ship with a pair the
+  # harness would have refused.
+  #
+  # Why a trigger rather than the quoted-literal rule below: that rule matches
+  # the changed path itself, and a theme file is never named by a suite -- the
+  # suite names the directory it reads the whole of. Widening the rule to
+  # quoted ancestor directories was measured and is worse: "lib" is quoted by
+  # 25 suites over 3,409 files and "config/prompts" by 26, against the one
+  # suite the prompt trigger above deliberately picks. A directory that a
+  # whole harness stands over is named here, where it can be argued for.
+  themes_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/themes/' || [ $? -eq 1 ]; } | head -1)
+  theme_guard="test/test_tui_theme_contrast.ml"
+
 
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
@@ -196,13 +215,23 @@ test/test_tools_coverage.ml"
   # package sources, 94 name a suite, 79 of those within the per-module cap,
   # median 1. The 15 over the cap are the namespace modules the cap is for --
   # base/tool.ml names 61 suites, runtime.ml 31.
+  #
+  # An interface edit is an edit to the same module. The scope took .ml only,
+  # so a change to foo.mli alone ran none of test_foo_*: an interface can
+  # change a contract's doc, or a signature the suite exercises through a
+  # different caller, with the implementation untouched. Measured 2026-09-14
+  # over origin/main's last 60 commits: 7 edited an .mli without its .ml and
+  # named a suite within the cap -- among them #36279, whose suite over the
+  # function it re-documented did not run.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.mli?$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
-    stem=$(basename "${changed_source}" .ml)
+    stem=$(basename "${changed_source}")
+    stem=${stem%.mli}
+    stem=${stem%.ml}
     stem=${stem#masc_}
     # Both spellings, in both test roots: the suite named for the module, and
     # the family under it.
@@ -297,8 +326,12 @@ DECLARED
   declared_suites=$( { printf '%s\n' "${declared_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
-  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ] \
-    && [ -z "${declared_suites}" ]; then
+  # [themes_changed] stands beside [assets] here: the tool and prompt triggers
+  # ride that variable, which matches config/(prompts|tools|mcp), and a theme
+  # is none of those. Left out, a theme-only pull request returned here before
+  # reaching the trigger below and reported no suite at all.
+  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
+    && [ -z "${module_suites}" ] && [ -z "${declared_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -326,6 +359,12 @@ DECLARED
   if [ -n "${prompts_changed}" ]; then
     echo "this pull request changes prompt assets; adding ${prompt_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${prompt_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${themes_changed}" ]; then
+    echo "this pull request changes theme assets; adding ${theme_guard}"
+    sources=$(printf '%s\n%s\n' "${sources}" "${theme_guard}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -454,6 +493,13 @@ self_test() {
   # out of this file and compares it to the dashboard mirror; the name mapping
   # looks for test_keeper_meta_contract_*, and there is no suite by that name,
   # so before this the only edit that ran the mirror was an edit to itself.
+  # The regression this declaration exists for: #36290 narrowed the tab strip
+  # in this module, and the scenario that reads a tab name off the row lived
+  # only inside the whole-screen walk -- which names no source. Nothing ran.
+  # It merged green and main was red until #36327.
+  check_required "the shared chrome selects the strip scenario" \
+    "test/test_tui_tab_strip_pty.py" \
+    "bin/masc_tui_ansi.ml"
   check "a guard that opens its input is selected too" \
     "test/test_blocker_class_mirror.ml" \
     "lib/keeper/keeper_meta_contract.ml"
@@ -512,6 +558,12 @@ self_test() {
   check "a prompt asset reaches the asset guard and the prompt golden" \
     "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
     "config/prompts/foo.md"
+  # And not the asset guard: it runs the real sync, whose domains are Prompts,
+  # Tools and Mcp. A scheme is embedded but never synced, so that guard has
+  # nothing to say about one.
+  check "a theme asset reaches the contrast harness" \
+    "test/test_tui_theme_contrast.ml" \
+    "config/themes/foo.toml"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # The hole this closes: the pattern wanted test_ straight after test/, so a
@@ -519,6 +571,11 @@ self_test() {
   check "an edited suite under a test directory is selected too" \
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml" \
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml"
+  # An interface is the same module: #36279 re-documented this one and the
+  # suite over the function it documents did not run.
+  check "an interface edit selects the suites named after its module" \
+    "packages/agent_core/test/test_provider_admission.ml" \
+    "packages/agent_core/lib/llm_provider/provider_admission.mli"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
@@ -532,7 +589,10 @@ self_test() {
   # 9s against their 0.7s, so it is attributed instead.
   check "an edited terminal scenario is selected" \
     "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
-  check "an interface edit selects only its declared PTY scenario" \
+  # tui_browser names five suites, over the per-module cap, so the name
+  # mapping attributes nothing to this interface and the declared scenario
+  # is all that is left.
+  check "an interface over the cap selects only its declared PTY scenario" \
     "test/test_tui_browser_history.py" "bin/masc_tui_browser.mli"
   check "an interface and its edited PTY suite select one entry" \
     "test/test_tui_browser_history.py" \

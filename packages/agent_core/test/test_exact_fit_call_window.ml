@@ -33,19 +33,6 @@ type count_tokens_behaviour =
   | Answers_after of float
   | Never_answers
 
-let fresh_port () =
-  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.setsockopt socket Unix.SO_REUSEADDR true;
-  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
-  let port =
-    match Unix.getsockname socket with
-    | Unix.ADDR_INET (_, port) -> port
-    | _ -> fail "loopback socket did not expose a TCP port"
-  in
-  Unix.close socket;
-  port
-;;
-
 type listener =
   { base_url : string
   ; count_posts : int Atomic.t
@@ -57,7 +44,6 @@ type listener =
    transport, so any other path reaching this listener is a fault the case
    reports. *)
 let start_count_tokens_server ~sw ~net ~clock ~behaviour =
-  let port = fresh_port () in
   let count_posts = Atomic.make 0 in
   let first_count_request, arrived = Eio.Promise.create () in
   let handler _conn request body =
@@ -77,8 +63,16 @@ let start_count_tokens_server ~sw ~net ~clock ~behaviour =
         ~body:"the completion must not reach the listener"
         ()
   in
+  (* The kernel picks the port and the listener keeps it: choosing one
+     first on a throwaway socket and listening on it afterwards let another
+     suite take it in between. *)
   let socket =
-    Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+    Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> fail "the loopback listener is not a TCP socket"
   in
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork_daemon ~sw (fun () ->

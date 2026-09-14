@@ -129,7 +129,9 @@ let test_context_summaries () =
    | Layout.Context_measured _ | Layout.Context_unavailable _ ->
        fail "partial context lost");
   let reasons =
-    [ Decode.Context_measurement_missing, "context measurement missing"
+      (* Drawn under a row labelled "Context:", so the reason does not open
+         with that word again -- its four siblings never did. *)
+    [ Decode.Context_measurement_missing, "measurement missing"
     ; Decode.Context_turn_record_undecodable, "turn record undecodable"
     ; Decode.Context_turn_record_read_failed, "turn record read failed"
     ; ( Decode.Context_turn_record_without_usage

@@ -1021,6 +1021,18 @@ let test_operator_approvals_use_current_contract () =
   (* The Tools surface has had its own file since before the primitives
      moved; this asked the godfile about a binding that is not in it, so it
      answered 0 whatever the surface did. *)
+  (* One name per row. [remember_surface_error] opens the event with the
+     surface it belongs to, and every refusal that reaches it arrives unnamed
+     -- except this one, which spelled "asks" a second time and made the row
+     read "asks data unreliable: asks: HTTP 503: ...". The panel that draws it
+     cuts the event to thirty-six cells, so the repetition cost six of them
+     (#36266). All three call sites of this fetch reach that function through
+     [apply_asks_load], so there is no reader left that the name would help. *)
+  check int "the asks fetch leaves the surface name to the event" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"fetch_keeper_asks"
+       ~callee:"named_refusal");
   check int "the tools header does not serialise its skills" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_tools.ml"

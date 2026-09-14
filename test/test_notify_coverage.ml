@@ -397,6 +397,20 @@ let test_a_host_with_no_notifier_starts_no_process () =
 (* The bound is what turns a notifier that never returns into a failed
    notification instead of a held tool call: the fake sleeps far past it and
    the call comes back at the bound, not at the sleep. *)
+
+(* How much later than the bound the call may return. After the bound the
+   notifier is stopped: SIGTERM, a grace, SIGKILL, a grace
+   ([Process_eio.child_exit_grace_seconds] each). The fake dies on the
+   SIGTERM and comes back well inside that; the window admits the worst case
+   plus a second for the runner. *)
+let stop_slack_s = (2. *. Process_eio.child_exit_grace_seconds) +. 1.0
+
+(* The bound is a policy value, not a measurement; the case only rejects one
+   that could not serve as a bound: at or under a measured post, or a
+   minute and longer, where a held tool call would already be the symptom. *)
+let shortest_useful_bound_s = 1.0
+let longest_useful_bound_s = 60.0
+
 let test_a_notifier_that_never_returns_is_stopped_at_the_bound () =
   with_eio @@ fun env ->
   with_path_dir @@ fun dir ->
@@ -407,11 +421,11 @@ let test_a_notifier_that_never_returns_is_stopped_at_the_bound () =
   let elapsed = Eio.Time.now clock -. started in
   let bound = Notify.notifier_timeout_sec in
   check bool "the bound sits between a measured post and a minute" true
-    (bound > 1.0 && bound < 60.0);
+    (bound > shortest_useful_bound_s && bound < longest_useful_bound_s);
   check bool
     (Printf.sprintf "returned at the bound (%.1fs), took %.1fs" bound elapsed)
     true
-    (elapsed >= bound && elapsed < bound +. 5.0)
+    (elapsed >= bound && elapsed < bound +. stop_slack_s)
 
 (* ============================================================
    Test Runners

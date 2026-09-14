@@ -9,10 +9,11 @@ open Alcotest
 open Masc
 module Subcall = Keeper_provider_subcall
 
-(* [turn.provider_call_deadline_sec] is clamped to [30, 3600] where it is
-   read, so thirty seconds is the shortest deadline a declared threshold can
-   produce. This case pays it once. *)
-let shortest_declared_threshold_s = 30.0
+(* [turn.provider_call_deadline_sec] has a declared range whose lower bound
+   is the shortest deadline a declared threshold can produce; a value below
+   it is refused where it is read. This case pays that bound once. *)
+let shortest_declared_threshold_s =
+  Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
 let threshold_slack_s = 5.0
 
 let with_declared_provider_call_deadline seconds f =

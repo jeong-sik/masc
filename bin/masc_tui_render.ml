@@ -2617,25 +2617,39 @@ let render_planning_list (state : state) =
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
   (* The clock and the badge always ride this row; the modes ride it when the
-     row can hold them, and take one of their own when it cannot. Measured
-     against the title the strip has already been sized for, so the strip is
-     not asked to shrink twice. *)
+     row can hold them, and take one of their own when it cannot. *)
   let chrome = Printf.sprintf "  %s  %s" timestamp (connection_badge state) in
-  let title =
+  (* The whole tail, measured as the row draws it. [planning_workspace_title]
+     sizes its strip against what follows, so modes inserted after that
+     measurement spend the cells the badge was holding: at a hundred columns
+     the row ran to 112 of the 96 it had, and the reading lost "HTTP
+     [connected]" and the seconds off its clock -- the two facts that say
+     whether what is on the screen is live. Asking the question of
+     [title ^ "  " ^ modes] alone could only ever answer it for a row with no
+     chrome on it, which this row has never been. *)
+  let riding = "  " ^ modes ^ chrome in
+  let title_alone =
     planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
       ~after:chrome
   in
-  (* Unchanged: whether the modes ride this row is the same question it was,
-     asked of the title the strip has now been sized for. What changed is that
-     the clock and the badge are no longer what falls off when the answer is
-     wrong -- they are reserved before the strip is measured, and the modes
-     have a row of their own to fall back to. *)
-  let modes_fit_header =
-    Message_layout.display_width (title ^ "  " ^ modes) < framed_inner_width cols
+  let title_with_modes =
+    planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+      ~after:riding
   in
-  let header = Printf.sprintf "%s%s%s" title
-    (if modes_fit_header then "  " ^ modes else "")
-    chrome in
+  (* The modes ride when they cost nothing: the strip drawn beside them is the
+     same strip, and the row still fits. Measuring only the width let the strip
+     pay instead -- it cuts rather than overflowing, so any row "fits" once the
+     tabs are allowed to disappear, and at a hundred columns Planning answered
+     yes by hiding "Task Review" and "Task Verdicts". The modes have a row of
+     their own; the two other tabs and the badge have nowhere else to go. *)
+  let modes_fit_header =
+    String.equal title_alone title_with_modes
+    && Message_layout.display_width (title_with_modes ^ riding)
+       <= framed_inner_width cols
+  in
+  let header =
+    if modes_fit_header then title_with_modes ^ riding else title_alone ^ chrome
+  in
 
   box_top buf cols;
   box_line buf cols header;

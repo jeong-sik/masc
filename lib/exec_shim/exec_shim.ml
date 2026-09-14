@@ -23,6 +23,21 @@ external restrict_self : string -> bool -> bool -> bytes -> int
 
 let observe_supported () = observe_support_abi () >= 1
 
+(* Capability probe only (task-1568, PR #36032 review 5192723206): whether
+   this kernel would accept SECCOMP_FILTER_FLAG_NEW_LISTENER at all.
+   [probe] below reports it as a capability (review 5195604213's lesson:
+   an unreferenced surface in this lineage gets rejected as dead code, so
+   this is read on the wire from its first commit rather than left
+   declared-only). [deny_sockets] itself still answers socket(2) with
+   EPERM straight from the filter, and [decide_after_observation] still
+   defers every [Observed_refused] to the judge regardless of what this
+   reports — advertising a capability is not a policy the gate reads.
+   Acting on it needs a listener fd carried from the child to the parent
+   (a plain pipe cannot carry a file descriptor: a new SCM_RIGHTS stub)
+   and a supervisor loop that reads/decodes/responds to notifications —
+   deferred to the PR that adds that loop. *)
+external user_notif_supported : unit -> bool = "ocaml_shim_user_notif_supported"
+
 let observe_unsupported_code = "observe_unsupported"
 let observe_scratch_code = "observe_scratch_error"
 
@@ -899,7 +914,9 @@ let probe () =
     { name = "masc-exec-shim"
     ; version =
       Printf.sprintf "%d.0.0%s" protocol_version Shim_build_id.suffix
-    ; capabilities = (if observe_supported () then [ observe_capability ] else [])
+    ; capabilities =
+      (if observe_supported () then [ observe_capability ] else [])
+      @ (if user_notif_supported () then [ user_notif_capability ] else [])
     ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     }
 

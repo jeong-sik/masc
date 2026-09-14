@@ -57,6 +57,41 @@ let test_the_first_entry_keeps_its_left_edge () =
   Alcotest.(check bool) "the cut is on the right" true
     (String.equal (String.sub drawn (String.length drawn - 3) 3) cut)
 
+(* What the width means. The window is seeded with the current entry, so a
+   strip narrower than that one entry used to draw it anyway and hand the
+   overrun to the frame -- which takes its cells from the end of the row, not
+   from the strip. On Config at a hundred columns that end is the clock and
+   the connection badge: the row read "20:30:22  HT" with the badge cut in
+   half, because two cells were left for a strip that drew sixteen.
+
+   Swept rather than sampled: every width a row can leave a strip, against
+   every entry the cursor can be on. One width and one tab would pin this
+   case and leave the next one to be found on a screen. *)
+let test_the_strip_never_draws_wider_than_its_budget () =
+  let labels =
+    [ "Info"; "Sandbox"; "Settings"; "Secrets"; "GitHub"; "Identity"
+    ; "Channels"; "Automation"; "Runs" ]
+  in
+  List.iter
+    (fun current ->
+      for width = 0 to 40 do
+        let drawn = plain ~width (keeper_tabs current) in
+        Alcotest.(check bool)
+          (Printf.sprintf "%s at %d cells stays inside its budget" current width)
+          true
+          (cells drawn <= width)
+      done)
+    labels
+
+(* And it still says which entry is current whenever there is room to. The
+   clamp cuts from the right, so the mark -- which the window puts first when
+   the current entry is the leftmost one shown -- survives any width that can
+   hold it. *)
+let test_a_clamped_strip_still_marks_where_it_can () =
+  let drawn = plain ~width:6 (keeper_tabs "Runs") in
+  Alcotest.(check bool) "six cells is not overrun" true (cells drawn <= 6);
+  Alcotest.(check bool) "and something is drawn" true (String.length drawn > 0)
+
 let test_a_middle_entry_keeps_both_neighbours () =
   let drawn = plain ~width:40 (keeper_tabs "GitHub") in
   Alcotest.(check bool) "the neighbour before" true (contains "Secrets  \xe2\x96\xb8GitHub" drawn);
@@ -116,6 +151,10 @@ let () =
             test_the_last_entry_stays_on_the_row
         ; Alcotest.test_case "the first entry keeps its left edge" `Quick
             test_the_first_entry_keeps_its_left_edge
+        ; Alcotest.test_case "the strip never draws wider than its budget" `Quick
+            test_the_strip_never_draws_wider_than_its_budget
+        ; Alcotest.test_case "a clamped strip still marks where it can" `Quick
+            test_a_clamped_strip_still_marks_where_it_can
         ; Alcotest.test_case "a middle entry keeps both neighbours" `Quick
             test_a_middle_entry_keeps_both_neighbours
         ; Alcotest.test_case "the current entry is always on the row" `Quick

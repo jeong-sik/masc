@@ -146,7 +146,12 @@ val resume_direct_runtime_retry :
     consuming continuation into Running. An interrupted resumed execution needs
     reconciliation; it is never blindly replayed from a stale checkpoint. *)
 
-val settle_running_after_restart : t -> now:float -> (int, error) result
+(** Settle every [Running] operation as [Failed Interrupted_by_restart] and
+    return those operations as they were read, so the caller can leave an
+    operator-visible failure row for each: without one, a request the
+    restart cut off vanished from the transcript with no answer
+    (msx-retro-mania, three requests on 2026-09-14). *)
+val settle_running_after_restart : t -> now:float -> (Operation.t list, error) result
 val error_to_string : error -> string
 
 module For_testing : sig

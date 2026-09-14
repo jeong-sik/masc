@@ -79,6 +79,14 @@ val observe_capability : string
 (** The probe capability a shim advertises when it can run [Observe] and
     [Guest_local] here: ["observe"]. *)
 
+val user_notif_capability : string
+(** The probe capability a shim advertises when this kernel accepts
+    [SECCOMP_FILTER_FLAG_NEW_LISTENER] ({!Exec_shim.user_notif_supported}):
+    ["user_notif"]. Reports a fact about the host, not a promise the shim
+    acts on it -- nothing decodes notify-fd attempts yet (task-1568 phase
+    2, a separate PR: fd-passing and the supervisor's read/decode/respond
+    loop). *)
+
 val default_scratch_root : string
 (** [/tmp]: where a shim makes a boxed request's scratch when its config
     names no [scratch_root]. Shared with the microvm boot, which mounts the

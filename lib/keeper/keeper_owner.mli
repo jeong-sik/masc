@@ -326,6 +326,11 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+(** The running operations {!start} settled as [Interrupted_by_restart], as
+    they were read before settlement. The registry leaves a failure row in the
+    transcript for each; the owner has no transcript of its own. *)
+val restart_interrupted_operations : t -> Chat_operation.t list
+
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->

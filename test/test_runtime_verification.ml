@@ -270,7 +270,10 @@ let with_silent_endpoint_runtime ~binding_keys f =
           net
           (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
       in
-      Eio.Fiber.fork ~sw (fun () ->
+      (* A daemon: a case whose verdict arrives before anything connects (a
+         run still queued for a permit at the timeout) must not leave the
+         switch waiting on an accept that never comes. *)
+      Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
           let buf = Cstruct.create 4096 in
           try
@@ -278,7 +281,8 @@ let with_silent_endpoint_runtime ~binding_keys f =
               ignore (Eio.Flow.single_read flow buf)
             done
           with
-          | End_of_file | Eio.Io _ -> ()));
+          | End_of_file | Eio.Io _ -> ());
+        `Stop_daemon);
       let port =
         match Eio.Net.listening_addr listening with
         | `Tcp (_, port) -> port
@@ -324,13 +328,17 @@ streaming = true
 ;;
 
 (* Runs [verify] with [timeout_s] under a guard that turns a hang into a
-   failure, and returns the verdict with the seconds it took. The HTTP arm's
-   deadlines are enforced by Agent Core on the clock [Runtime_agent.run]
-   finds in the process context, the one the CLI installs with
-   [Eio_context.set_env] before it verifies; without it the deadline is
-   refused before the request as "supplied without the clock required to
-   enforce it" and the verdict is a rejection, not a timeout. *)
+   failure, and returns the verdict with the seconds it took. The call is
+   shaped like the CLI's: the command's [clock] and nothing installed in the
+   process. `masc runtime-verify` and `masc setup` install no process clock,
+   and an HTTP arm whose deadline needed one refused every binding before
+   the request; a harness that installs one would hide that again. *)
 let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
+  check
+    bool
+    "no process clock is installed, as in the CLI"
+    true
+    (Option.is_none (Eio_context.get_clock_opt ()));
   let directory = Filename.temp_dir "runtime-verification-silent-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
   let clock = env#clock in
@@ -339,22 +347,16 @@ let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
     try
       Some
         (Eio.Time.with_timeout_exn clock guard_s (fun () ->
-           Eio_context.with_test_env
-             ~net:env#net
-             ~clock
-             ~mono_clock:env#mono_clock
+           Verify.verify
+             ~secure_random:env#secure_random
              ~sw
-             (fun () ->
-               Verify.verify
-                 ~secure_random:env#secure_random
-                 ~sw
-                 ~net:env#net
-                 ~mgr:env#process_mgr
-                 ~clock
-                 ~cwd:Eio.Path.(env#fs / directory)
-                 ~cwd_path:directory
-                 ~timeout_s
-                 runtime)))
+             ~net:env#net
+             ~mgr:env#process_mgr
+             ~clock
+             ~cwd:Eio.Path.(env#fs / directory)
+             ~cwd_path:directory
+             ~timeout_s
+             runtime))
     with
     | Eio.Time.Timeout -> None
   in
@@ -383,8 +385,16 @@ let check_timed_out_inside ~label ~timeout_s ~slack_s ~guard_s (result, elapsed)
       (timeout_s +. slack_s)
 ;;
 
+(* The command's deadline in these cases. *)
 let declared_timeout_s = 0.5
+
+(* How far past the deadline a verdict may arrive and still count as the
+   deadline's: scheduling on a loaded runner, plus the socket teardown the
+   cancelled run does before returning. Well under [guard_s], so the window
+   still tells "the deadline ended it" from "the guard ended it". *)
 let slack_s = 2.5
+
+(* Turns a hang into a failure; a case that reaches it has no bound at all. *)
 let guard_s = 10.0
 
 (* The HTTP arm ran the readiness turn with no bound: [timeout_s] reached

@@ -507,10 +507,22 @@ let test_store_failure_fences_mutations () =
    | Error (Owner.Store_unavailable "disk unavailable") -> ()
    | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "store-fenced owner accepted another mutation");
+  (* The metadata persistence fault is its own slot now (#36203). A drain wake
+     touches only the operation store, which is healthy here, so it returns Ok;
+     the metadata fault does not clear on operation-store activity, proven by
+     the next meta commit still being refused. *)
   (match Owner.wake_operation_drain owner with
-   | Error (Owner.Store_unavailable _) -> ()
-   | Error error -> fail (Owner.error_to_string error)
-   | Ok () -> fail "operation-store recovery cleared metadata persistence failure");
+   | Ok () -> ()
+   | Error error ->
+     fail ("operation drain was blocked by a metadata persistence fault: " ^ Owner.error_to_string error));
+  (match
+     Owner.apply_meta
+       owner
+       (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "still-fenced-after-drain" })
+   with
+   | Error (Owner.Store_unavailable "disk unavailable") -> ()
+   | Error error -> fail ("metadata fault was not preserved: " ^ Owner.error_to_string error)
+   | Ok _ -> fail "operation drain cleared the metadata persistence fault");
   match Owner.exact_projection owner with
   | Ok projection ->
     check bool
@@ -2616,10 +2628,113 @@ let test_startup_interrupts_running_without_requeue () =
             (Chat_operation.failure_kind_to_string kind)
         | state -> fail ("restart did not interrupt Running: " ^ Chat_operation.state_to_string state));
        check bool "interrupted input is scrubbed" true (Option.is_none settled.input);
+       (match Owner.restart_interrupted_operations owner with
+        | [ interrupted ] ->
+          check bool "the owner names the operation the restart cut off" true
+            (Chat_operation.Operation_id.equal interrupted.operation_id operation_id)
+        | interrupted ->
+          failf "expected one restart-interrupted operation, got %d" (List.length interrupted));
        check bool
          "restart never requeues Running"
          true
          (Option.is_none (owner_ok (Owner.claim_next_operation owner))))
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request () =
+  (* The stream that persists a request's failure row dies with the process,
+     so a request the restart cut off used to vanish from the transcript with
+     no answer (msx-retro-mania, three requests on 2026-09-14). The registry
+     now leaves the same [Transport_failure] row the stream would have. *)
+  let base_path = Filename.temp_dir "keeper-owner-restart-row" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "restart-row-owner" in
+       (match Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
+        | Ok () -> ()
+        | Error detail -> fail ("persist keeper meta: " ^ detail));
+       let operation_id = operation_id "kmsg-restart-row" in
+       let source =
+         Keeper_chat_operation_payload.source_to_json
+           ~submitted_by:"masc-tui"
+           ~thread_id:("keeper:" ^ keeper_name)
+           ~continuation_channel:
+             (Keeper_continuation_channel.dashboard ~thread_id:("keeper:" ^ keeper_name)
+              |> Result.get_ok)
+           ~surface:(Surface_ref.Dashboard { session_id = None })
+           ~channel:""
+           ~channel_user_id:""
+           ~channel_user_name:""
+           ~channel_workspace_id:""
+           ~conversation_id:None
+           ~external_message_id:None
+           ~workspace_id:None
+           ~extra_mentions:[]
+           ~user_row_origin:Keeper_chat_store.Needs_append
+         |> Result.get_ok
+       in
+       let store_path =
+         Keeper_chat_operation_store.path_for_keeper
+           ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+           ~keeper_name
+       in
+       (try Unix.mkdir (Filename.dirname store_path) 0o755 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path:store_path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       Keeper_chat_operation_store.submit
+         seed
+         ~now:10.0
+         ~operation_id
+         ~source
+         ~input:(operation_input "running at crash")
+       |> Result.get_ok
+       |> ignore;
+       Keeper_chat_operation_store.claim_next seed ~now:11.0 |> Result.get_ok |> ignore;
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       Eio.Switch.run @@ fun sw ->
+       (match
+          Owner_registry.install_from_store
+            ~sw
+            ~operation_runner:None
+            ~on_turn_slot_released:None
+            config
+        with
+        | Ok count -> check int "one owner installed" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
+       let failure_rows =
+         List.filter
+           (fun (row : Keeper_chat_store.chat_message) ->
+              Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant
+              && Keeper_chat_store.Row_kind.equal row.kind Keeper_chat_store.Row_kind.Transport_failure)
+           rows
+       in
+       (match failure_rows with
+        | [ row ] ->
+          check string "the row says what happened"
+            "Keeper request failed: the server restarted before this request finished."
+            row.content
+        | rows -> failf "expected one transport-failure row, got %d" (List.length rows)))
 ;;
 
 let test_startup_queued_waits_for_runner_readiness () =
@@ -2851,10 +2966,25 @@ let test_recovery_keeps_integrity_failure_fenced () =
       Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-integrity")
         ~source:operation_source ~input:(operation_input "must remain fenced")
       |> expect_store_unavailable;
-      (* Metadata is refused on the same fault: a command is where the fence
-         is re-examined, and an integrity fault does not lift there either. *)
-      Owner.apply_meta owner
-        (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
+      (* The metadata store is healthy, so a metadata commit lands even while
+         the operation store is fenced for integrity reconciliation (#36203).
+         The two fault slots are independent: the commit does not clear the
+         operation fault, and operation commands stay refused. *)
+      (match
+         Owner.apply_meta owner
+           (Set_activation_mode
+              { mode = Masc.Keeper_activation_mode.Autonomous
+              ; updated_at = "meta-commits-through-op-fence" })
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail
+           ("metadata commit was blocked by an operation integrity fault: "
+            ^ Owner.error_to_string error));
+      check bool "the operation store stays fenced after the meta commit" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-still-fenced")
+        ~source:operation_source ~input:(operation_input "operation path stays fenced")
       |> expect_store_unavailable)
 ;;
 
@@ -2916,6 +3046,64 @@ let test_recovery_does_not_replay_an_active_or_uncertain_child () =
        | Chat_operation.Running _ -> ()
        | _ -> fail "recovery fabricated an outcome for an uncertain terminal commit");
       check int "external-effect child was never replayed" 1 !executions)
+;;
+
+(* msx-retro-mania, 2026-09-14 16:45 KST: an operation-store fault landed while
+   the autonomous lane held the turn, and the any-child recovery guard refused
+   to reopen for the 25 minutes that lane ran without pause. Every meta commit
+   in that window was refused as [store_unavailable] and the keeper marched to
+   failing. The lane guard reopens because no Chat_operation child holds the
+   handle, so both the drain and the cycle's own meta commit recover. *)
+let test_availability_recovers_under_an_autonomous_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  with_recovery_store ~sw ~keeper_name:"recovery-autonomous" ~runner:None
+    ~on_turn_slot_released:None
+    (fun owner _path ->
+      let autonomous_result = Eio.Stream.create 1 in
+      Eio.Fiber.fork ~sw (fun () ->
+        let result =
+          Owner.run_autonomous_if_idle owner (fun () ->
+            Eio.Promise.resolve resolve_started ();
+            Eio.Promise.await release)
+        in
+        Eio.Stream.add autonomous_result result);
+      Eio.Promise.await started;
+      (match Owner.turn_in_flight owner with
+       | Some { lane = Owner.Autonomous; _ } -> ()
+       | Some _ -> fail "the fenced turn is not the autonomous lane"
+       | None -> fail "the autonomous child was not in flight");
+      inject_operation_failure owner (operation_id "kmsg-autonomous-rollback");
+      check bool "the fault fenced the operation store" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (match Owner.wake_operation_drain owner with
+       | Ok () -> ()
+       | Error error ->
+         fail
+           ("availability recovery was refused under an autonomous child: "
+            ^ Owner.error_to_string error));
+      check bool "the drain reopened the store under the autonomous child" false
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (match
+         Owner.apply_meta
+           owner
+           (Set_activation_mode
+              { mode = Masc.Keeper_activation_mode.Autonomous
+              ; updated_at = "recovered-under-autonomous" })
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail
+           ("the autonomous cycle's meta commit was still fenced after recovery: "
+            ^ Owner.error_to_string error));
+      Eio.Promise.resolve resolve_release ();
+      match Eio.Stream.take autonomous_result with
+      | Ok (`Ran ()) -> ()
+      | Ok (`Busy _) -> fail "the autonomous child reported itself busy"
+      | Ok `Interrupted -> fail "nothing interrupted the autonomous child"
+      | Error error -> fail (Owner.error_to_string error))
 ;;
 
 let test_keeper_owners_do_not_cross_block () =
@@ -4243,6 +4431,10 @@ let () =
             `Quick
             test_startup_interrupts_running_without_requeue
         ; test_case
+            "registry start leaves a failure row for a restart-interrupted request"
+            `Quick
+            test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request
+        ; test_case
             "startup Queued waits for runner readiness"
             `Quick
             test_startup_queued_waits_for_runner_readiness
@@ -4270,6 +4462,8 @@ let () =
             test_recovery_keeps_integrity_failure_fenced
         ; test_case "recovery never replays active or uncertain child" `Quick
             test_recovery_does_not_replay_an_active_or_uncertain_child
+        ; test_case "availability recovers under an autonomous child" `Quick
+            test_availability_recovers_under_an_autonomous_child
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

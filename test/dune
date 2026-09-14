@@ -1938,6 +1938,13 @@
  (modules test_keeper_stream_idle_floor)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; A process with no clock refuses the provider attempt instead of running it
+; unbounded. The only driver suite that installs no clock.
+(test
+ (name test_keeper_attempt_without_clock)
+ (modules test_keeper_attempt_without_clock)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 (test
  (name test_keeper_required_tools)
  (modules test_keeper_required_tools)
@@ -2252,6 +2259,8 @@
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
+
+(include stanzas/test_exec_policy_containment.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 (include stanzas/test_auth_oauth.inc)

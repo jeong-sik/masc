@@ -90,6 +90,7 @@ let major_of_probe (p : probe) : (major, string) result =
          (Printf.sprintf "the shim speaks v%d and this build speaks %s" n (majors_text ())))
 
 let observe_capability = "observe"
+let user_notif_capability = "user_notif"
 let default_scratch_root = "/tmp"
 
 let mode_to_string = function

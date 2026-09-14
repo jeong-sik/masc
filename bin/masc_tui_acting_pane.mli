@@ -164,9 +164,9 @@ type input = {
   call_order : call_order;
   expanded : (string * Masc_tui_acting.call_key) list;
       (** The calls whose detail is open, by keeper and call key. An open
-          call draws three rows under its own: its receipt age with the
-          schedule and disposition in words, then the input and output
-          previews the producer sent, one row each. *)
+          call draws three rows under its own: its disposition, receipt age
+          and schedule in words, then the input and output previews the
+          producer sent, one row each. *)
 }
 
 type span = {

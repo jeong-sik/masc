@@ -218,7 +218,7 @@ let complete_prepared_sync
                    (Http_client.TimeoutError
                       { message =
                           Printf.sprintf
-                            "call_timeout_s deadline exceeded after %.17gs %s                              (Complete.complete)"
+                            "call_timeout_s deadline exceeded after %.17gs %s (Complete.complete)"
                             call_timeout_s
                             stage
                       ; phase
@@ -240,7 +240,14 @@ let complete_prepared_sync
                 (fun () ->
                    let remaining = deadline_at -. Eio.Time.now call_clock in
                    if Float.compare remaining 0.0 <= 0
-                   then queue_expired ()
+                   then
+                     (* The permit arrived as the deadline passed: nothing was
+                        sent, and the permit goes straight back. Still the
+                        queue phase, said as what happened. *)
+                     call_deadline_exceeded
+                       ~phase:Http_client.Queue
+                       ~stage:
+                         "with a provider admission permit granted as the deadline passed"
                    else (
                      match
                        Eio.Time.with_timeout call_clock remaining (fun () ->

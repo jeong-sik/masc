@@ -279,7 +279,10 @@ let all =
       ~env_name:"MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
       ~exposure:(Toml_and_env "turn.stream_idle_timeout_sec")
       ~value_kind:Float
-      ~default:"(failsafe 600)"
+      ~default:
+        (Printf.sprintf
+           "(failsafe %g)"
+           Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)
       ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context" ]
       ~category:"turn"
       "Streaming provider inter-line idle timeout"
@@ -288,25 +291,40 @@ let all =
       ~env_name:"MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
       ~exposure:(Toml_and_env "turn.first_event_timeout_sec")
       ~value_kind:Float
-      ~default:"(failsafe 600)"
+      ~default:
+        (Printf.sprintf
+           "(failsafe %g)"
+           Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)
       ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context" ]
       ~category:"turn"
       "Streaming provider first-event (TTFT/prefill) timeout"
   ; setting
-      ~range:(float_range ~min:30.0 ~max:3600.0 ())
+      ~range:
+        (float_range
+           ~min:Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
+           ~max:Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec
+           ())
       ~env_name:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
       ~value_kind:Float
-      ~default:"(failsafe 900)"
+      ~default:
+        (Printf.sprintf
+           "(failsafe %g)"
+           Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec)
       ~consumers:
         [ "Keeper_runtime_resolved"
         ; "Keeper_turn_driver_try_provider attempt watchdog"
         ; "Keeper_provider_subcall"
+        ; "Keeper_identity_tools MCP transport"
         ]
       ~category:"turn"
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
   ; setting
-      ~range:(float_range ~min:10.0 ~max:600.0 ())
+      ~range:
+        (float_range
+           ~min:Env_config_keeper.KeeperKeepalive.body_timeout_min_sec
+           ~max:Env_config_keeper.KeeperKeepalive.body_timeout_max_sec
+           ())
       ~env_name:"MASC_KEEPER_BODY_TIMEOUT_SEC"
       ~exposure:Env_only
       ~value_kind:Float

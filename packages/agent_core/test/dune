@@ -761,6 +761,13 @@
  (modules test_sse_budget_anchor)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
 
+; A slot granted as a waiter's deadline passes is owned, not dropped: the
+; mock clock orders the timer's wake-up ahead of the grant's.
+(test
+ (name test_slot_scheduler_deadline_ownership)
+ (modules test_slot_scheduler_deadline_ownership)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
 (test
  (name test_tls_config_cache)
  (modules test_tls_config_cache)

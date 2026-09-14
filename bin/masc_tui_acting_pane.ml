@@ -667,6 +667,11 @@ let clip_cells text room =
   if Layout.display_width text <= room then text
   else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
 
+(* The mode and, in a batch, how many ran at once. Not the planned step:
+   the list already shows the calls in receipt order, and the facts row has
+   fifty cells after its indent -- with "step 12" on it the widest row
+   ("completed \xc2\xb7 12m05s ago \xc2\xb7 step 12 \xc2\xb7 concurrent, 12 at
+   once", 57) lost its last word to the cut; without it that row is 47. *)
 let schedule_text (tool : Acting.chunk_tool) =
   match tool.Acting.ct_schedule with
   | None -> ""
@@ -677,13 +682,9 @@ let schedule_text (tool : Acting.chunk_tool) =
         | Agent_core.Tool_contract.Concurrent -> "concurrent"
         | Agent_core.Tool_contract.Serial -> "serial"
       in
-      let at_once =
-        if schedule.Agent_core.Tool_contract.batch_size > 1 then
-          Printf.sprintf ", %d at once" schedule.Agent_core.Tool_contract.batch_size
-        else ""
-      in
-      Printf.sprintf "step %d" (schedule.Agent_core.Tool_contract.planned_index + 1)
-      ^ middle_dot ^ mode ^ at_once
+      if schedule.Agent_core.Tool_contract.batch_size > 1 then
+        Printf.sprintf "%s, %d at once" mode schedule.Agent_core.Tool_contract.batch_size
+      else mode
 
 let disposition_span (tool : Acting.chunk_tool) =
   match tool.Acting.ct_disposition with
@@ -698,11 +699,12 @@ let disposition_span (tool : Acting.chunk_tool) =
       in
       Some { text = Reading.keeper_call_disposition_to_string disposition; tone }
 
-(* One of an opened call's three rows. The facts row is the receipt age,
-   the schedule and the disposition -- the words behind the marks on the
-   call's own row. The two previews are what the producer redacted and sent,
-   one row each, cut to the pane; "not carried" is the wire plane, which
-   sends none. *)
+(* One of an opened call's three rows. The facts row is the disposition,
+   the receipt age and the schedule -- the words behind the marks on the
+   call's own row, the disposition first because it is the one that carries
+   a tone and the one the cut must never take. The two previews are what
+   the producer redacted and sent, one row each, cut to the pane; "not
+   carried" is the wire plane, which sends none. *)
 let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
   let indent = { text = String.make detail_indent_cells ' '; tone = Plain } in
   let room = max 0 (cols - border_cells - detail_indent_cells) in
@@ -727,10 +729,10 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
       in
       let disposition =
         match disposition_span tool with
-        | Some span -> [ { text = middle_dot; tone = Dim }; span ]
+        | Some span -> [ span; { text = middle_dot; tone = Dim } ]
         | None -> []
       in
-      fit_line ~cols (with_border (indent :: facts :: disposition))
+      fit_line ~cols (with_border ((indent :: disposition) @ [ facts ]))
   | Detail_input -> preview_row ~label:"in" tool.Acting.ct_input
   | Detail_output -> preview_row ~label:"out" tool.Acting.ct_output
 

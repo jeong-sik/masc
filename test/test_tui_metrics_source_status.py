@@ -127,9 +127,22 @@ def run(executable: str) -> None:
         h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
         h.send_and_wait(process, master, output, b"3", b"Gate Governance")
         await_requests("initial")
-        await_screen("Gate unavailable", "Tool holds unavailable", "YOLO Keepers: unavailable",
-                     "Pending Gate Calls: unavailable", "Standing Rules: unavailable",
-                     absent=("no active pending", "Pending Gate Calls: 0", "Tool holds 0"))
+        # Two rows, two jobs. The pulse row has one cell where a number goes,
+        # so it names the state in a word ("Gate unavailable"). The section row
+        # under it has the width to say why, and a read that failed has the
+        # loader's own sentence for that -- "gate load failed: HTTP 503: ..."
+        # names its subject and its verdict already, so the row prints it as it
+        # stands. It used to print "unavailable: " in front of it too, which
+        # said the verdict a second time and pushed the row past the pane
+        # (#36253). Reading for that prefix is how this suite keeps the two
+        # rows from collapsing back into one wording.
+        await_screen("Gate unavailable", "Tool holds unavailable",
+                     "YOLO Keepers: tool approval modes load failed",
+                     "Pending Gate Calls: gate load failed",
+                     "Standing Rules: gate load failed",
+                     absent=("no active pending", "Pending Gate Calls: 0", "Tool holds 0",
+                             "Pending Gate Calls: unavailable:", "Standing Rules: unavailable:",
+                             "YOLO Keepers: unavailable:"))
         refresh("ready")
         await_screen("Gate 1", "Tool holds 1", "Pending Gate Calls: 1",
                      "Held Tool Approvals: 1", "Standing Rules: 1", "YOLO Keepers: 1")

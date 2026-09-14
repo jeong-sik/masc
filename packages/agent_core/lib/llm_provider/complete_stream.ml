@@ -664,7 +664,14 @@ let complete_stream_http
                    | Some elapsed_ms when Option.is_none !first_event_at_ref ->
                      first_event_at_ref := Some elapsed_ms
                    | Some _ | None -> ());
-                  stream_idle_state := Http_client.Awaiting_first_delta);
+                  (* Until the first output, a frame means "a delta may be
+                     next". After it, a frame that projects nothing the
+                     classifier names (a usage-only chunk, a message delta)
+                     leaves the stream where its last production put it: a
+                     stall after such a frame is an idle gap in that state,
+                     not a wait for a first delta that has already come. *)
+                  if not !first_output_seen
+                  then stream_idle_state := Http_client.Awaiting_first_delta);
                 let project_event emitted_evt =
                   if Streaming.sse_event_is_first_token_signal emitted_evt
                   then (
@@ -1014,7 +1021,13 @@ let complete_stream_http
                     (Telemetry_event.Timeout
                        { provider
                        ; model
-                       ; timeout_type = Telemetry_event.Stream_idle !stream_idle_state
+                       ; (* The same fact the phase states: before the first
+                            output the budget that ran out was the one to the
+                            first token, whatever frame last moved the state. *)
+                         timeout_type =
+                           (if !first_output_seen
+                            then Telemetry_event.Stream_idle !stream_idle_state
+                            else Telemetry_event.Ttft_exceeded)
                        });
                   publish_summary
                     ~terminal:

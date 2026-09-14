@@ -26,6 +26,19 @@ assert.equal(parsed.present, true)
 assert.equal(parsed.error, undefined)
 assert.deepEqual(taxonomy.resolve(parsed.fields).errors, [])
 
+// 2026-09-14 (task-1574): a composer that writes the field separators as the
+// two literal characters `\` `n`, not an actual newline -- the block's own
+// opening fence still needs a real newline right after the language tag, so
+// this only breaks the content split, not whether the block is found at all.
+const literalNewlineBlock = `\`\`\`${language}\n${Object.entries(validFields)
+  .map(([key, value]) => `${key}: ${value}`)
+  .join('\\n')}\`\`\``
+const literalNewlineParsed = taxonomy.parseDeclaration(literalNewlineBlock)
+assert.equal(literalNewlineParsed.present, true)
+assert.equal(literalNewlineParsed.error, undefined)
+assert.deepEqual(literalNewlineParsed.fields, validFields)
+assert.deepEqual(taxonomy.resolve(literalNewlineParsed.fields).errors, [])
+
 const singleAxis = Object.entries(ssot.axes).find(([, spec]) => spec.cardinality === 'one')
 assert.ok(singleAxis, 'fixture requires one single-cardinality axis')
 const [singleAxisName, singleAxisSpec] = singleAxis

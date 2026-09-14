@@ -18223,21 +18223,18 @@ and is loaded on demand through keeper_skill.
             | "k" | "up" ->
                 state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.patch_modal_scroll <- state.patch_modal_scroll + 10
+                let _, height = Masc_tui_render.patch_modal_viewport state in
+                state.patch_modal_scroll <- state.patch_modal_scroll + height
             | "u" | "pageup" ->
-                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 10)
+                let _, height = Masc_tui_render.patch_modal_viewport state in
+                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - height)
             | "g" | "home" ->
                 state.patch_modal_scroll <- 0
             | "G" | "end" ->
-                let total_rows =
-                  match state.patch_modal_diff with
-                  | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
-                  | None ->
-                      (match state.repository_changes_diff with
-                       | Some (_, d) -> List.length d.Masc.Tui_decode.gd_rows
-                       | None -> 0)
+                let total_rows, height =
+                  Masc_tui_render.patch_modal_viewport state
                 in
-                state.patch_modal_scroll <- max 0 (total_rows - 5)
+                state.patch_modal_scroll <- max 0 (total_rows - height)
             | "e" | "E" ->
                 let path_opt =
                   match state.patch_modal_path with

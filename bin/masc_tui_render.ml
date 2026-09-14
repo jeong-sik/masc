@@ -14314,6 +14314,30 @@ let render_palette (state : state) =
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are
    the footer's alone. *)
+(* The diff's rows and the rows the overlay shows, computed once for the
+   renderer that draws them and the keys that scroll them. The keys used to
+   move ten rows whatever the window was, and to reach the end by leaving five
+   rows on screen -- a number the renderer's own clamp then corrected, which is
+   why it went unnoticed. *)
+let patch_modal_viewport (state : state) =
+  let terminal_rows, _cols = get_terminal_size () in
+  let diff_opt =
+    match state.patch_modal_diff with
+    | Some (_, d) -> Some d
+    | None -> (match state.repository_changes_diff with Some (_, d) -> Some d | None -> None)
+  in
+  let total =
+    match diff_opt with
+    | Some diff -> List.length diff.Masc.Tui_decode.gd_rows
+    | None -> 0
+  in
+  (* The column heading and the divider under it open the body. *)
+  let heading_rows = 2 in
+  ( total
+  , max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - surface_chrome_rows - heading_rows) )
+
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let path_label =
@@ -14331,14 +14355,7 @@ let render_patch_modal (state : state) =
     | Some diff -> diff.Masc.Tui_decode.gd_rows
     | None -> []
   in
-  let total = List.length diff_rows in
-  (* The column heading and the divider under it open the body. *)
-  let heading_rows = 2 in
-  let content_height =
-    max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows
-       - surface_chrome_rows - heading_rows)
-  in
+  let total, content_height = patch_modal_viewport state in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
@@ -14348,7 +14365,8 @@ let render_patch_modal (state : state) =
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
     ~hints:
-      (Printf.sprintf "[lines %s]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+      (Printf.sprintf
+         "[lines %s]  e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
          (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())

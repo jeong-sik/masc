@@ -18143,10 +18143,13 @@ and is loaded on demand through keeper_skill.
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
+                let _, height = Masc_tui_render.link_modal_viewport state in
                 state.link_modal_scroll <-
-                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll
+                    ~by:height
             | "u" | "pageup" ->
-                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
+                let _, height = Masc_tui_render.link_modal_viewport state in
+                state.link_modal_scroll <- max 0 (state.link_modal_scroll - height)
             | "g" | "home" ->
                 state.link_modal_scroll <- 0
             | "G" | "end" ->

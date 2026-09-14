@@ -14375,7 +14375,12 @@ let render_patch_modal (state : state) =
 
 (* The link preview overlay, through the same contract. The title names the
    site, so the footer carries only keys. *)
-let render_link_preview_modal (state : state) =
+(* The card, its height and the line count, computed once for the two readers
+   that need to agree: the renderer that draws it and the keys that scroll it.
+   They did not agree before -- the renderer sized the card to the window while
+   the keys moved a fixed five lines -- so a page key covered a quarter of a
+   tall window and four windows of a short one. *)
+let link_modal_card (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let url_opt =
     match state.link_modal_url with
@@ -14386,18 +14391,9 @@ let render_link_preview_modal (state : state) =
          | [] -> None)
   in
   match url_opt with
-  | None ->
-      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
-        ~frame:Chrome_overlay
-        ~title:
-          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
-           ^ Ansi.reset)
-        ~hints:"Esc:close"
-        ~body:(fun ~budget:_ c ->
-          c.push "  (no web links found in this conversation to preview)")
+  | None -> None
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
-      let site = Masc_tui_link_preview.site_label preview in
       let total_links = List.length state.link_modal_links in
       (* Which link of several, and the divider under it. *)
       let nav_rows = if total_links > 1 then 2 else 0 in
@@ -14410,6 +14406,29 @@ let render_link_preview_modal (state : state) =
         Masc_tui_link_preview.render_modal_card
           ~width:(framed_inner_width cols) ~height:content_height preview
       in
+      Some (url, preview, total_links, content_height, content_lines)
+
+(* The rows the modal shows and the rows it holds, for the page keys. *)
+let link_modal_viewport (state : state) =
+  match link_modal_card state with
+  | None -> (0, 1)
+  | Some (_, _, _, content_height, content_lines) ->
+      (List.length content_lines, content_height)
+
+let render_link_preview_modal (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  match link_modal_card state with
+  | None ->
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+           ^ Ansi.reset)
+        ~hints:"Esc:close"
+        ~body:(fun ~budget:_ c ->
+          c.push "  (no web links found in this conversation to preview)")
+  | Some (_url, preview, total_links, content_height, content_lines) ->
+      let site = Masc_tui_link_preview.site_label preview in
       let total = List.length content_lines in
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
@@ -14419,7 +14438,9 @@ let render_link_preview_modal (state : state) =
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset)
-        ~hints:"o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
+        ~hints:
+          (Masc_tui_link_preview.modal_hints ~total_links
+             ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
         ~body:(fun ~budget:_ c ->
           if total_links > 1 then begin
             c.push_styled ~style:(Theme.warn ())

@@ -1450,7 +1450,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
-    ?(active_goal_summaries : (goal_summary list, string) result option)
+    ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_publication.Missing)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])

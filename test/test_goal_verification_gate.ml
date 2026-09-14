@@ -575,7 +575,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   (match Goal_verification_agent.For_testing.collect_pending config with
    | Ok work -> check bool "the verifier can collect the new proof request" true
        (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
-   | Error detail -> fail detail);
+   | Error failure -> fail (Goal_verification_agent.For_testing.scan_failure_to_string failure));
   let pending = ledger_record config goal_id in
   (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"delayed-reopen" with
    | Error _ -> ()

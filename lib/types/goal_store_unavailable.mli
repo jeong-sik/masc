@@ -65,7 +65,9 @@ val to_string : t -> string
     masc_goal) is the lossy projection for tool results and HTTP bodies. The
     [kind] member of each nested object carries the wire name
     ({!reason_name} and siblings); a member this build does not know, or a
-    kind it does not name, is refused. *)
+    kind it does not name, is refused. A [Unix.error] is an object whose
+    [kind] is its lowercase name; [EUNKNOWNERR] alone adds an integer [code]
+    member, so no member packs two facts into one string. *)
 
 val record_to_yojson : t -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (t, string) result

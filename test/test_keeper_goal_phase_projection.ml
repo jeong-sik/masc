@@ -213,8 +213,7 @@ let test_world_observation_drops_terminal_goals () =
   in
   check (list string) "the per-turn frame agrees with the system prompt"
     [ "goal-executing"; "goal-verifying" ]
-    (match observation.Keeper_world_observation.active_goals with
-     | Ok ids -> ids | Error detail -> fail detail)
+    (get_ok observation.Keeper_world_observation.active_goals)
 ;;
 
 (* Terminal phases are the only thing that removes a Goal from the surface.
@@ -237,8 +236,7 @@ let test_no_goals_surface_when_all_are_terminal () =
       ~meta
   in
   check (list string) "and the frame carries none either" []
-    (match observation.Keeper_world_observation.active_goals with
-     | Ok ids -> ids | Error detail -> fail detail)
+    (get_ok observation.Keeper_world_observation.active_goals)
 ;;
 
 (* A Goal is a standing question, not an assignment. Nothing in a turn frame

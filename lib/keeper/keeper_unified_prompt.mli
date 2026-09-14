@@ -138,7 +138,7 @@ val build_prompt :
   ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
-  ?active_goal_summaries:(goal_summary list, string) result ->
+  ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_publication.observation ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
@@ -164,8 +164,10 @@ val build_prompt :
       annotation on [Verifying] goals (RFC-0387 stage 2). These are the goals
       linked to this turn's task ({!active_goal_summaries_for_task}). Omitted
       or [Ok []], the layer is absent when the world Goal source is available.
-      A failed world or task-linked source renders its error without blocking
-      other context. A Keeper holding no task reaches Goals through [masc_goal_list].
+      [Error] is the typed store failure ({!Goal_store.unavailable}, RFC-0444
+      §2.3 row 6): a failed world or task-linked source renders its reason,
+      file, mirror and reset step without blocking other context. A Keeper
+      holding no task reaches Goals through [masc_goal_list].
     - [?repository_freshness]: rows for the Repository Checkouts layer,
       measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
       or empty, the layer is absent. *)
@@ -176,7 +178,7 @@ val build_prompt_preview :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
-  ?active_goal_summaries:(goal_summary list, string) result ->
+  ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_publication.observation ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->

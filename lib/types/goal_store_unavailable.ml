@@ -93,7 +93,9 @@ let to_string { file; reason; mirror; reset_step } =
    detail string, the mirror's inner reason — which the wire envelope
    ([Goal_unavailable_envelope], masc_goal) deliberately does not carry. The
    [kind] tokens are the wire names above; every other member is exact, and
-   an object with a member this build does not know is refused. *)
+   an object with a member this build does not know is refused. A
+   [Unix.error] is itself an object whose [kind] is its lowercase name;
+   [EUNKNOWNERR] alone adds an integer [code] member. *)
 
 let unix_error_name = function
   | Unix.E2BIG -> "e2big"
@@ -164,7 +166,7 @@ let unix_error_name = function
   | Unix.EHOSTUNREACH -> "ehostunreach"
   | Unix.ELOOP -> "eloop"
   | Unix.EOVERFLOW -> "eoverflow"
-  | Unix.EUNKNOWNERR code -> "eunknownerr:" ^ string_of_int code
+  | Unix.EUNKNOWNERR _ -> "eunknownerr"
 
 let unix_error_of_name name =
   match name with
@@ -236,13 +238,7 @@ let unix_error_of_name name =
   | "ehostunreach" -> Ok Unix.EHOSTUNREACH
   | "eloop" -> Ok Unix.ELOOP
   | "eoverflow" -> Ok Unix.EOVERFLOW
-  | other ->
-    (match String.index_opt other ':' with
-     | Some 11 when String.sub other 0 11 = "eunknownerr" ->
-       (match int_of_string_opt (String.sub other 12 (String.length other - 12)) with
-        | Some code -> Ok (Unix.EUNKNOWNERR code)
-        | None -> Error (Printf.sprintf "unix error %S has no numeric code" other))
-     | Some _ | None -> Error (Printf.sprintf "unknown unix error name %S" other))
+  | other -> Error (Printf.sprintf "unknown unix error name %S" other)
 
 let kind_member = "kind"
 
@@ -284,11 +280,48 @@ let member name members =
 
 let ( let* ) = Result.bind
 
+(* One [Unix.error] as an object. [kind] is the token above; [EUNKNOWNERR],
+   the one constructor whose identity is a number, carries that number as
+   its own [code] member. No member packs two facts into a string a reader
+   would have to split. *)
+let unix_error_to_yojson error : Yojson.Safe.t =
+  let kind = kind_member, `String (unix_error_name error) in
+  match error with
+  | Unix.EUNKNOWNERR code -> `Assoc [ kind; "code", `Int code ]
+  | Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD
+  | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR
+  | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMFILE | Unix.EMLINK
+  | Unix.ENAMETOOLONG | Unix.ENFILE | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC
+  | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR
+  | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.EPIPE | Unix.ERANGE
+  | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK
+  | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ
+  | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT
+  | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT
+  | Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.ENETDOWN | Unix.ENETUNREACH
+  | Unix.ENETRESET | Unix.ECONNABORTED | Unix.ECONNRESET | Unix.ENOBUFS | Unix.EISCONN
+  | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.ETIMEDOUT
+  | Unix.ECONNREFUSED | Unix.EHOSTDOWN | Unix.EHOSTUNREACH | Unix.ELOOP
+  | Unix.EOVERFLOW ->
+    `Assoc [ kind ]
+
+let unix_error_of_yojson json =
+  let* members = object_members json in
+  let* kind = string_member kind_member members in
+  match kind with
+  | "eunknownerr" ->
+    let* () = exact_members ~required:[ kind_member; "code" ] members in
+    let* code = int_member "code" members in
+    Ok (Unix.EUNKNOWNERR code)
+  | named ->
+    let* () = exact_members ~required:[ kind_member ] members in
+    unix_error_of_name named
+
 let reason_to_yojson reason : Yojson.Safe.t =
   let kind = kind_member, `String (reason_name reason) in
   match reason with
   | Missing_after_init -> `Assoc [ kind ]
-  | Unreadable error -> `Assoc [ kind; "error", `String (unix_error_name error) ]
+  | Unreadable error -> `Assoc [ kind; "error", unix_error_to_yojson error ]
   | Not_json detail -> `Assoc [ kind; "detail", `String detail ]
   | Schema_rejected { field; detail } ->
     `Assoc [ kind; "field", `String field; "detail", `String detail ]
@@ -302,8 +335,8 @@ let reason_of_yojson json =
     Ok Missing_after_init
   | "unreadable" ->
     let* () = exact_members ~required:[ kind_member; "error" ] members in
-    let* name = string_member "error" members in
-    let* error = unix_error_of_name name in
+    let* error_json = member "error" members in
+    let* error = unix_error_of_yojson error_json in
     Ok (Unreadable error)
   | "not_json" ->
     let* () = exact_members ~required:[ kind_member; "detail" ] members in
@@ -320,7 +353,7 @@ let mirror_status_to_yojson mirror : Yojson.Safe.t =
   let kind = kind_member, `String (mirror_status_name mirror) in
   match mirror with
   | Mirror_absent -> `Assoc [ kind ]
-  | Mirror_unreadable error -> `Assoc [ kind; "error", `String (unix_error_name error) ]
+  | Mirror_unreadable error -> `Assoc [ kind; "error", unix_error_to_yojson error ]
   | Mirror_decodes { goal_count; updated_at } ->
     `Assoc [ kind; "goal_count", `Int goal_count; "updated_at", `String updated_at ]
   | Mirror_rejected reason -> `Assoc [ kind; "reason", reason_to_yojson reason ]
@@ -334,8 +367,8 @@ let mirror_status_of_yojson json =
     Ok Mirror_absent
   | "mirror_unreadable" ->
     let* () = exact_members ~required:[ kind_member; "error" ] members in
-    let* name = string_member "error" members in
-    let* error = unix_error_of_name name in
+    let* error_json = member "error" members in
+    let* error = unix_error_of_yojson error_json in
     Ok (Mirror_unreadable error)
   | "mirror_decodes" ->
     let* () = exact_members ~required:[ kind_member; "goal_count"; "updated_at" ] members in

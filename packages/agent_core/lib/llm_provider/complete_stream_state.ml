@@ -278,10 +278,63 @@ let capture_failure failure state =
   | None -> { state with failure = Some failure }
 ;;
 
-(* Applied to text blocks only. A reasoning block that circles is a separate
-   question with its own ceiling, and stopping a provider mid-thought on a
-   repeated line would end turns that were about to answer. *)
-let guard_repeating_text ~index state =
+(* A reasoning block is guarded by a different rule from a text block. The
+   paragraph count above is for an answer: whole paragraphs recurring anywhere
+   in the block, which prose does not do. A model thinking is allowed to come
+   back to a line — a plan header, "let me check the file again" — and cutting
+   it there would end a turn that was about to answer. What ends a reasoning
+   block is the shape of a generation that has stopped moving: its tail is one
+   unit written verbatim over and over, whatever the unit is ("!!!!", "the the
+   the ", a five-line chant). Only the newest bytes are examined, so the cost
+   per delta is bounded by the window, not by the block.
+
+   Measured 2026-09-14 on every thinking stream in keeper_chat_events since
+   2026-08-29 (1,364 blocks, 6.27 MB). Nine were loops — verbatim cycles of 35
+   to 2,491 bytes repeated 3 to 234 times, every one filling the 8,192-byte
+   window — and the longest periodic tail in the other 1,355 was 220 bytes (an
+   84-byte phrase, 2.6 times). 1,024 is 4.6x that. On the nine loops the rule
+   fired at 7% to 87% of the bytes the provider eventually sent (median 17%);
+   the largest of them ran to 458,221 bytes. Three copies is the same count the
+   paragraph rule and the Keeper turn loop use, and the smallest unit that can
+   qualify is the window over three, so no separate period bound is declared. *)
+let reasoning_repeat_window_bytes = 8192
+let reasoning_repeat_min_span_bytes = 1024
+let reasoning_repeat_min_copies = 3
+
+(* The newest [bytes] of the block's text, assembled from as few of its
+   reversed chunks as reach that many bytes. *)
+let block_tail ~bytes block =
+  let rec newest acc collected = function
+    | [] -> acc
+    | chunk :: rest ->
+      if collected >= bytes
+      then acc
+      else newest (chunk :: acc) (collected + String.length chunk) rest
+  in
+  let joined = String.concat "" (newest [] 0 block.text_chunks_rev) in
+  let length = String.length joined in
+  if length <= bytes then joined else String.sub joined (length - bytes) bytes
+;;
+
+let block_text_bytes block =
+  List.fold_left (fun total chunk -> total + String.length chunk) 0 block.text_chunks_rev
+;;
+
+let repeating_reasoning_cycle block =
+  let tail = block_tail ~bytes:reasoning_repeat_window_bytes block in
+  match
+    Periodic_suffix.find
+      tail
+      ~max_period:(reasoning_repeat_window_bytes / reasoning_repeat_min_copies)
+      ~min_copies:reasoning_repeat_min_copies
+  with
+  | Some ({ Periodic_suffix.span; period } as suffix)
+    when span >= reasoning_repeat_min_span_bytes ->
+    Some (Periodic_suffix.cycle tail suffix, span / period)
+  | Some _ | None -> None
+;;
+
+let guard_repeating_generation ~index state =
   match Blocks.find_opt index state.blocks with
   | None -> state
   | Some block ->
@@ -293,14 +346,28 @@ let guard_repeating_text ~index state =
         | Some (paragraph, occurrences) ->
           capture_failure
             (Types.Stream_repeating
-               { paragraph; occurrences; bytes_seen = String.length text })
+               { repeated = paragraph
+               ; occurrences
+               ; bytes_seen = String.length text
+               ; shape = Types.Repeated_paragraph
+               })
+            state)
+     | Announced { kind = Thinking_block | Reasoning_details_block; _ } ->
+       (match repeating_reasoning_cycle block with
+        | None -> state
+        | Some (cycle, occurrences) ->
+          capture_failure
+            (Types.Stream_repeating
+               { repeated = cycle
+               ; occurrences
+               ; bytes_seen = block_text_bytes block
+               ; shape = Types.Repeated_reasoning_cycle
+               })
             state)
      (* An unannounced block has no declared kind yet; a repeat there is
         indistinguishable from a provider that has not said what it is
-        sending. *)
+        sending. Redacted thinking carries no text to compare. *)
      | Unannounced
-     | Announced { kind = Thinking_block; _ }
-     | Announced { kind = Reasoning_details_block; _ }
      | Announced { kind = Redacted_thinking_block; _ }
      | Announced { kind = Tool_use_block; _ }
      | Announced { kind = Tool_result_block _; _ }
@@ -611,7 +678,7 @@ let transition_open state = function
             })
          state
      | _ ->
-       guard_repeating_text
+       guard_repeating_generation
          ~index
          (update_block
             index
@@ -718,9 +785,9 @@ let transition_open state = function
   (* An inbound repeat event is the transport telling us what this module
      already decides for itself; it is captured as the same sticky failure so
      both paths end one way. *)
-  | Types.StreamRepeating { paragraph; occurrences; bytes_seen } ->
+  | Types.StreamRepeating { repeated; occurrences; bytes_seen; shape } ->
     capture_failure
-      (Types.Stream_repeating { paragraph; occurrences; bytes_seen })
+      (Types.Stream_repeating { repeated; occurrences; bytes_seen; shape })
       state
   | Types.MessageStop ->
     (match state.message_lifecycle with

@@ -2609,6 +2609,64 @@ let test_complete_stream_stops_reading_a_repeating_generation () =
   | Exit -> ()
 ;;
 
+(* The same wiring for a reasoning block: the cycle guard lives in the state
+   machine, and the socket has to stop when it fires. The provider chants one
+   43-byte unit; the guard fires on the 24th copy (1,032 bytes of periodic
+   tail), and the client must not wait out the quiet gap for the frame after
+   it. *)
+let test_complete_stream_stops_reading_a_chanting_reasoning_block () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let chant = anthropic_sse_frame_thinking_delta "Let me write.\\n\\nNow.\\n\\nGo.\\n\\nProducing.\\n\\nOK.\\n\\n" in
+    let quiet_s = 2.0 in
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        ([ 0.0, anthropic_sse_frame_message_start; 0.0, anthropic_sse_frame_thinking_block_start ]
+         @ List.init 24 (fun _ -> 0.0, chant)
+         @ [ quiet_s, anthropic_sse_frame_thinking_delta "a frame the client must never wait for"
+           ; 0.0, anthropic_sse_frame_stop
+           ])
+    in
+    let started = Eio.Time.now env#clock in
+    let result =
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_config url)
+        ~messages
+        ~on_event:(fun _ -> ())
+        ()
+    in
+    let elapsed = Eio.Time.now env#clock -. started in
+    (match result with
+     | Error
+         (Http_client.ProviderFailure
+            { kind =
+                Http_client.Provider_wire_error
+                  { kind = Http_client.Repeating_generation; _ }
+            ; _
+            }) -> ()
+     | Error _ ->
+       fail "a chanting reasoning block must be reported as a repeat, not as a timeout"
+     | Ok _ -> fail "a reasoning block chanting one unit must not finalize as an answer");
+    if elapsed >= quiet_s
+    then
+      failf
+        "the stream spent %.2fs on a provider it had stopped reading (it went \
+         quiet for %.2fs)"
+        elapsed
+        quiet_s;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_complete_stream_replaces_invalid_content_with_typed_failure () =
   Eio_main.run
   @@ fun env ->
@@ -4330,6 +4388,10 @@ let () =
             "built-in stream stops reading a repeating generation"
             `Quick
             test_complete_stream_stops_reading_a_repeating_generation
+        ; test_case
+            "built-in stream stops reading a chanting reasoning block"
+            `Quick
+            test_complete_stream_stops_reading_a_chanting_reasoning_block
         ; test_case
             "built-in stream replaces invalid content with typed failure"
             `Quick

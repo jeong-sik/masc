@@ -1549,6 +1549,38 @@ type content_delta =
             fields; the accumulator records the metadata (idempotent across
             chunks) and concatenates [data]. *)
 
+(** How a generation was found to be repeating itself. The two rules read
+    different blocks and count different things: a paragraph of an answer
+    recurring anywhere in the block, or the tail of a reasoning block being one
+    unit written verbatim over and over. *)
+type repeating_shape =
+  | Repeated_paragraph
+  | Repeated_reasoning_cycle
+
+(* One spelling for both readers of a repeat: the transport's provider
+   failure and the Keeper chat bridge's protocol error. *)
+let repeating_generation_message ~repeated ~occurrences ~bytes_seen shape =
+  let shown =
+    if String.length repeated <= 120 then repeated else String.sub repeated 0 120
+  in
+  match shape with
+  | Repeated_paragraph ->
+    Printf.sprintf
+      "generation repeated one paragraph %d times after %d bytes; ended here rather \
+       than at the token ceiling: %S"
+      occurrences
+      bytes_seen
+      shown
+  | Repeated_reasoning_cycle ->
+    Printf.sprintf
+      "reasoning repeated one %d-byte unit %d times verbatim after %d bytes; ended \
+       here rather than at the token ceiling: %S"
+      (String.length repeated)
+      occurrences
+      bytes_seen
+      shown
+;;
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -1616,9 +1648,10 @@ type sse_event =
   | Timeout of string
   | StreamIncomplete of { reason : string }
   | StreamRepeating of
-      { paragraph : string
+      { repeated : string
       ; occurrences : int
       ; bytes_seen : int
+      ; shape : repeating_shape
       }
 
 (** Terminal error captured while accumulating a streaming response.
@@ -1644,16 +1677,18 @@ type stream_error =
       }
   | Stream_incomplete of { reason : string }
   | Stream_repeating of
-      { paragraph : string
+      { repeated : string
       ; occurrences : int
       ; bytes_seen : int
+      ; shape : repeating_shape
       }
-      (** The generation started repeating one paragraph and did not stop. This
-          is neither a transport fault nor a malformed payload: the bytes parse,
-          and the provider is answering. Ending here rather than at the token
-          ceiling is what makes the difference legible — and it costs a
-          twentieth of the output, because a repeat is established long before
-          the ceiling is reached. *)
+      (** The generation started repeating itself and did not stop: a paragraph
+          of the answer recurring, or a reasoning block whose tail is one unit
+          written verbatim over and over. Neither a transport fault nor a
+          malformed payload: the bytes parse, and the provider is answering.
+          Ending here rather than at the token ceiling is what makes the
+          difference legible, and a repeat is established long before the
+          ceiling is reached. [repeated] is the paragraph or the cycle unit. *)
   | Stream_unknown_event of
       { event_type : string
       ; raw : string

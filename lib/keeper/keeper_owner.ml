@@ -682,28 +682,6 @@ let record_operation_error t error =
   owner_error_of_operation_error error
 ;;
 
-let run_operation_command t ~label f =
-  match !(t.store_error) with
-  | Some fault -> Error (Store_unavailable (store_fault_detail fault))
-  | None ->
-    (match run_operation_store ~label f with
-     | Error error -> Error (record_operation_error t error)
-     | Ok value ->
-       (match read_operation_projection t.operation_store ~now:(t.now ()) with
-        | Error error -> Error (record_operation_error t error)
-        | Ok projection ->
-          publish_operation_projection t projection;
-          Keeper_waiting_inventory_broadcast.changed
-            ~keeper_name:t.keeper_name
-            ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
-          Ok (value, projection)))
-;;
-
-let run_operation_read t ~label f =
-  run_operation_store ~label f
-  |> Result.map_error (record_operation_error t)
-;;
-
 let recover_operation_availability t =
   match !(t.store_error) with
   | None -> Ok ()
@@ -747,6 +725,34 @@ let recover_operation_availability t =
              Log.Keeper.info ~keeper_name:t.keeper_name
                "keeper Owner operation store recovered queued=%d" projection.queued_count;
              Ok ())))
+;;
+
+(* A command is the moment the fence is re-examined, not a later wake:
+   [wake_operation_drain] fires only when a keepalive starts or a deferred
+   retry comes due, so a fence raised mid-day had no trigger to lift it and
+   every later submission was refused with a stale detail (msx-retro-mania,
+   2026-09-14 16:45 KST). An availability fault is retried here while no
+   child holds the handle; the other faults stay fenced. *)
+let run_operation_command t ~label f =
+  match recover_operation_availability t with
+  | Error error -> Error error
+  | Ok () ->
+    (match run_operation_store ~label f with
+     | Error error -> Error (record_operation_error t error)
+     | Ok value ->
+       (match read_operation_projection t.operation_store ~now:(t.now ()) with
+        | Error error -> Error (record_operation_error t error)
+        | Ok projection ->
+          publish_operation_projection t projection;
+          Keeper_waiting_inventory_broadcast.changed
+            ~keeper_name:t.keeper_name
+            ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
+          Ok (value, projection)))
+;;
+
+let run_operation_read t ~label f =
+  run_operation_store ~label f
+  |> Result.map_error (record_operation_error t)
 ;;
 
 let reject_if_stopping state f =
@@ -1182,11 +1188,11 @@ let start
              Eio.Promise.resolve resolve (Error error);
              loop state shutdown_operation_id
            | Ok () ->
-          (match !(t.store_error) with
-           | Some fault ->
-             Eio.Promise.resolve resolve (Error (Store_unavailable (store_fault_detail fault)));
+          (match recover_operation_availability t with
+           | Error error ->
+             Eio.Promise.resolve resolve (Error error);
              loop state shutdown_operation_id
-           | None ->
+           | Ok () ->
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->
                 Eio.Promise.resolve resolve (Error (Reducer_rejected error));

@@ -1588,11 +1588,18 @@ let test_promoted_live_output_survives_settlement_and_replay () =
           (count "read_file" screen > 0)
       in
       check_output "still running";
+      (* A run that finished records its reply first (KEEPER_REPLY_DETAILS),
+         and the record is the last stretch of the attempt -- here the text
+         after the tool round. A finish with no reply is how a cancelled
+         stream ends, and a log that ends there does not stand for its turn:
+         the decoded row speaks for it, so the frame keeps no block to draw. *)
       let terminal = match failure with
-        | None -> Live.Run_finished
-        | Some message -> Live.Run_failed {message}
+        | None -> [ visible_reply "LATER_ANSWER"; Live.Run_finished ]
+        | Some message -> [ Live.Run_failed {message} ]
       in
-      Tui_types.turn_log_add ~now:49. entry.log ~seq:(Some 5) terminal;
+      List.iteri (fun step delta ->
+        Tui_types.turn_log_add ~now:49. entry.log ~seq:(Some (5 + step)) delta)
+        terminal;
       Tui_types.settle_turn_log state entry;
       state.msg_inflight <- [];
       check_output "settled";

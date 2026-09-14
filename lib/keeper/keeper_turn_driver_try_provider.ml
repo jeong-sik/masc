@@ -100,10 +100,10 @@ type try_provider_ctx =
        [InFlightElapsedSeconds]: "a supervising consumer judges staleness
        against progress, not against this value alone."
 
-       [None] (the operator has not set
-       [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] or
-       [turn.provider_call_deadline_sec]) means no MASC-side enforcement. *)
-    provider_call_deadline_sec : float option
+       Always set: the operator's value or the resolved layer's failsafe
+       floor. There is no "off" (an attempt this could not end would be one
+       only an operator could end). *)
+    provider_call_deadline_sec : float
   ; (* #28417: reads the keeper's live turn progress signal. Injected as a
        callback instead of calling [Keeper_registry] from here so the stall
        decision stays a pure function of its inputs (unit-testable with no
@@ -1094,14 +1094,12 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
-       [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
-       No separate liveness FSM for the common case — provider stall is
-       primarily an AGENT_CORE-level concern. #27349: when the operator has set
-       [ctx.provider_call_deadline_sec], the wrap below adds a total
-       wall-clock ceiling on this whole attempt as a MASC-side backstop —
-       still opt-in, off by default, same as before this existed.
-       No per-lane capacity gate — provider load is managed by operator
-       adjusting keeper count. *)
+       [stream_idle_timeout_s]. No separate liveness FSM for the common
+       case — provider stall is primarily an AGENT_CORE-level concern.
+       #27349/#28417: [ctx.provider_call_deadline_sec] is the MASC-side
+       no-progress ceiling on this whole attempt, armed below on every
+       attempt. No per-lane capacity gate — provider load is managed by
+       operator adjusting keeper count. *)
     let run_started_at =
       Unix.gettimeofday ()
       (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
@@ -1174,9 +1172,10 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
        [stream_idle_timeout_s]/[body_timeout_s] firing remains a typed RETURN
        VALUE inside [Runtime_agent.run]'s result rather than an exception, so
        it still cannot be misclassified as this deadline firing. *)
+    let threshold_sec = ctx.provider_call_deadline_sec in
     let result =
-      match ctx.provider_call_deadline_sec, Eio_context.get_clock_opt () with
-      | Some threshold_sec, Some clock ->
+      match Eio_context.get_clock_opt () with
+      | Some clock ->
         (* Same clock as [last_progress_at] (see [await_attempt_stall]): the
            elapsed fallback and the progress comparison must not read two
            different clocks. *)
@@ -1214,7 +1213,12 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                           policy, which #28417 does not intend to touch. *)
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
-      | None, _ | _, None -> run_attempt_switch ()
+      | None ->
+        (* No Eio clock in this process, so nothing can sleep out the
+           threshold: the attempt runs with no MASC-side ceiling. The
+           server installs its clock at boot before any turn; this arm is
+           reached by suites that drive the driver without one. *)
+        run_attempt_switch ()
     in
     let result =
       match result with

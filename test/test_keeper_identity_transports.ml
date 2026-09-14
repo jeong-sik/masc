@@ -12,15 +12,11 @@ let access_token_env = "ATLASSIAN_ACCESS_TOKEN"
 
 exception Fixture_done
 
-let temp_base () =
-  let path =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-identity-transports-%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday ()))
-  in
-  Unix.mkdir path 0o700;
-  path
-;;
+(* One directory per call, made by the runtime so two calls in the same
+   second cannot collide: the pid-and-second name this replaced gave the two
+   stub-transport cases the same path when they ran within one second, and
+   the second mkdir failed with EEXIST (PR #36162's check run). *)
+let temp_base () = Filename.temp_dir "masc-identity-transports-" ""
 
 (* A declaration for the stub-transport cases. The loader admits only https
    endpoints, so the wire cases below do not go through a declaration; the
@@ -145,7 +141,7 @@ let transport_slack_s = 3.0
 let test_the_mcp_transport_ends_at_its_deadline () =
   with_eio (fun ~sw ~net ~clock ~mono_clock ->
     let url = start_server_that_never_answers ~sw ~net in
-    let post = Mcp_client.http_post ~clock ~deadline_s:(Some transport_deadline_s) in
+    let post = Mcp_client.http_post ~clock ~deadline_s:transport_deadline_s in
     let answer, elapsed =
       bounded ~clock ~mono_clock ~deadline_s:transport_deadline_s ~slack_s:transport_slack_s (fun () ->
         Mcp_client.connect ~post ~url ~access_token:"the-keepers-token" ())
@@ -182,9 +178,9 @@ let with_declared_provider_call_deadline seconds f =
 let test_the_keeper_threshold_reaches_the_wire () =
   with_declared_provider_call_deadline shortest_declared_threshold_s (fun () ->
     check
-      (option (float 0.0))
+      (float 0.0)
       "the resolver saw the declared threshold"
-      (Some shortest_declared_threshold_s)
+      shortest_declared_threshold_s
       (Keeper_runtime_resolved.provider_call_deadline_sec ());
     with_eio (fun ~sw ~net ~clock ~mono_clock ->
       let url = start_server_that_never_answers ~sw ~net in

@@ -2934,7 +2934,7 @@ let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
     ; "sse_unsupported_part", SSEUnsupportedPart { provider_kind; part = "inline_data"; raw = "{}" }
     ; "sse_unsupported_response", SSEUnsupportedResponse { provider_kind; response = "prompt_feedback"; raw = "{}" }
     ; "sse_stream_incomplete", StreamIncomplete { reason = "max_output_tokens" }
-    ; "sse_stream_repeating", StreamRepeating { paragraph = "again"; occurrences = 4; bytes_seen = 400 }
+    ; "sse_stream_repeating", StreamRepeating { repeated = "again"; occurrences = 4; bytes_seen = 400; shape = Repeated_paragraph }
     ; "sse_timeout", Timeout "idle timeout after 120.0s"
     ]
   in
@@ -3092,7 +3092,7 @@ let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
       , StreamIncomplete { reason = "max_output_tokens" } )
     ; ( "sse_stream_repeating"
       , Keeper_chat_events.Sse_stream_repeating
-      , StreamRepeating { paragraph = "again"; occurrences = 4; bytes_seen = 400 } )
+      , StreamRepeating { repeated = "again"; occurrences = 4; bytes_seen = 400; shape = Repeated_paragraph } )
     ]
 
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =

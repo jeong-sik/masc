@@ -174,6 +174,18 @@ type reply =
    reverses on read. Appending an argument fragment walks the list, which a
    turn's handful of calls makes cheap enough -- the list is short and the
    fragments are what arrive often. *)
+(* One word per kind of event the model side sends between tool calls, with
+   the instant it arrived. The row states the word, and once the silence since
+   it is long enough to read as a stall, the silence's age beside it. *)
+type model_signal =
+  | Model_started_at of float
+      (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
+  | Reasoning_at of float (* the last THINKING delta *)
+  | Answering_at of float (* the last TEXT delta *)
+  | Tool_returned_at of string * float
+      (* the last result handed back to the model, by tool name; nothing
+         since. The model has the result and owes the next token. *)
+
 type t =
   { keeper_name : string
   ; request_id : string
@@ -210,15 +222,20 @@ type t =
         (* 0-based runtime attempt the growing trail belongs to. *)
   ; mutable current_runtime_id : string option
         (* Currently observed runtime identity serving this attempt. *)
-  ; mutable endpoint_streaming : bool
-        (* Whether tokens have started streaming from the runtime endpoint. *)
+  ; mutable model_signal : model_signal option
+        (* The last thing the model side sent in this attempt, and when.
+           Tool calls carry their own pending state; this covers the stretches
+           between them, where the row used to say only that something had
+           streamed and a reader could not tell reasoning from writing from a
+           provider that had stopped answering. [None] until the first byte.
+           Reset per attempt. *)
   ; mutable runtime_named_at : float option
         (* When the runtime serving this attempt was named. Read only while
-           [endpoint_streaming] is false, where it is the age of the silence:
+           [model_signal] is [None], where it is the age of the silence:
            the turn's own age counts tool rounds that already finished, so on
            a turn that ran for a minute and then went quiet the two numbers
            are not the same question. Re-stamped per attempt; never cleared,
-           because the streaming flag is what makes it meaningful. *)
+           because the signal is what makes it meaningful. *)
   ; mutable reply : reply option
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
@@ -258,7 +275,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; admission = None
   ; attempt = 0
   ; current_runtime_id = None
-  ; endpoint_streaming = false
+  ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
   ; settled_at = None
@@ -1077,6 +1094,31 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
+(* Tokens arrive several times a second while the model works. A pause past
+   this is where a reader starts asking whether it stopped, so it is where the
+   row starts stating the silence's age beside the phase. *)
+let quiet_after_s = 2.0
+
+(* The model side's phase as one clause, or [None] before the first byte,
+   where the named runtime is the subject instead. *)
+let model_phase_text ~now t =
+  match t.model_signal with
+  | None -> None
+  | Some signal ->
+    let word, since =
+      match signal with
+      | Model_started_at since -> "model started", since
+      | Reasoning_at since -> "reasoning", since
+      | Answering_at since -> "answering", since
+      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
+    in
+    if now -. since < quiet_after_s then Some word
+    else
+      match Masc_tui_message_layout.age_text ~now ~since with
+      | None -> Some word
+      | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
+;;
+
 let phase_text ~now t =
   match t.phase with
   | Waiting when awaiting_continuation t ->
@@ -1201,41 +1243,49 @@ let phase_text ~now t =
         | Some since -> (
           match Masc_tui_message_layout.age_text ~now ~since with
           | None -> ""
-          | Some age -> Printf.sprintf " \xc2\xb7 nothing back for %s" age)
+          | Some age -> Printf.sprintf ", nothing back for %s" age)
       in
-      let work =
-        if calls = 0 then
-          match t.current_runtime_id, t.endpoint_streaming with
-          | Some rid, true ->
-              Printf.sprintf "streaming from [%s]%s" rid in_this_call
-          | Some rid, false when t.attempt > 0 ->
-              Printf.sprintf "failover: waiting on [%s] (attempt %d)%s%s"
-                rid attempt_shown silent_for in_this_call
-          | Some rid, false ->
-              Printf.sprintf "waiting on [%s]%s%s" rid silent_for in_this_call
-          | None, _ when t.attempt > 0 ->
-              Printf.sprintf "failover working (attempt %d)%s" attempt_shown
-                in_this_call
-          | None, _ -> "working" ^ in_this_call
+      (* The runtime and the attempt, as one tag. The heading above this row
+         already says IN PROGRESS or FAILOVER IN PROGRESS (render.ml); the tag
+         carries only what the heading cannot. *)
+      let runtime_tag =
+        match t.current_runtime_id with
+        | Some rid when t.attempt > 0 ->
+            Printf.sprintf "[%s] attempt %d" rid attempt_shown
+        | Some rid -> Printf.sprintf "[%s]" rid
+        | None when t.attempt > 0 -> Printf.sprintf "attempt %d" attempt_shown
+        | None -> ""
+      in
+      (* The first clause answers what is happening right now, in the slot a
+         reader's eye learns: a mode word the way an editor's status line
+         shows one. While a call is pending the call is the subject and the
+         clause is the runtime tag alone; the pending call and its age follow.
+         Otherwise the clause is the model side's last signal, with the
+         silence since it once that silence is long enough to read as a stall
+         -- the one number that tells a slow model from a stopped one, which
+         the turn's age at the far end of the row cannot. Before the first
+         byte it is the named runtime and how long it has been silent. *)
+      let leading =
+        if has_pending_activity then runtime_tag
         else
-          (* The heading above this row already says which of the two states
-             it is ("IN PROGRESS" / "FAILOVER IN PROGRESS", render.ml). Saying
-             it again here spent forty-eight cells on "failover [rid] (attempt
-             1) · " before the row reached its first fact, and what fell off
-             the far end was the open call's age -- the one number that tells
-             a slow call from a stuck one. The tag now carries only what the
-             heading cannot: which runtime, and which attempt. *)
-          let runtime_tag =
+          match model_phase_text ~now t with
+          | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
+          | None -> (
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "[%s] attempt %d · " rid attempt_shown
-            | Some rid -> Printf.sprintf "[%s] · " rid
+                Printf.sprintf "failover: waiting on [%s] (attempt %d)%s"
+                  rid attempt_shown silent_for
+            | Some rid -> Printf.sprintf "waiting on [%s]%s" rid silent_for
             | None when t.attempt > 0 ->
-                Printf.sprintf "attempt %d · " attempt_shown
-            | None -> ""
-          in
-          Printf.sprintf "%s%s%s%s · %s"
-            runtime_tag (Masc_tui_message_layout.count_noun calls "tool") running in_this_call
+                Printf.sprintf "failover working (attempt %d)" attempt_shown
+            | None -> "working")
+      in
+      let work =
+        if calls = 0 then leading ^ in_this_call
+        else
+          Printf.sprintf "%s%s%s%s \xc2\xb7 %s"
+            (if leading = "" then "" else leading ^ " \xc2\xb7 ")
+            (Masc_tui_message_layout.count_noun calls "tool") running in_this_call
             (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
@@ -1399,7 +1449,7 @@ let update_occurrence t occurrence f =
     Call_updated
 ;;
 
-let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
+let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id =
   match
     List.find_opt
       (fun (call : live_tool_call) -> call.segment = t.segment && same_occurrence call.occurrence occurrence)
@@ -1431,7 +1481,7 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
       (Printf.sprintf
          "KEEPER_TOOL_RESULT_READY conflicts for stream occurrence %s: %s != %s"
          (occurrence_label occurrence) recorded execution_id)
-  | Some _ ->
+  | Some returned ->
     (match
        List.find_opt
          (fun (call : live_tool_call) ->
@@ -1453,7 +1503,8 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             ; ended = true
             })
         with
-        | Call_updated -> ()
+        | Call_updated ->
+          t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
         | Call_missing ->
           note_unreadable t
             "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"
@@ -1541,7 +1592,7 @@ let apply_delta ~now t (delta : Live.delta) =
          one. A repeated event for this same attempt adds no missing fact. *)
       if new_attempt || Option.is_some runtime_id then
         t.current_runtime_id <- runtime_id;
-      t.endpoint_streaming <- false;
+      t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
       (match t.phase with
@@ -1549,17 +1600,18 @@ let apply_delta ~now t (delta : Live.delta) =
        | Stream_ended | Stream_failed _ -> ())
   | Live.Stream_model_started { model } ->
       if Option.is_none t.current_runtime_id then t.current_runtime_id <- Some model;
-      t.endpoint_streaming <- true
+      t.model_signal <- Some (Model_started_at now)
   | Live.Text text ->
-      t.endpoint_streaming <- true;
+      t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text t text
   | Live.Thinking text ->
-      t.endpoint_streaming <- true;
+      t.model_signal <- Some (Reasoning_at now);
       Buffer.add_string t.thinking_buffer text;
       trail_thinking t text
   | Live.Tool_started { occurrence; tool_name } ->
-      t.endpoint_streaming <- true;
+      (* The pending call is the row's subject until its result returns; the
+         model-side signal stays what it was and is not drawn meanwhile. *)
       (match
          List.find_opt
            (fun (call : live_tool_call) -> call.segment = t.segment && same_occurrence call.occurrence occurrence)
@@ -1635,7 +1687,7 @@ let apply_delta ~now t (delta : Live.delta) =
               "TOOL_CALL_END provider correlation conflicts for stream occurrence %s"
               (occurrence_label occurrence)))
   | Live.Tool_result { occurrence; execution_id } ->
-      apply_tool_result t ~occurrence ~execution_id
+      apply_tool_result ~now t ~occurrence ~execution_id
   | Live.Stream_protocol_error { quarantined_occurrence; detail } ->
       (match quarantined_occurrence with
        | None -> note_unreadable t ("stream protocol: " ^ detail)

@@ -107,5 +107,10 @@ val render_inline_card : width:int -> og_preview -> string list
 (** Multi-line styled Unicode box embed card for chat stream rendering.
     Uses grapheme-safe cell width measurement and Notion-style 2-column layout. *)
 
+val modal_hints : total_links:int -> has_image:bool -> string
+(** The key row of the link preview overlay. Cycling is named only with more
+    than one link and the image retry only with an image, because neither key
+    does anything otherwise. *)
+
 val render_modal_card : width:int -> height:int -> og_preview -> string list
 (** Full-width rich embed layout for the link preview overlay. *)

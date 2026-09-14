@@ -14330,6 +14330,30 @@ let render_palette (state : state) =
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are
    the footer's alone. *)
+(* The diff's rows and the rows the overlay shows, computed once for the
+   renderer that draws them and the keys that scroll them. The keys used to
+   move ten rows whatever the window was, and to reach the end by leaving five
+   rows on screen -- a number the renderer's own clamp then corrected, which is
+   why it went unnoticed. *)
+let patch_modal_viewport (state : state) =
+  let terminal_rows, _cols = get_terminal_size () in
+  let diff_opt =
+    match state.patch_modal_diff with
+    | Some (_, d) -> Some d
+    | None -> (match state.repository_changes_diff with Some (_, d) -> Some d | None -> None)
+  in
+  let total =
+    match diff_opt with
+    | Some diff -> List.length diff.Masc.Tui_decode.gd_rows
+    | None -> 0
+  in
+  (* The column heading and the divider under it open the body. *)
+  let heading_rows = 2 in
+  ( total
+  , max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - surface_chrome_rows - heading_rows) )
+
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let path_label =
@@ -14347,14 +14371,7 @@ let render_patch_modal (state : state) =
     | Some diff -> diff.Masc.Tui_decode.gd_rows
     | None -> []
   in
-  let total = List.length diff_rows in
-  (* The column heading and the divider under it open the body. *)
-  let heading_rows = 2 in
-  let content_height =
-    max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows
-       - surface_chrome_rows - heading_rows)
-  in
+  let total, content_height = patch_modal_viewport state in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
@@ -14364,7 +14381,8 @@ let render_patch_modal (state : state) =
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
     ~hints:
-      (Printf.sprintf "[lines %s]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+      (Printf.sprintf
+         "[lines %s]  e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
          (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
@@ -14391,7 +14409,12 @@ let render_patch_modal (state : state) =
 
 (* The link preview overlay, through the same contract. The title names the
    site, so the footer carries only keys. *)
-let render_link_preview_modal (state : state) =
+(* The card, its height and the line count, computed once for the two readers
+   that need to agree: the renderer that draws it and the keys that scroll it.
+   They did not agree before -- the renderer sized the card to the window while
+   the keys moved a fixed five lines -- so a page key covered a quarter of a
+   tall window and four windows of a short one. *)
+let link_modal_card (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let url_opt =
     match state.link_modal_url with
@@ -14402,18 +14425,9 @@ let render_link_preview_modal (state : state) =
          | [] -> None)
   in
   match url_opt with
-  | None ->
-      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
-        ~frame:Chrome_overlay
-        ~title:
-          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
-           ^ Ansi.reset)
-        ~hints:"Esc:close"
-        ~body:(fun ~budget:_ c ->
-          c.push "  (no web links found in this conversation to preview)")
+  | None -> None
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
-      let site = Masc_tui_link_preview.site_label preview in
       let total_links = List.length state.link_modal_links in
       (* Which link of several, and the divider under it. *)
       let nav_rows = if total_links > 1 then 2 else 0 in
@@ -14426,6 +14440,29 @@ let render_link_preview_modal (state : state) =
         Masc_tui_link_preview.render_modal_card
           ~width:(framed_inner_width cols) ~height:content_height preview
       in
+      Some (url, preview, total_links, content_height, content_lines)
+
+(* The rows the modal shows and the rows it holds, for the page keys. *)
+let link_modal_viewport (state : state) =
+  match link_modal_card state with
+  | None -> (0, 1)
+  | Some (_, _, _, content_height, content_lines) ->
+      (List.length content_lines, content_height)
+
+let render_link_preview_modal (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  match link_modal_card state with
+  | None ->
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+           ^ Ansi.reset)
+        ~hints:"Esc:close"
+        ~body:(fun ~budget:_ c ->
+          c.push "  (no web links found in this conversation to preview)")
+  | Some (_url, preview, total_links, content_height, content_lines) ->
+      let site = Masc_tui_link_preview.site_label preview in
       let total = List.length content_lines in
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
@@ -14435,7 +14472,9 @@ let render_link_preview_modal (state : state) =
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset)
-        ~hints:"o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
+        ~hints:
+          (Masc_tui_link_preview.modal_hints ~total_links
+             ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
         ~body:(fun ~budget:_ c ->
           if total_links > 1 then begin
             c.push_styled ~style:(Theme.warn ())

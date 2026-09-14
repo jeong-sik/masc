@@ -633,6 +633,21 @@ let render_notion_card ~width p =
 let render_inline_card ~width p =
   render_notion_card ~width p
 
+(* The key row of the link preview overlay. A modal swallows every key it does
+   not handle, so [?] never reaches the key sheet while one is open and this row
+   is the only place these keys are named. It named six of the fourteen the
+   modal answers: the page keys, the ends and the image retry were reachable
+   from nowhere. Cycling and retry are named only when they do something -- one
+   link has nothing to cycle to, and a preview with no image has nothing to
+   retry. Order is what survives a narrow window: [drop_hint_items] gives up
+   whole items from the back and never gives up Esc. *)
+let modal_hints ~total_links ~has_image =
+  "o:browser  y:copy  v:image  "
+  ^ (if total_links > 1 then "n/p:cycle  " else "")
+  ^ "j/k:scroll  d/u:page  g/G:first/last  "
+  ^ (if has_image then "r:retry image  " else "")
+  ^ "Esc:close"
+
 let render_modal_card ~width ~height:_ p =
   let card = render_notion_card ~width:(max 30 (width - 4)) p in
   let inner_width = max 20 (width - 6) in

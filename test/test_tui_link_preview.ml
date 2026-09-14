@@ -170,6 +170,33 @@ let test_render_notion_card_narrow_fallback () =
        check int "narrow card all lines match cell width" first_w w)
     widths
 
+let test_modal_hints_name_what_the_keys_do () =
+  let has ~needle value =
+    let n = String.length needle and h = String.length value in
+    let rec go i = i + n <= h && (String.sub value i n = needle || go (i + 1)) in
+    go 0
+  in
+  let one = modal_hints ~total_links:1 ~has_image:false in
+  let many = modal_hints ~total_links:3 ~has_image:true in
+  (* A modal swallows every key it does not handle, so this row is the only
+     place the overlay names its keys. *)
+  List.iter
+    (fun needle ->
+       check bool (needle ^ " is named") true (has ~needle one))
+    [ "o:browser"; "y:copy"; "v:image"; "j/k:scroll"; "d/u:page";
+      "g/G:first/last"; "Esc:close" ];
+  (* Neither key does anything in these states, so neither is offered. *)
+  check bool "one link offers no cycle" false (has ~needle:"n/p:cycle" one);
+  check bool "no image offers no retry" false (has ~needle:"r:retry" one);
+  check bool "several links offer the cycle" true (has ~needle:"n/p:cycle" many);
+  check bool "an image offers the retry" true (has ~needle:"r:retry image" many);
+  (* [drop_hint_items] gives up whole items from the back, so the row must end
+     on the key that leaves. *)
+  check bool "the exit is last" true
+    (String.length many >= 9
+     && String.sub many (String.length many - 9) 9 = "Esc:close")
+;;
+
 let test_render_modal_card () =
   let p = synthesize_preview "https://example.com/photo.png" in
   let modal_lines = render_modal_card ~width:60 ~height:20 p in
@@ -323,6 +350,8 @@ let () =
         ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
         ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
         ; test_case "modal card" `Quick test_render_modal_card
+        ; test_case "modal hints name what the keys do" `Quick
+            test_modal_hints_name_what_the_keys_do
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said
         ; test_case "an undecided image url says nothing" `Quick

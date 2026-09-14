@@ -2174,6 +2174,28 @@ let test_a_queued_line_takes_its_attachments_when_it_is_typed () =
       n
 ;;
 
+(* Enter admits the line to run next; it does not stop what the Keeper is
+   doing. Until 2026-09-14 the send derived an interrupt target from whatever
+   was running -- the chat operation in progress or the observed autonomous
+   turn -- and handed it to the interactive admission, so every line typed
+   while a Keeper worked cancelled that work, while the footer said "Enter
+   queues your line". Stopping a turn is an explicit act (Esc, /steer), so no
+   send path derives a target from the running turn. This pins the absence of
+   that derivation by name; a new helper doing the same under another name
+   would need its own pin. *)
+let test_enter_does_not_derive_an_interrupt_target_from_the_running_turn () =
+  let n =
+    Ast_grep.count_calls
+      ~module_path:"bin/masc_tui.ml"
+      ~callee:"interactive_target_for"
+  in
+  if n <> 0 then
+    failf
+      "the send path must not derive an interrupt target from the running \
+       turn; interactive_target_for is called %d time(s) in bin/masc_tui.ml"
+      n
+;;
+
 (* The operator pressed Enter, so the line belongs in the conversation now --
    not when the turn ahead of it settles. Keyed on the request id through the
    same call dispatch makes, so the row a queued line already has is the row it
@@ -2736,6 +2758,8 @@ let () =
             test_queueing_puts_the_line_in_the_conversation
         ; test_case "a queued line takes its attachments when it is typed" `Quick
             test_a_queued_line_takes_its_attachments_when_it_is_typed
+        ; test_case "Enter does not derive an interrupt target from the running turn" `Quick
+            test_enter_does_not_derive_an_interrupt_target_from_the_running_turn
         ; test_case "a transcript reload replaces only an exact user row" `Quick
             test_a_transcript_reload_replaces_only_an_exact_user_row
         ; test_case "cancel and edit take the row with them" `Quick

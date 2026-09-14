@@ -6088,7 +6088,18 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
                 raise AssertionError(f"navigation dispatched input before control acknowledgement: {fixture.received!r}")
             # Confirm exit before releasing the server handler. Goodbye is a
             # visible completed exit; the harness still verifies terminal mode.
-            send_and_wait(process, master_fd, output, b"q", b"Goodbye!")
+            #
+            # Waited for on its own, not through send_and_wait: the farewell is
+            # the last thing written. Terminal_restore.finish_after_restore
+            # restores the terminal and only then prints it, so the frame
+            # terminator send_and_wait looks for after a needle has already
+            # gone by and no other follows.
+            read_available(master_fd, output)
+            start = len(output)
+            write_all(master_fd, output, b"q")
+            wait_for_output(
+                process, master_fd, output, b"Goodbye!", start=start, timeout=3.0
+            )
         finally:
             fixture.release_interrupt.set()
             fixture.release.set()

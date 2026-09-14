@@ -150,14 +150,29 @@ let create_keeper_meta_exn ~sw ~config (meta : Masc.Keeper_meta_contract.keeper_
      failwith
        ("keeper owner inventory install failed: "
         ^ Masc.Keeper_owner_registry.install_error_to_string error));
-  match
-    Masc.Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta
-  with
-  | Ok _ -> ()
-  | Error error ->
-    failwith
-      ("create_keeper_meta failed: "
-       ^ Masc.Keeper_owner_registry.command_error_to_string error)
+  (match
+     Masc.Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta
+   with
+   | Ok _ -> ()
+   | Error error ->
+     failwith
+       ("create_keeper_meta failed: "
+        ^ Masc.Keeper_owner_registry.command_error_to_string error));
+  (* #36066 refuses a keeper nothing declares (audit F386): the profile loader
+     answers [Declaration_not_found] for a keeper with no keepers/<name>.toml,
+     and the official-client runtimes read that profile through
+     [Keeper_official_client_host.resolve_native_posture] before any turn. A
+     meta snapshot alone therefore no longer reaches a native runtime; the
+     fixture keeper is declared the way a real one is, at the one path
+     [Config_dir_resolver] spells for it. *)
+  let declaration =
+    Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:config.Workspace.base_path
+      meta.name
+  in
+  mkdir_p (Filename.dirname declaration);
+  write_file declaration
+    (Printf.sprintf "[keeper]\ninstructions = \"%s fixture instructions\"\n" meta.name)
 ;;
 
 let playground_file ~config ~meta name =

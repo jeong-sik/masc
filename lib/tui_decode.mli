@@ -1746,6 +1746,7 @@ type keeper_turn_lane =
 
 type keeper_turn_preview = {
   ktp_status_text : string;
+  ktp_updated_at_unix : float;
   ktp_text_tail : string;
       (** Tail of the newest response text this turn has produced. *)
   ktp_last_tool : string option;
@@ -1769,6 +1770,7 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 

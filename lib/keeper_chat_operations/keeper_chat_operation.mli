@@ -40,8 +40,11 @@ type state =
       }
   | Cancelled of { completed_at : float }
 
+type batch_membership = { execution_id : Operation_id.t; input_digest : string }
+
 type t =
   { operation_id : Operation_id.t
+  ; batch_membership : batch_membership option
   ; admission_digest : string
   ; execution_digest : string
   ; sequence : int64

@@ -10,6 +10,7 @@
 
 type interrupt_signal =
   | Signalled of { turn_id : int option }
+  | Pending_admission_paused
   | Not_signalled of
       { reason : string
       ; detail : string option

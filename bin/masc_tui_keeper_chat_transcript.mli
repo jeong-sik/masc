@@ -27,6 +27,7 @@ type phase =
 type interrupt =
   | Not_requested
   | Signal_sent of { turn_id : int option; signalled_at_ns : int64 }
+  | Admission_paused
   | Signal_declined of string
       (** The server accepted the request and did not signal — no turn in
           flight, or the cancel itself failed. Carries its reason. *)
@@ -221,6 +222,8 @@ val create :
 
 val keeper_name : t -> string
 val request_id : t -> string
+val execution_id : t -> string
+(** Shared batch execution owner, or the singleton request identity. *)
 val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)
@@ -256,6 +259,8 @@ val revision : t -> int
     transcript. *)
 
 val phase : t -> phase
+val awaiting_continuation : t -> bool
+(** A checkpoint segment ended; the original request still awaits its answer. *)
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
 (** Server acceptance and queue length observed at acceptance, if received.
     This remains historical after the run starts; inspect [phase] alongside it. *)

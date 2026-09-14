@@ -44,9 +44,14 @@ val request_output_token_receipt : request_artifact -> Types.output_token_receip
     and do not share a thinking contract: Anthropic carries the adaptive policy
     its catalog entry declares, and Kimi carries an on/off flag because
     [Capabilities.kimi_capabilities] declares [No_thinking_control]. Naming them
-    apart is what stops a change to one from rewriting the other's wire. *)
+    apart is what stops a change to one from rewriting the other's wire.
+    [Anthropic_no_policy] is the Anthropic wire for a model no catalog or
+    manifest row declares a policy for: it serializes no [thinking] block and
+    rejects an explicit [enable_thinking], instead of standing in for
+    [Anthropic_adaptive_default]. *)
 type thinking_wire =
   | Anthropic_control of Capabilities.anthropic_thinking_control
+  | Anthropic_no_policy
   | Kimi_flag
 
 (** The thinking request field for a model family, on the wire that family

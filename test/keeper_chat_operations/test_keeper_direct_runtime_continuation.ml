@@ -192,7 +192,111 @@ let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun pat
         (Operation.Operation_id.equal operation_id operation.operation_id)
     | None -> fail "cooling retry never became claimable"))
 
+let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
+  let follower = Operation.Operation_id.of_string "batch-runtime-follower" |> string_ok in
+  let arrival = Operation.Operation_id.of_string "batch-runtime-new-arrival" |> string_ok in
+  with_open path (fun store ->
+    List.iter (fun operation_id -> ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> ok)) [operation_id; follower];
+    let combined = `Assoc ["message", `String "frozen batch"] in
+    let batch _ _ = Ok (Some {Store.members=[operation_id; follower]; input=combined}) in
+    let claimed = match Store.claim_next ~batch store ~now:2. |> ok with Some value -> value | None -> fail "no batch" in
+    let retry = continuation () in
+    ignore (defer store claimed retry |> ok);
+    ignore (Store.submit store ~now:13. ~operation_id:arrival ~source ~input |> ok);
+    let prioritized = Store.move_queued_to_front store ~now:14. ~operation_id:follower |> ok in
+    check bool "pending follower priority retains original request identity" true
+      (Operation.Operation_id.equal prioritized.operation_id follower);
+    check bool "pending follower resolves to frozen execution" true
+      (Option.exists (fun (binding : Operation.batch_membership) -> Operation.Operation_id.equal binding.execution_id operation_id) prioritized.batch_membership);
+    let forbidden _ _ = fail "resumed batch asked to reselect membership" in
+    let resumed = match Store.claim_next ~batch:forbidden store ~now:14. |> ok with Some value -> value | None -> fail "no retry" in
+    check bool "same frozen aggregate" true (resumed.input = claimed.input);
+    check int "same frozen members" 2 (List.length (Store.batch_operations store ~operation_id |> ok));
+    check int "new arrival remains queued" 1 (Store.inventory store |> ok).queued_count;
+    Store.resume_direct_runtime_retry store ~now:15. ~operation_id ~observed:retry |> ok;
+    ignore (Store.succeed_running store ~now:16. ~operation_id ~outcome_ref:"shared-retry" |> ok);
+    match Store.get store follower |> ok with
+    | Some {Operation.state=Operation.Succeeded _; _} -> ()
+    | _ -> fail "follower was not settled by resumed execution"))
+
+let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = with_path (fun path ->
+  let saved = Semantic.Agent_core (checkpoint "cooperative tool results") in
+  with_open path (fun store ->
+    let first = admitted store in
+    let steering = Operation.Operation_id.of_string "new-user-steering" |> string_ok in
+    ignore (Store.submit store ~now:11. ~operation_id:steering ~source ~input:(`Assoc ["message", `String "change direction"]) |> ok);
+    let queued = Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:saved |> ok in
+    check bool "checkpoint keeps original input" true (queued.input = first.input);
+    check bool "checkpoint is unfinished" true (queued.state = Operation.Queued);
+    check bool "no provider retry invented" true (Store.direct_runtime_retry store ~operation_id |> ok = None);
+    let next = Store.claim_next store ~now:13. |> ok |> Option.get in
+    check bool "new user steering precedes continuation" true (Operation.Operation_id.equal steering next.operation_id);
+    ignore (Store.succeed_running store ~now:14. ~operation_id:steering ~outcome_ref:"steering" |> ok);
+    ignore (Store.claim_next store ~now:15. |> ok));
+  with_open path (fun store ->
+    check int "claim crash retains unconsumed checkpoint" 0 (Store.settle_running_after_restart store ~now:16. |> ok);
+    ignore (Store.claim_next store ~now:17. |> ok);
+    rejected (Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:(Semantic.Agent_core (checkpoint "wrong")));
+    Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:saved |> ok;
+    ignore (Store.succeed_running store ~now:19. ~operation_id ~outcome_ref:"actual-answer" |> ok);
+    check bool "actual answer settles semantic execution" true (Semantic.is_terminal (execution store));
+    check bool "success releases original input" true ((current store).input = None)))
+
+let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path ->
+  with_open path (fun store ->
+    let first = admitted store in
+    let saved = Semantic.Agent_core (checkpoint "saved") in
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+    rejected (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:saved);
+    check bool "failed defer leaves operation running" true
+      (match (current store).state with Operation.Running _ -> true | _ -> false);
+    check bool "failed defer has no checkpoint authority" true (Store.direct_checkpoint store ~operation_id |> ok = None);
+    ignore (Store.defer_direct_checkpoint store ~now:13. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:saved |> ok);
+    ignore (Store.cancel_queued store ~now:14. ~operation_id |> ok);
+    check bool "cancel settles checkpoint authority" true (Semantic.is_terminal (execution store));
+    check bool "cancel does not authorize resume" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
+
+let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with_path (fun path ->
+  let official = ref None in
+  with_open path (fun store ->
+    let first = admitted store in
+    let seed = match Semantic.create ~id:(Scope.direct_operation operation_id) ~input ~sources:[] ~now:10. with
+      | Ok value -> value | Error error -> fail (Semantic.error_to_string error) in
+    let checkpoint : Semantic.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = "codex.test"; session_id = "original-thread";
+        turn_id = "yielded-turn"; tool_surface_sha256 = String.make 64 'a'; frame = seed.frame } in
+    official := Some checkpoint;
+    let authority = Semantic.Official_client checkpoint in
+    ignore (Store.defer_direct_checkpoint store ~now:12. ~operation_id
+      ~execution_digest:first.execution_digest ~checkpoint:authority |> ok);
+    check bool "original multimodal input remains durable" true ((current store).input = first.input);
+    check bool "official yield is pending, not a fake provider retry" true
+      ((current store).state = Operation.Queued && Store.direct_runtime_retry store ~operation_id |> ok = None));
+  with_open path (fun store ->
+    let saved = Option.get !official in
+    let authority = Semantic.Official_client saved in
+    check bool "reopen preserves the official authority" true
+      (match Store.direct_checkpoint store ~operation_id |> ok with
+       | Some observed -> Semantic.equal_gate_checkpoint authority observed | None -> false);
+    ignore (Store.claim_next store ~now:13. |> ok);
+    rejected (Store.resume_direct_checkpoint store ~now:14. ~operation_id
+      ~observed:(Semantic.Official_client {saved with session_id="unrelated-thread"}));
+    Store.resume_direct_checkpoint store ~now:14. ~operation_id ~observed:authority |> ok;
+    let advanced = Semantic.Official_client {saved with turn_id="next-yield"} in
+    ignore (Store.defer_direct_checkpoint store ~now:15. ~operation_id
+      ~execution_digest:(current store).execution_digest ~checkpoint:advanced |> ok);
+    ignore (Store.cancel_queued store ~now:16. ~operation_id |> ok);
+    check bool "cancel terminalizes official continuation" true (Semantic.is_terminal (execution store));
+    check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
+
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
+  test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
+  test_case "cooperative checkpoint commit fault and cancel" `Quick test_cooperative_checkpoint_commit_fault_and_cancel;
+  test_case "batch retry freezes members and excludes new arrivals" `Quick test_batch_runtime_retry_keeps_frozen_members;
   test_case "same operation survives and completes" `Quick test_same_operation_survives_and_completes;
   test_case "restart after claim requires exact checkpoint" `Quick test_restart_after_claim_requires_exact_checkpoint;
   test_case "interrupted resumed effects are not replayed" `Quick test_interrupted_resumed_effects_are_not_replayed;

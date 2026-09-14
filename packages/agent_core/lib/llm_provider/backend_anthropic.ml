@@ -113,6 +113,7 @@ let effort_for_config (config : Provider_config.t) =
    to one from silently rewriting the other's wire. *)
 type thinking_wire =
   | Anthropic_control of Capabilities.anthropic_thinking_control
+  | Anthropic_no_policy
   | Kimi_flag
 
 let thinking_config_for_config wire (config : Provider_config.t) =
@@ -122,6 +123,12 @@ let thinking_config_for_config wire (config : Provider_config.t) =
      | Some true -> Some (`Assoc [ "type", `String "enabled" ])
      | Some false -> Some (`Assoc [ "type", `String "disabled" ])
      | None -> None)
+  | Anthropic_no_policy ->
+    (* No catalog or manifest row declares a policy for this model, so there
+       is no adaptive shape to encode. [validate_thinking_controls] refuses an
+       explicit [enable_thinking] on this wire before serialization; the
+       request body carries no [thinking] block. Adversarial F195. *)
+    None
   | Anthropic_control mode ->
     (match config.enable_thinking, mode with
      | Some true, Capabilities.Anthropic_always_adaptive -> None
@@ -138,6 +145,15 @@ let thinking_config_for_config wire (config : Provider_config.t) =
 let validate_thinking_controls wire (config : Provider_config.t) =
   match wire with
   | Kimi_flag -> Provider_config.validate_reasoning_effort_request config
+  | Anthropic_no_policy ->
+    (match config.enable_thinking with
+     | Some (true | false) ->
+       Error
+         (Printf.sprintf
+            "model %S has no catalog-declared Anthropic thinking-control policy; an \
+             explicit enable_thinking value cannot be encoded safely"
+            config.model_id)
+     | None -> Provider_config.validate_reasoning_effort_request config)
   | Anthropic_control mode ->
   match mode, config.enable_thinking, config.reasoning_effort with
   | _, Some false, Some effort ->
@@ -409,16 +425,9 @@ let build_request_payload
     match config.kind with
     | Provider_config.Kimi -> Kimi_flag
     | Provider_config.Anthropic ->
-      Anthropic_control
-        (match anthropic_thinking_control with
-         | Some mode -> mode
-         | None when Option.is_some config.enable_thinking ->
-           invalid_arg
-             (Printf.sprintf
-                "Backend_anthropic.build_request: model %S has no catalog-declared \
-                 Anthropic thinking-control policy"
-                config.model_id)
-         | None -> Capabilities.Anthropic_adaptive_default)
+      (match anthropic_thinking_control with
+       | Some mode -> Anthropic_control mode
+       | None -> Anthropic_no_policy)
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
     | Provider_config.Gemini
@@ -706,13 +715,7 @@ let validate_nonexact_thinking_controls (config : Provider_config.t) =
   | Provider_config.Anthropic ->
     (match nonexact_anthropic_thinking_control config with
      | Some mode -> validate_thinking_controls (Anthropic_control mode) config
-     | None when Option.is_some config.enable_thinking ->
-       Error
-         (Printf.sprintf
-            "model %S has no catalog-declared Anthropic thinking-control policy; an \
-             explicit enable_thinking value cannot be encoded safely"
-            config.model_id)
-     | None -> Ok ())
+     | None -> validate_thinking_controls Anthropic_no_policy config)
   | Provider_config.Kimi -> validate_thinking_controls Kimi_flag config
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama

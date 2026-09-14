@@ -6085,6 +6085,13 @@
  (modules test_lane_addon_reconcile)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
 
+; Mock clock orders a watcher's wake-up ahead of the work's: the pool's
+; request window and idle window keep a result the work finished.
+(test
+ (name test_pool_watched_work)
+ (modules test_pool_watched_work)
+ (libraries masc_test_deps masc.http_client piaf eio eio_main eio.mock))
+
 (test
  (name test_lane_addon_skills)
  (modules test_lane_addon_skills)

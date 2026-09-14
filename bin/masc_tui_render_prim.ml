@@ -2783,14 +2783,18 @@ let tools_scrolled_for_lines state display_lines =
    reading, and a second copy of the spelling would drift from this one. *)
 let config_pane_keys = "9:Runtime  p:next  "
 
+let config_pane_tabs (state : state) =
+  List.map (fun (pane, label) -> (label, state.config_pane = pane)) config_panes
+
 let config_pane_strip ~cols ~before ~after (state : state) =
-  let name pane label = (label, state.config_pane = pane) in
   Ansi.dim ^ config_pane_keys ^ Ansi.reset
   ^ tab_strip
-      ~width:
-        (tab_strip_width ~cols
-           ~before:(before ^ tab_strip_gap ^ config_pane_keys) ~after)
-      (List.map (fun (pane, label) -> name pane label) config_panes)
+      (* [before] carries its own trailing gap -- every pane spells this row
+         that way -- and nothing else sits between it and the keys. Counting
+         another gap here reserved two cells the row never draws, which came
+         straight out of the strip. *)
+      ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
+      (config_pane_tabs state)
 
 (* The whole title row a Config pane draws: its name, the strip, and the badge
    at the end -- with the file it is reading and the clock between them where
@@ -2818,12 +2822,36 @@ let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
      path's deciding end is its tail, which [fit_middle] keeps. When nothing
      is left it goes entirely, gap and all, and the strip and the badge have
      the row. *)
+  (* The strip's floor comes off the row before anything that can give way
+     spends it. Bounding the note alone was not enough: a pane whose name
+     carries a reading of its own -- prompts with the prompt it has selected,
+     themes with its counts -- left the strip six cells for an eight-cell
+     entry, and beside the acting pane at a hundred and fifty columns the row
+     read "@p@" and "@them@" where it meant prompts and themes. The strip
+     cannot say it was cut that far; it has already spent its marks. *)
+  let strip_floor = tab_strip_min_width (config_pane_tabs state) in
+  (* What the title gives way with is its tail. Every pane spells this row the
+     same way -- the name it is known by, then whatever reading it has to add
+     -- so cutting from the right spends the reading before it reaches the
+     name, and the cut mark says it happened. *)
+  let before =
+    let room =
+      framed_inner_width cols - cells config_pane_keys - strip_floor - cells tail
+    in
+    if cells before <= room then before
+    else
+      (* The gap the title carries at its end is what holds it off the keys,
+         and cutting takes the end. It is put back, so a cut title reads
+         "... 주 프 …  9:Runtime" rather than running into the key. *)
+      let gap = cells tab_strip_gap in
+      Masc_tui_message_layout.fit_width before (max 0 (room - gap)) ^ tab_strip_gap
+  in
   let note =
     if note = "" then ""
     else
       let room =
         framed_inner_width cols - cells before - cells config_pane_keys
-        - cells tail - cells "  "
+        - strip_floor - cells tail - cells "  "
       in
       if room >= cells note then note
       else Masc_tui_message_layout.fit_middle (max 0 room) note

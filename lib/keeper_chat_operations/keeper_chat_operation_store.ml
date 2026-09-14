@@ -713,6 +713,12 @@ let ensure_current_schema db =
 ;;
 
 let configure db =
+  (* Boot opens several stores at once; a sibling writer holding the lock for
+     a moment must be waited out. Without this, the first concurrent commit
+     returns SQLITE_BUSY and the Owner fences chat for the rest of the
+     process (install smoke, 2026-09-14). Same contract as
+     keeper_tool_call_index and tool_metrics_store. *)
+  let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
   let* journal_mode =
     single_text db ~operation:"set DELETE journal mode" "PRAGMA journal_mode=DELETE"
   in

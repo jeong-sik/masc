@@ -1281,8 +1281,11 @@ let test_runtime_failover_visibility_and_error_attribution () =
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
   feed t [ Live.Text "streaming token" ];
-  check bool "streaming from runtime endpoint" true
-    (contains ~needle:"streaming from [claude-3-7-sonnet]" (progress_text t));
+  (* A token names the phase, not the fact of streaming: the row's first
+     clause is what the model side is doing, then the runtime it is doing
+     it on. *)
+  check bool "a text token puts the model in the answering phase" true
+    (contains ~needle:"answering \xc2\xb7 [claude-3-7-sonnet]" (progress_text t));
   feed t
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
@@ -1319,12 +1322,71 @@ let test_runtime_silence_is_timed_from_the_attempt_not_the_turn () =
   check bool "the second attempt is timed from itself" true
     (contains ~needle:"nothing back for 10s"
        (progress_text ~now:(origin +. 110.) t));
-  (* Anything arriving ends the silence: the row moves to "streaming from",
-     where the question is no longer whether the endpoint is there. *)
+  (* A token ends the endpoint's silence and starts the phase's own: the
+     question is no longer whether the endpoint is there but whether the
+     model that was answering has stopped. The age is re-timed from the
+     token, and it sits beside the phase word so the two are one clause. *)
   feed ~now:(origin +. 111.) t [ Live.Text "first token" ];
-  check bool "a token takes the silence off the row" false
-    (contains ~needle:"nothing back for"
-       (progress_text ~now:(origin +. 300.) t))
+  check bool "a token re-times the silence from itself, beside the phase" true
+    (contains ~needle:"answering, nothing back for 3m09s"
+       (progress_text ~now:(origin +. 300.) t));
+  check bool "the endpoint silence is not stated twice" false
+    (contains ~needle:"waiting on" (progress_text ~now:(origin +. 300.) t))
+
+(* The row's first clause is a mode word for what the model side is doing
+   between tool calls -- reasoning, answering, or holding a tool's result with
+   nothing back yet -- with the silence since that signal once it is long
+   enough to read as a stall. Before, one tool call switched the row to a
+   count and mix that never again said which of those the turn was in; the
+   2026-09-14 msx-retro-mania screen read "2 tools · 2m50s" for a model that
+   had been silent since its last tool returned. *)
+let test_the_row_names_the_model_phase_between_tool_calls () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started { runtime_id = Some "deepseek"; attempt_index = Some 0 }
+    ];
+  feed ~now:(origin +. 1.) t [ Live.Stream_model_started { model = "deepseek" } ];
+  check bool "the endpoint answering without a token is its own phase" true
+    (contains ~needle:"model started, nothing back for 4s" (progress_text ~now:(origin +. 5.) t));
+  feed ~now:(origin +. 6.) t [ Live.Thinking "let me" ];
+  let at_7 = progress_text ~now:(origin +. 7.) t in
+  check bool "a thinking delta is the reasoning phase" true (contains ~needle:"reasoning" at_7);
+  check bool "a pause under the threshold states no silence" false
+    (contains ~needle:"nothing back" at_7);
+  check bool "a stalled reasoning phase states how long" true
+    (contains ~needle:"reasoning, nothing back for 9s" (progress_text ~now:(origin +. 15.) t));
+  feed ~now:(origin +. 16.) t [ Live.Text "Here is" ];
+  check bool "a text delta is the answering phase" true
+    (contains ~needle:"answering \xc2\xb7 [deepseek]" (progress_text ~now:(origin +. 17.) t));
+  (* A pending call is the subject; the model-side word steps aside for it. *)
+  feed ~now:(origin +. 20.) t
+    [ Live.Tool_started { occurrence = occurrence "call-1"; tool_name = "Execute" } ];
+  feed ~now:(origin +. 21.) t [ Live.Tool_ended { occurrence = occurrence "call-1" } ];
+  let at_25 = progress_text ~now:(origin +. 25.) t in
+  check bool "a pending call names itself" true (contains ~needle:"awaiting results: Execute" at_25);
+  check bool "no model-side word competes with a pending call" false
+    (contains ~needle:"answering" at_25 || contains ~needle:"reasoning" at_25);
+  (* The result is handed back; until the next token the model owes one. *)
+  feed ~now:(origin +. 30.) t [ tool_result "call-1" "exec-call-1" ];
+  check bool "a returned call names what the model is holding" true
+    (contains ~needle:"Execute returned" (progress_text ~now:(origin +. 31.) t));
+  let at_40 = progress_text ~now:(origin +. 40.) t in
+  check bool "silence after a result is timed from the result" true
+    (contains ~needle:"Execute returned, nothing back for 10s" at_40);
+  check bool "the tool count still follows the phase" true (contains ~needle:"1 tool" at_40);
+  feed ~now:(origin +. 41.) t [ Live.Thinking "next" ];
+  let at_42 = progress_text ~now:(origin +. 42.) t in
+  check bool "a token after the result moves the phase on" true
+    (contains ~needle:"reasoning \xc2\xb7 [deepseek] \xc2\xb7 1 tool" at_42);
+  check bool "the returned call is no longer the clause" false (contains ~needle:"returned" at_42);
+  (* A failover names its new runtime and re-times the silence even after
+     tools ran: the count of earlier calls used to hide that clause. *)
+  feed ~now:(origin +. 50.) t
+    [ Live.Runtime_attempt_started { runtime_id = Some "gpt-4o"; attempt_index = Some 1 } ];
+  check bool "a failover after tools still states the new runtime's silence" true
+    (contains ~needle:"failover: waiting on [gpt-4o] (attempt 2), nothing back for 10s \xc2\xb7 1 tool"
+       (progress_text ~now:(origin +. 60.) t))
 
 let test_runtime_identity_separates_configured_and_observed () =
   let identity ?(keeper_name = "keeper.one") transcript =
@@ -2518,6 +2580,8 @@ let () =
             test_runtime_failover_visibility_and_error_attribution
         ; test_case "runtime silence is timed from the attempt" `Quick
             test_runtime_silence_is_timed_from_the_attempt_not_the_turn
+        ; test_case "the row names the model phase between tool calls" `Quick
+            test_the_row_names_the_model_phase_between_tool_calls
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
         ; test_case "new attempt does not inherit previous runtime" `Quick

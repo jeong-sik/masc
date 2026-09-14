@@ -532,6 +532,8 @@ let test_backlog_with_rows_omits_readable_empty_statement () =
         claimable_tasks =
           [ { Inputs.task_id =
                 Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
+            ; priority = 2
+            ; created_at = "2026-08-08T00:00:00Z"
             }
           ];
       }

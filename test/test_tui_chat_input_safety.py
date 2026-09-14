@@ -234,8 +234,10 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # Focus the composer row while Overview is the surface.
-        h.send_and_wait(process, fd, output, b"i", b"\x1b[?25h")
+        # Focus the composer row while Overview is the surface. The row says
+        # which state it is in: unfocused it offers "(i to write)", focused it
+        # names the voice keys.
+        h.send_and_wait(process, fd, output, b"i", b"Ctrl-Y to speak")
         h.drain_until_quiet(process, fd, output)
         os.write(fd, b"\x11")
         h.drain_until_quiet(process, fd, output)

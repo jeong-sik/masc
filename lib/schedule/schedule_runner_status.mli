@@ -13,6 +13,7 @@ type tick_counts =
   ; dispatch_failed : int
   ; dispatch_unsupported : int
   ; dispatch_start_rejected : int
+  ; dispatch_deferred : int
   ; wake_enqueued : int
   ; wake_skipped_no_keeper : int
   ; wake_skipped_missing_schedule : int

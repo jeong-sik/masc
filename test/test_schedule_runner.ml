@@ -142,6 +142,7 @@ let accepting_consumer
             (fun acceptance_commit ->
                Work_accepted { detail; acceptance_commit })
             (commit_acceptance detail))
+  ; defer_wake = (fun _config _request -> false)
   }
 ;;
 
@@ -560,6 +561,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              accept (`Assoc [ "healthy", `Bool true ])))
+    ; defer_wake = (fun _config _request -> false)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -802,6 +804,42 @@ let test_runner_status_cross_domain_updates_are_lossless () =
   Schedule_runner_status.reset_for_test ()
 ;;
 
+(* Self-clock (#36213): when the consumer holds a due schedule back, the tick
+   emits no signal, calls no dispatch, and leaves the schedule at its current
+   due — it does not advance to the next occurrence. *)
+let test_tick_defers_held_wake_without_advancing () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id:"selfclock-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let consumer : Schedule_runner.consumer =
+    { accepts = (fun _request -> Ok ())
+    ; dispatch =
+        (fun _config ~now:_ _signal request ~commit_acceptance ->
+           calls := request.schedule_id :: !calls;
+           Result.map
+             (fun acceptance_commit -> Work_accepted { detail = `Assoc []; acceptance_commit })
+             (commit_acceptance (`Assoc [])))
+    ; defer_wake = (fun _config _request -> true)
+    }
+  in
+  let result = tick_ok config ~now:201.0 ~consumer in
+  check int "held wake is not dispatched" 0 (List.length !calls);
+  check int "held wake emits no signal" 0 (List.length result.emitted);
+  check int "held wake is reported once" 1 (List.length result.dispatches);
+  check_dispatch_status "deferred" Dispatch_deferred (List.hd result.dispatches).status;
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "schedule missing after deferral"
+  | Some stored ->
+    check string "held schedule stays due" "due"
+      (schedule_status_to_string stored.status);
+    check (float 0.001) "held schedule due is unchanged" 200.0 stored.due_at
+;;
+
 
 let () =
   run "Schedule_runner"
@@ -828,6 +866,8 @@ let () =
             test_tick_retries_same_occurrence_without_blocking_other_schedule
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
+        ; test_case "defers held wake without advancing" `Quick
+            test_tick_defers_held_wake_without_advancing
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

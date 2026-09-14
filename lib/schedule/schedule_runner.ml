@@ -28,6 +28,7 @@ and dispatch_status =
   | Dispatch_failed
   | Dispatch_unsupported
   | Dispatch_start_rejected
+  | Dispatch_deferred
 
 and dispatch_result =
   { occurrence_id : Schedule_occurrence_id.t
@@ -60,6 +61,14 @@ type consumer =
         (Yojson.Safe.t ->
          (acceptance_commit, consumer_dispatch_error) result) ->
       (consumer_dispatch_result, consumer_dispatch_error) result
+  ; defer_wake : Workspace_utils.config -> Schedule_domain.schedule_request -> bool
+      (** Self-clock: [true] leaves this due schedule unfired this tick — no
+          signal, no dispatch, no advance — because its target still holds the
+          previous, unconsumed occurrence. Emission then tracks consumption
+          rather than wall-clock, bounding a slow keeper to one pending
+          occurrence per instance. The consumer decides which schedules
+          self-clock; a schedule whose every occurrence is distinct work returns
+          [false] and fires on every due. *)
   }
 
 type runner_error =
@@ -88,6 +97,7 @@ let dispatch_status_to_string = function
   | Dispatch_failed -> "failed"
   | Dispatch_unsupported -> "unsupported"
   | Dispatch_start_rejected -> "start_rejected"
+  | Dispatch_deferred -> "deferred"
 ;;
 
 let schedules_dir config =
@@ -394,13 +404,33 @@ let tick ?consumer ?clock config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
-    let candidates = candidates ~now state in
-    let candidate_signals = List.map snd candidates in
+    let all_candidates = candidates ~now state in
+    (* Self-clock (#36213): a consumer may hold a due schedule back when its
+       target still carries the previous unconsumed occurrence. Held candidates
+       emit no signal and are not dispatched or advanced — they stay due and are
+       reconsidered next tick, so emission tracks consumption instead of the
+       wall clock. Without a consumer the runner is keeper-agnostic and holds
+       nothing. *)
+    let deferred, active =
+      match consumer with
+      | Some consumer ->
+        List.partition
+          (fun (request, _signal) -> consumer.defer_wake config request)
+          all_candidates
+      | None -> [], all_candidates
+    in
+    let candidate_signals = List.map snd active in
     let* emitted = append_new_signals config candidate_signals in
+    let deferred_dispatches =
+      List.map
+        (fun (_request, (signal : wake_signal)) ->
+           dispatch_result signal.occurrence_id signal.schedule_id Dispatch_deferred)
+        deferred
+    in
     (match consumer with
      | Some consumer ->
-       let dispatches = dispatch_candidates config ~now ~clock consumer candidates in
-       Ok { due_changed; emitted; rescheduled = 0; dispatches }
+       let dispatches = dispatch_candidates config ~now ~clock consumer active in
+       Ok { due_changed; emitted; rescheduled = 0; dispatches = deferred_dispatches @ dispatches }
      | None ->
        let schedule_ids =
          List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals

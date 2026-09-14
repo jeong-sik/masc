@@ -318,18 +318,21 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
 ;;
 
+let interrupted_cycle_outcome ~(meta : keeper_meta) =
+  Log.Keeper.info
+    ~keeper_name:meta.name
+    "%s: keeper cycle interrupted by operator; no turn failure recorded"
+    meta.name;
+  { meta
+  ; cycle_status = Turn_cycle_interrupted
+  ; stimuli_acked = false
+  ; provider_backoff = None
+  }
+;;
+
 let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
   if Keeper_registry_types.is_operator_interrupt exn
-  then (
-    Log.Keeper.info
-      ~keeper_name:meta.name
-      "%s: keeper cycle interrupted by operator; no turn failure recorded"
-      meta.name;
-    { meta
-    ; cycle_status = Turn_cycle_interrupted
-    ; stimuli_acked = false
-    ; provider_backoff = None
-    })
+  then interrupted_cycle_outcome ~meta
   else (
     record_crashed_cycle_failure
       ~base_path
@@ -1078,10 +1081,12 @@ let run_keepalive_unified_turn
       }
     with
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
-      handle_cycle_exception
-        ~base_path:ctx.config.base_path
-        ~meta:meta_after_triage
-        exn
+      (* The Owner failed the child switch with this exception, so
+         [Switch.run] re-raises it whatever this body returns. Let it
+         propagate; [run_autonomous_if_idle] answers [`Interrupted] and the
+         outcome is built once, below. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace exn backtrace
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       Printexc.raise_with_backtrace e backtrace
@@ -1098,6 +1103,7 @@ let run_keepalive_unified_turn
         exn))
     with
   | Ok (`Ran outcome) -> outcome
+  | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage
   | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name

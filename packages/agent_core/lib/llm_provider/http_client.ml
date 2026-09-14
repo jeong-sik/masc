@@ -2594,7 +2594,7 @@ let with_post_stream
      second full one: the budget is one window from here to the first
      token. Without a clock no budget is armed anywhere and the elapsed time
      is not read. *)
-  let opened_at = Option.map Eio.Time.now clock in
+  let window_opened = Option.map (fun clock -> clock, Eio.Time.now clock) clock in
   Eio.Switch.run
   @@ fun sw ->
   (* When a cache is active, bind the transport to the cache's long-lived
@@ -2802,9 +2802,9 @@ let with_post_stream
      successfully, ensuring the reader is no longer using the flow. *)
   let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
   let pre_header_elapsed_s =
-    match clock, opened_at with
-    | Some clock, Some opened_at -> Eio.Time.now clock -. opened_at
-    | None, _ | _, None -> 0.0
+    match window_opened with
+    | Some (clock, opened_at) -> Eio.Time.now clock -. opened_at
+    | None -> 0.0
   in
   let body_result =
     try Ok (f ~pre_header_elapsed_s reader) with

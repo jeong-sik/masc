@@ -1004,6 +1004,8 @@ let accept_keeper_wake_occurrence
       ~keeper_name
       ~expected_owner
       ~stimulus_id
+      ~now
+      ~(wake : Keeper_event_queue.scheduled_wake)
       stimulus
   =
   let exact_stimulus_for_source = function
@@ -1114,6 +1116,43 @@ let accept_keeper_wake_occurrence
          owner
          stimulus_id)
   | Ok (Absent_at _) ->
+    (* A recurring schedule advances as soon as its wake is enqueued
+       ([Schedule_store.accept_running]), so while the keeper's autonomous
+       lane does not run, one pending occurrence per period accumulates for
+       one schedule -- 31 for msx-retro-mania on 2026-09-14 -- and the turn
+       that finally runs reads them all as one batch. The occurrence firing
+       now is the current one; the earlier pending ones are superseded by it
+       and are cancelled with that reason before it is enqueued, so the queue
+       holds at most one pending occurrence per schedule and every skipped
+       firing is a durable cancellation rather than a silent drop. Cancel
+       first, then enqueue: if the enqueue fails, the dispatch is retried and
+       the current occurrence lands then; the earlier ones were superseded by
+       its firing either way. *)
+    let* () =
+      match
+        Keeper_registry_event_queue.cancel_scheduled_wakes_result
+          ~base_path
+          keeper_name
+          ~applied_at:now
+          ~schedule_ids:[ wake.schedule_id ]
+          ~reason:
+            (Printf.sprintf
+               "superseded by occurrence %s of the same schedule"
+               wake.occurrence_id)
+      with
+      | Ok 0 -> Ok ()
+      | Ok superseded ->
+        Log.Keeper.info
+          "schedule wake superseded %d pending occurrence(s) schedule_id=%s keeper=%s occurrence=%s"
+          superseded
+          wake.schedule_id
+          keeper_name
+          wake.occurrence_id;
+        Ok ()
+      | Error detail ->
+        retryable_dispatch_failure
+          ("scheduled keeper wake could not supersede earlier occurrences: " ^ detail)
+    in
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
          ?intake_token
@@ -1211,6 +1250,8 @@ let dispatch_keeper_wake
         ~keeper_name
         ~expected_owner:intake_owner
         ~stimulus_id
+        ~now
+        ~wake
         stimulus
     in
     let occurrence_status =

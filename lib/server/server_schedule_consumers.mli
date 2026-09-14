@@ -85,7 +85,11 @@ val accept_keeper_wake_occurrence :
   keeper_name:string ->
   expected_owner:string ->
   stimulus_id:string ->
+  now:float ->
+  wake:Keeper_event_queue.scheduled_wake ->
   Keeper_event_queue.stimulus ->
   (keeper_wake_acceptance, Schedule_runner.consumer_dispatch_error) result
 (** Accepts one scheduled wake occurrence for [keeper_name], reusing the
-    durable occurrence when the queue already holds it. *)
+    durable occurrence when the queue already holds it. A new occurrence
+    first cancels the schedule's earlier pending occurrences as superseded,
+    stamped [now], so the queue holds at most one per schedule. *)

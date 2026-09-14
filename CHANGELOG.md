@@ -10,6 +10,7 @@
 - Browser Lane TUI: the scene text renders observed heading levels, keeps block spacing, joins inline fragments of one block into one row, keeps the selected region's role and label through scroll, click and copied context, and the status line counts articles, other regions, links, controls and images instead of raw nodes (#36040, #36042, #36044, #36061, #36036, #36038).
 - Goals: `masc_goal_list`, `masc_goal_transition`, `masc_goal_upsert` and the goal HTTP routes answer an unreadable goal store with a typed `goal_store_unavailable` error instead of an empty list, `not_found` or an internal error (#36060).
 - Lanes: the overview draws lanes as one header row and measured columns, so failure counts stay on screen beside the Activity pane (#36062).
+- TUI: the `:` palette reaches Runtime, Changes and every Config pane (#36095).
 - Lanes: the TUI guides subscribing a Keeper to retained output references and shows the output position each subscription has acknowledged (#36007).
 
 ### Fixed
@@ -32,6 +33,8 @@
 - TUI: the Board draft footers come from the key table and its pane row stays on the draft; the Task Review title states a full page's count once; the Planning rollup counts only phases that have goals (#36049, #36047, #36015).
 - TUI: the Fusion detail footer names `K` and `B`, which the detail already answered, and the run list row states only the run's own progress, failure or retained evidence (#36055).
 - Browser Lane TUI: a paragraph with two or more inline elements reads as one row again (#36077).
+- Setup: the web configuration's connection kind is a typed provider variant, and a route's status code is decided from the typed error rather than from a string table (#36082).
+- TUI: the Board read keys are on the footer instead of a second row inside the post, and Code and Resources put their gap row above the title the way every other screen does (#36088, #36076).
 - TUI: the Approvals title counts only the kinds that have rows; a verification request's Created uses the terminal clock and its reading note wraps; a keeper's Last 24h draws no zeros when no metrics rows were read; the Memory detail blocks start their values in one column (#36079, #36064, #36085, #36083).
 - TUI: the Overview names its cluster and project without padding, the Config paths row keeps the binary age and the tail of each path, and the acting pane stays off both Activity tabs (#36012, #36025, #36018).
 

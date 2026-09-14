@@ -33,6 +33,50 @@ let test_the_masthead_names_the_product_and_nothing_else_twice () =
 (* The masthead scrolls with the sheet and the title row above it already says
    MASC, so every row it spends is a row of keys a short terminal does not
    show. A name and the blank under it. *)
+(* The sheet's key column is where the five mark sections put a glyph, and a
+   glyph is one cell in two or three bytes. Padded with [%-*s], which counts
+   bytes, every mark row sat at its own indent: the word beside the paused
+   mark started two columns left of the word beside "?" one row under it.
+
+   Read off the drawn rows rather than the padding code, and over the keeper
+   marks because that section holds a one-byte key, a two-byte one and a
+   three-byte one. *)
+let test_the_mark_rows_share_one_column () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let rows =
+    List.map Masc_tui_theme.strip_sgr
+      (Masc_tui_render_prim.help_lines ~width:90 state)
+  in
+  let entries =
+    match List.assoc_opt "Keeper marks" (Masc_tui_keys.help_sections ()) with
+    | Some entries -> entries
+    | None -> Alcotest.fail "the sheet has no Keeper marks section"
+  in
+  let column_of (_, action) =
+    match List.find_opt (fun row -> contains ("  " ^ action) row) rows with
+    | None -> Alcotest.failf "the sheet drew no row for %S" action
+    | Some row ->
+        let rec seek i =
+          if i + String.length action > String.length row then
+            Alcotest.failf "row lost %S: %S" action row
+          else if String.equal (String.sub row i (String.length action)) action
+          then Masc_tui_message_layout.display_width (String.sub row 0 i)
+          else seek (i + 1)
+        in
+        seek 0
+  in
+  match entries with
+  | [] -> Alcotest.fail "the Keeper marks section is empty"
+  | first :: rest ->
+      let expected = column_of first in
+      List.iter
+        (fun entry ->
+          Alcotest.(check int)
+            (Printf.sprintf "%S starts where the first mark's word does"
+               (snd entry))
+            expected (column_of entry))
+        rest
+
 let test_the_masthead_spends_two_rows () =
   Alcotest.(check int) "the name and a blank row" 2 (List.length (masthead ()))
 
@@ -136,6 +180,8 @@ let () =
     [ ( "masthead"
       , [ Alcotest.test_case "the product, not the chrome" `Quick
             test_the_masthead_names_the_product_and_nothing_else_twice
+        ; Alcotest.test_case "the mark rows share one column" `Quick
+            test_the_mark_rows_share_one_column
         ; Alcotest.test_case "the masthead spends two rows" `Quick
             test_the_masthead_spends_two_rows
         ; Alcotest.test_case "keys are not wrapped in brackets" `Quick

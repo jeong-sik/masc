@@ -41,6 +41,8 @@ type execution_boundary =
   | Exec_failed
   | Child_ack_unavailable
   | Refused
+  | Refused_socket
+  | Refused_write
 
 type execution_receipt = { mode : mode; boundary : execution_boundary }
 
@@ -398,6 +400,8 @@ let execution_receipt_to_yojson { mode; boundary } =
     | Exec_failed -> "exec_failed"
     | Child_ack_unavailable -> "child_ack_unavailable"
     | Refused -> "refused"
+    | Refused_socket -> "refused_socket"
+    | Refused_write -> "refused_write"
   in
   `Assoc ["mode", `String (mode_to_string mode); "plan", `String plan;
           "boundary", `String boundary]

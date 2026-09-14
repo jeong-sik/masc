@@ -464,8 +464,50 @@ let test_child_boundary_acknowledgements () =
     check bool ("child acknowledgement " ^ String.escaped ack) true
       (Exec_shim.child_boundary_of_ack ack = expected))
     ["A", Sandbox_applied; "AE", Exec_failed; "S", Setup_failed;
+     "N", Refused_socket; "W", Refused_write;
      "", Child_ack_unavailable; "E", Child_ack_unavailable;
      "AA", Child_ack_unavailable; "AEX", Child_ack_unavailable]
+
+(* Review 5192723206: the "N"/"W" path once went dead because the raw
+   8-byte buffer never equalled the bare tag. Pin the emission mapping
+   itself -- the C stub's fixed-size buffer with NUL padding -- so the
+   path cannot go dead again without a red test.
+
+   Review 5195604213 (bonus, non-blocking): nothing ties this decoder's
+   "socket"/"write" literals to the C stub that writes them
+   ("lib/exec_shim/observe_stub.c", where [refusing_rule] is assigned).
+   If the C side's spelling ever drifts, this test still passes on its
+   own OCaml-side literals while the real mismatch only shows up as a
+   [Failure] on whatever host first hits the machine's actual refusal --
+   loud, but in production, not in CI. Quoting the C file's path here
+   (the repo's edited-test-file selector matches on the quoted string)
+   at least routes an edit to that file through this suite, so a
+   reviewer sees these two spellings side by side instead of trusting
+   they still agree. *)
+let test_refusal_of_rule_bytes () =
+  let padded s =
+    let b = Bytes.make 8 '\000' in
+    Bytes.blit_string s 0 b 0 (String.length s);
+    b
+  in
+  let expect name rule expected =
+    match Exec_shim.refusal_of_rule_bytes (padded rule) with
+    | exn -> check bool name true (exn = expected)
+  in
+  expect "socket rule -> Sandbox_refused_socket" "socket"
+    Exec_shim.Sandbox_refused_socket;
+  expect "write rule -> Sandbox_refused_write" "write"
+    Exec_shim.Sandbox_refused_write;
+  (* A full 8-byte name (no padding) must still match by content. *)
+  let full = Bytes.of_string "socket\000\000" in
+  check bool "socket with two NULs still matches" true
+    (Exec_shim.refusal_of_rule_bytes full = Exec_shim.Sandbox_refused_socket);
+  (* An unrecognized rule is a loud failure, never a silent allow. *)
+  (match Exec_shim.refusal_of_rule_bytes (padded "other") with
+   | exception Failure _ -> ()
+   | exn ->
+     failf "unknown rule should raise Failure, got %s"
+       (Printexc.to_string exn))
 
 let () =
   run "exec shim"
@@ -512,6 +554,8 @@ let () =
     ; "probe", [ test_case "identity" `Quick test_probe_identity ]
     ; "box", [ test_case "child-owned boundary acknowledgement" `Quick
                  test_child_boundary_acknowledgements
+             ; test_case "refusal rule emission mapping" `Quick
+                 test_refusal_of_rule_bytes
              ; test_case "plan for mode" `Quick test_plan_for_mode
              ; test_case "scratch env" `Quick test_scratch_env
              ; test_case "scratch_root config" `Quick test_parse_config_scratch_root

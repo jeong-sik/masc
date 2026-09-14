@@ -24,7 +24,12 @@ let unavailable_tag = function
   | Keeper_tooling.Execute_shell_ir.Path_reject _ -> "path_reject"
 ;;
 
-type box_evidence = Acknowledged | Refused | Unavailable
+type box_evidence =
+  | Acknowledged
+  | Refused
+  | Refused_socket
+  | Refused_write
+  | Unavailable
 
 let box_evidence ~run evidence =
   let expected_mode = match run with
@@ -36,6 +41,8 @@ let box_evidence ~run evidence =
       when mode = expected_mode ->
         (match boundary with
          | Exec_ssh_protocol.Sandbox_applied | Exec_ssh_protocol.Exec_failed -> read rest
+         | Exec_ssh_protocol.Refused_socket -> Refused_socket
+         | Exec_ssh_protocol.Refused_write -> Refused_write
          | Exec_ssh_protocol.Setup_failed | Exec_ssh_protocol.Refused -> Refused
          | Exec_ssh_protocol.Child_ack_unavailable -> Unavailable)
     | _ -> Unavailable
@@ -53,8 +60,32 @@ let observe t () : Keeper_gate.observation =
        | Ok result ->
          (match box_evidence ~run (t.execution_evidence ()) with
           | Acknowledged -> Keeper_gate.Observed_result { run; result }
-          | Refused -> Keeper_gate.Observed_refused { status = result.status; stderr = result.stderr }
-          | Unavailable -> Keeper_gate.Observation_unavailable "enforced_box_not_acknowledged")
+          | Refused_socket ->
+            (* The child attributed the refusal to its own seccomp socket
+               filter -- typed, nothing read back out of stderr. *)
+            Keeper_gate.Observed_refused
+              { status = result.status
+              ; stderr = result.stderr
+              ; refusal_kind = Keeper_gate.Socket_denied
+              }
+          | Refused_write ->
+            Keeper_gate.Observed_refused
+              { status = result.status
+              ; stderr = result.stderr
+              ; refusal_kind = Keeper_gate.Write_denied
+              }
+          | Refused ->
+            (* An unattributed refusal (older shims) still refuses. *)
+            Keeper_gate.Observed_refused
+              { status = result.status
+              ; stderr = result.stderr
+              ; refusal_kind = Keeper_gate.Unspecified
+              }
+          | Unavailable ->
+            (* No acknowledgement: the box may or may not have applied.
+               That says nothing about a refusal -- say exactly that,
+               never dress an unknown up as an observed refusal. *)
+            Keeper_gate.Observation_unavailable "enforced_box_not_acknowledged")
        | Error error -> Keeper_gate.Observation_unavailable (unavailable_tag error))
   in
   t.outcome := Some outcome;

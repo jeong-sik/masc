@@ -209,9 +209,17 @@ type execution_boundary =
   | Exec_failed
   | Child_ack_unavailable
   | Refused
+  | Refused_socket
+  | Refused_write
 (** [Sandbox_applied] acknowledges that the child finished its sandbox setup.
     It does not prove exec succeeded or that the command achieved its goal.
-    [Exec_failed] means setup succeeded but exec itself reported an error. *)
+    [Exec_failed] means setup succeeded but exec itself reported an error.
+    [Refused_socket] and [Refused_write] are the two box rules that can
+    refuse setup itself, typed by the child's own acknowledgement of which
+    rule failed (the socket filter, the Landlock ruleset) -- the child knows
+    this from its own syscall results, never from anything the payload
+    printed. Plain [Refused] keeps meaning a refusal the child did not
+    attribute to one rule, including every older shim. *)
 
 type execution_receipt = { mode : mode; boundary : execution_boundary }
 (** The mode/plan is reported by the shim. Only [Sandbox_applied] and

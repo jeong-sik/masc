@@ -77,11 +77,30 @@ type authorization_source =
   | Local_output
   | Observed_in_box of boxed_execution
 
+type refusal_kind =
+  | Socket_denied
+  | Write_denied
+  | Unspecified
+
+let refusal_kind_tag = function
+  | Socket_denied -> "socket_denied"
+  | Write_denied -> "write_denied"
+  | Unspecified -> "unspecified"
+;;
+
+(* The closed reading of the shim's refusal record. The refusal's rule name
+   crosses the boundary pipe typed by the child itself, so nothing is read
+   back out of stderr here. An unattributed refusal (older shims, or a rule
+   the child could not name) arrives as [Unspecified], which refuses
+   towards the judge -- misclassification can only cost a judge visit,
+   never an allow. *)
+
 type observation =
   | Observed_result of boxed_execution
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
+      ; refusal_kind : refusal_kind
       }
   | Observation_unavailable of string
 
@@ -273,6 +292,12 @@ let rec take_matching_cycle_grant grant request =
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_authorized (entry.approval_id, audit_receipt))
     else take_matching_cycle_grant grant request
+;;
+
+let status_label = function
+  | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
 ;;
 
 let authorization_source_to_string = function
@@ -1990,12 +2015,6 @@ let observe_exact_rule_expired
        ())
 ;;
 
-let status_label = function
-  | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
-;;
-
 (* Sorted before the judge is paid. What the judge answers is whether an
    effect lands beyond the operator, and a speak lands none: the audio plays
    on the operator's own speakers (or a dashboard device the operator
@@ -2045,17 +2064,33 @@ let decide_after_observation request ~observe =
            source
        in
        allow request source [ audit_receipt ]
-     | Observed_refused { status; stderr } ->
-       Log.Keeper.info
-         ~keeper_name:request.keeper_name
-         "observe run refused operation=%s %s stderr_bytes=%d; the judge decides"
-         request.operation
-         (status_label status)
-         (String.length stderr);
-       (* The judge is shown what the box refused rather than left to guess
-          what the request would have done (RFC-0422 §3.3). *)
+     | Observed_refused { status; stderr; refusal_kind } ->
+       (* Review 5192723206: no refusal the box's own setup channel can
+          report justifies allowing without the judge — a setup failure is
+          the box NOT applying, and the ack channel cannot see attempts
+          after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
+          logs, a separate observation path). Until that path exists the
+          main-line rule holds: every refused observe keeps the judge, and
+          the refusal travels to the judge for weighing (RFC-0422 §3.3). *)
+       let () =
+         Log.Keeper.info
+           ~keeper_name:request.keeper_name
+           "observe run refused operation=%s %s stderr_bytes=%d \
+            refusal_kind=%s; the judge decides"
+           request.operation
+           (status_label status)
+           (String.length stderr)
+           (refusal_kind_tag refusal_kind)
+       in
        defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested
      | Observation_unavailable reason ->
+       (* Unlike Observed_refused, no box could be built at all here — a
+          missing shim, an unadvertised box, a dispatch the typed gate
+          itself refused. That silence says nothing about what the request
+          would have reached (a missing box does not distinguish a network
+          route from a plain filesystem write inside the keeper's own
+          tree), so this keeps the judge exactly as before this stage
+          existed. *)
        Log.Keeper.info
          ~keeper_name:request.keeper_name
          "observe run unavailable operation=%s reason=%s; the judge decides"

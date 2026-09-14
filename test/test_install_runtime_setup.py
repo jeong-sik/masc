@@ -6,6 +6,7 @@ import json
 import os
 import pty
 import select
+import signal
 import termios
 from pathlib import Path
 import subprocess
@@ -413,12 +414,80 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertEqual(self.transports, ['runtime-setup-inventory', 'runtime-setup-render', 'runtime-setup-batch'])
 
     def test_native_verification_failure_identifies_connection_without_raw_diagnostics(self):
-        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error')
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error',
+                        failure=dict(code='client_not_authenticated',
+                                     message='The official client is not signed in.',
+                                     detail='claude auth status reported loggedIn=false'))
         with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
             with self.assertRaises(SETUP.VerificationError) as error:
                 SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
         self.assertEqual(error.exception.runtime_id, 'failed.runtime')
+        self.assertEqual(error.exception.failure['code'], 'client_not_authenticated')
+        self.assertEqual(error.exception.failure['message'], 'The official client is not signed in.')
         self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_verification_failure_without_a_failure_object_stays_quiet(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_failed', runtime_id='failed.runtime', error='safe error')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.VerificationError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertEqual(error.exception.failure, {})
+
+    def test_verification_reason_prints_the_native_account_of_the_failure(self):
+        with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+            SETUP.print_verification_reason(dict(code='client_not_authenticated',
+                                                 message='The official client is not signed in.',
+                                                 detail='claude auth status reported loggedIn=false'))
+            SETUP.print_verification_reason({})
+        text = stderr.getvalue()
+        self.assertIn('client_not_authenticated: The official client is not signed in.', text)
+        self.assertIn('  claude auth status reported loggedIn=false', text)
+        self.assertEqual(text.count('\n'), 2)
+
+    def test_ctrl_c_in_the_picker_cancels_without_a_traceback(self):
+        master, slave = pty.openpty()
+        program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                   repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                   '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n'
+                   'try:\n'
+                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5"])\n'
+                   'except m.SetupError as error:\n'
+                   '    print(json.dumps({"cancelled": str(error)}))')
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        try:
+            terminal = b''
+            while b'1/1 shown' not in terminal:
+                self.assertTrue(select.select([master], [], [], 5)[0], 'picker did not render')
+                terminal += os.read(master, 65536)
+            # cbreak keeps ISIG on, so a real terminal delivers Ctrl-C as
+            # SIGINT, never as the \x03 byte the key loop handles. The child
+            # is not this pty's foreground group, so the same signal is sent
+            # directly; the line discipline would deliver exactly this.
+            os.kill(process.pid, signal.SIGINT)
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            self.assertIn(b'setup cancelled; existing connections were preserved', output)
+            self.assertNotIn(b'Traceback', terminal + output)
+        finally:
+            process.kill()
+            os.close(master)
+            os.close(slave)
+
+    def test_ctrl_c_outside_the_picker_exits_as_a_cancelled_setup(self):
+        argv = ['setup', '--binary', '/fixture/masc', '--wizard', '--base-path', '/fixture/workspace']
+        with patch.object(SETUP.sys, 'argv', argv), \
+                patch.object(SETUP, 'wizard', side_effect=KeyboardInterrupt), \
+                self.assertRaises(SystemExit) as error:
+            SETUP.main()
+        self.assertEqual(error.exception.code, 'runtime setup cancelled; existing connections were preserved')
 
     def test_changed_configuration_is_not_reobserved_to_silently_accept_stale_choices(self):
         def cli(argv, **kwargs):

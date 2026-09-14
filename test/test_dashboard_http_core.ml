@@ -7,6 +7,14 @@ module Auth = Auth
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 
+(* [Server_dashboard_http_keeper_api.tool_call_entries] answers
+   [Error Index_unavailable] when the read index cannot be read (audit F397);
+   the cases here are about rows, so that failure fails the case. *)
+let tool_call_entries_exn ~keeper_name ~limit =
+  match Server_dashboard_http_keeper_api.tool_call_entries ~keeper_name ~limit with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
 open Alcotest
 
 let test_dir () =
@@ -5538,7 +5546,7 @@ let test_tool_calls_select_keeper_before_limiting () =
           ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
-      let entries = Server_dashboard_http_keeper_api.tool_call_entries
+      let entries = tool_call_entries_exn
         ~keeper_name:"target" ~limit:100 in
       check int "other Keepers cannot truncate the requested 100 calls" 100 (List.length entries);
       check bool "every returned row belongs to the requested Keeper" true
@@ -5546,12 +5554,12 @@ let test_tool_calls_select_keeper_before_limiting () =
       let outputs rows = List.map (fun row -> Safe_ops.json_string_opt "output" row) rows in
       check (list (option string)) "chronological order is retained"
         (List.init 100 (fun index -> Some (string_of_int (index+1)))) (outputs entries);
-      let tail = Server_dashboard_http_keeper_api.tool_call_entries
+      let tail = tool_call_entries_exn
         ~keeper_name:"target" ~limit:3 in
       check (list (option string)) "limit applies after Keeper selection"
         [Some "98";Some "99";Some "100"] (outputs tail);
       append "target" 101;
-      let latest = Server_dashboard_http_keeper_api.tool_call_entries
+      let latest = tool_call_entries_exn
         ~keeper_name:"target" ~limit:3 in
       check (list (option string)) "next request sees the committed indexed tail"
         [Some "99";Some "100";Some "101"] (outputs latest))

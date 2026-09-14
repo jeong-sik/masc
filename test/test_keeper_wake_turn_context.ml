@@ -97,7 +97,7 @@ let base_observation : WO.world_observation =
     connected_surface_failures = [];
     own_recent_board_posts = [];
     fleet_messages = [];
-    own_recent_actions = [];
+    own_recent_actions = Ok [];
   }
 
 let meta_of_json json =
@@ -295,7 +295,7 @@ let test_successful_call_arguments_are_not_replayed () =
   let observation =
     { base_observation with
       WO.own_recent_actions =
-        [ action_turn
+        Ok [ action_turn
             360
             (List.init 20 (fun i ->
                call
@@ -322,7 +322,7 @@ let test_refused_call_keeps_its_arguments () =
   let observation =
     { base_observation with
       WO.own_recent_actions =
-        [ action_turn
+        Ok [ action_turn
             361
             [ call
                 ~tool:"keeper_task_done"
@@ -349,7 +349,7 @@ let test_failure_digest_dedupes_and_counts () =
   let observation =
     { base_observation with
       WO.own_recent_actions =
-        List.init 5 (fun i ->
+        Ok (List.init 5 (fun i ->
             action_turn
               (370 + i)
               [
@@ -359,7 +359,7 @@ let test_failure_digest_dedupes_and_counts () =
                   ~outcome:
                     (Masc.Keeper_own_recent_actions.Failed_call
                        (Some "docker_cat_failed: No such file or directory"));
-              ])
+              ]))
     }
   in
   let body = user_message observation in
@@ -378,7 +378,7 @@ let test_no_digest_without_failures () =
   let observation =
     { base_observation with
       WO.own_recent_actions =
-        [ action_turn
+        Ok [ action_turn
             380
             [ call
                 ~tool:"masc_board_list"

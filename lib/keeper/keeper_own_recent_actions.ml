@@ -160,17 +160,19 @@ let digest_failures ?(limit = 8) (turns : turn list) : failure_digest list =
 
 let collect ~keeper_name ~max_turns =
   if max_turns <= 0
-  then []
+  then Ok []
   else begin
     (* One turn's worth of slack, so discarding the clipped group still leaves
        [max_turns] whole ones. *)
     let n = (max_turns + 1) * typical_calls_per_turn in
-    let rows = Keeper_tool_call_log.read_recent ~keeper_name ~n () in
-    (* Short of the window means the store held nothing older, so nothing was
-       cut. *)
-    turns_of_rows
-      ~keeper_name ~max_turns
-      ~window_saturated:(List.length rows >= n)
-      rows
+    Result.map
+      (fun rows ->
+         (* Short of the window means the store held nothing older, so nothing
+            was cut. *)
+         turns_of_rows
+           ~keeper_name ~max_turns
+           ~window_saturated:(List.length rows >= n)
+           rows)
+      (Keeper_tool_call_log.read_recent ~keeper_name ~n ())
   end
 ;;

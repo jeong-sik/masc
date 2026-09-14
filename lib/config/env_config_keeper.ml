@@ -551,6 +551,16 @@ module KeeperKeepalive = struct
     Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
+  (* Lower bound of the failure-route backoff sleep when the provider
+     rate-limited or capacity-refused the lane but sent no usable
+     [Retry-After] (absent, zero, negative, NaN, infinite). The signal is
+     real even without a duration, so the lane must wait longer than a short
+     cadence would: at 60s a lane that keeps hitting a 429 re-tries once a
+     minute instead of once every heartbeat (#26068). The cap's lower clamp
+     is this same value so an env override can never set the cap below the
+     no-hint backoff. Not env-configurable. *)
+  let rate_limit_backoff_floor_sec = 60.0
+
   (** Upper bound for the failure-route backoff sleep computed after a failed
       keepalive cycle. A provider rate-limit ([429]) or capacity route makes
       the next cycle wait longer than the plain cadence would, but the wait is
@@ -558,12 +568,12 @@ module KeeperKeepalive = struct
       never park a lane for longer than this. A rate-limit or quota backoff
       sleeps to its end and serves queued stimuli then (#34653); a capacity
       backoff still wakes within [sleep_chunk_sec]. Default: 900 (15 min).
-      Range: [60.0, 3600.0].
+      Range: [[rate_limit_backoff_floor_sec], 3600.0].
       @category Thresholds
       @ops_class operator *)
   let rate_limit_backoff_cap_sec =
     Float.max
-      60.0
+      rate_limit_backoff_floor_sec
       (Float.min 3600.0 (get_float ~default:900.0 "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"))
   ;;
 

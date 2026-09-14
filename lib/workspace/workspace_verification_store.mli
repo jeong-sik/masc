@@ -168,13 +168,25 @@ val persist_binary_body :
     filed. Exposed so a test builds a filed item through the same filing the
     capture path uses. *)
 
+type read_binary_error =
+  | Not_binary  (** the item is not a binary artifact *)
+  | Body_not_filed
+      (** the item was decoded from persistence, not captured, so no body
+          was ever filed under a request *)
+  | Body_unreadable of string  (** the filed body file cannot be read *)
+  | Over_delivery_ceiling of { bytes : int; ceiling : int }
+      (** the filed body is [bytes] long and the judge delivery ceiling
+          {!verification_evidence_max_bytes} is [ceiling] *)
+(** Why {!read_binary_body_base64} did not deliver a body. Closed so a
+    caller decides per case rather than reading a sentence. *)
+
 val read_binary_body_base64 :
-  base_path:string -> submitted_evidence_item -> (string, string) result
+  base_path:string ->
+  submitted_evidence_item ->
+  (string, read_binary_error) result
 (** The filed body of a binary artifact read back as base64 for an attached
-    media block. [Error] when the item is not a binary artifact, filed no
-    body (decoded from persistence, not captured), the body file cannot be
-    read, or the body exceeds the capture ceiling
-    {!verification_evidence_max_bytes} — the judge then rests on the
+    media block. [Error] names why it was not delivered — see
+    {!read_binary_error}; in every case the judge then rests on the
     reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
 
 val snapshot_submitted_evidence_json :

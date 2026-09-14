@@ -43,11 +43,17 @@ val turns_of_rows
     earliest calls; that group is then discarded rather than rendered
     incomplete. [max_turns <= 0] returns the empty list. Pure. *)
 
-val collect : keeper_name:string -> max_turns:int -> turn list
+val collect
+  :  keeper_name:string
+  -> max_turns:int
+  -> (turn list, Keeper_tool_call_log.index_error) result
 (** Reads the durable tool-call log and applies {!turns_of_rows}. Every turn
     returned is whole: a saturated tail read begins mid-turn, so its oldest
     group is discarded rather than rendered with calls silently missing. A
-    short read window therefore costs turns, never parts of one. *)
+    short read window therefore costs turns, never parts of one. A log the
+    index cannot read is the [Error]: it is not "no turns", and the prompt
+    states it so the keeper knows its own history is missing. [max_turns <= 0]
+    is [Ok []] without a read. *)
 
 type failure_digest =
   { failure_tool : string

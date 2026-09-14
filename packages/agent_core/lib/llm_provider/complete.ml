@@ -38,7 +38,16 @@ type fit_error = Prepared_completion_request.fit_error =
 
 let prepare_request = Prepared_completion_request.prepare
 let admit_request_body = Prepared_completion_request.admit_serialized_body
+type measurement_next_stage = Prepared_completion_request.next_stage =
+  | Completion of { call_timeout_s : float option }
+  | Stream of
+      { admission_timeout_s : float option
+      ; first_event_timeout_s : float option
+      }
+
 let measure_request = Prepared_completion_request.measure
+let count_round_trip_s = Prepared_completion_request.count_round_trip_s
+let with_first_event_timeout_s = Prepared_completion_request.with_first_event_timeout_s
 let resolve_context_limit = Prepared_completion_request.resolve_context_limit
 let requires_token_measurement = Prepared_completion_request.requires_token_measurement
 let serving_constraint = Prepared_completion_request.serving_constraint

@@ -2425,6 +2425,7 @@ let production_keeper_meta ~base_path ~trace_id =
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
     ~turn_instructions =
+  declare_keeper ~base_path ~keeper_name:"codex-production-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -2505,7 +2506,13 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
    refuses it before the turn runs. A fixture declares the keeper it is about
    to run under the base path the turn reads, with the instructions the turn
    is given. *)
-let declare_keeper ~base_path ~keeper_name ~instructions =
+(* The declaration's instructions are the keeper's profile text, which the
+   turn does not read as its system prompt; the fixtures pass that prompt
+   explicitly, blank ones included, so the declaration keeps a fixed
+   non-blank text of its own. *)
+let fixture_keeper_instructions = "fixture keeper"
+
+let declare_keeper ~base_path ~keeper_name =
   let path =
     Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
   in
@@ -2515,7 +2522,10 @@ let declare_keeper ~base_path ~keeper_name ~instructions =
       output
       (Otoml.Printer.to_string
          (Otoml.TomlTable
-            [ "keeper", Otoml.TomlTable [ "instructions", Otoml.TomlString instructions ] ])))
+            [ ( "keeper"
+              , Otoml.TomlTable
+                  [ "instructions", Otoml.TomlString fixture_keeper_instructions ] )
+            ])))
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
@@ -2528,7 +2538,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
   in
-  declare_keeper ~base_path ~keeper_name ~instructions:system_prompt;
+  declare_keeper ~base_path ~keeper_name;
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->

@@ -279,7 +279,13 @@ let content_of_wire_message raw =
    refuses it before the turn runs. A fixture declares the keeper it is about
    to run under the base path the turn reads, with the instructions the turn
    is given. *)
-let declare_keeper ~base_path ~keeper_name ~instructions =
+(* The declaration's instructions are the keeper's profile text, which the
+   turn does not read as its system prompt; the fixtures pass that prompt
+   explicitly, blank ones included, so the declaration keeps a fixed
+   non-blank text of its own. *)
+let fixture_keeper_instructions = "fixture keeper"
+
+let declare_keeper ~base_path ~keeper_name =
   let path =
     Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
   in
@@ -289,7 +295,10 @@ let declare_keeper ~base_path ~keeper_name ~instructions =
       output
       (Otoml.Printer.to_string
          (Otoml.TomlTable
-            [ "keeper", Otoml.TomlTable [ "instructions", Otoml.TomlString instructions ] ])))
+            [ ( "keeper"
+              , Otoml.TomlTable
+                  [ "instructions", Otoml.TomlString fixture_keeper_instructions ] )
+            ])))
 ;;
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
@@ -297,7 +306,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
-  declare_keeper ~base_path ~keeper_name:"claude-fixture" ~instructions:system_prompt;
+  declare_keeper ~base_path ~keeper_name:"claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1536,7 +1545,7 @@ let run_direct_attempt
       ~tools
       ()
   =
-  declare_keeper ~base_path ~keeper_name:"claude-pre-dispatch" ~instructions:system_prompt;
+  declare_keeper ~base_path ~keeper_name:"claude-pre-dispatch";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)

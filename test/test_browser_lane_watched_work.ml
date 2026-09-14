@@ -119,7 +119,8 @@ let test_an_automation_answer_that_arrived_as_the_timeout_passed_stands () =
   with_lane
   @@ fun ~sw ~clock ->
   let answer, arrive = Eio.Promise.create () in
-  Lane.install_automation_executor (fun _verb -> Lane.Answered (Eio.Promise.await answer));
+  Lane.install_automation_executor
+    (Some (fun _verb -> Lane.Answered (Eio.Promise.await answer)));
   let issued =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Lane.issue ~lane_name:"automation" ~verb:Lane.Tabs_list ~timeout_sec:window_s)

@@ -807,6 +807,12 @@ let open_existing ~path =
        Error error)
 ;;
 
+(* Whether this handle still names a live database. [close] is idempotent and
+   every command is guarded by [ensure_open], so a closed handle cannot corrupt
+   anything -- but a caller that holds one and knows why it was closed can say
+   so instead of letting "database handle is closed" stand for the cause. *)
+let is_open store = not (Atomic.get store.closed)
+
 let close store =
   if Atomic.compare_and_set store.closed false true
   then

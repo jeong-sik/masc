@@ -287,16 +287,34 @@ let same_tool_call_input
   && same_present_fingerprint left.input_fingerprint right.input_fingerprint
 ;;
 
+(* A call whose handler declared [Progress] is the world moving, which is
+   the one thing this axis cannot otherwise tell: it dropped the output
+   fingerprint to catch a clock, and a tool that advances an emulator by a
+   fixed number of frames has the same shape as a clock -- identical input,
+   a different result every time -- while being the opposite thing. One
+   keeper's every game turn ended in this yield after five
+   [masc_msx_step {frames: 300}] in a row (2026-09-14, receipts all day), the
+   reply deferred each time. The clock declares nothing and is still caught. *)
+let declared_progress (call : Keeper_agent_result.tool_call_detail) =
+  match call.typed_outcome with
+  | Some Keeper_tool_outcome.Progress -> true
+  | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) | None -> false
+;;
+
 (* Newest-first, so the head is the latest call and the streak runs back from
    it. Unlike [repeated_exact_tool_call] the repeats must be adjacent: without
    the output fingerprint, two identical inputs far apart in a dispatch are
-   ordinary re-reads, not a loop. *)
+   ordinary re-reads, not a loop. A declared [Progress] anywhere in the streak
+   ends it: those calls are evidence of movement, not of its absence. *)
 let repeated_tool_call_input ~threshold tool_calls =
   match tool_calls with
   | [] -> None
+  | latest :: _ when declared_progress latest -> None
   | latest :: previous ->
     let rec streak count = function
-      | call :: rest when same_tool_call_input latest call -> streak (count + 1) rest
+      | call :: rest
+        when same_tool_call_input latest call && not (declared_progress call) ->
+        streak (count + 1) rest
       | _ -> count
     in
     let repeated_count = streak 1 previous in

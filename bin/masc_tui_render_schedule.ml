@@ -760,6 +760,81 @@ let verification_header_row ~submitter_width ~title_width =
 let verification_row ~submitter_width ~title_width values =
   Table.row (verification_cells ~submitter_width ~title_width values)
 
+(* Schedules list columns.
+
+   The list drew six columns and named one of them, inside the row: the wake's
+   word wore a "wake:" prefix and the delivery word followed it after a dot.
+   The other five -- the state, when it is due, who the wake reaches, what the
+   delivery ledger made of it, how it repeats -- were left for the reader to
+   work out from the values, so a row read "alpha" without saying whether that
+   was the target or the author.
+
+   Every other list on this screen states its columns above them. Approvals is
+   the one other headerless list and it has a reason: its three row kinds put
+   different readings in the same cell, so a name over the column would be
+   wrong for two of the three. A schedule row has one shape.
+
+   With the names above the rows, the two labels inside them are the same
+   words twice. Dropping "wake:" and the dot gives eight cells back to the
+   recurrence, which is the column the pane was cutting and the one that
+   carries the timezone. *)
+let schedule_status_width = 12
+let schedule_due_width = 19
+let schedule_delivery_width = 12
+let schedule_minimum_recurrence_width = 12
+
+type schedule_row_values = {
+  srow_status : string;
+  srow_due : string;
+  srow_target : string;
+  srow_wake : string;
+  srow_delivery : string;
+  srow_recurrence : string;
+}
+
+let schedule_no_values =
+  { srow_status = ""
+  ; srow_due = ""
+  ; srow_target = ""
+  ; srow_wake = ""
+  ; srow_delivery = ""
+  ; srow_recurrence = ""
+  }
+
+let schedule_cells ?(status_style = "") ?(wake_style = "")
+      ?(recurrence_style = "") ~target_width ~wake_width ~recurrence_width
+      values =
+  [ Table.cell ~style:status_style ~header:"STATUS" ~width:schedule_status_width
+      values.srow_status
+  ; Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
+  ; Table.cell ~header:"TARGET" ~width:target_width values.srow_target
+  ; Table.cell ~style:wake_style ~header:"WAKE" ~width:wake_width
+      values.srow_wake
+  ; Table.cell ~header:"DELIVERY" ~width:schedule_delivery_width
+      values.srow_delivery
+  ; Table.cell ~style:recurrence_style ~header:"RECURRENCE"
+      ~width:recurrence_width values.srow_recurrence
+  ]
+
+let schedule_recurrence_width ~inner_width ~target_width ~wake_width =
+  let named =
+    Table.used_width
+      (schedule_cells ~target_width ~wake_width ~recurrence_width:0
+         schedule_no_values)
+  in
+  max schedule_minimum_recurrence_width (inner_width - named)
+
+let schedule_header_row ~target_width ~wake_width ~recurrence_width =
+  Table.header_row
+    (schedule_cells ~target_width ~wake_width ~recurrence_width
+       schedule_no_values)
+
+let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
+      ~wake_width ~recurrence_width values =
+  Table.row
+    (schedule_cells ?status_style ?wake_style ?recurrence_style ~target_width
+       ~wake_width ~recurrence_width values)
+
 (* Lane run columns.
 
    The header and the rows carried the same six widths in two format strings,

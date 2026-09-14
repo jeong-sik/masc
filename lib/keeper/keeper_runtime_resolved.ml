@@ -9,11 +9,14 @@ type 'a field = {
   source : source;
 }
 
+(* Three of the four are floored: an explicit value or the floor, never
+   absent, and their type says so. Only the body override has a real
+   "not configured", which AGENT_CORE reads as "no override". *)
 type t = {
-  stream_idle_timeout_sec : float option field;
-  first_event_timeout_sec : float option field;
+  stream_idle_timeout_sec : float field;
+  first_event_timeout_sec : float field;
   body_timeout_override_sec : float option field;
-  provider_call_deadline_sec : float option field;
+  provider_call_deadline_sec : float field;
 }
 
 (** Exhaustive boundary for the labels emitted by
@@ -90,7 +93,7 @@ let freeze_from_current () =
     | Some seconds ->
       (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
       {
-        value = Some seconds;
+        value = seconds;
         source = source_of_env_name "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
       }
     | None ->
@@ -99,7 +102,7 @@ let freeze_from_current () =
          as [Failsafe_floor] so telemetry and the boot log distinguish it from an
          operator-supplied value. *)
       {
-        value = Some stream_idle_failsafe_floor_sec;
+        value = stream_idle_failsafe_floor_sec;
         source = Failsafe_floor;
       }
   in
@@ -108,7 +111,7 @@ let freeze_from_current () =
     | Some seconds ->
       (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
       {
-        value = Some seconds;
+        value = seconds;
         source = source_of_env_name "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC";
       }
     | None ->
@@ -118,7 +121,7 @@ let freeze_from_current () =
          Sourced as [Failsafe_floor] so telemetry and the boot log
          distinguish it from an operator-supplied value. *)
       {
-        value = Some first_event_failsafe_floor_sec;
+        value = first_event_failsafe_floor_sec;
         source = Failsafe_floor;
       }
   in
@@ -133,7 +136,7 @@ let freeze_from_current () =
     | Some seconds ->
       (* Explicit env or runtime.toml value: honoured verbatim. *)
       {
-        value = Some seconds;
+        value = seconds;
         source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
       }
     | None ->
@@ -141,7 +144,7 @@ let freeze_from_current () =
          attempt watchdog and a bounded sub-call. Sourced as [Failsafe_floor]
          so telemetry and the boot log distinguish it from an operator value. *)
       {
-        value = Some provider_call_deadline_failsafe_floor_sec;
+        value = provider_call_deadline_failsafe_floor_sec;
         source = Failsafe_floor;
       }
   in
@@ -174,6 +177,8 @@ let field_to_yojson value_to_yojson (field : 'a field) =
       ("source", `String (source_to_string field.source));
     ]
 
+let float_to_yojson value = `Float value
+
 let option_float_to_yojson = function
   | Some value -> `Float value
   | None -> `Null
@@ -181,10 +186,10 @@ let option_float_to_yojson = function
 let to_yojson (runtime : t) =
   `Assoc
     [
-      ("stream_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.stream_idle_timeout_sec);
-      ("first_event_timeout_sec", field_to_yojson option_float_to_yojson runtime.first_event_timeout_sec);
+      ("stream_idle_timeout_sec", field_to_yojson float_to_yojson runtime.stream_idle_timeout_sec);
+      ("first_event_timeout_sec", field_to_yojson float_to_yojson runtime.first_event_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
-      ("provider_call_deadline_sec", field_to_yojson option_float_to_yojson runtime.provider_call_deadline_sec);
+      ("provider_call_deadline_sec", field_to_yojson float_to_yojson runtime.provider_call_deadline_sec);
     ]
 
 let stream_idle_timeout_sec () =

@@ -61,8 +61,8 @@ val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> trans
     only liveness the call has. The bound is per request: a call ends within
     one threshold of its last completed request, so a server that answers
     each request inside the threshold runs a call to its end (at most ten
-    MCP requests in one {!run_call}, counting a 401 refresh and retry). When
-    the threshold is not declared the MCP requests have no bound. Discovery
+    MCP requests in one {!run_call}, counting a 401 refresh and retry). The
+    threshold is always set, the operator's or the failsafe floor. Discovery
     and the token endpoint are short JSON round trips of the same class as
     the Slack and Discord REST calls and run under
     {!Masc_http_client.default_request_timeout_sec}; a catalog refresh is an

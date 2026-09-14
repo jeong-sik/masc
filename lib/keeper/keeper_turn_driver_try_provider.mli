@@ -40,10 +40,11 @@ type try_provider_ctx =
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
-  ; provider_call_deadline_sec : float option
+  ; provider_call_deadline_sec : float
         (** Seconds a provider attempt may go WITHOUT a progress signal
             before it is cancelled and rotated (#28417 changed this from a
-            total-elapsed ceiling). [None] disables MASC-side enforcement. *)
+            total-elapsed ceiling). Always set: the operator's value or the
+            resolved layer's failsafe floor. *)
   ; provider_progress_probe : (unit -> provider_progress_sample option) option
         (** Reads the keeper's live progress signal. Must not raise; return
             [None] when unavailable, which degrades the deadline to the

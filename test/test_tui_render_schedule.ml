@@ -982,6 +982,106 @@ let test_verification_names_its_columns_in_capitals () =
       check bool (retired ^ " is gone") false (holds retired header))
     [ "Submitted by"; "What it asks for" ]
 
+(* The Schedules list drew six columns and named one of them, inside the row:
+   "wake:" sat on the wake's word and a dot separated the delivery's. Now the
+   names are above the rows, where every other list on this screen puts them,
+   and the row carries readings only. *)
+let schedule_probe : Schedule.schedule_row_values =
+  { srow_status = "[an overlong state word]"
+  ; srow_due = "2026-08-25 19:00:00"
+  ; srow_target = "a-keeper-name-longer-than-its-column"
+  ; srow_wake = "succeeded"
+  ; srow_delivery = "consumed_ack"
+  ; srow_recurrence = String.concat "" (List.init 12 (fun _ -> "every 30 minutes "))
+  }
+
+let schedule_empty : Schedule.schedule_row_values =
+  { srow_status = ""
+  ; srow_due = ""
+  ; srow_target = ""
+  ; srow_wake = ""
+  ; srow_delivery = ""
+  ; srow_recurrence = ""
+  }
+
+let test_schedule_rows_stay_on_the_header_columns () =
+  for inner_width = 60 to 240 do
+    let target_width = 16 and wake_width = 9 in
+    let recurrence_width =
+      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width
+    in
+    let width text = Masc_tui_message_layout.display_width text in
+    let header =
+      width
+        (Schedule.schedule_header_row ~target_width ~wake_width
+           ~recurrence_width)
+    in
+    List.iter
+      (fun (what, values) ->
+        check int
+          (Printf.sprintf "inner %d: %s matches the header" inner_width what)
+          header
+          (width
+             (Schedule.schedule_row ~target_width ~wake_width ~recurrence_width
+                values)))
+      [ "an overlong row", schedule_probe; "an empty row", schedule_empty ];
+    (* The styles a schedule row wears -- the state's colour, the wake's, the
+       dim on the recurrence -- are escapes, and an escape occupies no cell. *)
+    check int
+      (Printf.sprintf "inner %d: a dressed row matches the header" inner_width)
+      header
+      (width
+         (Schedule.schedule_row ~status_style:"\027[33m" ~wake_style:"\027[31m"
+            ~recurrence_style:"\027[2m" ~target_width ~wake_width
+            ~recurrence_width schedule_probe))
+  done
+
+(* The recurrence takes what the named columns leave, down to a floor. It is
+   the column that carries the timezone, and the one the pane was cutting. *)
+let test_schedule_recurrence_takes_the_remainder () =
+  for inner_width = 20 to 300 do
+    let target_width = 16 and wake_width = 9 in
+    let recurrence_width =
+      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width
+    in
+    let drawn =
+      Masc_tui_message_layout.display_width
+        (Schedule.schedule_header_row ~target_width ~wake_width
+           ~recurrence_width)
+    in
+    if recurrence_width > Schedule.schedule_minimum_recurrence_width then
+      check int
+        (Printf.sprintf "inner %d is fully allocated" inner_width)
+        inner_width drawn
+    else
+      check bool
+        (Printf.sprintf "inner %d keeps the floor" inner_width)
+        true
+        (recurrence_width = Schedule.schedule_minimum_recurrence_width)
+  done
+
+(* Six names above the rows, and none of them left inside a row. *)
+let test_schedule_names_its_columns_once () =
+  let target_width = 16 and wake_width = 9 in
+  let recurrence_width =
+    Schedule.schedule_recurrence_width ~inner_width:120 ~target_width
+      ~wake_width
+  in
+  let header =
+    Schedule.schedule_header_row ~target_width ~wake_width ~recurrence_width
+  in
+  List.iter
+    (fun name -> check bool (name ^ " names a column") true (holds name header))
+    [ "STATUS"; "DUE"; "TARGET"; "WAKE"; "DELIVERY"; "RECURRENCE" ];
+  let row =
+    Schedule.schedule_row ~target_width ~wake_width ~recurrence_width
+      { schedule_probe with srow_recurrence = "every 30 minutes" }
+  in
+  List.iter
+    (fun label ->
+      check bool (label ^ " no longer sits in the row") false (holds label row))
+    [ "wake:"; "\xc2\xb7" ]
+
 (* Escapes have no display width, so a dressed row measures exactly what an
    undressed one does -- and what the header does. A colour cannot move a
    column. *)
@@ -1756,6 +1856,12 @@ let () =
             test_verification_names_its_columns_in_capitals
         ; test_case "verification title takes the remainder" `Quick
             test_verification_title_takes_the_remainder
+        ; test_case "schedule rows stay on the header columns" `Quick
+            test_schedule_rows_stay_on_the_header_columns
+        ; test_case "schedule recurrence takes the remainder" `Quick
+            test_schedule_recurrence_takes_the_remainder
+        ; test_case "schedule names its columns once" `Quick
+            test_schedule_names_its_columns_once
         ; test_case "system log message takes the remainder" `Quick
             test_system_log_message_takes_the_remainder
         ; test_case "system log header and row share their offsets" `Quick

@@ -141,7 +141,7 @@ let transport_slack_s = 3.0
 let test_the_mcp_transport_ends_at_its_deadline () =
   with_eio (fun ~sw ~net ~clock ~mono_clock ->
     let url = start_server_that_never_answers ~sw ~net in
-    let post = Mcp_client.http_post ~clock ~deadline_s:(Some transport_deadline_s) in
+    let post = Mcp_client.http_post ~clock ~deadline_s:transport_deadline_s in
     let answer, elapsed =
       bounded ~clock ~mono_clock ~deadline_s:transport_deadline_s ~slack_s:transport_slack_s (fun () ->
         Mcp_client.connect ~post ~url ~access_token:"the-keepers-token" ())
@@ -178,9 +178,9 @@ let with_declared_provider_call_deadline seconds f =
 let test_the_keeper_threshold_reaches_the_wire () =
   with_declared_provider_call_deadline shortest_declared_threshold_s (fun () ->
     check
-      (option (float 0.0))
+      (float 0.0)
       "the resolver saw the declared threshold"
-      (Some shortest_declared_threshold_s)
+      shortest_declared_threshold_s
       (Keeper_runtime_resolved.provider_call_deadline_sec ());
     with_eio (fun ~sw ~net ~clock ~mono_clock ->
       let url = start_server_that_never_answers ~sw ~net in

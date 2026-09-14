@@ -121,3 +121,21 @@ val capture_response :
     raw-trace correlation. [base_path] selects the exact Keeper secret
     projection snapshot. This closes the loop for analysis: turn N's response
     is turn N+1's replayed history input. No-op unless {!enabled}. *)
+
+val capture_rejected_reasoning :
+  base_path:string ->
+  masc_root:string ->
+  keeper_name:string ->
+  ?turn_id:int ->
+  ?trace_id:string ->
+  runtime_id:string ->
+  Agent_core.Types.api_response ->
+  unit
+(** Appends one redacted [kind:"rejected_reasoning"] record when the accept
+    gate rejected a response whose only content is reasoning: the response's
+    newest 64 KiB of reasoning (the window the stream repeat guard reads),
+    its total length, the provider stop reason, and the longest periodic
+    suffix {!Agent_core.Llm_provider.Periodic_suffix.find} sees in that
+    window, so a block the guard did not end can be re-run against the rule
+    offline. Any other response shape writes nothing. [turn_id] is the keeper
+    turn when the caller has one. No-op unless {!enabled}. *)

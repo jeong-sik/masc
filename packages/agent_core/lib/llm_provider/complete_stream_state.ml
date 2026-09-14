@@ -46,6 +46,8 @@ type block =
   ; signature_chunks_rev : string list
   ; reasoning_details_rev : Types.reasoning_detail list
   ; media : media option
+  ; repeat_checked_bytes : int
+        (** Text bytes the block held when the reasoning repeat rule last ran. *)
   }
 
 type usage =
@@ -113,6 +115,7 @@ let empty_block =
   ; signature_chunks_rev = []
   ; reasoning_details_rev = []
   ; media = None
+  ; repeat_checked_bytes = 0
   }
 ;;
 
@@ -289,17 +292,23 @@ let capture_failure failure state =
    per delta is bounded by the window, not by the block.
 
    Measured 2026-09-14 on every thinking stream in keeper_chat_events since
-   2026-08-29 (1,364 blocks, 6.27 MB). Nine were loops — verbatim cycles of 35
-   to 2,491 bytes repeated 3 to 234 times, every one filling the 8,192-byte
-   window — and the longest periodic tail in the other 1,355 was 220 bytes (an
-   84-byte phrase, 2.6 times). 1,024 is 4.6x that. On the nine loops the rule
-   fired at 7% to 87% of the bytes the provider eventually sent (median 17%);
-   the largest of them ran to 458,221 bytes. Three copies is the same count the
-   paragraph rule and the Keeper turn loop use, and the smallest unit that can
-   qualify is the window over three, so no separate period bound is declared. *)
-let reasoning_repeat_window_bytes = 8192
+   2026-08-29 (1,385 blocks, 6.4 MB), with the window and stride below. Nine
+   were loops: verbatim cycles of 35 to 2,491 bytes repeated 6.5 to 1,872
+   times, periodic tails of 15 KB to the full window. The longest periodic
+   tail in the other 1,376 blocks was 5 bytes (a run of one byte), so 1,024
+   is the bound the paragraph-scale loops clear by 15x and prose never
+   approaches. The window is 64 KB rather than the 8 KB it started at: the
+   rule reads units up to a third of the window, the sangsu loops' units of
+   2,330 to 2,491 bytes sat within 10% of the old 2,730-byte ceiling, and a
+   601,318-byte thinking block on 2026-09-14 08:50Z (geek-scout,
+   deepseek-v4.1-flash) ran to the token ceiling under it unseen. The rule
+   runs once per 1,024 new bytes: checking more often than the span can grow
+   into a verdict buys nothing, and each run reads the whole window. Three
+   copies is the same count the paragraph rule and the Keeper turn loop use. *)
+let reasoning_repeat_window_bytes = 65536
 let reasoning_repeat_min_span_bytes = 1024
 let reasoning_repeat_min_copies = 3
+let reasoning_repeat_check_stride_bytes = 1024
 
 (* The newest [bytes] of the block's text, assembled from as few of its
    reversed chunks as reach that many bytes. *)
@@ -353,17 +362,24 @@ let guard_repeating_generation ~index state =
                })
             state)
      | Announced { kind = Thinking_block | Reasoning_details_block; _ } ->
-       (match repeating_reasoning_cycle block with
-        | None -> state
-        | Some (cycle, occurrences) ->
-          capture_failure
-            (Types.Stream_repeating
-               { repeated = cycle
-               ; occurrences
-               ; bytes_seen = block_text_bytes block
-               ; shape = Types.Repeated_reasoning_cycle
-               })
-            state)
+       let text_bytes = block_text_bytes block in
+       if text_bytes - block.repeat_checked_bytes < reasoning_repeat_check_stride_bytes
+       then state
+       else (
+         let state =
+           update_block index (fun block -> { block with repeat_checked_bytes = text_bytes }) state
+         in
+         match repeating_reasoning_cycle block with
+         | None -> state
+         | Some (cycle, occurrences) ->
+           capture_failure
+             (Types.Stream_repeating
+                { repeated = cycle
+                ; occurrences
+                ; bytes_seen = text_bytes
+                ; shape = Types.Repeated_reasoning_cycle
+                })
+             state)
      (* An unannounced block has no declared kind yet; a repeat there is
         indistinguishable from a provider that has not said what it is
         sending. Redacted thinking carries no text to compare. *)

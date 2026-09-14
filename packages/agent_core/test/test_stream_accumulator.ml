@@ -227,16 +227,21 @@ let repeat n s = List.init n (fun _ -> s)
 
 let test_reasoning_cycle_ends_the_stream () =
   let acc = Streaming.create_stream_acc () in
-  (* 1,024 bytes of a 43-byte unit is 24 copies; the 24th delta completes it. *)
-  let copies = 1 + (1024 / String.length chant) in
-  feed_thinking acc (("Now I have the full rejection. 4 reasons:\n\n" :: repeat copies chant) @ repeat 200 chant);
+  let header = "Now I have the full rejection. 4 reasons:\n\n" in
+  (* The rule runs once per 1,024 new bytes. With a 43-byte header the first
+     run is at the 23rd chant (43 + 989 = 1,032 bytes), where the periodic
+     tail is 991 bytes (23 chants plus the two header bytes the chant also
+     ends in) and under the 1,024-byte bound; the second run is at the 47th
+     chant (43 + 2,021 = 2,064 bytes), tail 2,023 bytes, and ends the stream. *)
+  let fires_at = 47 in
+  feed_thinking acc (header :: repeat (fires_at + 200) chant);
   match Streaming.failure acc with
   | Some (Stream_repeating { repeated; occurrences; bytes_seen; shape = Repeated_reasoning_cycle }) ->
     Alcotest.(check int) "the unit is the chant" (String.length chant) (String.length repeated);
-    Alcotest.(check int) "stopped at the span bound, not the ceiling" copies occurrences;
+    Alcotest.(check int) "stopped at the second run of the rule" fires_at occurrences;
     Alcotest.(check int)
       "bytes_seen is what had been read when it stopped"
-      (String.length "Now I have the full rejection. 4 reasons:\n\n" + (copies * String.length chant))
+      (String.length header + (fires_at * String.length chant))
       bytes_seen
   | Some (Stream_repeating { shape = Repeated_paragraph; _ }) ->
     Alcotest.fail "a reasoning cycle is not a paragraph repeat"
@@ -245,7 +250,8 @@ let test_reasoning_cycle_ends_the_stream () =
 ;;
 
 (* The unit may be a single byte. GLM-5.3-Flash fills reasoning_content with
-   "!" runs (opencrabs#1351, 2026-09-04); a run of that length is not a thought. *)
+   "!" runs (opencrabs#1351, 2026-09-04); a run of that length is not a thought.
+   The first run of the rule is at 1,024 bytes, and the whole tail is periodic. *)
 let test_reasoning_same_byte_run_ends_the_stream () =
   let acc = Streaming.create_stream_acc () in
   feed_thinking acc (repeat 300 "!!!!");

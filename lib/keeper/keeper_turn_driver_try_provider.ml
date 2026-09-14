@@ -1223,10 +1223,29 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     let result =
       match result with
       | Ok run_result ->
-        apply_accept
-          ~runtime_id:ctx.error_runtime_id
-          ~accept:ctx.accept
-          run_result
+        (match
+           apply_accept
+             ~runtime_id:ctx.error_runtime_id
+             ~accept:ctx.accept
+             run_result
+         with
+         | Ok _ as accepted -> accepted
+         | Error _ as rejected ->
+           (* A rejected thinking-only response is a reasoning block the
+              stream repeat guard did not end; keep the window it read so the
+              miss can be explained (writes nothing for other shapes). *)
+           Keeper_wire_capture.capture_rejected_reasoning
+             ~base_path:ctx.base_path
+             ~masc_root:(Common.masc_dir_from_base_path ~base_path:ctx.base_path)
+             ~keeper_name:ctx.keeper_name
+             ?turn_id:
+               (Option.bind ctx.runtime_manifest_context
+                  (fun (context : Keeper_runtime_manifest.turn_context) ->
+                     context.manifest_keeper_turn_id))
+             ?trace_id:ctx.session_id
+             ~runtime_id:ctx.runtime_id
+             run_result.response;
+           rejected)
       | Error _ as err -> err
     in
     (match result with

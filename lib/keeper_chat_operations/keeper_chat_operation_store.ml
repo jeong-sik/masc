@@ -2226,12 +2226,17 @@ let settle_running_after_restart store ~now =
             let* operation = decode_operation statement in read (operation :: acc)
           else Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
         read []) in
-    let* () = List.fold_left (fun result operation ->
-      let* () = result in
+    (* A running operation with a durable continuation goes back to Queued and
+       resumes; one without is the request the restart cut off, and only
+       those are failed below. *)
+    let* interrupted = List.fold_left (fun result operation ->
+      let* interrupted = result in
       let* execution = direct_execution_with_db store.db operation in
       match pending_checkpoint execution, pending_retry execution, gate_state execution with
-      | None, None, None -> Ok ()
-      | Some _, _, _ | None, Some _, _ | None, None, Some _ -> requeue_continuation_with_db store.db operation |> Result.map (fun _ -> ())) (Ok ()) running in
+      | None, None, None -> Ok (operation :: interrupted)
+      | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
+        requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)) (Ok []) running in
+    let interrupted = List.rev interrupted in
     let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
     let* count = with_statement
       store.db
@@ -2251,7 +2256,14 @@ let settle_running_after_restart store ~now =
          Ok (Sqlite3.changes store.db)) in
     let* () = List.fold_left (fun result (operation : Operation.t) -> let* () = result in
       settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) running in
-    Ok count)
+    let* () =
+      if count = List.length interrupted then Ok ()
+      else Error (Integrity_error (Printf.sprintf
+        "restart settlement failed %d row(s) for %d interrupted operation(s)" count (List.length interrupted))) in
+    (* The failed rows as they were read, still [Running]: the caller needs
+       their identity and source to leave an operator-visible failure row,
+       which the store cannot write itself. *)
+    Ok interrupted)
 ;;
 
 module For_testing = struct

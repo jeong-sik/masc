@@ -157,21 +157,98 @@ let prepare_operation_store_path pool keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+(* What the operator reads in the transcript for a request the restart cut
+   off. Same shape as the stream's [persisted_error_reply], so the row renders
+   as the failure it is and does not read as the keeper's own words. *)
+let restart_interrupted_reply =
+  "Keeper request failed: the server restarted before this request finished."
+;;
+
+(* A request the restart cut off is settled [Failed Interrupted_by_restart] in
+   the operation store, but the stream that would have persisted its failure
+   row died with the process, so the transcript showed the user's line with
+   no answer at all (msx-retro-mania, three requests on 2026-09-14). Leave the
+   same [Transport_failure] row the stream leaves, once per operation: the
+   delivery key makes a second start on the same store a no-op. The row is
+   evidence for the operator, not the keeper's utterance, so it does not
+   advance the lane watermark. A row that cannot be written is logged and
+   does not stop the owner from starting. *)
+let record_restart_interruptions pool ~keeper_name owner =
+  let base_dir = pool.config.Workspace.base_path in
+  List.iter
+    (fun (operation : Keeper_owner.Chat_operation.t) ->
+       let operation_id =
+         Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
+       in
+       let surface, conversation_id, broadcast_source =
+         match Keeper_chat_operation_payload.source_of_json operation.source with
+         | Ok source ->
+           Some source.surface, source.conversation_id, Surface_ref.lane_label source.surface
+         | Error detail ->
+           Log.Keeper.warn
+             ~keeper_name
+             "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
+             operation_id
+             detail;
+           None, None, "restart"
+       in
+       match
+         Keeper_chat_delivery_identity.Request_id.of_string operation_id
+       with
+       | Error detail ->
+         Log.Keeper.warn
+           ~keeper_name
+           "restart-interrupted operation %s left no failure row: %s"
+           operation_id
+           detail
+       | Ok request_id ->
+         (match
+            Keeper_chat_store.append_assistant_message_once
+              ~base_dir
+              ~keeper_name
+              ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+              ~content:restart_interrupted_reply
+              ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+              ?surface
+              ?conversation_id
+              ()
+          with
+          | Ok _ ->
+            Keeper_chat_broadcast.chat_appended
+              ~keeper_name
+              ~source:broadcast_source
+              ~content:restart_interrupted_reply
+              ()
+          | Error detail ->
+            Log.Keeper.warn
+              ~keeper_name
+              "restart-interrupted operation %s left no failure row: %s"
+              operation_id
+              detail))
+    (Keeper_owner.restart_interrupted_operations owner)
+;;
+
 let start_owner pool ~keeper_name ~initial_meta =
   match prepare_operation_store_path pool keeper_name with
   | Error _ as error -> error
   | Ok operation_store_path ->
-    Keeper_owner.start
-      ~sw:pool.sw
-      ~store:(store_for pool keeper_name)
-      ~operation_store_path
-      (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
-      ~now:Unix.gettimeofday
-      ~operation_runner:pool.operation_runner
-      ~on_turn_slot_released:
-        (Option.map (fun notify () -> notify ~keeper_name) pool.on_turn_slot_released)
-      ~keeper_name
-      ~initial_meta
+    (match
+       Keeper_owner.start
+         ~sw:pool.sw
+         ~store:(store_for pool keeper_name)
+         ~operation_store_path
+         (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
+         ~now:Unix.gettimeofday
+         ~operation_runner:pool.operation_runner
+         ~on_turn_slot_released:
+           (Option.map (fun notify () -> notify ~keeper_name) pool.on_turn_slot_released)
+         ~keeper_name
+         ~initial_meta
+     with
+     | Error _ as error -> error
+     | Ok owner ->
+       record_restart_interruptions pool ~keeper_name owner;
+       Ok owner)
 ;;
 
 let refresh_owner_handles pool =

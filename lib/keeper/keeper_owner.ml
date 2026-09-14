@@ -354,6 +354,11 @@ type t =
            turn duration. Only a lane that actually lost the slot needs telling
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
+  ; restart_interrupted : Chat_operation.t list
+        (* The running operations this start settled as
+           [Interrupted_by_restart], for the caller that owns the transcript
+           to leave a failure row per request. Fixed at start; a later
+           restart is a later owner. *)
   }
 
 let error_to_string = function
@@ -838,25 +843,27 @@ let start
       |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error
-    | Ok settled ->
+    | Ok interrupted ->
       (* [interrupted_count] in the inventory is cumulative, so it cannot answer
          "did this restart cut anything off". That is the question asked right
          after a bad swap, and the number is only available here. *)
-      if settled > 0
-      then
-        Log.Keeper.routine
-          ~keeper_name
-          "restart interrupted %d running chat operation(s)"
-          settled;
+      (match interrupted with
+       | [] -> ()
+       | _ :: _ ->
+         Log.Keeper.routine
+           ~keeper_name
+           "restart interrupted %d running chat operation(s)"
+           (List.length interrupted));
       read_operation_projection operation_store ~now:startup_now
       |> Result.map_error owner_error_of_operation_error
+      |> Result.map (fun projection -> projection, interrupted)
   in
   (match startup_result with
    | Error _ as error ->
      (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
-   | Ok initial_operation_projection ->
+   | Ok (initial_operation_projection, restart_interrupted) ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
@@ -879,6 +886,7 @@ let start
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
+    ; restart_interrupted
     }
   in
   (* [closed_p] is what a caller of {!request} waits on to learn that no
@@ -1818,6 +1826,7 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
+let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
 let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })

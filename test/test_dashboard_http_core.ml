@@ -2223,6 +2223,23 @@ let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
         | Ok meta -> meta
         | Error error -> fail ("meta fixture: " ^ error)
       in
+      (* The per-keeper enrich resolves the keeper's runtime id through
+         [Keeper_meta_contract.runtime_id_of_meta], which reads the process
+         default runtime and raises when none was initialized (RFC-0206
+         §2.1: no silent fallback). This case runs before the groups that
+         call [Runtime.init_default], so it initializes the same fixture
+         runtime itself; without it the worker raised, the degraded row
+         raised again on the same read, and the keeper vanished from the
+         payload before [active_goals_tree] was ever built. *)
+      let runtime_path =
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.Workspace.base_path
+      in
+      mkdir_p (Filename.dirname runtime_path);
+      write_file runtime_path config_sync_runtime_toml;
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> fail ("runtime init: " ^ error));
       declare_fixture_keeper config name;
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()

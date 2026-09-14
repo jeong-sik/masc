@@ -12038,7 +12038,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
-              && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel ->
+              && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel
+              && Option.is_none view.evidence_prompt ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -17253,6 +17254,17 @@ and is loaded on demand through keeper_skill.
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
                            then update {view with error=Some "A draft with this installation name is already open; choose another name or edit the existing draft."}
                            else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
+                 | None -> match view.evidence_prompt with
+                 | Some _ ->
+                     (match key with
+                      | "esc" | "q" -> update {view with evidence_prompt=None;scroll=0}
+                      | "j" | "down" -> update (Addons.move_evidence view 1)
+                      | "k" | "up" -> update (Addons.move_evidence view (-1))
+                      | "\r" | "\n" | "enter" ->
+                          (match Addons.submit_evidence view with
+                           | Ok (next, request) -> update next; launch_lane_addons state ~mailbox:async_messages request
+                           | Error detail -> update {view with evidence_prompt=None;error=Some detail})
+                      | _ -> ())
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
                      let module Subs = Masc_tui_lane_subscriptions in
@@ -17411,8 +17423,9 @@ and is loaded on demand through keeper_skill.
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
                      | "e" when view.selected <> [] ->
-                         (match Addons.evidence_request view with
-                          | Ok request -> launch_lane_addons state ~mailbox:async_messages request
+                         let keepers = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
+                         (match Addons.open_evidence ~keepers view with
+                          | Ok next -> update next
                           | Error detail -> update {view with error=Some detail})
                      | _ -> ()))
        (* Inline Runtime_params editing is modal: printable keys, including q,
@@ -23289,7 +23302,8 @@ and is loaded on demand through keeper_skill.
         (match state.lane_addons with
          | Some view when not view.loading && Option.is_none view.draft
               && Option.is_none view.document_key && Option.is_none view.action_menu
-              && Option.is_none view.installer && Option.is_none view.subscription_panel ->
+              && Option.is_none view.installer && Option.is_none view.subscription_panel
+              && Option.is_none view.evidence_prompt ->
              let request = match Masc_tui_lane_addons.pending_action view with
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in

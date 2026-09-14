@@ -27,10 +27,15 @@ type 'a field = {
 }
 
 type t = {
-  stream_idle_timeout_sec : float option field;
-  first_event_timeout_sec : float option field;
+  stream_idle_timeout_sec : float field;
+      (** An explicit value or {!stream_idle_failsafe_floor_sec}. *)
+  first_event_timeout_sec : float field;
+      (** An explicit value or {!first_event_failsafe_floor_sec}. *)
   body_timeout_override_sec : float option field;
-  provider_call_deadline_sec : float option field;
+      (** The one setting with a real "not configured": AGENT_CORE reads
+          [None] as no override on non-streaming body reads. *)
+  provider_call_deadline_sec : float field;
+      (** An explicit value or {!provider_call_deadline_failsafe_floor_sec}. *)
 }
 
 val init : unit -> unit
@@ -47,17 +52,17 @@ val stream_idle_failsafe_floor_sec : float
     keeper chat lane indefinitely (#25128). A universal liveness ceiling, not a
     per-provider tuned default; an explicit env/toml value overrides it. *)
 
-val stream_idle_timeout_sec : unit -> float option
-(** Streaming-provider inter-line idle-gap timeout, in seconds. Always [Some] at
-    runtime: an explicit [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] (or runtime.toml
-    [turn.stream_idle_timeout_sec]) is honoured verbatim; when unset, the
-    RFC-0345 fail-safe floor {!stream_idle_failsafe_floor_sec} is substituted so
-    a hung stream cannot freeze the keeper chat lane indefinitely (#25128). MASC
-    does not synthesize a per-provider/model tuned default and does not clamp an
-    operator-provided value. Invalid configured values fail during runtime
-    configuration initialization. The [float option] return type is retained for
-    the existing [?stream_idle_timeout_s] wiring; the resolver no longer yields
-    [None].
+val stream_idle_timeout_sec : unit -> float
+(** Streaming-provider inter-line idle-gap timeout, in seconds: an explicit
+    [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] (or runtime.toml
+    [turn.stream_idle_timeout_sec]) honoured verbatim, or when unset the
+    RFC-0345 fail-safe floor {!stream_idle_failsafe_floor_sec}, so a hung
+    stream cannot freeze the keeper chat lane indefinitely (#25128). MASC
+    does not synthesize a per-provider/model tuned default and does not clamp
+    an operator-provided value. Invalid configured values fail during runtime
+    configuration initialization. AGENT_CORE's [?stream_idle_timeout_s] stays
+    optional for callers outside the keeper; the keeper always has a value
+    and passes it.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec} (raw
     parse; [None] when unset) + {!stream_idle_failsafe_floor_sec} (floor). *)
@@ -71,18 +76,16 @@ val first_event_failsafe_floor_sec : float
     local MLX 20.7K-token keeper prompts). A universal liveness ceiling, not a
     per-provider tuned default; an explicit env/toml value overrides it. *)
 
-val first_event_timeout_sec : unit -> float option
+val first_event_timeout_sec : unit -> float
 (** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. One
     window from the first body read to the provider's first token-bearing
     event (an opening frame such as Responses [response.created] neither ends
     it nor extends it); [stream_idle_timeout_sec] arms the inter-line gaps
-    after it
-    (RFC-AC-037). Always [Some] at runtime: an
-    explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] (or runtime.toml
-    [turn.first_event_timeout_sec]) is honoured verbatim; when unset,
-    {!first_event_failsafe_floor_sec} is substituted. The [float option]
-    return type mirrors the transport wiring; the resolver never yields
-    [None].
+    after it (RFC-AC-037). An explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]
+    (or runtime.toml [turn.first_event_timeout_sec]) honoured verbatim, or
+    when unset {!first_event_failsafe_floor_sec}. AGENT_CORE's
+    [?first_event_timeout_s] stays optional for callers outside the keeper;
+    the keeper always has a value and passes it.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.first_event_timeout_sec} (raw
     parse; [None] when unset) + {!first_event_failsafe_floor_sec} (floor). *)
@@ -113,12 +116,12 @@ val provider_call_deadline_failsafe_floor_sec : float
     measured against the turn's progress signal since #28417). The attempt
     watchdog ends an attempt that made no progress for this long while no
     tool is in flight and no approval is pending; a tool's provider sub-call
-    runs under it ({!Keeper_provider_subcall}). Always [Some] at runtime: an
-    explicit [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
-    [turn.provider_call_deadline_sec]) is honoured verbatim; when unset,
-    {!provider_call_deadline_failsafe_floor_sec} is substituted. The
-    [float option] return type mirrors the wiring; the resolver never yields
-    [None].
+    runs under it ({!Keeper_provider_subcall}). An explicit
+    [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
+    [turn.provider_call_deadline_sec]) honoured verbatim, or when unset
+    {!provider_call_deadline_failsafe_floor_sec}. There is no "off": a
+    keeper turn that could not be ended by this threshold would be one only
+    an operator could end.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
-val provider_call_deadline_sec : unit -> float option
+val provider_call_deadline_sec : unit -> float

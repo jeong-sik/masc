@@ -1337,11 +1337,11 @@ let run_turn
        [Keeper_alerting_path] and [Keeper_sandbox_containment]; AGENT_CORE receives no
        ambient path capability. *)
     (
-       (* AGENT_CORE [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-          only when the operator explicitly configures it. The deadline resets
-          after each successful line, so this is gap detection, not a total run
-          cap. [None] is carried unchanged: neither MASC nor AGENT_CORE may infer a
-          provider/model default. *)
+       (* AGENT_CORE [stream_idle_timeout_s] bounds inter-line idle on HTTP
+          streams. The deadline resets after each successful line, so this is
+          gap detection, not a total run cap. The keeper always has a value:
+          the operator's, or the RFC-0345 floor; neither MASC nor AGENT_CORE
+          infers a provider/model default. *)
        let stream_idle_timeout_s =
          Keeper_runtime_resolved.stream_idle_timeout_sec ()
        in
@@ -1466,7 +1466,7 @@ let run_turn
                       ~on_runtime_retry_deferred:record_runtime_retry_deferred
                       ~on_runtime_lane_terminal_error:record_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
-                      ?stream_idle_timeout_s
+                      ~stream_idle_timeout_s
                       ?body_timeout_s:
                         (Keeper_runtime_resolved.body_timeout_override_sec ())
                       ~temperature

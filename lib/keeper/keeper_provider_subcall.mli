@@ -46,7 +46,7 @@ val complete
     [TimeoutError { phase = Queue }] without being sent, and one in its round
     trip as [TimeoutError { phase = Non_streaming_body }].
     {!Keeper_runtime_resolved.body_timeout_override_sec}, when declared,
-    bounds the round trip inside it as [body_timeout_s]. With neither
-    declared the call has no bound. The clock is required because a deadline
-    cannot be enforced without one. No feature-local wall-clock timeout is
-    installed. *)
+    bounds the round trip inside it as [body_timeout_s]. The threshold is
+    always set (the operator's value or the failsafe floor), so every call
+    has a bound. The clock is required because a deadline cannot be enforced
+    without one. No feature-local wall-clock timeout is installed. *)

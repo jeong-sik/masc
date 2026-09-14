@@ -86,7 +86,8 @@ type measurement_next_stage = Prepared_completion_request.next_stage =
     after it. [timeout_s] bounds the count round trip on its own;
     [next_stage] carries the bounds of the stage the measurement is ahead of,
     which the permit wait and the round trip run under (the phases are named
-    there). None is a bound without [clock]. Unsupported protocols return the
+    there). Either given without [clock] is refused as [AcceptRejected]
+    before any I/O, never applied loosely. Unsupported protocols return the
     existing typed [Unsupported] measurement error; no estimate is used. *)
 val measure_request
   :  ?connection_cache:Http_client.cache

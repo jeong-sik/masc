@@ -81,7 +81,7 @@ let memory_updated_text = function
 
 let memory_context_lines (k : memory_keeper_health) =
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · %s · updated %s (local)"
+    Printf.sprintf "  %s · %s · snapshot r%d · %s · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
       (Masc_tui_context_inspector.format_bytes k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
@@ -456,7 +456,7 @@ let render_memory_body ~cols ~budget (state : state)
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          snapshot.mhs_total_support_invalidations snapshot.mhs_total_librarian_failures));
   push_styled ~style:(Theme.recede ())
-    "  ST: + ready  ! attention  - no snapshot  s source only  x failed  |  UPDATED: local date/time";
+    "  ST: + ready  ! attention  - no snapshot  s source only  x failed";
   push info_bar;
   let search_bar =
     if query <> "" then

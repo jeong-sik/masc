@@ -125,7 +125,7 @@ val overlay_application_to_yojson :
       sleep_chunk_sec             = 1.5
 
       [turn]
-      # stream_idle_timeout_sec is intentionally omitted (disabled).
+      # stream_idle_timeout_sec omitted: the RFC-0345 fail-safe floor applies.
       [web_search]
       searxng_url                 = "http://localhost:8888"
       provider                    = "auto"

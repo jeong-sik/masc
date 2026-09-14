@@ -978,7 +978,6 @@ let run_named
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
-    ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -1878,14 +1877,17 @@ let run_named
             ; initial_messages
             ; model_input_projection
             ; recovery_view
-            ; stream_idle_timeout_s
+            ; (* Keeper policy knobs, injected from the resolved layer like
+                 [provider_call_deadline_sec] below rather than threaded through
+                 run_named as optionals: every entry point that reaches this
+                 closure -- the turn runner, the recovery worker, the metric
+                 hooks, the test drivers -- gets the operator's value or the
+                 floor. [Keeper_turn_driver_try_provider] builds the option
+                 AGENT_CORE reads. *)
+              stream_idle_timeout_s =
+                Keeper_runtime_resolved.stream_idle_timeout_sec ()
             ; first_event_timeout_s =
-                (* Keeper policy knob, injected from the resolved layer like
-                   [provider_call_deadline_sec] below instead of threading
-                   one more optional through run_named (RFC-AC-037). The
-                   resolved value is always set; the option is AGENT_CORE's
-                   shape for callers that have none. *)
-                Some (Keeper_runtime_resolved.first_event_timeout_sec ())
+                Keeper_runtime_resolved.first_event_timeout_sec ()
             ; body_timeout_s
             ; provider_call_deadline_sec =
                 Keeper_runtime_resolved.provider_call_deadline_sec ()

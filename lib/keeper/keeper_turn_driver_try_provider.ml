@@ -75,11 +75,16 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; recovery_view : Keeper_recovery_transmission.t option
-  ; stream_idle_timeout_s : float option
-  ; first_event_timeout_s : float option
+  ; stream_idle_timeout_s : float
+    (* Bound on the silent gap between two streamed lines. It re-arms after
+       every line, so it detects a stalled stream, not a long turn. The keeper
+       always has one: the operator's value or the RFC-0345 floor. AGENT_CORE
+       reads it as an option; that [Some] is built once, where this record is
+       projected onto [Runtime_agent.config]. *)
+  ; first_event_timeout_s : float
     (* Bound on the silent wait for the FIRST streaming provider event
        (TTFT/prefill), distinct from [stream_idle_timeout_s] which arms only
-       after that event (RFC-AC-037). *)
+       after that event (RFC-AC-037). Always set, for the same reason. *)
   ; body_timeout_s : float option
   ; (* #27349, axis changed by #28417: the ceiling for THIS provider call
        attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line
@@ -994,8 +999,10 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     in
     Ok
       { base_config with
-        stream_idle_timeout_s = ctx.stream_idle_timeout_s
-          ; first_event_timeout_s = ctx.first_event_timeout_s
+        (* AGENT_CORE boundary: the keeper's two stream floors are always set,
+           so the option AGENT_CORE reads is built here and nowhere else. *)
+        stream_idle_timeout_s = Some ctx.stream_idle_timeout_s
+          ; first_event_timeout_s = Some ctx.first_event_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; (* The wait for the binding's admission permit is time in which
                this attempt makes no progress, so the no-progress threshold

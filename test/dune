@@ -1932,6 +1932,12 @@
  (modules test_keeper_optional_request_cap)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; The resolved stream idle bound reaches a run_named turn that named none.
+(test
+ (name test_keeper_stream_idle_floor)
+ (modules test_keeper_stream_idle_floor)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 (test
  (name test_keeper_required_tools)
  (modules test_keeper_required_tools)

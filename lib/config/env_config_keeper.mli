@@ -191,11 +191,17 @@ module KeeperKeepalive : sig
       value. *)
 
 
+  val stream_idle_timeout_env_key : string
+  (** Env name of {!stream_idle_timeout_sec}; a suite that must not run under
+      an ambient operator value checks this name, not a re-spelled literal. *)
+
   val stream_idle_timeout_sec : unit -> float option
-  (** Explicit streaming-provider idle-gap timeout. [None] means disabled;
-      MASC does not infer a timeout from provider/model kind. A configured
-      value must be finite and strictly positive or configuration loading
-      raises {!Env_config_core.Config_error}. *)
+  (** Explicit streaming-provider idle-gap timeout as the operator wrote it.
+      [None] means no explicit value (the resolved layer substitutes
+      {!stream_idle_failsafe_floor_sec}, RFC-0345); MASC does not infer a
+      timeout from provider/model kind. A configured value must be finite and
+      strictly positive or configuration loading raises
+      {!Env_config_core.Config_error}. *)
 
   val first_event_failsafe_floor_sec : float
   (** Resolved runtime fallback used only when the explicit first-event

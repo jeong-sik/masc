@@ -643,7 +643,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
      unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
      configured yet never observed to fire). The body-timeout override is None
-     when unset; stream_idle_timeout_sec now resolves to the RFC-0345 fail-safe
+     when unset; stream_idle_timeout_sec resolves to the RFC-0345 fail-safe
      floor when unset (stated on the dedicated line below). No existing surface
      exposes the resolved value. *)
   Log.Runtime.info
@@ -654,9 +654,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
      came from an operator value (env/toml) or the fail-safe floor, so operators
      can see the floor is active and raise it if their provider legitimately
-     idles longer. The resolver always yields [Some] after the floor; the [None]
-     arm is retained as total handling and reports the pre-floor freeze-risk
-     posture should the floor ever be removed. *)
+     idles longer. *)
   Keeper_runtime_resolved.(
     let idle = (current ()).stream_idle_timeout_sec in
     Log.Runtime.info

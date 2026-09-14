@@ -133,7 +133,7 @@ let run_client ~clock ~net ~port =
                 ~reader
                 ~on_data:(fun ~event_type:_ _ ->
                   incr lines;
-                  Http_client.Continue)
+                  Http_client.Continue Http_client.Output)
                 ())
             ()
         with

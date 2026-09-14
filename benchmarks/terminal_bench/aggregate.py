@@ -59,6 +59,9 @@ def main() -> None:
     jobs = Path(sys.argv[1])
     # csv.writer 로 쓴다. task_name 이나 masc_state 에 쉼표가 들어가면 수동
     # join 은 이후 모든 컬럼을 한 칸씩 밀어버린다.
+    # Invariant (measured 2026-09-14): every row must go through csv.writer —
+    # a manual ",".join(row) silently shifts every later column one cell
+    # right the first time a task_name or masc_state contains a comma.
     out = csv.writer(sys.stdout, lineterminator="\n")
     out.writerow(COLUMNS)
     for trial_dir, data, read_error in iter_trials(jobs):

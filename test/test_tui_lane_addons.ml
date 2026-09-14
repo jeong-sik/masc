@@ -508,9 +508,23 @@ let refresh_preserves_operator_target () =
      "instance",{(declaration "worker") with instance_id=Some "other"},snapshot.instances;
      "run",declaration "worker",[{(worker "worker") with run_id="new-run"}];
      "incarnation",declaration "worker",[{(worker "worker") with incarnation="new-incarnation"}]];
+  (* The timeline status line is painted: its warning tone reaches the text
+     wrapped in SGR codes, so read the text those codes carry. *)
+  let plain line =
+    let n = String.length line in
+    let buf = Buffer.create n in
+    let rec walk i =
+      if i < n then
+        if line.[i] = '\027' then
+          let j = ref (i + 1) in
+          while !j < n && line.[!j] <> 'm' do incr j done;
+          walk (if !j < n then !j + 1 else !j)
+        else (Buffer.add_char buf line.[i]; walk (i + 1)) in
+    walk 0;
+    Buffer.contents buf in
   let failed = {view with focus=UI.Timeline;error=Some "network failed"} in
   check bool "stale snapshot exposes refresh failure" true
-    (List.exists (String.starts_with ~prefix:"Error: network failed")
+    (List.exists (fun line -> String.starts_with ~prefix:"Error: network failed" (plain line))
       (UI.lines ~height:24 ~width:120 failed))
 
 let () = run "TUI Lane package operations" ["operator scenarios",[

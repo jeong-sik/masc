@@ -952,6 +952,12 @@ let source_next_actions rows =
 ;;
 
 let keeper_json ~base_path keeper_name ~busy rows =
+  let paused =
+    match Keeper_owner_registry.get ~base_path ~keeper_name with
+    | Error _ -> None
+    | Ok owner -> Option.map (fun meta -> meta.Keeper_meta_contract.paused)
+        (Keeper_owner.projection owner).meta
+  in
   let state = keeper_state ~busy rows in
   let since =
     rows
@@ -965,6 +971,7 @@ let keeper_json ~base_path keeper_name ~busy rows =
   in
   `Assoc
     [ "keeper_name", `String keeper_name
+    ; "paused", Option.fold ~none:`Null ~some:(fun value -> `Bool value) paused
     ; "state", `String (keeper_state_to_string state)
     ; "waiting_on", `List (List.map waiting_row_json rows)
     ; "waiting_count", `Int (List.length rows)

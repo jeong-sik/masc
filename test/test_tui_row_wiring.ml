@@ -379,12 +379,15 @@ let test_a_lane_mark_says_what_its_colour_says () =
 
    [sl_admission_error] is a [required_nullable_string_field]: the server
    sends it on every lane, so a decoder that reads it and a screen that does
-   not is the whole of the gap. *)
+   not is the whole of the gap.
+
+   The cell's text is [standalone_lane_slots_text], its own binding since the
+   Lanes table measures the column from it before drawing a row. *)
 let test_a_lane_that_cannot_admit_says_why () =
   Alcotest.(check bool) "the row reads the reason the projection carries" true
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"standalone_lane_row" ~callees:[]
-       ~fields:[ "sl_admission_error" ]
+       ~module_path:render ~binding_name:"standalone_lane_slots_text"
+       ~callees:[] ~fields:[ "sl_admission_error" ]
      > 0);
   (* Reading the field is not drawing it: an arm that matches [Some _] and
      then prints the old sentence passes a read count. What the cell must not
@@ -396,8 +399,8 @@ let test_a_lane_that_cannot_admit_says_why () =
      and printed the old sentence would pass the read count above. *)
   Alcotest.(check int) "the reason is what the cell becomes, on both arms" 2
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"standalone_lane_row" ~callees:[]
-       ~identifiers:[ "reason" ])
+       ~module_path:render ~binding_name:"standalone_lane_slots_text"
+       ~callees:[] ~identifiers:[ "reason" ])
 
 (* The fleet summary above the Keepers table read "2 offline" and named
    one keeper among them, while that keeper's own row drew a turning mark and a

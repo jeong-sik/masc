@@ -1330,13 +1330,22 @@ base_url = "https://voice.fixture.invalid/v1"
                 self.assertEqual(unpointed.returncode, 1)
                 self.assertIn('no workspace is resolved', unpointed.stdout, unpointed.stderr)
 
-    def test_a_local_model_cannot_replace_a_remote_stt_model(self):
+    def test_a_local_model_lands_on_its_own_endpoint(self):
+        # The file used to be written as the section's default_model, which is
+        # what every remote endpoint in the section is asked for, so this was
+        # refused outright. It goes on the whisper endpoint now.
+        import tomllib
         with self.workspace(self.REMOTE_STT) as (base, runtime):
-            before = runtime.read_bytes()
+            before = tomllib.loads(runtime.read_text())['voice']['stt']
             result = self.configure(base, '--voice', 'Yuna', '--model', '/fixture/ggml.bin')
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Existing STT endpoints share a provider model', result.stderr)
-            self.assertEqual(runtime.read_bytes(), before)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = tomllib.loads(runtime.read_text())['voice']['stt']
+            self.assertEqual(after['default_model'], before['default_model'])
+            self.assertEqual(after['endpoints'][0], before['endpoints'][0])
+            local = [e for e in after['endpoints'] if e['id'] == 'whisper-local']
+            self.assertEqual(len(local), 1, after)
+            self.assertEqual(local[0]['model'], '/fixture/ggml.bin')
+            self.assertEqual(local[0]['kind'], 'whisper_cli')
 
     def test_standalone_source_is_not_shadowed_by_partial_toml(self):
         for contents in ('{"tts":null,"stt":null}', 'invalid JSON'):

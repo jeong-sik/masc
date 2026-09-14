@@ -377,7 +377,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -459,6 +459,21 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
         Runtime_antigravity.Resume { conversation_id = session_id }
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
+    (* This CLI offers no replaceable configuration channel. Keep the vendor
+       session intact and refuse stale canonical history/core instructions;
+       ephemeral world context remains on the existing per-turn prompt path. *)
+    let snapshot = `Assoc ["system_prompt", `String system_prompt;
+      "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
+    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let* () = if not is_resume then Ok () else
+      Session_store.validate_unchanged_context ~expected:stored_session ~snapshot_sha256
+      |> Result.map_error (fun reason -> config_error
+           ~field:"official_client_session.context_admission"
+           (Session_store.context_admission_error_to_string reason)) in
+    let context_frontier : Session_store.context_frontier =
+      {snapshot_sha256; message_count=List.length initial_messages;
+       delivery=Canonical_source_guard; acknowledged_turn=None} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with
@@ -476,6 +491,10 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
         ?on_model_input_window_observation
         model_input_projection
     in
+    let* () = match official_task_reference with
+      | None -> Ok ()
+      | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
+          "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -667,7 +686,8 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     in
     let* claimed_session =
       match
-        Session_store.claim
+        Session_store.claim_with_context_frontier
+          ~context_frontier:(Some context_frontier)
           ~base_path
           ~keeper_name
           ~expected:stored_session
@@ -1089,7 +1109,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                   recovery_detail))))
 ;;
 
-let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1109,7 +1129,7 @@ let run ~accepts_image_input ?required_native_posture ?official_client_continuat
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name

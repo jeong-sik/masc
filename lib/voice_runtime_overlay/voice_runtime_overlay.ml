@@ -673,8 +673,8 @@ let stt_command_for_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~mod
     then
       Error
         (Printf.sprintf
-           "voice config endpoint %s needs the model file to transcribe with; set the \
-            section's default_model to the path of a ggml model"
+           "voice config endpoint %s needs the model file to transcribe with; set its \
+            model to the path of a ggml model"
            endpoint.Voice_config.id)
     else (
       let command = endpoint_command endpoint ~default:whisper_cli_command in

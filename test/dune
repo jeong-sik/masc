@@ -380,6 +380,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_keeper_provider_subcall
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -732,6 +733,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_keeper_provider_subcall
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -3266,6 +3268,8 @@
   masc.masc_types
   masc_tui_footer
   masc_tui_interrupt_signal
+  masc_tui_esc_interrupt
+  masc_tui_send_disposition
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -3353,6 +3357,7 @@
   fmt
   masc
   masc.masc_types
+  masc.keeper_chat_operations
   masc.ag_ui
   masc.server
   masc_tui_credential
@@ -3400,7 +3405,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc masc_tui_keeper_chat_live yojson))
+ (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_command)
@@ -3536,6 +3541,11 @@
   base64
   masc_tui_attachment
   masc
+  masc.server
+  masc.masc_types
+  masc.ag_ui
+  masc.keeper_runtime
+  masc.keeper_chat_delivery_identity
   masc.keeper_chat_operations
   masc.string_util
   masc_tui_keeper_chat_projection
@@ -5955,7 +5965,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries alcotest yojson unix eio eio_main masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -6093,3 +6103,11 @@
  (alias runtest-test_tui_lane_visual_pty)
  (deps test_tui_lane_visual_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_lane_visual_pty.py} %{dep:../bin/masc_tui.exe})))
+
+
+(include stanzas/test_operator_media_inspection.inc)
+
+(test
+ (name test_tui_queue_inspection)
+ (modules test_tui_queue_inspection)
+ (libraries alcotest astring masc masc.keeper_runtime masc_tui_queue_inspection yojson))

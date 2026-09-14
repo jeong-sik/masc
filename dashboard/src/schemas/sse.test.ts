@@ -474,6 +474,31 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  // Attempt failures carry no quarantined occurrence: the attempt ended and
+  // the next one follows in the same bubble, so the frame must decode.
+  it.each(['sse_timeout', 'sse_stream_repeating'])(
+    'accepts the %s attempt-failure kind without a quarantined occurrence',
+    kind => {
+      const r = SSEMessageSchema.safeParse(
+        customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+          kind,
+          reason: 'the attempt ended; the next one follows',
+        }),
+      )
+      expect(r.success).toBe(true)
+    },
+  )
+
+  it('rejects a stream protocol error kind outside the contract list', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+        kind: 'sse_not_a_kind',
+        reason: 'never emitted by the backend',
+      }),
+    )
+    expect(r.success).toBe(false)
+  })
+
   it('accepts a tool approval request with the fields the server sends', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
@@ -520,6 +545,20 @@ describe('SSEMessageSchema', () => {
       }),
     )
     expect(r.success).toBe(true)
+  })
+
+  it('accepts a shared execution binding and rejects unknown fields', () => {
+    const binding = { operation_id: 'member-1', execution_id: 'leader-1' }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', binding)).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', { ...binding, guessed: true })).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_BATCH_BOUND', { operation_id: 'member-1' })).success).toBe(false)
+  })
+
+  it('retains interactive acceptance facts without inventing effects', () => {
+    const accepted = { operation_id: 'member-1', state: 'Queued', queued_count: 2 }
+    const interactive = { outcome: 'stale_control', chat_control_token: 'fresh-control', signalled: false, resumed: false, interrupt_error: null }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive })).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', { ...accepted, interactive: { ...interactive, resumed: true } })).success).toBe(false)
   })
 
   it('accepts a durable chat operation acceptance', () => {

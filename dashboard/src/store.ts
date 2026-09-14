@@ -55,10 +55,13 @@ import {
   goalTreeData,
   goalTreeError,
   goalTreeLoading,
+  hydrateGoalSourceUnavailable,
   hydrateGoalTreeError,
   hydrateGoalTreeObservationError,
   hydrateGoalTreeSnapshot,
 } from './goal-tree-state'
+import { goalSourceUnavailable } from './api/dashboard-goals'
+import type { GoalSourceUnavailable } from './types'
 import {
   WORK_GOAL_LOAD_ERROR,
   WORK_GOAL_LOAD_PARTIAL_ERROR,
@@ -767,6 +770,16 @@ function bootstrapSliceError(slice: unknown): slice is DashboardBootstrapSliceEr
   return isRecord(slice) && typeof slice.error === 'string'
 }
 
+// RFC-0444 §2.3 row 4: a Goal slice may be the typed store failure envelope
+// (HTTP 200, no `error` line), which the slice-error guard above cannot see.
+function firstGoalSourceUnavailable(slices: readonly unknown[]): GoalSourceUnavailable | null {
+  for (const slice of slices) {
+    const unavailable = goalSourceUnavailable(slice)
+    if (unavailable !== null) return unavailable
+  }
+  return null
+}
+
 async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
   await Promise.all([refreshShell(opts), refreshExecution(opts)])
 }
@@ -808,12 +821,15 @@ function hydrateDashboardBootstrap(
   goalObservationOwner = owner
   pendingGoalRefresh = null
   try {
-    if (data.planning && !bootstrapSliceError(data.planning)) {
-      hydratePlanningSnapshot(data.planning)
-    }
-    if (data.goals && !bootstrapSliceError(data.goals)) {
-      if (!hydrateGoalTreeSnapshot(data.goals)) {
-        hydrateGoalTreeObservationError(new Error('Goal Store tree payload was malformed'))
+    const sourceUnavailable = firstGoalSourceUnavailable([data.planning, data.goals])
+    if (sourceUnavailable === null) {
+      if (data.planning && !bootstrapSliceError(data.planning)) {
+        hydratePlanningSnapshot(data.planning)
+      }
+      if (data.goals && !bootstrapSliceError(data.goals)) {
+        if (!hydrateGoalTreeSnapshot(data.goals)) {
+          hydrateGoalTreeObservationError(new Error('Goal Store tree payload was malformed'))
+        }
       }
     }
     const goalSourceErrors = [data.planning, data.goals]
@@ -822,6 +838,13 @@ function hydrateDashboardBootstrap(
       goals.value = []
       lastGoalsRefreshAt.value = null
       hydrateGoalTreeObservationError(goalSourceErrors.join('; '))
+    }
+    if (sourceUnavailable !== null) {
+      // The typed failure is the observation; a zero-goal planning snapshot
+      // must not survive beside it.
+      goals.value = []
+      lastGoalsRefreshAt.value = null
+      hydrateGoalSourceUnavailable(sourceUnavailable)
     }
   } catch (error) {
     if (goalObservationOwner === owner) {
@@ -1473,17 +1496,13 @@ export async function refreshGoals(): Promise<void> {
     if (goalObservationOwner !== owner) return
     const errors: string[] = []
     let generatedAt: string | undefined
-    if (planning.status === 'fulfilled') {
-      hydratePlanningSnapshot(planning.value, { markRefreshAt: false })
-      generatedAt = planning.value.generated_at
-    } else {
-      console.warn('[Planning] fetch error:', planning.reason)
-      errors.push(errorMessageOr(planning.reason, 'Planning data failed to load'))
-    }
+    // The tree is hydrated before Planning so a typed Planning failure
+    // (GoalSourceUnavailableError) is the state left standing when both
+    // arrive; a tree success would otherwise clear it.
     if (tree.status === 'fulfilled') {
       const hydrated = hydrateGoalTreeSnapshot(tree.value)
       if (hydrated) {
-        generatedAt ??= tree.value.generated_at
+        generatedAt = tree.value.generated_at
       } else {
         const message = 'Goal Store tree payload was malformed'
         hydrateGoalTreeObservationError(new Error(message))
@@ -1497,6 +1516,17 @@ export async function refreshGoals(): Promise<void> {
       const message = goalTreeError.value
         ?? errorMessageOr(tree.reason, 'Goal Store tree failed to load')
       errors.push(message)
+    }
+    if (planning.status === 'fulfilled') {
+      hydratePlanningSnapshot(planning.value, { markRefreshAt: false })
+      generatedAt = planning.value.generated_at ?? generatedAt
+    } else {
+      console.warn('[Planning] fetch error:', planning.reason)
+      if (hydrateGoalTreeError(planning.reason)) {
+        errors.push(goalTreeError.value ?? errorMessageOr(planning.reason, 'Planning data failed to load'))
+      } else {
+        errors.push(errorMessageOr(planning.reason, 'Planning data failed to load'))
+      }
     }
     if (errors.length > 0) {
       // Any failure invalidates the combined goal/tree snapshot so consumers

@@ -8,6 +8,7 @@ module Live = Masc_tui_keeper_chat_live
    byte-at-a-time feed, and the invariance test below pins the general case. *)
 
 let delta_to_string : Live.delta -> string = function
+  | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       Printf.sprintf "runtime_attempt_started(%s,%s)"
@@ -43,7 +44,7 @@ let delta_to_string : Live.delta -> string = function
         args question because
   | Live.Approval_settled { call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
-  | Live.Accepted { admission; queue_length } ->
+  | Live.Accepted { admission; queue_length; _ } ->
       let admission =
         match admission with
         | Live.Queued -> "queued"
@@ -262,7 +263,7 @@ let test_a_fresh_decoder_starts_without_a_seq () =
     (Live.feed cut "id: 9\ndata: {\"type\":\"TEXT_MESSAGE_CON");
   let fresh = Live.create () in
   check (list tagged) "the new stream's acceptance carries no seq"
-    [ (None, Live.Accepted { admission = Live.Running; queue_length = 0 }) ]
+    [ (None, Live.Accepted { admission = Live.Running; queue_length = 0; interactive = None }) ]
     (Live.feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
   check (list tagged) "the cut decoder's seq never reaches the new stream"
     [ (Some 10, Live.Text "b") ]
@@ -276,7 +277,7 @@ let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
   in
   check (list tagged) "acceptance is None between two tagged frames"
     [ (Some 3, Live.Text "a")
-    ; (None, Live.Accepted { admission = Live.Running; queue_length = 1 })
+    ; (None, Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None })
     ; (Some 4, Live.Text "b")
     ]
     (feed_whole_tagged body);
@@ -558,20 +559,32 @@ let test_the_settled_event_carries_its_outcome () =
 
 (* The acceptance is what the pane has to answer "why has this not started"
    with. Before it, a wait of minutes and a wait of seconds look the same. *)
+let test_interactive_acceptance_reports_authority () =
+  let receipt = `Assoc ["outcome", `String "stale_control"; "chat_control_token", `String "new-owner-control";
+    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null] in
+  let body = sse (custom "KEEPER_CHAT_OPERATION_ACCEPTED" (`Assoc ["operation_id", `String "tui-request-1";
+    "state", `String "Queued"; "queued_count", `Int 2; "interactive", receipt])) in
+  match feed_whole body with
+  | [Live.Accepted {interactive = Some value; _}] ->
+    check bool "stale admission is visible" true (value.outcome = Masc_tui_keeper_chat_projection.Stale_control);
+    check string "fresh control token reaches consumer" "new-owner-control" value.chat_control_token;
+    check bool "stale control never signals" false value.signalled
+  | _ -> fail "interactive admission receipt did not reach live consumer"
+
 let test_acceptance_states_are_read () =
   let deltas state = feed_whole (sse (accepted ~state ~queued_count:2 ())) in
   check (list delta) "queued keeps its place in the queue"
-    [ Live.Accepted { admission = Live.Queued; queue_length = 2 } ]
+    [ Live.Accepted { admission = Live.Queued; queue_length = 2; interactive = None } ]
     (deltas "Queued");
   check (list delta) "running has started"
-    [ Live.Accepted { admission = Live.Running; queue_length = 2 } ]
+    [ Live.Accepted { admission = Live.Running; queue_length = 2; interactive = None } ]
     (deltas "Running");
   (* One admission for the three terminal words: the pane draws them the same,
      and keeping them apart here would be a distinction nothing reads. *)
   List.iter
     (fun state ->
       check (list delta) ("a finished operation is settled: " ^ state)
-        [ Live.Accepted { admission = Live.Settled; queue_length = 2 } ]
+        [ Live.Accepted { admission = Live.Settled; queue_length = 2; interactive = None } ]
         (deltas state))
     [ "Succeeded"; "Failed"; "Cancelled" ]
 
@@ -657,7 +670,8 @@ let test_unknown_custom_event_is_reported () =
 let () =
   run "tui_keeper_chat_live"
     [ ( "deltas"
-      , [ test_case "coding turn, whole body" `Quick test_coding_turn_whole_body
+      , [ test_case "interactive acceptance reports authority" `Quick test_interactive_acceptance_reports_authority
+        ; test_case "coding turn, whole body" `Quick test_coding_turn_whole_body
         ; test_case "chunk size does not change the deltas" `Quick
             test_chunk_boundaries_do_not_matter
         ; test_case "a partial line is held" `Quick

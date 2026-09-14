@@ -122,6 +122,15 @@ let acting_pane_columns (state : state) ~terminal_cols =
   then Masc_tui_acting_pane.pane_cols
   else 0
 
+let format_context_tokens tokens =
+  if tokens >= 1_000_000 then
+    if tokens mod 1_000_000 = 0 then Printf.sprintf "%dM" (tokens / 1_000_000)
+    else Printf.sprintf "%.1fM" (float_of_int tokens /. 1_000_000.0)
+  else if tokens >= 1_000 then
+    Printf.sprintf "%dk" (tokens / 1_000)
+  else
+    Printf.sprintf "%d" tokens
+
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -1362,22 +1371,34 @@ let render_approvals (state : state) =
     | None -> ""
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
-  let type_breakdown =
-    let held_c = List.length state.keeper_tool_approvals in
-    let gate_c = List.length state.gate_pending in
-    let op_c = List.length (operator_approval_items state) in
-    if count > 0 then
-      Printf.sprintf " [%s%d held%s · %s%d gate%s · %s%d op%s]"
-        (Theme.warn ()) held_c Ansi.reset
-        (Theme.bad ()) gate_c Ansi.reset
-        (Theme.info ()) op_c Ansi.reset
-    else ""
+  (* The count and where it came from, naming only the lists that have a row
+     on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
+     with nothing in them, a bracket inside the parenthesis, and a total the
+     one kind that did have rows had already said. With one kind its count is
+     the total; with more, the total leads and the kinds follow it. *)
+  let count_text =
+    let kinds =
+      [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
+      ; (Theme.bad (), List.length state.gate_pending, "gate")
+      ; (Theme.info (), List.length (operator_approval_items state), "op")
+      ]
+      |> List.filter_map (fun (style, kind_count, word) ->
+             if kind_count = 0 then None
+             else
+               Some
+                 (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    match kinds with
+    | [] -> string_of_int count
+    | [ only ] -> only
+    | several ->
+      Printf.sprintf "%d: %s" count (String.concat " \xc2\xb7 " several)
   in
   let header =
     Printf.sprintf
-      "%s (%d%s%s%s)  %s  %s%s"
+      "%s (%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count type_breakdown queue_note held_note timestamp
+      count_text queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 
@@ -2114,12 +2135,6 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
 
   box_top buf cols;
   box_line buf cols header;
-  box_line buf cols
-    (Printf.sprintf "  Actions:  %s[c]%s Reply   %s[v/V]%s Vote (+/-)   %s[Y]%s Copy Link   %s[Esc]%s Back"
-       (Theme.ok ()) Ansi.reset
-       (Theme.warn ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.recede ()) Ansi.reset);
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
@@ -2392,17 +2407,12 @@ let render_board_read (state : state) (list_post : board_post) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let footer =
-    let pane_hint =
-      if cols >= keeper_split_threshold_cols && not state.board_detail_wide then
-        "  h/l:pane  Ctrl-W:switch"
-      else ""
-    in
     footer_line state ~max_cells:cols
       ~hints:
-        (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
-           (if state.board_focus = Left_pane then "posts" else "scroll")
-           pane_hint)
+        (Masc_tui_keys.footer_hints_board_read
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~split:
+             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
   in
   if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in
@@ -4329,7 +4339,81 @@ let standalone_lane_status_style = function
   | Tui_decode.Standalone_unavailable -> (Theme.bad ())
   | Tui_decode.Standalone_no_retained_observation -> (Theme.muted ())
 
-let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
+(* Why the lane cannot admit, where the cell used to restate that it cannot.
+   "no admitted slot" says the same thing the status word beside it already
+   says; the projection carries the reason -- an unconfigured lane and a lane
+   whose registry could not be read are different problems and the operator
+   acts on them differently -- and nothing drew it. *)
+let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
+  let base =
+    match lane.sl_admitted_slots, lane.sl_admission_error with
+    | [], Some reason -> reason
+    | [], None ->
+      (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
+         cli suffix declared, an empty catalog list is a shape, not a
+         failure. *)
+      if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
+    | admitted, None -> String.concat "," admitted
+    | admitted, Some reason ->
+      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
+  in
+  let base =
+    match lane.sl_cli_slots with
+    | [] -> base
+    | cli -> base ^ " +cli:" ^ String.concat "," cli
+  in
+  (* A declared slot publication could not admit is the difference between
+     "configured single" and "configured double, one silently dropped" —
+     the boot WARN was the only place that said so before this. *)
+  match lane.sl_dropped_slots with
+  | [] -> base
+  | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
+
+(* The lane table's two measured columns. Every other column has a fixed
+   width; the lane's name and its slot list are the two the data sizes, and
+   the name column was a literal 15 that "Workspace Curator" overran, pushing
+   its whole row two cells right of the others. Measured from the rows the
+   way Schedules measures its subject, floored at the header's own word and
+   capped so one long slot list cannot take the row. *)
+let standalone_lane_status_cells = 14
+let standalone_lane_ok_fail_cancel_cells = 14
+let standalone_lane_p50_cells = 6
+
+let standalone_lane_columns (lanes : Tui_decode.standalone_lane list) =
+  let widest header value_of cap =
+    List.fold_left
+      (fun widest lane ->
+        max widest (Message_layout.display_width (Terminal_text.single_line (value_of lane))))
+      (Message_layout.display_width header) lanes
+    |> min cap
+  in
+  ( widest "LANE" (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label) 24
+  , widest "SLOTS" standalone_lane_slots_text 28 )
+
+(* The header the rows share, so a reader meets each label once instead of
+   on every row: the rows carried "slots", "active", "runs", "ok/fail/cancel",
+   "p50" and "observed" as words of their own, which beside the roster pane
+   cut every row at "runs 12" and left the failure counts off the screen for
+   all five lanes. The mark's cell is blank here.
+
+   The counts come before the slot list. They are what a reader compares
+   down the column, and they are fixed-width; the slot list is the one cell
+   that can run long, and the block under the list prints the selected lane's
+   slots in full, so it is the cell to lose first when the frame is narrow. *)
+let standalone_lane_header ~label_cells ~slots_cells width =
+  fit_width
+    (Printf.sprintf "    %s  %s  %6s  %4s  %s  %s  %s  %s"
+       (fit_width "LANE" label_cells)
+       (fit_width "STATUS" standalone_lane_status_cells)
+       "ACTIVE" "RUNS"
+       (fit_width "OK/FAIL/CANCEL" standalone_lane_ok_fail_cancel_cells)
+       (fit_width "P50" standalone_lane_p50_cells)
+       (fit_width "SLOTS" slots_cells)
+       "OBSERVED")
+    width
+
+let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
+    (lane : Tui_decode.standalone_lane) =
   let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
   (* A lane that is running says so twice and neither says for how long: the
      word "running", and a count of how many. The server has sent the start
@@ -4361,36 +4445,7 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
       ("\xe2\x9c\x97", status)
     | Tui_decode.Standalone_no_retained_observation, _ -> ("\xc2\xb7", status)
   in
-  (* Why the lane cannot admit, where the cell used to restate that it cannot.
-     "no admitted slot" says the same thing the status word beside it already
-     says; the projection carries the reason -- an unconfigured lane and a lane
-     whose registry could not be read are different problems and the operator
-     acts on them differently -- and nothing drew it. *)
-  let slots =
-    let base =
-      match lane.sl_admitted_slots, lane.sl_admission_error with
-      | [], Some reason -> reason
-      | [], None ->
-        (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
-           cli suffix declared, an empty catalog list is a shape, not a
-           failure. *)
-        if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
-      | admitted, None -> String.concat "," admitted
-      | admitted, Some reason ->
-        String.concat "," admitted ^ " \xc2\xb7 " ^ reason
-    in
-    let base =
-      match lane.sl_cli_slots with
-      | [] -> base
-      | cli -> base ^ " +cli:" ^ String.concat "," cli
-    in
-    (* A declared slot publication could not admit is the difference between
-       "configured single" and "configured double, one silently dropped" —
-       the boot WARN was the only place that said so before this. *)
-    match lane.sl_dropped_slots with
-    | [] -> base
-    | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
-  in
+  let slots = standalone_lane_slots_text lane in
   let observed_slots =
     match lane.sl_selected_slots with
     | [] -> "none"
@@ -4407,11 +4462,19 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
-    Printf.sprintf
-      "  %s%s %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
-      prefix mark lane.sl_label status Ansi.reset slots lane.sl_running_count
-      lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count
-      lane.sl_cancelled_count p50 observed_slots
+    Printf.sprintf "  %s%s %s  %s%s  %6d  %4d  %s  %s  %s  %s"
+      prefix mark
+      (fit_width (Terminal_text.single_line lane.sl_label) label_cells)
+      (fit_width status standalone_lane_status_cells)
+      Ansi.reset
+      lane.sl_running_count lane.sl_retained_run_count
+      (fit_width
+         (Printf.sprintf "%d/%d/%d" lane.sl_succeeded_count lane.sl_failed_count
+            lane.sl_cancelled_count)
+         standalone_lane_ok_fail_cancel_cells)
+      (fit_width p50 standalone_lane_p50_cells)
+      (fit_width (Terminal_text.single_line slots) slots_cells)
+      observed_slots
   in
   fit_width line width
 
@@ -4574,11 +4637,17 @@ let render_lanes_overview (state : state) =
     "  Lane Add-ons: No Add-ons installed. Press A to inspect installed add-ons";
   (match state.standalone_lanes with
    | Some snapshot ->
+       let label_cells, slots_cells =
+         standalone_lane_columns snapshot.Tui_decode.sls_lanes
+       in
+       if snapshot.sls_lanes <> [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (standalone_lane_header ~label_cells ~slots_cells inner);
        List.iteri
          (fun index (lane : Tui_decode.standalone_lane) ->
            let row =
              standalone_lane_row ~now:(Unix.gettimeofday ())
-               ~frame:state.activity_frame inner lane
+               ~frame:state.activity_frame ~label_cells ~slots_cells inner lane
            in
            if
              index = state.lanes_standalone_cursor
@@ -4668,13 +4737,19 @@ let render_lanes_overview (state : state) =
                 then "  (same provider as a current slot)"
                 else ""
               in
-              let mark = if offset = state.runtime_lane_pick_cursor then ">" else " " in
+              let mark = if offset = 0 then ">" else " " in
+              let ctx =
+                Printf.sprintf " [%s ctx]"
+                  (format_context_tokens runtime.ro_effective_max_context)
+              in
+              let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s   %s / %s%s"
+                (Printf.sprintf "  %s %s   %s / %s%s%s%s"
                    mark
                    (Terminal_text.single_line runtime.ro_id)
                    (Terminal_text.single_line runtime.ro_provider)
                    (Terminal_text.single_line runtime.ro_model)
+                   ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
@@ -5851,41 +5926,48 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Recent activity, folded from the metrics rows already read for this
        Keeper. The window is bounded by row count, so it can fall short of the
-       span; when it does, say what it reached instead of implying a full day. *)
-    let activity =
-      Keeper_activity.summarize
-        ~since:
-          (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
-        state.log_entries
-    in
+       span; when it does, say what it reached instead of implying a full day.
+       With no rows there is nothing to total, so the section says why and
+       draws no zeros: the same sentence the Logs tab gives for the same
+       read. *)
     add_section "Last 24h";
-    if not activity.Keeper_activity.aw_covered then
-      add_row "Window:"
-        (match activity.Keeper_activity.aw_oldest_ts with
-         | Some oldest ->
-           Printf.sprintf "partial, reaches %s"
-             (Terminal_text.short_timestamp oldest)
-         | None -> "no metrics rows read");
-    add_row "Turns / Heartbeats:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
-         activity.Keeper_activity.aw_heartbeats);
-    add_row "Tokens In / Out:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
-         activity.Keeper_activity.aw_output_tokens);
-    add_row "Cost:"
-      (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
-    add_row "Tool Calls:"
-      (string_of_int activity.Keeper_activity.aw_tool_calls);
-    add_row "Top Tools:"
-      (match activity.Keeper_activity.aw_top_tools with
-       | [] -> "-"
-       | tools ->
-         tools
-         |> List.map (fun (tool : Keeper_activity.tool_use) ->
-                Printf.sprintf "%s x%d"
-                  (Terminal_text.single_line tool.Keeper_activity.tu_name)
-                  tool.Keeper_activity.tu_calls)
-         |> String.concat "  ");
+    (match
+       Keeper_activity.read
+         ~since:
+           (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
+         state.log_entries
+     with
+     | Keeper_activity.No_rows ->
+       add_row "Window:"
+         (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
+     | Keeper_activity.Rows activity ->
+       if not activity.Keeper_activity.aw_covered then
+         add_row "Window:"
+           (match activity.Keeper_activity.aw_oldest_ts with
+            | Some oldest ->
+              Printf.sprintf "partial, reaches %s"
+                (Terminal_text.short_timestamp oldest)
+            | None -> "partial");
+       add_row "Turns / Heartbeats:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
+            activity.Keeper_activity.aw_heartbeats);
+       add_row "Tokens In / Out:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
+            activity.Keeper_activity.aw_output_tokens);
+       add_row "Cost:"
+         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+       add_row "Tool Calls:"
+         (string_of_int activity.Keeper_activity.aw_tool_calls);
+       add_row "Top Tools:"
+         (match activity.Keeper_activity.aw_top_tools with
+          | [] -> "-"
+          | tools ->
+            tools
+            |> List.map (fun (tool : Keeper_activity.tool_use) ->
+                   Printf.sprintf "%s x%d"
+                     (Terminal_text.single_line tool.Keeper_activity.tu_name)
+                     tool.Keeper_activity.tu_calls)
+            |> String.concat "  "));
     add_empty ();
 
     add_section "Autonomy";
@@ -7078,7 +7160,10 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" request.vr_created_at
+    (* In the terminal's zone, like every other Created on a detail. This
+       one printed the server's RFC 3339 text, offset and all, under a header
+       clock in local time. *)
+  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -7087,11 +7172,15 @@ let verification_detail_lines ~width
      drawn, two of them as "No X was recorded". The pane already tells a
      reader how to read the request from its artifacts and evidence, which is
      what those rows were pointing away from. *)
+  @ [ Ansi.dim, ""; Ansi.bold, "  HOW TO READ THIS" ]
+    (* Wrapped like the evidence items under it. As one row it was cut at
+       "what the verifier can …" beside the roster pane, and a reading
+       instruction that stops mid-sentence instructs nothing. *)
+  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+       ~sanitize:Keeper_chat.terminal_safe_text
+       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
+     |> List.map (fun line -> Ansi.dim, "    " ^ line))
   @ [ Ansi.dim, ""
-    ; Ansi.bold, "  HOW TO READ THIS"
-    ; ( Ansi.dim
-      , "    Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now." )
-    ; Ansi.dim, ""
     ; Ansi.bold
     , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
         (List.length request.vr_required_artifacts)
@@ -10099,12 +10188,18 @@ let render_runtime (state : state) =
              then "  (same provider as a current candidate)"
              else ""
            in
+           let ctx =
+             Printf.sprintf " [%s ctx]"
+               (format_context_tokens runtime.ro_effective_max_context)
+           in
+           let def = if runtime.ro_is_default then " [default]" else "" in
            c.push
-             (Printf.sprintf "  %s %s   %s / %s%s"
+             (Printf.sprintf "  %s %s   %s / %s%s%s%s"
                 (if offset = 0 then ">" else " ")
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)
+                ctx def
                 (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
@@ -10867,23 +10962,28 @@ let render_runtime_pick (state : state) =
         state.runtime_assignments
     with
     | Some a ->
-        Printf.sprintf "%s (%s)%s"
-          (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
+        let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
+        let kind =
+          match a.ra_target_id with
+          | Some tid
+            when List.exists
+                   (fun (l : Tui_decode.runtime_resolved_lane) ->
+                     String.equal l.rrl_id tid)
+                   state.runtime_lanes ->
+              "lane"
+          | Some _ -> "model"
+          | None -> "default"
+        in
+        Printf.sprintf "%s (%s, %s)%s"
+          target kind
           (Terminal_text.single_line a.ra_source)
           (match a.ra_unavailable_reason with
            | None -> ""
            | Some reason -> " — unavailable: " ^ Terminal_text.single_line reason)
     | None -> "-"
   in
-  (* Only what a keeper can actually be pointed at. The catalogue also lists
-     rows the dispatcher refuses; offering one would end in the server's
-     rejection, so the picker does not draw them. *)
-  let options =
-    List.filter
-      (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
-      state.runtime_catalog
-  in
-  let count = List.length options in
+  let items = Masc_tui_types.runtime_picker_items state in
+  let count = List.length items in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -10900,7 +11000,15 @@ let render_runtime_pick (state : state) =
         | None when count = 0 ->
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
-        | None -> 0
+        | None ->
+            let header =
+              Printf.sprintf "  %s  %s  %s"
+                (fit_width "KIND   TARGET" 33)
+                (fit_width "CONFIGURED ROUTE / MODEL" (max 24 (cols - 62)))
+                "PROPERTIES / FAILOVER"
+            in
+            c.push (Ansi.dim ^ header ^ Ansi.reset);
+            1
       in
       let height = max 0 (budget - status_rows) in
       let scroll_offset =
@@ -10909,23 +11017,66 @@ let render_runtime_pick (state : state) =
         else 0
       in
       List.iteri
-        (fun idx (option : Tui_decode.runtime_option) ->
+        (fun idx item ->
           if idx >= scroll_offset && idx < scroll_offset + height then begin
             let line =
-              Printf.sprintf "  %s  %s%s"
-                (fit_width (Terminal_text.single_line option.ro_id) 44)
-                (fit_width
-                   (Terminal_text.single_line
-                      (option.ro_provider ^ " / " ^ option.ro_model))
-                   (max 8 (cols - 56)))
-                (if option.ro_is_default then " [default]" else "")
+              match item with
+              | Masc_tui_types.Pick_lane lane ->
+                  let kind_badge = Ansi.cyan ^ "[LANE] " ^ Ansi.reset in
+                  let target = fit_width (Terminal_text.single_line lane.rrl_id) 24 in
+                  let chain =
+                    String.concat " \xe2\x86\x92 "
+                      (List.map
+                         (fun id ->
+                            match String.split_on_char '.' id with
+                            | [ _prov; model ] -> model
+                            | _ -> id)
+                         lane.rrl_runtime_ids)
+                  in
+                  let hops = Printf.sprintf "(%d hops)" (List.length lane.rrl_runtime_ids) in
+                  let pref =
+                    match lane.rrl_preferred_candidate with
+                    | Some p ->
+                        let short_p =
+                          match String.split_on_char '.' p with
+                          | [ _prov; m ] -> m
+                          | _ -> p
+                        in
+                        Printf.sprintf " [active: %s]" short_p
+                    | None -> ""
+                  in
+                  let route_col = fit_width (Terminal_text.single_line chain) (max 24 (cols - 62)) in
+                  Printf.sprintf "%s%s  %s  %s%s"
+                    kind_badge target route_col hops (Ansi.dim ^ pref ^ Ansi.reset)
+              | Masc_tui_types.Pick_model option ->
+                  let kind_badge = Ansi.dim ^ "[MODEL]" ^ Ansi.reset in
+                  let target = fit_width (Terminal_text.single_line option.ro_id) 24 in
+                  let model_desc =
+                    fit_width
+                      (Terminal_text.single_line
+                         (option.ro_provider ^ " / " ^ option.ro_model))
+                      (max 24 (cols - 62))
+                  in
+                  let ctx =
+                    Printf.sprintf "[%s ctx]"
+                      (format_context_tokens option.ro_effective_max_context)
+                  in
+                  let def = if option.ro_is_default then " [default]" else "" in
+                  let quota =
+                    if option.ro_quota_exhausted then " " ^ (Theme.warn ()) ^ "[quota exhausted]" ^ Ansi.reset
+                    else match option.ro_blocked_reason with
+                    | Some reason -> " " ^ (Theme.bad ()) ^ "[" ^ Terminal_text.single_line reason ^ "]" ^ Ansi.reset
+                    | None -> ""
+                  in
+                  Printf.sprintf "%s%s  %s  %s%s%s"
+                    kind_badge target model_desc ctx def quota
             in
             c.push
               (if idx = state.runtime_pick_cursor then
                  Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
                else "  " ^ line)
           end)
-        options)
+        items)
 
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show
@@ -10950,6 +11101,18 @@ let pane_surface_title (state : state) ~name =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
     (connection_badge state)
 
+(* The row between the strip and the title, then the title. Every other
+   surface draws that row first -- a gap on its own, the box's top edge beside
+   a roster -- and its title under it. The two pane surfaces drew the title
+   first and left the row to the pane, so alone on the surface the gap fell
+   between the title and the pane's own heading: the title sat one row higher
+   than on every other screen, and the heading read as a second, detached
+   block. Beside the other pane the list's box draws its top edge on that row,
+   so a split frame keeps it there. The row count is the same either way. *)
+let pane_surface_header buf cols (state : state) ~name ~split =
+  if not split then box_top buf cols;
+  box_line buf cols (pane_surface_title state ~name)
+
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
 
@@ -10964,8 +11127,8 @@ let code_pane_content_height (state : state) =
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  box_line buf cols (pane_surface_title state ~name:"Workspace / Code");
   let split = cols >= keeper_split_threshold_cols in
+  pane_surface_header buf cols state ~name:"Workspace / Code" ~split;
   let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
@@ -10974,8 +11137,9 @@ let render_code (state : state) =
   let list_pane ~framed pane_buf pane_cols =
     (* Beside the file pane the box is the pane separator; alone on a narrow
        terminal it is the redundant outer frame every other surface dropped
-       (same rule as keeper_detail_pane). *)
-    let framed_top = if framed then framed_top else box_top in
+       (same rule as keeper_detail_pane). Alone, its top row is the gap
+       [pane_surface_header] already drew above the title. *)
+    let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
     let framed_empty = if framed then framed_empty else box_empty in
@@ -11113,7 +11277,7 @@ let render_code (state : state) =
     done;
     framed_bottom pane_buf pane_cols
   in
-  let content_pane pane_buf pane_cols =
+  let content_pane ~split pane_buf pane_cols =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
@@ -11201,7 +11365,7 @@ let render_code (state : state) =
            | None -> with_note)
       | None -> "(Enter opens the selected file)"
     in
-    box_top pane_buf pane_cols;
+    if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
        ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
@@ -11611,11 +11775,11 @@ let render_code (state : state) =
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
      list_pane ~framed:true left_buf left_cols;
-     content_pane right_buf right_cols;
+     content_pane ~split right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
-   else if state.code_focus_file = Right_pane then content_pane buf cols
+   else if state.code_focus_file = Right_pane then content_pane ~split buf cols
    else list_pane ~framed:false buf cols);
   let code_pane =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
@@ -11713,9 +11877,9 @@ let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  box_line buf cols (pane_surface_title state ~name:"Config / Resources");
-  let pane_rows = pane_surface_content_height ~rows in
   let split = cols >= keeper_split_threshold_cols in
+  pane_surface_header buf cols state ~name:"Config / Resources" ~split;
+  let pane_rows = pane_surface_content_height ~rows in
   let list_rows_budget = pane_rows in
   let rows_list =
     match state.resources_list with Some rows -> rows | None -> []
@@ -11726,7 +11890,7 @@ let render_resources (state : state) =
     (* Same rule as the code surface: beside the content pane the box is the
        pane separator; alone on a narrow terminal it is the redundant outer
        frame every other surface dropped. *)
-    let framed_top = if framed then framed_top else box_top in
+    let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
     let framed_empty = if framed then framed_empty else box_empty in
@@ -11781,7 +11945,7 @@ let render_resources (state : state) =
     done;
     framed_bottom pane_buf pane_cols
   in
-  let content_pane pane_buf pane_cols =
+  let content_pane ~split pane_buf pane_cols =
     let selected_resource = List.nth_opt rows_list cursor in
     let error_uri = Option.map fst state.resource_content_error in
     let content_uri = Option.map fst state.resource_content in
@@ -11804,7 +11968,7 @@ let render_resources (state : state) =
       | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
       | None -> "Resource detail"
     in
-    box_top pane_buf pane_cols;
+    if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
        ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
@@ -11861,11 +12025,11 @@ let render_resources (state : state) =
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
      list_pane ~framed:true left_buf left_cols;
-     content_pane right_buf right_cols;
+     content_pane ~split right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
-   else if state.resource_focus = Right_pane then content_pane buf cols
+   else if state.resource_focus = Right_pane then content_pane ~split buf cols
    else list_pane ~framed:false buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

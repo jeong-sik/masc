@@ -36,36 +36,50 @@ let add_tree t json = match field "contexts" json with
   | Some (`List contexts) ->
     List.fold_left (fun result child -> let* () = result in tree t child) (Ok ()) contexts
   | _ -> Error "BiDi getTree lacks contexts"
+(* The only BiDi events this model subscribes to. [event] refuses any other
+   method name so an unexpected event interrupts the session with a reason
+   instead of being dropped as if it had been handled. *)
+type subscribed = Context_created | Download_will_begin | Download_end
+let subscribed_methods = [
+  Context_created, "browsingContext.contextCreated";
+  Download_will_begin, "browsingContext.downloadWillBegin";
+  Download_end, "browsingContext.downloadEnd"]
+let subscribed_of_method method_ =
+  match List.find_opt (fun (_, name) -> name = method_) subscribed_methods with
+  | Some (kind, _) -> Ok kind
+  | None -> Error ("unsubscribed BiDi event: " ^ method_)
+let download t (phase : [ `Will_begin | `Ended ]) json =
+  let* id = string "download" json in
+  let* context = string "context" json in
+  let* url = string "url" json in
+  let previous = Hashtbl.find_opt t.downloads id in
+  let* filename, status = match phase with
+    | `Will_begin ->
+      let* filename = string "suggestedFilename" json in
+      Ok (Some filename, Pending)
+    | `Ended ->
+      let* status = match field "status" json with
+        | Some (`String "canceled") -> Ok Canceled
+        | Some (`String "complete") ->
+          (match field "filepath" json with
+           | Some `Null -> Ok (Completed Path_unavailable)
+           | Some (`String path) when path <> "" -> Ok (Completed (File path))
+           | _ -> Error "BiDi completion lacks filepath or explicit null")
+        | _ -> Error "BiDi invalid download terminal status" in
+      Ok (Option.bind previous (fun d -> d.filename), status) in
+  let* () = match previous with
+    | Some d when d.context <> context || d.url <> url -> Error "BiDi download identity changed"
+    | Some { status = (Completed _ | Canceled); _ } -> Error "BiDi repeated terminal download"
+    | None | Some { status = (Pending | Interrupted _); _ } -> Ok () in
+  if previous = None then t.order <- id :: t.order;
+  Hashtbl.replace t.downloads id {id; context; url; filename; status};
+  Ok ()
 let event t ~method_ json =
-  match method_ with
-  | "browsingContext.contextCreated" -> tree t json
-  | "browsingContext.downloadWillBegin" | "browsingContext.downloadEnd" ->
-    let* id = string "download" json in
-    let* context = string "context" json in
-    let* url = string "url" json in
-    let previous = Hashtbl.find_opt t.downloads id in
-    let* filename, status = match method_ with
-      | "browsingContext.downloadWillBegin" ->
-        let* filename = string "suggestedFilename" json in
-        Ok (Some filename, Pending)
-      | _ ->
-        let* status = match field "status" json with
-          | Some (`String "canceled") -> Ok Canceled
-          | Some (`String "complete") ->
-            (match field "filepath" json with
-             | Some `Null -> Ok (Completed Path_unavailable)
-             | Some (`String path) when path <> "" -> Ok (Completed (File path))
-             | _ -> Error "BiDi completion lacks filepath or explicit null")
-          | _ -> Error "BiDi invalid download terminal status" in
-        Ok (Option.bind previous (fun d -> d.filename), status) in
-    let* () = match previous with
-      | Some d when d.context <> context || d.url <> url -> Error "BiDi download identity changed"
-      | Some { status = (Completed _ | Canceled); _ } -> Error "BiDi repeated terminal download"
-      | _ -> Ok () in
-    if previous = None then t.order <- id :: t.order;
-    Hashtbl.replace t.downloads id {id; context; url; filename; status};
-    Ok ()
-  | _ -> Ok ()
+  let* kind = subscribed_of_method method_ in
+  match kind with
+  | Context_created -> tree t json
+  | Download_will_begin -> download t `Will_begin json
+  | Download_end -> download t `Ended json
 let interrupt t reason =
   Hashtbl.filter_map_inplace (fun _ d -> Some (match d.status with
     | Pending -> {d with status = Interrupted reason}

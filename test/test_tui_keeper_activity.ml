@@ -103,6 +103,20 @@ let test_no_rows_is_not_a_covered_window () =
   check int "no turns" 0 window.Activity.aw_turns;
   check (option string) "no oldest row" None window.Activity.aw_oldest_ts
 
+(* A read that returned no rows has no totals to show. The pane drew four rows
+   of zeros under "no metrics rows read", which read as a Keeper idle for a
+   day when nothing had been read. *)
+let test_no_rows_is_no_reading () =
+  let since = "2026-08-22T12:00:00Z" in
+  (match Activity.read ~since [] with
+   | Activity.No_rows -> ()
+   | Activity.Rows _ -> fail "an empty read produced totals");
+  match Activity.read ~since [ entry ~input:(Some 7) "2026-08-23T09:00:00Z" ] with
+  | Activity.No_rows -> fail "a row was read and the reading was dropped"
+  | Activity.Rows window ->
+    check int "the row is counted" 1 window.Activity.aw_turns;
+    check int "its tokens are summed" 7 window.Activity.aw_input_tokens
+
 let () =
   run "keeper_activity"
     [ ( "window",
@@ -120,5 +134,6 @@ let () =
             test_absent_usage_does_not_invent_a_zero_turn
         ; test_case "no rows is not a covered window" `Quick
             test_no_rows_is_not_a_covered_window
+        ; test_case "no rows is no reading" `Quick test_no_rows_is_no_reading
         ] )
     ]

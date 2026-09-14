@@ -2696,14 +2696,7 @@ let config_pane_strip ~cols ~before (state : state) =
   Ansi.dim ^ keys ^ Ansi.reset
   ^ tab_strip
       ~width:(tab_strip_width ~cols ~before:(before ^ tab_strip_gap ^ keys))
-      [ name Config_runtime "runtime.toml"
-      ; name Config_models "models"
-      ; name Config_params "params"
-      ; name Config_prompts "prompts"
-      ; name Config_presets "presets"
-      ; name Config_themes "themes"
-      ; name Config_voice "voice"
-      ]
+      (List.map (fun (pane, label) -> name pane label) config_panes)
 
 
 let config_metadata_summary (state : state) =

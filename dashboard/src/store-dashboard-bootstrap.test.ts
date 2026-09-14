@@ -64,7 +64,21 @@ describe('refreshDashboard bootstrap', () => {
 
   const readyPlanning = { generated_at: '2026-09-09T03:00:00Z', goals: [], rollup: {} }
   const readyTree = { generated_at: '2026-09-09T03:00:00Z', approval_queue_state: { state: 'ready' }, tree: [], summary: { total_goals: 0 } }
-  const sourceFailure = { ok: false, error_code: 'goal_store_unavailable', error: 'new Goal source failure' }
+  // RFC-0444 §2.3 row 4: the typed store failure envelope, HTTP 200, no `error` line.
+  const sourceFailure = {
+    ok: false, error_code: 'goal_store_unavailable', reason: 'not_json', field: null,
+    file: '/srv/masc/.masc/goals.json', mirror: { status: 'mirror_absent', goal_count: null },
+    reset_step: 'reset_goal_store',
+  }
+  // Built through the same module registry the store imports (resetModules
+  // runs after every case), so the store's instanceof check sees this class.
+  async function sourceFailureRejection(): Promise<never> {
+    const { GoalSourceUnavailableError } = await import('./api/dashboard-goals')
+    throw new GoalSourceUnavailableError({
+      kind: 'unavailable', reason: 'not_json', field: null, file: '/srv/masc/.masc/goals.json',
+      mirror: { status: 'mirror_absent', goalCount: null }, resetStep: 'reset_goal_store',
+    })
+  }
   function bootstrapGoals(failed: boolean) {
     return { shell: { generated_at: 'now', status: {}, counts: {}, providers: {} },
       execution: { generated_at: 'now', status: {}, agents: [], tasks: [], messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
@@ -75,9 +89,9 @@ describe('refreshDashboard bootstrap', () => {
     const oldBootstrap = pending<unknown>()
     apiMocks.fetchDashboardBootstrap.mockReturnValue(oldBootstrap.promise)
     apiMocks.fetchDashboardPlanning.mockImplementation(() => failed
-      ? Promise.reject(new Error(sourceFailure.error)) : Promise.resolve(readyPlanning))
+      ? sourceFailureRejection() : Promise.resolve(readyPlanning))
     apiMocks.fetchDashboardGoalsTree.mockImplementation(() => failed
-      ? Promise.reject(new Error(sourceFailure.error)) : Promise.resolve(readyTree))
+      ? sourceFailureRejection() : Promise.resolve(readyTree))
     const store = await import('./store')
     const state = await import('./goal-tree-state')
     const older = store.refreshDashboard()
@@ -236,7 +250,11 @@ describe('refreshDashboard bootstrap', () => {
   })
 
   it('preserves a Goal store bootstrap failure instead of retaining a zero-goal success', async () => {
-    const failure = { ok: false, error_code: 'goal_store_unavailable', error: 'goals.json criterion_revision missing' }
+    const failure = {
+      ok: false, error_code: 'goal_store_unavailable', reason: 'schema_rejected', field: 'criterion_revision',
+      file: '/srv/masc/.masc/goals.json', mirror: { status: 'mirror_decodes', goal_count: 97 },
+      reset_step: 'repair_field',
+    }
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
       execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
@@ -247,9 +265,33 @@ describe('refreshDashboard bootstrap', () => {
     const store = await import('./store')
     const goalTreeState = await import('./goal-tree-state')
     await store.refreshDashboard({ force: true })
-    expect(goalTreeState.goalTreeError.value).toContain(failure.error)
+    expect(goalTreeState.goalStoreUnavailable.value).toEqual({
+      kind: 'unavailable', reason: 'schema_rejected', field: 'criterion_revision',
+      file: '/srv/masc/.masc/goals.json', mirror: { status: 'mirror_decodes', goalCount: 97 },
+      resetStep: 'repair_field',
+    })
+    expect(goalTreeState.goalTreeError.value).toContain(failure.file)
+    expect(goalTreeState.goalTreeError.value).toContain('criterion_revision')
     expect(goalTreeState.goalTreeApprovalQueueState.value).toBeNull()
     expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.goals.value).toEqual([])
+    expect(store.lastGoalsRefreshAt.value).toBeNull()
+  })
+
+  it('refuses a malformed Goal store failure envelope instead of reading it as a planning snapshot', async () => {
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue({
+      shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
+      execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
+        messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
+      planning: { ...sourceFailure, reason: 'corrupt' },
+      goals: readyTree,
+    })
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+    await store.refreshDashboard({ force: true })
+    expect(goalTreeState.goalStoreUnavailable.value).toBeNull()
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(goalTreeState.goalTreeError.value).toContain('unknown reason "corrupt"')
     expect(store.goals.value).toEqual([])
   })
 

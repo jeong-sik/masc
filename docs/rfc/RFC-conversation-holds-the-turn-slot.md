@@ -120,7 +120,7 @@ RFC-0373은 "admission 정책을 쓰기 전에 invariant를 먼저 문서로 남
   종료다("checkpoint saved — will resume next cycle",
   `lib/keeper/keeper_unified_turn_success.ml:450-458`). §1(b)의 실측 21건이 이 경계의
   지연이다.
-- 하드 interrupt는 수동 전용이다: owner측 `Interrupt_running_operation`
+- 하드 interrupt는 수동 전용이다: owner측 `Interrupt_turn`
   (`keeper_owner.ml:833-853`), registry측 `interrupt_current_turn_exact`
   (`lib/keeper/keeper_registry_setup.ml:1331-1379`), HTTP `POST /api/v1/keepers/turn/interrupt`,
   TUI Esc. 자율 턴이 인터럽트되면 `Skip_interrupted_turn`
@@ -330,7 +330,7 @@ D = 4는 최악 연속 상실을 4사이클(약 20분)로 묶고, 연속 대화�
 
 - `lib/keeper/keeper_owner.ml` — `Run_if_idle`(:1051-1099), `Child_finished`(:1100-1127),
   `notify_turn_slot_released`(:321-334), `autonomous_lost_slot`(:1063-1065),
-  `Interrupt_running_operation`(:833-853), `autonomous_block`(:48-50)
+  `Interrupt_turn`, `autonomous_block`(:48-50)
 - `lib/keeper/keeper_owner.mli` — 단일-기록자 불변식(:48-68), wake 3조건 계약(:175-201)
 - `lib/keeper/keeper_heartbeat_loop.ml` — admission 선행 구조(:565, :697, :702),
   슬롯 안 audit/counter(:742, :814-829), defer 경로(:1416-1425)

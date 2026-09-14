@@ -48,7 +48,7 @@ type interrupt_target =
 
 type run_next_result =
   | Run_next_paused
-  | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
+  | Run_next_applied of { signalled : bool; interrupt_error : string option }
 
 type interactive_outcome = Applied | Stale_control | Paused | Replayed
 type interactive_receipt =
@@ -314,10 +314,10 @@ val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
 val pause_and_interrupt : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
-(** Persist pause before signalling an exact current target. An unknown or
-    queued direct request can instead pause admission when the supplied control
-    token is current and no other child is active; this never cancels a child.
-    Refused stale targets change neither pause nor token. *)
+val interrupt_turn : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
+(** Stop an exact current execution or invalidate a pending admission without
+    pausing the Keeper. Admission remains open for queued and future operations
+    unless explicitly paused by an operator latch. *)
 val chat_control_token : t -> string
 val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
 (** Admit and prioritize compatible queued context in one SQLite transaction,
@@ -325,7 +325,7 @@ val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id
     Replayed admissions and stale control tokens perform no control effects. *)
 val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
-(** Prioritize before releasing a chat-interrupt pause. Other pauses remain closed. *)
+(** Prioritize a queued operation. Refused only while an operator's explicit pause closes admission. *)
 
 val interrupt_running_operation
   :  t

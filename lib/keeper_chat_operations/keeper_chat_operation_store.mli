@@ -46,6 +46,9 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     [None] means no database, distinct from an empty validated snapshot. *)
 
 val open_or_create : path:string -> (t, error) result
+val open_existing : path:string -> (t, error) result
+(** Open and validate the current authoritative schema without creating or
+    migrating a database. Used only by the serialized Owner recovery path. *)
 val close : t -> (unit, error) result
 val path : t -> string
 

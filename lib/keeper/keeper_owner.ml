@@ -286,6 +286,34 @@ type interrupt_resolution =
   | Interrupt_maintenance_running
   | Interrupt_not_current
 
+(* Why the Owner refuses store work. Only [Operation_availability_failure]
+   is retried: a stale SQLite handle heals by close+reopen at an idle wake.
+   The other three need a process restart or an operator, so a wake must not
+   churn the handle for them. *)
+type store_fault =
+  | Metadata_persistence_failure of string
+  | Operation_availability_failure of string
+  | Operation_integrity_failure of string
+  | Operation_reconciliation_required of Chat_operation.Operation_id.t
+      (* A durable Running row with no live child: its terminal commit was
+         lost to the outage. [settle_running_after_restart] settles it on
+         the next boot; this process never fabricates an outcome. *)
+
+let store_fault_detail = function
+  | Metadata_persistence_failure detail
+  | Operation_availability_failure detail
+  | Operation_integrity_failure detail -> detail
+  | Operation_reconciliation_required operation_id ->
+    Printf.sprintf
+      "operation %s is Running with no live child; restart the keeper to settle it before storage recovery"
+      (Chat_operation.Operation_id.to_string operation_id)
+
+let retain_store_fault fault previous =
+  match previous with
+  | Some (Metadata_persistence_failure _ | Operation_integrity_failure _
+         | Operation_reconciliation_required _) -> previous
+  | None | Some (Operation_availability_failure _) -> Some fault
+
 type t =
   { keeper_name : string
   ; mailbox : packed_command Eio.Stream.t
@@ -298,7 +326,7 @@ type t =
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
-  ; store_error : string option ref
+  ; store_error : store_fault option ref
   ; child_active : bool ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -484,6 +512,24 @@ let request t command =
              Error Owner_closed)))
 ;;
 
+(* The first fault is otherwise visible only as [store_unavailable = true] in
+   the projection; the detail resurfaces later as a rejected meta commit and
+   reads as if that commit were the cause. Log the onset once, at the source. *)
+let set_store_fault t fault =
+  let previous = !(t.store_error) in
+  let next = retain_store_fault fault previous in
+  t.store_error := next;
+  match previous, next with
+  | None, Some fault ->
+    Log.Keeper.error ~keeper_name:t.keeper_name
+      "keeper Owner store fenced: %s" (store_fault_detail fault)
+  | Some before, Some after
+    when store_fault_detail before <> store_fault_detail after ->
+    Log.Keeper.error ~keeper_name:t.keeper_name
+      "keeper Owner store fault replaced: %s" (store_fault_detail after)
+  | Some _, Some _ | None, None | Some _, None -> ()
+;;
+
 let commit store transition =
   match transition.Keeper_owner_reducer.persistence with
   | Keeper_owner_reducer.No_persistence -> Ok transition.state
@@ -500,7 +546,7 @@ let commit store transition =
 let apply_transition t store old_state transition =
   match commit store transition with
   | Error (Store_unavailable detail as error) ->
-    t.store_error := Some detail;
+    set_store_fault t (Metadata_persistence_failure detail);
     Error (old_state, error)
   | Error
       (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed as error) ->
@@ -562,7 +608,6 @@ let read_operation_projection operation_store ~now =
     in
     Ok (operation_projection_of_inventory
           ~has_claimable_queued ~next_runtime_retry_wake inventory))
-  |> Result.map_error owner_error_of_operation_error
 ;;
 
 let reopen_operation_store_if_missing t =
@@ -604,7 +649,8 @@ let reopen_operation_store_if_missing t =
            with
            | Error error -> Error (owner_error_of_operation_error error)
            | Ok operation_store ->
-             (match read_operation_projection operation_store ~now:(t.now ()) with
+             (match read_operation_projection operation_store ~now:(t.now ())
+                     |> Result.map_error owner_error_of_operation_error with
               | Error error ->
                 ignore (Chat_operation_store.close operation_store : (unit, _) result);
                 Error error
@@ -620,26 +666,28 @@ let mark_operation_store_unavailable t =
   publish_operation_projection t { projection with store_unavailable = true }
 ;;
 
+let record_operation_error t error =
+  (match error with
+   | Chat_operation_store.Store_unavailable detail ->
+     set_store_fault t (Operation_availability_failure detail);
+     mark_operation_store_unavailable t
+   | Chat_operation_store.Integrity_error detail ->
+     set_store_fault t (Operation_integrity_failure detail);
+     mark_operation_store_unavailable t
+   | Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+   | Idempotency_conflict _ -> ());
+  owner_error_of_operation_error error
+;;
+
 let run_operation_command t ~label f =
   match !(t.store_error) with
-  | Some detail -> Error (Store_unavailable detail)
+  | Some fault -> Error (Store_unavailable (store_fault_detail fault))
   | None ->
-    (match
-       run_operation_store ~label f
-       |> Result.map_error owner_error_of_operation_error
-     with
-     | Error (Store_unavailable detail as error) ->
-       t.store_error := Some detail;
-       mark_operation_store_unavailable t;
-       Error error
-     | Error _ as error -> error
+    (match run_operation_store ~label f with
+     | Error error -> Error (record_operation_error t error)
      | Ok value ->
        (match read_operation_projection t.operation_store ~now:(t.now ()) with
-        | Error (Store_unavailable detail as error) ->
-          t.store_error := Some detail;
-          mark_operation_store_unavailable t;
-          Error error
-        | Error _ as error -> error
+        | Error error -> Error (record_operation_error t error)
         | Ok projection ->
           publish_operation_projection t projection;
           Keeper_waiting_inventory_broadcast.changed
@@ -649,15 +697,53 @@ let run_operation_command t ~label f =
 ;;
 
 let run_operation_read t ~label f =
-  match
-    run_operation_store ~label f
-    |> Result.map_error owner_error_of_operation_error
-  with
-  | Error (Store_unavailable detail as error) ->
-    t.store_error := Some detail;
-    mark_operation_store_unavailable t;
-    Error error
-  | (Error _ | Ok _) as result -> result
+  run_operation_store ~label f
+  |> Result.map_error (record_operation_error t)
+;;
+
+let recover_operation_availability t =
+  match !(t.store_error) with
+  | None -> Ok ()
+  | Some (Metadata_persistence_failure _ | Operation_integrity_failure _
+         | Operation_reconciliation_required _ as fault) ->
+    Error (Store_unavailable (store_fault_detail fault))
+  | Some (Operation_availability_failure detail) when !(t.child_active) ->
+    Error (Store_unavailable detail)
+  | Some (Operation_availability_failure _) ->
+    (* The Owner mailbox excludes all store commands here, and no child can
+       still deliver effects. Reopening is not permission to replay a command:
+       only authoritative queued/terminal rows determine the next action. *)
+    let recovered = run_operation_store ~label:"recover Keeper operation store" (fun () ->
+      let ( let* ) = Result.bind in
+      let path = Chat_operation_store.path t.operation_store in
+      let* () = Chat_operation_store.close t.operation_store in
+      Chat_operation_store.open_existing ~path)
+    in
+    (match recovered with
+     | Error error -> Error (record_operation_error t error)
+     | Ok operation_store ->
+       t.operation_store <- operation_store;
+       (match read_operation_projection operation_store ~now:(t.now ()) with
+        | Error error -> Error (record_operation_error t error)
+        | Ok projection ->
+          (match projection.running_operation_id with
+           | Some operation_id ->
+             (* [child_active] is cleared in the same mailbox turn that commits
+                the child's settlement, so a Running row seen here has already
+                lost that commit. It may be an uncertain claim or a completed
+                external effect. Neither starting it again nor manufacturing
+                completion is justified, and re-fencing it as an availability
+                fault would reopen the handle on every wake for nothing. *)
+             let fault = Operation_reconciliation_required operation_id in
+             set_store_fault t fault;
+             publish_operation_projection t { projection with store_unavailable = true };
+             Error (Store_unavailable (store_fault_detail fault))
+           | None ->
+             t.store_error := None;
+             publish_operation_projection t projection;
+             Log.Keeper.info ~keeper_name:t.keeper_name
+               "keeper Owner operation store recovered queued=%d" projection.queued_count;
+             Ok ())))
 ;;
 
 let reject_if_stopping state f =
@@ -720,6 +806,7 @@ let start
           "restart interrupted %d running chat operation(s)"
           settled;
       read_operation_projection operation_store ~now:startup_now
+      |> Result.map_error owner_error_of_operation_error
   in
   (match startup_result with
    | Error _ as error ->
@@ -854,7 +941,7 @@ let start
     mark_no_longer_answering ();
     let projection = Atomic.get t.projection in
     Atomic.set t.projection { projection with stopping = true };
-    match Chat_operation_store.close operation_store with
+    match Chat_operation_store.close t.operation_store with
     | Ok () -> ()
     | Error error ->
       Log.Keeper.error
@@ -1093,8 +1180,8 @@ let start
              loop state shutdown_operation_id
            | Ok () ->
           (match !(t.store_error) with
-           | Some detail ->
-             Eio.Promise.resolve resolve (Error (Store_unavailable detail));
+           | Some fault ->
+             Eio.Promise.resolve resolve (Error (Store_unavailable (store_fault_detail fault)));
              loop state shutdown_operation_id
            | None ->
              (match Keeper_owner_reducer.apply_meta state command with
@@ -1447,6 +1534,8 @@ let start
              before attempting a claim, even while an autonomous turn owns the
              slot, so its next safe boundary can see the ready successor. *)
           let response =
+            let ( let* ) = Result.bind in
+            let* () = recover_operation_availability t in
             run_operation_command t ~label:"refresh Keeper operation readiness"
               (fun () -> Ok ())
             |> Result.map (fun _ -> ())

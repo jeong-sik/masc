@@ -2918,6 +2918,64 @@ let test_recovery_does_not_replay_an_active_or_uncertain_child () =
       check int "external-effect child was never replayed" 1 !executions)
 ;;
 
+(* msx-retro-mania, 2026-09-14 16:45 KST: an operation-store fault landed while
+   the autonomous lane held the turn, and the any-child recovery guard refused
+   to reopen for the 25 minutes that lane ran without pause. Every meta commit
+   in that window was refused as [store_unavailable] and the keeper marched to
+   failing. The lane guard reopens because no Chat_operation child holds the
+   handle, so both the drain and the cycle's own meta commit recover. *)
+let test_availability_recovers_under_an_autonomous_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  with_recovery_store ~sw ~keeper_name:"recovery-autonomous" ~runner:None
+    ~on_turn_slot_released:None
+    (fun owner _path ->
+      let autonomous_result = Eio.Stream.create 1 in
+      Eio.Fiber.fork ~sw (fun () ->
+        let result =
+          Owner.run_autonomous_if_idle owner (fun () ->
+            Eio.Promise.resolve resolve_started ();
+            Eio.Promise.await release)
+        in
+        Eio.Stream.add autonomous_result result);
+      Eio.Promise.await started;
+      (match Owner.turn_in_flight owner with
+       | Some { lane = Owner.Autonomous; _ } -> ()
+       | Some _ -> fail "the fenced turn is not the autonomous lane"
+       | None -> fail "the autonomous child was not in flight");
+      inject_operation_failure owner (operation_id "kmsg-autonomous-rollback");
+      check bool "the fault fenced the operation store" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (match Owner.wake_operation_drain owner with
+       | Ok () -> ()
+       | Error error ->
+         fail
+           ("availability recovery was refused under an autonomous child: "
+            ^ Owner.error_to_string error));
+      check bool "the drain reopened the store under the autonomous child" false
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (match
+         Owner.apply_meta
+           owner
+           (Set_activation_mode
+              { mode = Masc.Keeper_activation_mode.Autonomous
+              ; updated_at = "recovered-under-autonomous" })
+       with
+       | Ok _ -> ()
+       | Error error ->
+         fail
+           ("the autonomous cycle's meta commit was still fenced after recovery: "
+            ^ Owner.error_to_string error));
+      Eio.Promise.resolve resolve_release ();
+      match Eio.Stream.take autonomous_result with
+      | Ok (`Ran ()) -> ()
+      | Ok (`Busy _) -> fail "the autonomous child reported itself busy"
+      | Ok `Interrupted -> fail "nothing interrupted the autonomous child"
+      | Error error -> fail (Owner.error_to_string error))
+;;
+
 let test_keeper_owners_do_not_cross_block () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -4270,6 +4328,8 @@ let () =
             test_recovery_keeps_integrity_failure_fenced
         ; test_case "recovery never replays active or uncertain child" `Quick
             test_recovery_does_not_replay_an_active_or_uncertain_child
+        ; test_case "availability recovers under an autonomous child" `Quick
+            test_availability_recovers_under_an_autonomous_child
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

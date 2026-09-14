@@ -304,6 +304,11 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
+val transport_summary : Masc.Tui_decode.transport_health -> string
+(** The transport tail of the Overview's cluster row: one entry per path, the
+    mark on the path carrying the traffic, then the queue's pressure and its
+    dropped count. *)
+
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per
     phase. *)

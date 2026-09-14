@@ -14,6 +14,10 @@ a short hold (5 frames) is a press. Every edge is recorded in the ledger with \
 your name and the frame number. Frames are 1/60 s; at most 300 per key."""
 additional_properties = false
 
+# A second identical call moves the machine on: the repeat is the work,
+# not a call getting nowhere. Read by Tool_repeat_declarations.
+same_input_advances = true
+
 defer_loading = true
 
 [[params]]

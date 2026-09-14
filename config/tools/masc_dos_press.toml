@@ -12,6 +12,10 @@ call stops at 4000000 instructions in total; keys_pressed says how many \
 landed, and the rest are unsent."""
 additional_properties = false
 
+# A second identical call moves the machine on: the repeat is the work,
+# not a call getting nowhere. Read by Tool_repeat_declarations.
+same_input_advances = true
+
 defer_loading = true
 
 [[params]]

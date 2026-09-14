@@ -15,7 +15,8 @@
     A file that does not parse raises on first ask rather than answering
     [Always_loaded]: a misplaced declaration and no declaration are the same
     answer at every call site, so swallowing the error would make a
-    [defer_loading] nobody honours and nobody reports.
+    [defer_loading] nobody honours and nobody reports. The parse itself is
+    {!Tool_declaration_table}'s, shared with the other per-tool axes.
 
     What a declaration buys, and where it stops. Two limits are easy to state
     wrongly in a tool file, so they live here once rather than in each of

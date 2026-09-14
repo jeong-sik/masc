@@ -161,9 +161,12 @@ module For_testing : sig
       result is a clock: its output moves on every call while nothing advances,
       so the output fingerprint it uses as no-progress proof never matches.
       This one drops the output and requires the repeats to be adjacent
-      instead. *)
+      instead. [advances] is the tool's own declaration
+      ({!Tool_repeat_declarations.advances}): a tool whose identical input
+      moves the machine on is never a streak here. *)
   val repeated_tool_call_input
     :  threshold:int
+    -> advances:(string -> bool)
     -> tool_call_detail list
     -> (string * int) option
 

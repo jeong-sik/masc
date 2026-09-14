@@ -290,10 +290,17 @@ let same_tool_call_input
 (* Newest-first, so the head is the latest call and the streak runs back from
    it. Unlike [repeated_exact_tool_call] the repeats must be adjacent: without
    the output fingerprint, two identical inputs far apart in a dispatch are
-   ordinary re-reads, not a loop. *)
-let repeated_tool_call_input ~threshold tool_calls =
+   ordinary re-reads, not a loop.
+
+   [advances] is the tool's own word on what a repeat is
+   ([Tool_repeat_declarations.advances]): for a tool that declares its
+   identical input moves the machine on -- a step of sixty frames, a key
+   held again -- the streak is the work, and this axis has nothing to say.
+   The exact axis above still counts it, on its own evidence. *)
+let repeated_tool_call_input ~threshold ~advances tool_calls =
   match tool_calls with
   | [] -> None
+  | latest :: _ when advances latest.Keeper_agent_result.tool_name -> None
   | latest :: previous ->
     let rec streak count = function
       | call :: rest when same_tool_call_input latest call -> streak (count + 1) rest
@@ -324,7 +331,8 @@ let official_client_tool_boundary ~repetition_execution ~tool_calls =
       | Some _ as repeated -> repeated
       | None ->
         repeated_tool_call_input
-          ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+          ~threshold:repeated_tool_call_input_yield_threshold
+          ~advances:Tool_repeat_declarations.advances tool_calls
     in
     Ok (Option.map (fun (tool_name, repeated_count) ->
       Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
@@ -636,6 +644,7 @@ let native_tool_boundary
                  repeated_tool_call_input
                    ~threshold:
                      repeated_tool_call_input_yield_threshold
+                   ~advances:Tool_repeat_declarations.advances
                    tool_calls
                with
                | Some (tool_name, repeated_count) ->

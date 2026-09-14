@@ -489,6 +489,7 @@ let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
 let test_repeated_tool_call_input_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
+      ~advances:(fun _ -> false)
   in
   let clock n =
     List.init n (fun i ->
@@ -928,6 +929,64 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   (match official [ live_call (); List.hd run_2_starts_from ] with
    | Ok None -> ()
    | _ -> fail "official-client boundary without a scope stopped an ordinary retry")
+
+(* A tool whose identical input is the work. msx-retro-mania stepped the
+   emulator sixty frames five times in a row -- three hundred frames, the
+   ordinary way to let a title play out -- and this axis read it as a call
+   getting nowhere: 49 of that keeper's 58 loop-guard yields on 2026-09-14
+   were masc_msx_step and masc_msx_press at exactly five. The tool's own
+   declaration ([same_input_advances = true], read through
+   [Tool_repeat_declarations]) takes it out of this axis; the exact axis,
+   which asks the observation to stand still too, keeps its say. *)
+let test_a_tool_whose_repeat_advances_is_not_a_streak () =
+  let steps ~output n =
+    List.init n (fun i ->
+      tool_call ~input:(Some "{\"frames\":60}")
+        ~output:(output i) "masc_msx_step")
+  in
+  let moving i = Some (Printf.sprintf "frame %d" i) in
+  let detect ~advances =
+    Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5 ~advances
+  in
+  check (option (pair string int))
+    "read as a read, five steps are a streak"
+    (Some ("masc_msx_step", 5))
+    (detect ~advances:(fun _ -> false) (steps ~output:moving 5));
+  check (option (pair string int))
+    "declared to advance, the same five are the work"
+    None
+    (detect ~advances:(fun _ -> true) (steps ~output:moving 5));
+  check bool "the declaration in the tool's file is what the guard reads" true
+    (Tool_repeat_declarations.advances "masc_msx_step");
+  check (option (pair string int))
+    "the exact axis still ends a step whose observation never moves"
+    (Some ("masc_msx_step", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       (steps ~output:(fun _ -> Some "same screen") 3));
+  (* The production boundary reads the declaration itself: five steps on
+     the wire continue, five list reads stop. *)
+  let native calls =
+    Masc.Keeper_agent_run.For_testing.native_tool_boundary
+      ~keeper_name:"advancing-tool-fixture"
+      ~repetition_execution:None
+      ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
+      ~tool_calls:calls
+      ~assistant_turn_texts:[]
+      ~autonomous_yield_requested:None
+  in
+  (match native (steps ~output:moving 5) with
+   | Ok Runtime_agent.Continue -> ()
+   | _ -> fail "five advancing steps were stopped as a loop");
+  let reads n =
+    List.init n (fun i ->
+      tool_call ~input:(Some "{}") ~output:(Some (Printf.sprintf "list %d" i))
+        "keeper_tasks_list")
+  in
+  (match native (reads 5) with
+   | Ok (Runtime_agent.Yield
+       (Runtime_agent.Repeated_tool_call
+          { tool_name = "keeper_tasks_list"; repeated_count = 5 })) -> ()
+   | _ -> fail "five identical reads were not stopped")
 
 let test_repeated_assistant_text_boundary () =
   let detect =
@@ -1504,6 +1563,8 @@ let () =
             test_tool_io_digest_survives_eviction;
           test_case "repeated tool input boundary" `Quick
             test_repeated_tool_call_input_boundary;
+          test_case "a tool whose repeat advances is not a streak" `Quick
+            test_a_tool_whose_repeat_advances_is_not_a_streak;
           test_case "repeated assistant text boundary" `Quick
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick

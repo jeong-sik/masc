@@ -10,6 +10,10 @@ for a program that is computing rather than asking. Returns settled, \
 steps_run and input_requests."""
 additional_properties = false
 
+# A second identical call moves the machine on: the repeat is the work,
+# not a call getting nowhere. Read by Tool_repeat_declarations.
+same_input_advances = true
+
 defer_loading = true
 
 [[params]]

@@ -6,6 +6,10 @@ Returns the observation (see masc_msx_screen). Use it to let a title, a fade or 
 level intro play out. Frames are 1/60 s; at most 300 per call."""
 additional_properties = false
 
+# A second identical call moves the machine on: the repeat is the work,
+# not a call getting nowhere. Read by Tool_repeat_declarations.
+same_input_advances = true
+
 defer_loading = true
 
 [[params]]

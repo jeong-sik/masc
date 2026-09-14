@@ -8,6 +8,10 @@ and stable (false at max_frames). A settled unchanged screen may await a key.
 Use for title/fade/level intros instead of repeated step and screen calls."""
 additional_properties = false
 
+# A second identical call moves the machine on: the repeat is the work,
+# not a call getting nowhere. Read by Tool_repeat_declarations.
+same_input_advances = true
+
 defer_loading = true
 
 [[params]]

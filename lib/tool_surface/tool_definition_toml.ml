@@ -554,6 +554,15 @@ let loading_to_string = function
   | Deferrable -> "deferrable"
 ;;
 
+type repeat =
+  | Same_input_reads
+  | Same_input_advances
+
+let repeat_to_string = function
+  | Same_input_reads -> "same_input_reads"
+  | Same_input_advances -> "same_input_advances"
+;;
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; title : string option
@@ -562,6 +571,7 @@ type loaded =
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
+  ; repeat : repeat
   ; operator_remote_description : string option
   ; shell_command : string list option
         (** RFC tools-as-shell-commands: the sub-command path this tool is
@@ -829,6 +839,13 @@ let tool_of_pairs ~name pairs =
       let* flag = as_bool ~context:"defer_loading" value in
       Ok (if flag then Deferrable else Always_loaded)
   in
+  let* repeat =
+    match List.assoc_opt "same_input_advances" pairs with
+    | None -> Ok Same_input_reads
+    | Some value ->
+      let* flag = as_bool ~context:"same_input_advances" value in
+      Ok (if flag then Same_input_advances else Same_input_reads)
+  in
   let* operator_remote_description =
     match List.assoc_opt "operator_remote_description" pairs with
     | None -> Ok None
@@ -898,6 +915,7 @@ let tool_of_pairs ~name pairs =
         ; "agent_core_projection"
         ; "help"
         ; "defer_loading"
+        ; "same_input_advances"
         ; "operator_remote_description"
         ; "shell_command"
         ]
@@ -922,6 +940,7 @@ let tool_of_pairs ~name pairs =
     ; agent_core_projection
     ; help
     ; loading
+    ; repeat
     ; operator_remote_description
     ; shell_command
     }

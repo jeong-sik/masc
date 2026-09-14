@@ -53,6 +53,30 @@ type loading =
 
 val loading_to_string : loading -> string
 
+(** What a second call with the same input does.
+
+    The keeper's loop guard reads consecutive identical inputs as a call that
+    is not getting anywhere -- a clock polled two hundred times, a list read
+    again and again while nothing in it changes -- and yields the turn at five
+    of them. That reading is right for a tool that reads. It is wrong for a
+    tool whose identical input is the work: stepping an emulator sixty frames
+    five times in a row advances it three hundred frames, and holding the
+    same key again is another press. Such a tool says so here, and the guard
+    leaves its repeats alone (the input-and-output axis still applies: a step
+    whose observation never moves is still a step that did nothing).
+
+    Declared per tool, like {!loading}: whether repeating a call is progress
+    is a fact about that tool, not about where it came from. *)
+type repeat =
+  | Same_input_reads
+      (** A second identical call reads what the first read. The default:
+          a tool that says nothing is a read. *)
+  | Same_input_advances
+      (** A second identical call moves the machine on. From the file's
+          [same_input_advances = true]. *)
+
+val repeat_to_string : repeat -> string
+
 (** One decoded tool definition. [schema] is the canonical schema published
     to MCP clients; [keeper_projection], when the file declares a
     [keeper_projection] table, is the deliberately narrower shape handed to
@@ -78,6 +102,9 @@ type loaded =
   ; help : help option
   ; loading : loading
     (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
+  ; repeat : repeat
+    (** From the file's [same_input_advances] key; [Same_input_reads] when
+        absent. *)
   ; operator_remote_description : string option
     (** From the file's [operator_remote_description] key: the sentence the
         operator-remote subset publishes for this tool, when the file
@@ -105,7 +132,8 @@ val load
     [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
     [agent_core_projection] (the same table grammar), [defer_loading]
-    (bool), [operator_remote_description] (non-empty string), and
+    (bool), [same_input_advances] (bool), [operator_remote_description]
+    (non-empty string), and
     [help] (a table of [short_description] / [when_to_use] /
     [details_markdown] strings and [key_constraints] / [doc_refs] /
     [prompt_hints] / [examples] / [alternatives] string lists, at least one

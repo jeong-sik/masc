@@ -4609,7 +4609,10 @@ let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
-    state.lane_addons <- Some {view with error=Some "A Lane request is pending; Esc returns to existing activity"}
+    (* The answer to the key just pressed goes at the top of the pane, so a
+       reader scrolled into a draft would not see it. *)
+    state.lane_addons <- Some {view with scroll=0;
+      error=Some "A Lane request is pending; Esc returns to existing activity"}
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
@@ -11798,7 +11801,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               let updated = Addons.put_document view session in
               {updated with document_key=view.document_key} in
             match response with
-            | Document.Rejected failure -> {view with error=Some failure.message}
+            (* Same reason as the pending note: a rejection is the answer to
+               the save, and it is drawn above the draft the reader is in. *)
+            | Document.Rejected failure -> {view with error=Some failure.message;scroll=0}
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
   (* The capture messages carry the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. The

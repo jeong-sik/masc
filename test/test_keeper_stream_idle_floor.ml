@@ -77,10 +77,11 @@ let test_idle_bound_reaches_a_turn_that_named_none () =
         ~clock:env#clock
         (Exact_output_fixture.Stream_then_stall first_answer_delta)
     in
-    (* One workspace runtime.toml, as an operator writes it: the provider
-       binding and, under [turn], the idle bound. The provider half feeds the
-       runtime registry; the [turn] half feeds the resolved layer that
-       run_named reads. *)
+    (* One workspace runtime.toml, as an operator writes it: the provider,
+       the model, the [stall.sample] binding that makes them a runtime, and
+       under [turn] the idle bound. The runtime half feeds the runtime
+       registry; the [turn] half feeds the resolved layer that run_named
+       reads. *)
     let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
     Fs_compat.mkdir_p (Filename.dirname config_path);
     write
@@ -95,6 +96,7 @@ endpoint = %S
 api-name = "stall-model"
 max-context = 8192
 streaming = true
+[stall.sample]
 [turn]
 stream_idle_timeout_sec = %g
 |}

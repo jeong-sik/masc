@@ -1098,8 +1098,7 @@ Keeper also exposes its automation in the Automation detail tab.
 
 ```
  MASC Schedules  [me]  10:44:57  [connected]
-   Requests: 34  (page shows first 20)
-   Next due: 2026-08-24T09:57:00
+   Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
      [running  ] 2026-08-24T09:12:00  sangsu       one-shot
   j/k:move  Enter:details  n:new  e:modify  x:cancel  r:refresh  Tab:next

@@ -142,13 +142,20 @@ type voice_placement =
   | On_the_section (** the section's default is say's to set: the voice becomes it *)
   | On_the_endpoint (** another provider shares the section and owns its default *)
 
-val voice_placement : Voice_config.tts_config option -> voice_placement
-(** Where a voice chosen for a local (command-run) endpoint is written, given
-    the TTS section as it is now.
+val voice_placement
+  :  alongside:Voice_config.endpoint_kind option list
+  -> adding:Voice_config.endpoint_kind
+  -> voice_placement
+(** Where the voice chosen for an endpoint is written. [alongside] is the kinds
+    already in the TTS section (empty when there is no section yet), [adding]
+    the kind of the endpoint about to land in it. A [None] in [alongside] is an
+    endpoint whose kind the caller could not name -- it counts as another kind,
+    because a default cannot be claimed readable by something unread.
 
     There are two places because a voice name is provider-shaped: [say] takes a
-    label like ["Yuna"], ElevenLabs a 20-character id. One workspace default
-    cannot serve both, so an endpoint carries its own when it has to.
+    label like ["Yuna"], ElevenLabs a 20-character id, an OpenAI voice a name
+    like ["alloy"]. One workspace default cannot serve two of those, so an
+    endpoint carries its own when it has to.
 
     But an endpoint voice outranks [voice.tts.agent_voices]
     ({!Voice_config.voice_for_agent_at_endpoint}), so one written where it is
@@ -157,9 +164,8 @@ val voice_placement : Voice_config.tts_config option -> voice_placement
     (119,044 bytes) without it.
 
     So the question is who owns the section's default, not whether a section
-    exists. A section whose endpoints are all [say] -- including one this
-    command wrote on an earlier run -- is say's, and gets the section default;
-    only a section that also holds another provider puts the voice on the
-    endpoint, and accepts that the mappings do not reach it. Asking only
-    whether a section existed sent the second run of the same command to the
-    endpoint. *)
+    exists. A section everything in it shares a kind with -- including an
+    endpoint an earlier run wrote -- is this endpoint's, and gets the section
+    default; a section holding any other kind puts the voice on the endpoint,
+    and accepts that the mappings do not reach it. Asking only whether a
+    section existed sent the second run of the same command to the endpoint. *)

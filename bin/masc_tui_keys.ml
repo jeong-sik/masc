@@ -463,6 +463,13 @@ let for_surface = function
                  Home/End reach its ends, [ / ] step asks, Esc goes back"
       ; approval_decide
       ; approval_retry
+        (* The footer names this key and the sheet did not, so an operator who
+           pressed [?] to find out how to answer a Keeper's question found
+           every other key on the surface and not that one. The approval queue
+           owns this surface's arrows and its y/n, which is why answering
+           opens as its own mode rather than as a key on the row. *)
+      ; b Act "a" "answer a question"
+          ~help:"open the selected Keeper question in its own mode; Esc leaves it"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "w" "Workspace Gate mode"

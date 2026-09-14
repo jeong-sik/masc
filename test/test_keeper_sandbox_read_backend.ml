@@ -378,6 +378,13 @@ let test_run_command_remote_ssh_endpoint_error_before_image_guard () =
     ; sandbox_image = Some ""
     }
   in
+  (* #36066: the endpoint resolve loads the keeper's declaration first. The
+     declaration carries the meta's profile and no remote_endpoint, so the
+     named endpoint error is what the resolve answers. *)
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path:base
+    ~sandbox_profile:(Some Keeper_types_profile_sandbox.Remote_ssh)
+    "remote-ssh";
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
     ~finally:(fun () ->

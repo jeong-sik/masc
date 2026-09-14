@@ -1126,8 +1126,7 @@ supports_reasoning = true
 # 2026-08-05 live probe of this alias (agent-core-models-overlay.toml comment):
 # the response carries reasoning in the typed "reasoning" field (message keys
 # ['content','reasoning','role']), not "reasoning_content". Declare what the
-# wire actually sends; the sibling ":397b" row's "delta:reasoning_content" is
-# the unresolved mismatch its comment records.
+# wire actually sends; the sibling ":397b" rows declare the same member.
 reasoning_streaming_format = "delta:reasoning"
 # Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
 # json_object returned bare JSON; json_schema returned fenced, unconstrained JSON.
@@ -1163,17 +1162,13 @@ supports_reasoning = true
 # tried too (PR #28680) and also failed, because nothing wires an effort value onto
 # this runtime — the reasoning_effort dialect needs both the format declaration and
 # a concrete effort level.
-# reasoning_streaming_format mirrors config/runtime.toml's ollama-cloud-qwen3-5-397b
-# fix (#28680, 2026-08-14), and matches the ollama_cloud fixture in
-# test_streaming.ml ("reasoning_content" delta on a qwen3.5:397b chunk).
-# Flagging one open discrepancy rather than silently resolving it: the
-# ":cloud" alias row above was live-probed and returned field name
-# "reasoning", not "reasoning_content" (agent-core-models-overlay.toml comment,
-# 2026-08-05). RFC-0370 says ":cloud" and ":397b" hit the same served backend,
-# so the two field names should match; they currently don't. Either value here
-# is strictly better than the prior No_streaming_reasoning default, but the
-# mismatch itself is unresolved — needs a live probe against ":397b" specifically.
-reasoning_streaming_format = "delta:reasoning_content"
+# The wire member is "reasoning": config/runtime.toml's
+# ollama-cloud-qwen3-5-397b entry measured ollama.com/v1/chat/completions with
+# stream=true on 2026-08-25 (delta keys content / reasoning / role), and the
+# ":cloud" alias row above was live-probed to the same name on 2026-08-05.
+# The parser reads only this declared member (F111, 2026-09-14): a value that
+# differs from the wire fails the stream as Openai_undeclared_reasoning_member.
+reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
@@ -1509,9 +1504,10 @@ supports_reasoning = true
 # Same correction as the provider-scoped row above (2026-08-15): this is the
 # bare-fallback twin of that entry and was carrying the identical
 # ollama_think/Enable_not_encodable defect. See that row's comment for the
-# full root-cause citation.
+# full root-cause citation. The streaming member follows that row's 2026-08-25
+# measurement: ollama.com sends "reasoning" (F111, 2026-09-14).
 thinking_control_format = "none"
-reasoning_streaming_format = "delta:reasoning_content"
+reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"

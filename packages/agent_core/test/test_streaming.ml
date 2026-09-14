@@ -352,13 +352,21 @@ let test_parse_with_explicit_event_type () =
   | None -> Alcotest.fail "parse returned None"
 ;;
 
+(* ollama.com /v1 spells readable reasoning [reasoning] (config/runtime.toml
+   measurement 2026-08-25), which is what the qwen3.5:397b fixture below
+   declares and sends. *)
 let parse_openai_chunk_exn data =
-  match Agent_core.Llm_provider.Streaming.parse_openai_sse_chunk data with
+  match
+    Agent_core.Llm_provider.Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:(Agent_core.Llm_provider.Reasoning_dialect.Delta_field "reasoning")
+      data
+  with
   | Agent_core.Llm_provider.Streaming.Openai_chunk chunk -> chunk
   | Agent_core.Llm_provider.Streaming.Openai_done
   | Agent_core.Llm_provider.Streaming.Openai_empty
   | Agent_core.Llm_provider.Streaming.Openai_provider_error _
-  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _ ->
+  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
+  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
     Alcotest.fail "expected OpenAI-compatible stream chunk"
 ;;
 
@@ -375,7 +383,7 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
   in
   let first =
     parse_openai_chunk_exn
-      {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning_content":"plan-","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":"}}]},"finish_reason":null}]}|}
+      {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning":"plan-","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":"}}]},"finish_reason":null}]}|}
   in
   let first_events, first_telemetry =
     Agent_core.Llm_provider.Streaming.openai_chunk_to_events state first
@@ -395,7 +403,7 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
    | _ -> Alcotest.fail "expected separate thinking and tool argument events");
   let second =
     parse_openai_chunk_exn
-      {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning_content":"done","content":"visible","tool_calls":[{"index":0,"function":{"arguments":"\"Seoul\"}"}}]},"finish_reason":null}]}|}
+      {|{"id":"chatcmpl-1","model":"qwen3.5:397b","choices":[{"delta":{"reasoning":"done","content":"visible","tool_calls":[{"index":0,"function":{"arguments":"\"Seoul\"}"}}]},"finish_reason":null}]}|}
   in
   let second_events, _ =
     Agent_core.Llm_provider.Streaming.openai_chunk_to_events state second

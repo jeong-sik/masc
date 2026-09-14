@@ -1605,9 +1605,12 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , No_structured_output
       , Replay_not_required
       (* 2026-08-15: no control wire on /v1 (see the catalog row's comment),
-         so the reasoning delta streams on the plain reasoning_content field
-         instead of Ollama's native "thinking" field. *)
-      , Delta_stream "reasoning_content" )
+         so the reasoning delta streams on a plain OpenAI-compat member instead
+         of Ollama's native "thinking" field. That member is "reasoning":
+         config/runtime.toml's ollama-cloud-qwen3-5-397b entry measured it on
+         2026-08-25, and since F111 the parser reads only the declared member,
+         so a row still declaring reasoning_content would fail the stream. *)
+      , Delta_stream "reasoning" )
     ; ( "Ollama Cloud Gemma4"
       , Provider_qualified "ollama_cloud"
       , "gemma4:31b"

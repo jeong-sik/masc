@@ -100,6 +100,17 @@ type openai_sse_parse_result =
       ; raw : string
       }
   | Openai_parse_failed of openai_chunk_parse_error
+  | Openai_undeclared_reasoning_member of
+      { declared : string
+      ; member : string
+      ; raw : string
+      }
+      (** The catalog row declared reasoning on [delta.<declared>], and the
+          chunk carried non-blank reasoning under the other documented
+          member instead while the declared one was absent or blank. The
+          parser reads only the declared member, so this is a misdeclared
+          row surfacing as a typed observation; [raw] is the chunk that
+          exposed it. *)
 
 (** Request-local mutable normalization state, owned by one sequential stream
     decoder. Its representation is private so callers cannot bypass tool
@@ -107,9 +118,14 @@ type openai_sse_parse_result =
 type openai_stream_state
 
 val parse_openai_sse_chunk
-  :  ?streaming_reasoning:Reasoning_dialect.streaming_reasoning
+  :  streaming_reasoning:Reasoning_dialect.streaming_reasoning
   -> string
   -> openai_sse_parse_result
+(** [streaming_reasoning] is the catalog row's declaration of where readable
+    reasoning arrives on a chat delta; it is the only member the parser
+    reads. There is no undeclared default: a caller without a resolved
+    dialect passes {!Reasoning_dialect.No_streaming_reasoning} and gets no
+    reasoning. *)
 
 (** Agent Core contract: [true] when the chunk carries either a non-empty
     [delta_content] or a non-empty [delta_reasoning] or any

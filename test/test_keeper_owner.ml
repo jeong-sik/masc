@@ -97,6 +97,7 @@ let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ =
 ;;
 
 let start_owner_with_executor_ready
+      ?(now = fun () -> 42.0)
       ?(on_execution_settled = noop_execution_settled)
       ~operation_ready
       ~sw
@@ -114,7 +115,7 @@ let start_owner_with_executor_ready
     ~sw
     ~store
     ~operation_store_path:path
-    ~now:(fun () -> 42.0)
+    ~now
     ~operation_runner:
       (Option.map
          (fun execute ->
@@ -1001,6 +1002,7 @@ let test_operation_lifecycle_is_durable_and_projected () =
   check int "acceptance includes exact queued count" 1 accepted.queued_count;
   let queued_projection = Owner.operation_projection owner in
   check int "queued projection publishes after commit" 1 queued_projection.queued_count;
+  check bool "queued input is ready" true queued_projection.has_claimable_queued;
   check bool
     "queued projection has no running operation"
     true
@@ -1019,6 +1021,7 @@ let test_operation_lifecycle_is_durable_and_projected () =
     (Option.is_none (owner_ok (Owner.claim_next_operation owner)));
   let running_projection = Owner.operation_projection owner in
   check int "claim drains queued projection" 0 running_projection.queued_count;
+  check bool "claimed input no longer requests a yield" false running_projection.has_claimable_queued;
   check bool
     "claim publishes running identity"
     true
@@ -1228,6 +1231,9 @@ let test_gate_wait_releases_owner_without_repeated_children () =
     |> owner_ok |> ignore;
   Eio.Promise.await waiting_p;
   check int "waiting did not launch another child" 1 !attempts;
+  let projection = Owner.operation_projection owner in
+  check int "approval wait remains queued" 1 projection.queued_count;
+  check bool "approval wait cannot request a yield" false projection.has_claimable_queued;
   (match owner_ok (Owner.run_autonomous_if_idle owner (fun () -> "independent work")) with
    | `Ran value -> check string "waiting released Owner" "independent work" value
    | `Busy _ -> fail "Gate waiting retained Owner slot");
@@ -1236,6 +1242,100 @@ let test_gate_wait_releases_owner_without_repeated_children () =
     |> owner_ok |> ignore;
   Eio.Promise.await finished_p;
   check int "resolution resumes exactly one original child" 2 !attempts
+;;
+
+let test_cooling_retry_readiness_refreshes_on_wake () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let now = ref 42.0 in
+  let owner = start_owner_with_executor_ready ~now:(fun () -> !now)
+      ~operation_ready:(fun ~keeper_name:_ -> true) ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_executor:None ~keeper_name:"cooling-readiness"
+      ~initial_meta:(Some (make_meta "cooling-readiness")) () |> owner_ok in
+  let operation_id = operation_id "kmsg-cooling-readiness" in
+  Owner.submit_operation owner ~operation_id ~source:operation_source
+    ~input:(operation_input "resume after provider backoff") |> owner_ok |> ignore;
+  let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "cooling-readiness" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"cooling checkpoint" |> Result.get_ok in
+  let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.0)
+      ~checkpoint ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
+      ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
+  Owner.defer_direct_runtime_retry owner ~operation_id
+    ~execution_digest:operation.execution_digest ~continuation |> owner_ok |> ignore;
+  let cooling = Owner.operation_projection owner in
+  check int "cooling input is retained" 1 cooling.queued_count;
+  check bool "cooling input is not ready" false cooling.has_claimable_queued;
+  check bool "cooling input cannot be claimed" true
+    (Option.is_none (Owner.claim_next_operation owner |> owner_ok));
+  (match Owner.run_autonomous_if_idle owner (fun () ->
+       Owner.wake_operation_drain owner |> owner_ok;
+       check bool "early wake does not request a yield" false
+         (Owner.operation_projection owner).has_claimable_queued;
+       now := 100.0;
+       Owner.wake_operation_drain owner |> owner_ok;
+       check bool "due wake publishes readiness while autonomous slot is held" true
+         (Owner.operation_projection owner).has_claimable_queued) |> owner_ok with
+   | `Ran () -> ()
+   | `Busy _ -> fail "cooling retry prevented autonomous progress");
+  let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  check bool "wake preserves original execution identity" true
+    (Chat_operation.Operation_id.equal operation_id resumed.operation_id)
+;;
+
+let test_retry_deadline_crossing_automatically_wakes () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+    ~mono_clock:env#mono_clock @@ fun () ->
+  let ready = ref false in
+  let reads_before_deadline = ref None in
+  let now () =
+    match !reads_before_deadline with
+    | None -> 42.0
+    | Some remaining when remaining > 0 ->
+      reads_before_deadline := Some (remaining - 1);
+      42.0
+    | Some _ -> 100.0
+  in
+  let resumed, resolve_resumed = Eio.Promise.create () in
+  let owner_p, resolve_owner = Eio.Promise.create () in
+  let executor ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation = claim () |> owner_ok |> Option.get in
+    let observed = Owner.direct_runtime_retry owner
+        ~operation_id:operation.Chat_operation.operation_id |> owner_ok |> Option.get in
+    Owner.resume_direct_runtime_retry owner ~operation_id:operation.operation_id
+      ~observed |> owner_ok;
+    Eio.Promise.resolve resolve_resumed operation.operation_id;
+    Owner.Operation_succeeded { outcome_ref = "deadline-crossing-completed" }
+  in
+  let owner = start_owner_with_executor_ready ~now
+      ~operation_ready:(fun ~keeper_name:_ -> !ready) ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_executor:(Some executor) ~keeper_name:"deadline-crossing"
+      ~initial_meta:(Some (make_meta "deadline-crossing")) () |> owner_ok in
+  Eio.Promise.resolve resolve_owner owner;
+  let operation_id = operation_id "kmsg-deadline-crossing" in
+  Owner.submit_operation owner ~operation_id ~source:operation_source
+    ~input:(operation_input "resume when ready") |> owner_ok |> ignore;
+  let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "deadline-crossing" |> Result.get_ok)
+      ~turn_count:1 ~canonical_checkpoint_bytes:"deadline checkpoint" |> Result.get_ok in
+  let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.0)
+      ~checkpoint ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
+      ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
+  ready := true;
+  (* Defer writes at 42, then projects at 42. The clock crosses the deadline
+     before re-arming. A second scan at 100 would lose this wake entirely. *)
+  reads_before_deadline := Some 2;
+  Owner.defer_direct_runtime_retry owner ~operation_id
+    ~execution_digest:operation.execution_digest ~continuation |> owner_ok |> ignore;
+  let actual = Eio.Time.with_timeout_exn env#clock 2.0 (fun () ->
+      Eio.Promise.await resumed) in
+  check bool "automatic wake claims the original operation" true
+    (Chat_operation.Operation_id.equal operation_id actual)
 ;;
 
 let test_runtime_deferred_child_keeps_same_operation_and_drains () =
@@ -3665,6 +3765,10 @@ let () =
             test_owner_coalesces_compatible_messages_and_preserves_other_conversations
         ; test_case "Esc resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:false)
         ; test_case "interactive Enter resolves batch member before wire binding" `Quick (test_batch_member_interrupt_before_wire_binding ~interactive:true)
+        ; test_case "cooling retry publishes readiness on wake" `Quick
+            test_cooling_retry_readiness_refreshes_on_wake
+        ; test_case "retry deadline crossing automatically wakes" `Quick
+            test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case

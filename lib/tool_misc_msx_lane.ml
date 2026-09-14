@@ -77,6 +77,14 @@ let carts_available ~base_path =
   else []
 ;;
 
+(* Where the C-BIOS directory came from, so the load and the report both
+   read the decision instead of comparing a path against "". *)
+type bios_source =
+  | Argument of string (* the caller's roms_dir *)
+  | Env of string (* MSX_ROMS through the config floor *)
+  | Inventory of string (* .masc/msx/bios/ holding the main ROM *)
+  | None_available (* the machine boots without a BIOS; the bus reads 0xFF *)
+
 (* roms_dir argument, then MSX_ROMS, then the bios/ inventory when it holds
    the main ROM, else no BIOS at all. *)
 let resolve_roms_dir ~base_path args =
@@ -86,11 +94,22 @@ let resolve_roms_dir ~base_path args =
        runtime.toml the way it names everything else. [Sys.getenv_opt] reads
        only what the parent process exported. *)
     match Env_config_core.raw_value_opt "MSX_ROMS" with
-    | Some dir when dir <> "" -> dir
+    | Some dir when dir <> "" -> Env dir
     | Some _ | None ->
       let dir = bios_dir ~base_path in
-      if Sys.file_exists (Filename.concat dir "cbios_main_msx2.rom") then dir else "")
-  | dir -> dir
+      if Sys.file_exists (Filename.concat dir "cbios_main_msx2.rom") then Inventory dir
+      else None_available)
+  | dir -> Argument dir
+;;
+
+let roms_dir_of_source = function
+  | Argument dir | Env dir | Inventory dir -> Some dir
+  | None_available -> None
+;;
+
+let bios_of_source = function
+  | Argument _ | Env _ | Inventory _ -> true
+  | None_available -> false
 ;;
 
 (* A cart is a path that exists, or a name (with or without .rom/.dsk) in
@@ -186,7 +205,8 @@ let arcade_announcement ~agent_name
 ;;
 
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
-  let roms_dir = resolve_roms_dir ~base_path args in
+  let bios_source = resolve_roms_dir ~base_path args in
+  let roms_dir = roms_dir_of_source bios_source in
   let media =
     match get_string_opt args "cart" with
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
@@ -220,7 +240,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
       ~extra:
         [ ( "carts_available"
           , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
-        ; ("bios", `Bool (roms_dir <> ""))
+        ; ("bios", `Bool (bios_of_source bios_source))
         ]
       (relayed
          (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir

@@ -23,4 +23,4 @@ description = "A name from carts_available (with or without its extension) or a 
 [[params]]
 name = "roms_dir"
 type = "string"
-description = "Directory holding the C-BIOS ROMs. Default: the server's MSX_ROMS, else .masc/msx/bios/ when it holds cbios_main_msx2.rom, else no BIOS."
+description = "All three C-BIOS ROMs; a missing one is refused by name. Default: MSX_ROMS, else .masc/msx/bios/ with cbios_main_msx2.rom, else no BIOS."

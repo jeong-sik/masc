@@ -226,10 +226,11 @@ let rendered_pixels st =
    observation (measured: 315 keeper screens averaged 3.7 KB), which is what
    drowns the useful fields in a playing keeper's context. Text and tile
    modes keep the name table — there it is the game's text. *)
-let is_bitmap_mode mode =
+let is_bitmap_mode (mode : Msx.display_mode) =
   match mode with
-  | "GRAPHIC4" | "GRAPHIC5" | "GRAPHIC6" | "GRAPHIC7" -> true
-  | _ -> String.starts_with ~prefix:"UNDEFINED" mode
+  | Msx.Graphic4 | Msx.Graphic5 | Msx.Graphic6 | Msx.Graphic7 | Msx.Undefined _ -> true
+  | Msx.Text1 | Msx.Text2 | Msx.Multicolor | Msx.Graphic1 | Msx.Graphic2 | Msx.Graphic3
+    -> false
 ;;
 
 let observe st =
@@ -238,9 +239,7 @@ let observe st =
   ; mode = Msx.display_mode_to_string mode
   ; pc = Msx.dump_pc st.m
   ; halted = Msx.cpu_halted st.m
-  ; screen_text =
-      (if is_bitmap_mode (Msx.display_mode_to_string mode) then ""
-       else Msx.screen_text st.m)
+  ; screen_text = (if is_bitmap_mode mode then "" else Msx.screen_text st.m)
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode
   ; cartridge = st.cart
@@ -281,20 +280,17 @@ let rec mkdir_p dir =
   end
 ;;
 
-let load_roms roms_dir =
-  if roms_dir = "" then Ok []
-  else begin
-    let main = Filename.concat roms_dir (List.hd bios_files) in
-    if not (Sys.file_exists main) then
-      Error (Unreadable (Printf.sprintf "no %s in %s" (List.hd bios_files) roms_dir))
-    else
-      Ok
-        (List.map
-           (fun f ->
-             let p = Filename.concat roms_dir f in
-             if Sys.file_exists p then read_file p else "")
-           bios_files)
-  end
+(* No directory means no BIOS: the bus reads 0xFF. A directory must hold the
+   whole C-BIOS triple -- a missing logo or sub ROM used to board as an empty
+   string and the machine booted with a hole in it, which is no evidence of
+   anything. The first file that is not there names the refusal. *)
+let load_roms (roms_dir : string option) =
+  match roms_dir with
+  | None -> Ok []
+  | Some dir -> (
+    match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
+    | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
+    | None -> Ok (List.map (fun f -> read_file (Filename.concat dir f)) bios_files))
 ;;
 
 let load_cart = function
@@ -345,7 +341,7 @@ let medium_of (st : machine option) =
      | None, None -> None)
 ;;
 
-let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
+let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
   locked (fun () ->
     (* Read under the lock the load commits under: two loads that serialise
        here see the machine each one replaced, not the one both started

@@ -528,14 +528,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                  ceiling. Here it bounds the whole readiness run on the clock
                  the command was given: the wait for the binding's admission
                  permit, both provider round trips and the tool call between
-                 them. It is held here, on [clock], and not as the run's
-                 provider deadlines, because those are enforced on the
-                 process clock, which the CLI does not install: a per-request
-                 deadline set on this config was refused before the request
-                 as "supplied without the clock required to enforce it", and
-                 no HTTP binding verified from `masc runtime-verify` or
-                 `masc setup`. Without any bound this arm held both commands
-                 for as long as a silent endpoint or a held permit lasted. *)
+                 them. It is held here, on [clock], as one window over the
+                 run, not as per-request deadlines on the config: a
+                 per-request deadline restarts at each request, so two round
+                 trips and a permit wait could take several of them, and
+                 without any bound this arm held `masc runtime-verify` and
+                 `masc setup` for as long as a silent endpoint or a held
+                 permit lasted. *)
               let config =
                 Runtime_agent.default_config
                   ~name:"runtime-verification"

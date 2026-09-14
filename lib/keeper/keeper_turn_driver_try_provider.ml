@@ -1194,7 +1194,16 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
            different clocks. *)
         let attempt_started_at = Time_compat.now () in
         (match
+           (* A finished attempt stands even when it finished in the same
+              scheduler pass the watchdog's poll called it stalled:
+              [Fiber.first] alone keeps whichever arm finished first, and a
+              provider answer that arrived must not be recorded as a stall
+              and retried. *)
            Eio.Fiber.first
+             ~combine:(fun first later ->
+               match first with
+               | `Attempt_finished _ -> first
+               | `Attempt_stalled -> later)
              (fun () -> `Attempt_finished (run_attempt_switch ()))
              (fun () ->
                await_attempt_stall

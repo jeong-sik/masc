@@ -27,7 +27,7 @@ let run_with_body_deadline body_deadline f =
   match body_deadline with
   | Http_client.Unbounded -> Body_completed (f ())
   | Http_client.Bounded (clock, timeout_s) ->
-    (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+    (match Under_deadline.run clock timeout_s f with
      | Ok result -> Body_completed result
      | Error `Timeout -> Body_deadline_exceeded timeout_s)
 ;;

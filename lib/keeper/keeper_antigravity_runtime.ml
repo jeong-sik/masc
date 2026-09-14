@@ -893,8 +893,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)
           in
+          (* A turn the runtime completed as the abort arrived is a
+             completed turn: its answer stands and the abort is moot. *)
           match
-            Eio.Fiber.first
+            Watched_work.run
               (fun () ->
                  `Runtime
                    (Runtime_antigravity.run_turn
@@ -924,7 +926,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                       ~on_stream_event:stream.on_runtime_event
                       client_config
                       ~prompt))
-              (fun () -> `Abort (Eio.Promise.await abort_turn))
+              ~watcher:(fun () -> `Abort (Eio.Promise.await abort_turn))
           with
           | `Runtime client_result ->
             client_result

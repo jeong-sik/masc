@@ -15183,9 +15183,15 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_tts_default_voice"):
-            if wanted not in changes:
-                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        if "put_endpoint" not in changes:
+            raise AssertionError(f"the save omitted put_endpoint: {body!r}")
+        # A voice name is provider vocabulary, so it is only right as the
+        # section default while everything falling back to it shares this
+        # endpoint's kind. This section holds a voice_mcp endpoint beside the
+        # elevenlabs one, so voice_placement puts the voice on the endpoint and
+        # leaves the section default the other endpoint can still read.
+        if "set_tts_default_voice" in changes:
+            raise AssertionError(f"the save rewrote the section's voice: {body!r}")
         # The model rides on the endpoint. Sent as the section's default it
         # became the model every other endpoint in the section was asked for.
         if "set_default_model" in changes:
@@ -15200,8 +15206,8 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
         # The name of the variable, never its value: runtime.toml is committed.
         if any("sk-" in str(value) for value in endpoint.values()):
             raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
-        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
-            raise AssertionError(f"the default voice was lost: {changes!r}")
+        if endpoint.get("default_voice") != "pty-voice-id":
+            raise AssertionError(f"the endpoint lost its voice: {endpoint!r}")
 
         # Esc leaves. The pane is underneath and no step counter remains.
         closed = press_and_settle(process, master_fd, output, b"\x1b")

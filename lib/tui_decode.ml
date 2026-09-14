@@ -1893,6 +1893,20 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+(* The wire word is what [Tool_result.string_of_disposition] writes, and
+   the two functions are each other's inverse so a reader that shows the
+   word back shows the one the ledger wrote. *)
+let keeper_call_disposition_to_string = function
+  | Keeper_call_completed -> "completed"
+  | Keeper_call_deferred -> "deferred"
+  | Keeper_call_failed -> "failed"
+
+let keeper_call_disposition_of_string = function
+  | "completed" -> Ok Keeper_call_completed
+  | "deferred" -> Ok Keeper_call_deferred
+  | "failed" -> Ok Keeper_call_failed
+  | unknown -> Error ("keeper call has unknown disposition " ^ unknown)
+
 type keeper_call = {
   kc_at : float;
   kc_tool : string;
@@ -5380,10 +5394,7 @@ let decode_keeper_call json =
   let* kc_disposition =
     match nonblank disposition with
     | None -> Ok None
-    | Some "completed" -> Ok (Some Keeper_call_completed)
-    | Some "deferred" -> Ok (Some Keeper_call_deferred)
-    | Some "failed" -> Ok (Some Keeper_call_failed)
-    | Some unknown -> Error ("keeper call has unknown disposition " ^ unknown)
+    | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
   in
   Ok
     ( keeper

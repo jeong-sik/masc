@@ -112,7 +112,11 @@ type keeper_tool_call = {
           invocation. *)
   kt_tool : string;
   kt_duration_ms : float option;
-  kt_disposition : string option;  (** [completed], as the server writes it *)
+  kt_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
+      (** [completed], [deferred] or [failed] as the call log spells them,
+          typed at the wire so a reader never compares the word. None when
+          the frame carried none; a word outside the vocabulary stays an
+          Error beside the call's I/O, the way [kt_schedule] keeps its. *)
   kt_at : float;
   kt_tool_use_id : string option;
   kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;

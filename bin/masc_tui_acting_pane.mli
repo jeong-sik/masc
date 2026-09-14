@@ -128,6 +128,20 @@ type scope =
   | Whole_fleet
   | Selected_only
 
+(** The order the focus block lists the newest record's calls in. The two
+    receipt orders are what the fold holds, forwards and backwards; the other
+    two are stable sorts over receipt order, so ties keep it. A call still
+    out has no duration and sorts after every call that has one. The heading
+    over the calls names the order that is up. *)
+type call_order =
+  | Oldest_first
+  | Newest_first
+  | Longest_first
+  | By_tool
+
+val call_order_label : call_order -> string
+val next_call_order : call_order -> call_order
+
 type input = {
   now : float;
   tab : tab;
@@ -147,6 +161,12 @@ type input = {
       (** Event-derived projection, newest first; all presentation inputs above
           remain live independently of chunk reuse. Ignored on Changes. *)
   changes : changes;  (** the selected keeper's, for the changes tab *)
+  call_order : call_order;
+  expanded : (string * Masc_tui_acting.call_key) list;
+      (** The calls whose detail is open, by keeper and call key. An open
+          call draws three rows under its own: its receipt age with the
+          schedule and disposition in words, then the input and output
+          previews the producer sent, one row each. *)
 }
 
 type span = {
@@ -169,8 +189,12 @@ type row_target =
   | Target_file of int
       (** a changes row: the index of the file in [Changes_ready.files] *)
   | Target_calls of string
-      (** a call row or an earlier-turn row in the focus block: the keeper
-          whose calls it draws; a press opens that keeper's calls surface *)
+      (** an earlier-turn row in the focus block: the keeper whose calls it
+          draws; a press opens that keeper's calls surface *)
+  | Target_call of string * Masc_tui_acting.call_key
+      (** a call row, or one of an open call's detail rows: the keeper and
+          the call; a press opens the call's detail or closes it *)
+  | Target_call_order  (** the heading over the calls: a press turns the order *)
 
 type rendering = {
   rows : line list;
@@ -191,6 +215,13 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     A row states less before it clips a figure: an earlier-turn row gives up
     its cost, then the token parts; the focus header gives up the long form
     of its state word.
+
+    The focus block, under either scope, is the keeper's header, then --
+    when the record names calls -- a heading naming their order, the calls
+    in that order with an open call's three detail rows under it, then the
+    earlier turns. A call row wears the record glyph, or the failure glyph
+    when the ledger said the call failed, then two dispatch cells: [&] when
+    it ran in a batch with others, [>] when it returned a deferral.
 
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the

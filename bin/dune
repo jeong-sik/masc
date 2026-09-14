@@ -471,7 +471,9 @@
  (name masc_tui_acting)
  (wrapped false)
  (modules masc_tui_acting)
- (libraries masc_tui_observer agent_core))
+ ; masc for the call log's disposition vocabulary, which the observer types
+ ; the live rows with and the fold carries through unchanged.
+ (libraries masc masc_tui_observer agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -853,7 +855,10 @@
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout
-  masc_tui_roster_pane))
+  masc_tui_roster_pane
+  ; agent_core for the tool schedule contract a ledger call carries: batch
+  ; size and execution mode decide the dispatch marks.
+  agent_core))
 
 (library
  (name masc_tui_keeper_mark)

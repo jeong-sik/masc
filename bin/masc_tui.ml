@@ -8854,10 +8854,37 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
           | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _ ->
               ()))
+  | Masc_tui_acting_pane.Target_call_order ->
+      state.acting_pane_call_order
+      <- Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
+  | Masc_tui_acting_pane.Target_call (keeper_name, key) ->
+      (* A press on a call opens it: its detail rows draw under it until a
+         press on the call or its detail closes it again. What stays open is
+         only what the feed still holds -- a key for a call that has left
+         the projection is dropped here rather than kept for a call that
+         may never come back. *)
+      let held =
+        Masc_tui_acting.projection_chunks (recent_chunk_projection state)
+        |> List.exists (fun (chunk : Masc_tui_acting.chunk) ->
+               List.exists
+                 (fun tool ->
+                   Masc_tui_acting.call_key_equal (Masc_tui_acting.call_key tool) key)
+                 (Masc_tui_acting.chunk_tools chunk)
+               && String.equal chunk.Masc_tui_acting.ck_keeper keeper_name)
+      in
+      let same (name, opened) =
+        String.equal name keeper_name && Masc_tui_acting.call_key_equal opened key
+      in
+      let others = List.filter (fun entry -> not (same entry)) state.acting_pane_expanded in
+      state.acting_pane_expanded
+      <- (if held && not (List.exists same state.acting_pane_expanded) then
+            (keeper_name, key) :: others
+          else others)
   | Masc_tui_acting_pane.Target_calls keeper_name -> (
-      (* A call row is the keeper's calls surface by another hand, the way
-         [t] opens it from the roster: the cursor lands on that keeper so the
-         surface names the right one, and the snapshot is asked for afresh. *)
+      (* An earlier turn's row is the keeper's calls surface by another hand,
+         the way [t] opens it from the roster: the cursor lands on that
+         keeper so the surface names the right one, and the snapshot is asked
+         for afresh. *)
       match
         List.find_index
           (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)

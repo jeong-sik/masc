@@ -245,6 +245,16 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
+val keeper_call_disposition_of_string :
+  string -> (keeper_call_disposition, string) result
+(** The wire word of a call's disposition ([completed], [deferred],
+    [failed]) as the variant; any other word is the error, never a default.
+    Read by the call log decoder here and by the TUI's live observer, so the
+    two planes agree on the vocabulary. *)
+
+val keeper_call_disposition_to_string : keeper_call_disposition -> string
+(** The inverse of {!keeper_call_disposition_of_string}. *)
+
 type keeper_call = {
   kc_at : float;  (** [ts], unix seconds *)
   kc_tool : string;

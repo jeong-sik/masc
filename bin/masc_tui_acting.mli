@@ -106,7 +106,28 @@ val row_of_event :
 type chunk_tool = {
   ct_tool : string;
   ct_duration_ms : float option;
+  ct_at : float;  (** receipt clock of the row that named the call *)
+  ct_tool_use_id : string option;
+  ct_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
+      (** The ledger's word for what became of the call. [None] on a call the
+          wire plane stood in for: that plane reports no disposition. *)
+  ct_schedule : (Agent_core.Tool_contract.schedule, string) result option;
+      (** Where the runtime placed the call in the turn: its planned step,
+          its batch and how many ran in that batch at once. [None] on the
+          wire plane, an [Error] when the ledger row's schedule did not
+          parse, kept beside the call rather than dropped. *)
+  ct_input : string option;  (** producer-redacted preview *)
+  ct_output : string option;  (** producer-redacted preview *)
 }
+
+(** How a press names one call across frames: the provider's call id when
+    the row carried one, else the receipt clock and the tool name. *)
+type call_key =
+  | Call_by_id of string
+  | Call_by_receipt of { at : float; tool : string }
+
+val call_key : chunk_tool -> call_key
+val call_key_equal : call_key -> call_key -> bool
 
 type wire_tool = {
   wt_id : string option;

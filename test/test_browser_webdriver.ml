@@ -14,7 +14,7 @@ let test_session_lifecycle () =
       | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `DELETE, "/session/owned" -> Ok `Null
       | `POST, "/session/owned/frame" -> Ok `Null
-      | `POST, "/session/owned/url" -> Error (Driver.Remote {code="invalid session id";message="Firefox exited"})
+      | `POST, "/session/owned/url" -> Error (Driver.Remote {code=Driver.Invalid_session_id;message="Firefox exited"})
       | _ -> fail ("unexpected request: " ^ path)
     in
     let driver = Driver.create ~start_downloads ~request () in
@@ -45,7 +45,7 @@ let test_session_lifecycle () =
 let test_backend_failure () =
   match Driver.decode_response ~status:404
     {|{"value":{"error":"no such window","message":"tab closed"}}|} with
-  | Error (Driver.Remote {code="no such window";message="tab closed"}) -> ()
+  | Error (Driver.Remote {code=Driver.No_such_window;message="tab closed"}) -> ()
   | _ -> fail "WebDriver errors must retain their code and message"
 let test_malformed_success () =
   match Driver.decode_response ~status:200 {|{"ok":true}|} with
@@ -58,7 +58,7 @@ let test_closed_current_window () =
       | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";"capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
       | `GET, "/session/owned/window/handles" -> Ok (`List [`String "remaining"])
       | `GET, "/session/owned/window" ->
-        Error (Driver.Remote {code="no such window";message="current tab closed"})
+        Error (Driver.Remote {code=Driver.No_such_window;message="current tab closed"})
       | `POST, "/session/owned/window" ->
         selected := body :: !selected; Ok `Null
       | `POST, "/session/owned/execute/sync" ->
@@ -175,7 +175,7 @@ let test_selected_binary () =
       match method_, path with
       | `POST, "/session" ->
         requests := body :: !requests;
-        Error (Driver.Remote {code="session not created";message="invalid configured browser"})
+        Error (Driver.Remote {code=Driver.Other "session not created";message="invalid configured browser"})
       | _ -> fail "unexpected browser request" in
     let driver = Driver.create ~start_downloads ~binary:"/test/Zen.app/Contents/MacOS/zen" ~request () in
     (match Driver.execute driver (Lane.Session_open {headless=Some true}) with
@@ -368,6 +368,58 @@ let test_optional_document_never_selects_or_blocks_owner () =
       (match Driver.observe_document_if_idle driver ~tab_id:1 with
        | Lane.Answered _ -> () | _ -> fail "primary completion should release optional admission")))
 
+(* Proves F290/F400: the W3C error code reaches every recovery site as a
+   closed sum, not a wire string. On origin/main [Remote.code] is a string,
+   so the constructor patterns here do not compile there. On this branch a
+   response decoded with "invalid session id" still clears the owned
+   session, and an unlisted code surfaces as [Other] carrying the raw code.
+   [spelled] is exhaustive: a constructor added without a spelling here
+   fails to compile under -warn-error +a. *)
+let test_remote_error_is_a_closed_sum () =
+  let decode code = Driver.decode_response ~status:404
+      (Printf.sprintf {|{"value":{"error":"%s","message":"m"}}|} code) in
+  let spelled = function
+    | Driver.Invalid_session_id -> "invalid session id"
+    | Driver.No_such_window -> "no such window"
+    | Driver.No_such_alert -> "no such alert"
+    | Driver.Unexpected_alert_open -> "unexpected alert open"
+    | Driver.Other code -> code in
+  List.iter (fun (wire, expected) ->
+      match decode wire with
+      | Error (Driver.Remote {code; message = "m"}) ->
+        check bool ("decoded " ^ wire) true (code = expected);
+        check string "constructor spells its wire code" wire (spelled code)
+      | _ -> fail ("no Remote error decoded for " ^ wire))
+    [ "invalid session id", Driver.Invalid_session_id;
+      "no such window", Driver.No_such_window;
+      "no such alert", Driver.No_such_alert;
+      "unexpected alert open", Driver.Unexpected_alert_open;
+      "session not created", Driver.Other "session not created" ];
+  (match decode "session not created" with
+   | Error error ->
+     check string "unlisted code stays visible in the message"
+       "session not created: m" (Driver.error_message error)
+   | Ok _ -> fail "HTTP 404 with a WebDriver error is not success");
+  Eio_main.run (fun _ ->
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId", `String "owned";
+          "capabilities", `Assoc ["webSocketUrl", `String "ws://localhost:1234/session/owned"]])
+      | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/url" -> decode "invalid session id"
+      | _ -> fail ("unexpected request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless = Some true}));
+    (match Driver.execute driver (Lane.Page_goto {url = "https://example.org"; tab_id = None}) with
+     | Lane.Refused _ -> () | _ -> fail "browser exit must be visible");
+    match Driver.execute driver Lane.Session_status with
+    | Lane.Answered (`Assoc fields) ->
+      (match List.assoc_opt "data" fields with
+       | Some (`Assoc data) ->
+         check bool "a decoded invalid session id clears the owned session" true
+           (List.assoc_opt "open" data = Some (`Bool false))
+       | _ -> fail "status answer carries no data")
+    | _ -> fail "status must answer after the session was lost")
+
 let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
@@ -376,6 +428,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;
   test_case "session status answers while closed" `Quick test_session_status_answers_while_closed;
   test_case "closed tab error" `Quick test_backend_failure;
+  test_case "remote error code is a closed sum" `Quick test_remote_error_is_a_closed_sum;
   test_case "malformed response" `Quick test_malformed_success;
   test_case "closed current window keeps remaining tabs discoverable" `Quick test_closed_current_window;
   test_case "deadline cancels I/O and releases the session" `Quick test_timeout_releases_session;

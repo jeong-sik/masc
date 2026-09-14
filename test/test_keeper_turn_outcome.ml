@@ -806,6 +806,7 @@ let test_checkpoint_history_is_not_current_tool_execution () =
   in
   let acc =
     Acc.create ~meta ~historical_tool_calls:[ prior; prior ]
+      ~history_pairs_at_setup:(Some 2)
       ~tool_surface:
         { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
         ; config_root = "fixture"
@@ -1002,6 +1003,29 @@ let test_seed_stops_where_a_yield_already_judged () =
     (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:5 pairs));
   check (list string) "a history cut shorter than the boundary seeds nothing" []
     (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:9 pairs))
+;;
+
+(* What a yield records is what the next setup will count for this run:
+   the pairs it was set up over, plus its own calls that carry both
+   fingerprints -- a call the digest refused has no pair the seeder can
+   match either. *)
+let test_a_yield_records_the_pairs_it_judged () =
+  let judged = Masc.Keeper_repetition_judged.pairs_judged_by in
+  let live = [ tool_call "Read"; tool_call "Grep"; tool_call "Read" ] in
+  check int "setup pairs plus the run's fingerprinted calls" 44
+    (judged ~history_pairs_at_setup:41 live);
+  check int "a call without an output fingerprint is not a pair" 43
+    (judged ~history_pairs_at_setup:41 (tool_call ~output:None "Execute" :: live));
+  check int "a run with no calls records what it was set up over" 41
+    (judged ~history_pairs_at_setup:41 []);
+  (* Then the next setup seeds only the pairs past that boundary: the
+     forty-four are gone, and a pair a later turn appended stays. *)
+  let history = List.init 45 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
+  check (list string) "one pair past the boundary seeds" [ "0" ]
+    (List.map
+       (fun (c : Masc.Keeper_agent_result.tool_call_detail) ->
+         Option.value ~default:"" c.input_fingerprint)
+       (Masc.Keeper_repetition_judged.seed_beyond ~judged:44 history))
 ;;
 
 let test_judged_boundary_rides_the_context () =
@@ -1616,6 +1640,8 @@ let () =
             test_repeated_tool_call_input_boundary;
           test_case "the seed stops where a yield already judged" `Quick
             test_seed_stops_where_a_yield_already_judged;
+          test_case "a yield records the pairs it judged" `Quick
+            test_a_yield_records_the_pairs_it_judged;
           test_case "the judged boundary rides the context" `Quick
             test_judged_boundary_rides_the_context;
           test_case "repeated assistant text boundary" `Quick

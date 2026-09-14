@@ -4,6 +4,7 @@ type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
   ; historical_tool_calls : Keeper_agent_result.tool_call_detail list
+  ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -35,8 +36,11 @@ val create :
   meta:Keeper_meta_contract.keeper_meta ->
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
   historical_tool_calls:Keeper_agent_result.tool_call_detail list ->
+  history_pairs_at_setup:int option ->
   hook_accumulator
-(** Begin a new invocation, retaining checkpoint calls only for repetition. *)
+(** Begin a new invocation, retaining checkpoint calls only for repetition.
+    [history_pairs_at_setup] is the checkpoint history's matched pair count
+    on the lane that seeds from it, [None] on a scope-bound lane. *)
 
 (** Current invocation outputs only. Checkpoint history is never execution
     evidence for a new invocation. *)

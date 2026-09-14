@@ -13,14 +13,19 @@
     evidence again.
 
     The boundary is a count of history pairs, as the seeder counts them,
-    kept in the agent context's Session scope under {!context_key} so it
-    rides with the checkpoint the way the tool load receipts do. It moves
-    only at the setup of the turn after a [Repeated_tool_call] checkpoint,
-    to the whole history as it stands then; a turn that stopped for any
-    other reason leaves it, so the 2+2 case #26057 measured still seeds.
-    Pairs are only ever appended, so the oldest [judged] pairs are exactly
-    the ones the yield saw; a history that has since been cut shorter
-    seeds nothing rather than something it cannot name. *)
+    kept in the agent context's Session scope under {!context_key}. Setup
+    restores it on both lanes, so every checkpoint either lane persists
+    carries it, and the autonomous seed keeps only the pairs past it. It
+    moves at the yield itself: when the guard's decision is a
+    [Repeated_tool_call], the run records the pairs it was set up over plus
+    its own fingerprinted calls -- exactly the pairs that yield judged --
+    and the Yielded checkpoint AGENT_CORE takes after the boundary probe
+    carries the record. A turn that stops for any other reason moves
+    nothing, so the 2+2 case #26057 measured still seeds; pairs a direct
+    turn appends afterwards sit past the boundary and seed too. Pairs are
+    only ever appended, so the oldest [judged] pairs are the ones the
+    yield saw; a history since cut shorter seeds nothing rather than
+    something it cannot name. *)
 
 type error = Invalid_record of string
 
@@ -38,8 +43,18 @@ val restore
   -> (int, error) result
 
 (** [record context pairs] writes the boundary into [context]'s Session
-    scope; the caller's checkpoint commits it. *)
+    scope; the checkpoint taken after it commits it. *)
 val record : Agent_core.Context.t -> int -> unit
+
+(** [pairs_judged_by ~history_pairs_at_setup tool_calls] is the boundary a
+    repetition yield records: the history pairs the run was set up over,
+    plus the run's own calls that carry both fingerprints -- the calls the
+    seeder will count once their ToolUse/ToolResult pairs are in the
+    history. *)
+val pairs_judged_by
+  :  history_pairs_at_setup:int
+  -> Keeper_agent_result.tool_call_detail list
+  -> int
 
 (** [seed_beyond ~judged pairs] keeps the newest [length pairs - judged] of
     [pairs] (newest first): everything a previous yield has not judged.

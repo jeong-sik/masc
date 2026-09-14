@@ -39,6 +39,21 @@ let record context pairs =
   Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (encode pairs)
 ;;
 
+(* The history pair count the next setup will see for this run's calls:
+   what the seeder counts is a ToolUse answered by a ToolResult whose
+   digest succeeded, and the live hook records exactly those calls with
+   both fingerprints present. *)
+let pairs_judged_by ~history_pairs_at_setup (tool_calls : Keeper_agent_result.tool_call_detail list) =
+  let fingerprinted =
+    List.length
+      (List.filter
+         (fun (call : Keeper_agent_result.tool_call_detail) ->
+           Option.is_some call.input_fingerprint && Option.is_some call.output_fingerprint)
+         tool_calls)
+  in
+  history_pairs_at_setup + fingerprinted
+;;
+
 let seed_beyond ~judged pairs =
   let total = List.length pairs in
   let keep = max 0 (total - judged) in

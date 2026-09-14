@@ -231,8 +231,11 @@ val user_notif_supported : unit -> bool
     listener fd carried from the child to the parent (a new SCM_RIGHTS
     stub; a plain pipe cannot carry a file descriptor) and a supervisor
     loop that reads, decodes and responds to notifications. Neither exists
-    yet: nothing in {!Exec_shim} or {!Keeper_gate.decide_after_observation}
-    consumes this value. It probes by forking a throwaway child that tries
+    yet: {!probe} reports this as
+    {!Exec_ssh_protocol.user_notif_capability} so the value is read on the
+    wire, but nothing decodes a notify-fd attempt from it and
+    {!Keeper_gate.decide_after_observation} does not consult it. It probes
+    by forking a throwaway child that tries
     to install an allow-all listener filter and exits without running a
     payload; the calling thread's own seccomp state is never touched
     (installing a filter can only add restrictions, so the flag cannot be

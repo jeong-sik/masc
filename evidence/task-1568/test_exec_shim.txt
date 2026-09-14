@@ -1,5 +1,5 @@
 Testing `[1mexec shim[0m'.
-[2mThis run has ID `G30WNOGD'.
+[2mThis run has ID `P93BTLV5'.
 
 [0m  [32m[OK][0m          [36menv[0m                  0   minimal base env.
   [32m[OK][0m          [36menv[0m                  1   base env defaults.
@@ -43,4 +43,4 @@ Testing `[1mexec shim[0m'.
   [32m[OK][0m          [36mbox[0m                  6   user_notif support is consistent.
 
 Full test results in `[36m/masc-work/goo-yang-bong/masc/_build/_tests/exec shim[0m'.
-[32mTest Successful[0m in 0.013s. 40 tests run.
+[32mTest Successful[0m in 0.040s. 40 tests run.

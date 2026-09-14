@@ -1,5 +1,5 @@
 Testing `[1mkeeper_gate_effect_coverage[0m'.
-[2mThis run has ID `UC0XCOOE'.
+[2mThis run has ID `PAFTTGS4'.
 
 [0m  [32m[OK][0m          [36mper-keeper mode[0m                        0   no override follow...
   [32m[OK][0m          [36mper-keeper mode[0m                        1   an override can ho...
@@ -31,4 +31,4 @@ Testing `[1mkeeper_gate_effect_coverage[0m'.
   [32m[OK][0m          [36mnarrow gap (task-635, #26058)[0m          2   task-1568: user_no...
 
 Full test results in `[36m/masc-work/goo-yang-bong/masc/_build/_tests/keeper_gate_effect_coverage[0m'.
-[32mTest Successful[0m in 0.038s. 28 tests run.
+[32mTest Successful[0m in 0.224s. 28 tests run.

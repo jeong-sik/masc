@@ -465,8 +465,13 @@ let test_probe_identity () =
   let protocol_version = string_of_int Exec_ssh_protocol.protocol_version in
   check string "name" "masc-exec-shim" p.Exec_ssh_protocol.name;
   check string "version" (protocol_version ^ ".0.0") p.Exec_ssh_protocol.version;
-  check (list string) "capabilities say exactly whether this host can box a payload"
-    (if Exec_shim.observe_supported () then [ Exec_ssh_protocol.observe_capability ] else [])
+  check (list string)
+    "capabilities say exactly whether this host can box a payload and \
+     whether it accepts a seccomp listener (task-1568)"
+    ((if Exec_shim.observe_supported () then [ Exec_ssh_protocol.observe_capability ] else [])
+     @ (if Exec_shim.user_notif_supported ()
+        then [ Exec_ssh_protocol.user_notif_capability ]
+        else []))
     p.Exec_ssh_protocol.capabilities;
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e

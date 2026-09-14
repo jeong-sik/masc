@@ -172,6 +172,25 @@ test/test_tools_coverage.ml"
     | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
   prompt_guard="test/test_keeper_system_prompt_bytes.ml"
 
+  # config/themes is the same shape a fourth time, and the only one of the
+  # three where the suite is not in doubt. 53 base16 schemes ship out of that
+  # directory; test_tui_theme_contrast measures every one of them through
+  # Catalog.all -- foreground against background, the receding token, the
+  # whole palette -- and it is the only suite that names the directory at all.
+  # An edit there selected nothing, so a scheme could ship with a pair the
+  # harness would have refused.
+  #
+  # Why a trigger rather than the quoted-literal rule below: that rule matches
+  # the changed path itself, and a theme file is never named by a suite -- the
+  # suite names the directory it reads the whole of. Widening the rule to
+  # quoted ancestor directories was measured and is worse: "lib" is quoted by
+  # 25 suites over 3,409 files and "config/prompts" by 26, against the one
+  # suite the prompt trigger above deliberately picks. A directory that a
+  # whole harness stands over is named here, where it can be argued for.
+  themes_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/themes/' || [ $? -eq 1 ]; } | head -1)
+  theme_guard="test/test_tui_theme_contrast.ml"
+
 
   # A source edit runs the suites named after it. Before this, only editing a
   # test picked one, so a change under bin/ or lib/ that broke a suite ran
@@ -307,8 +326,12 @@ DECLARED
   declared_suites=$( { printf '%s\n' "${declared_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
-  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${module_suites}" ] \
-    && [ -z "${declared_suites}" ]; then
+  # [themes_changed] stands beside [assets] here: the tool and prompt triggers
+  # ride that variable, which matches config/(prompts|tools|mcp), and a theme
+  # is none of those. Left out, a theme-only pull request returned here before
+  # reaching the trigger below and reported no suite at all.
+  if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
+    && [ -z "${module_suites}" ] && [ -z "${declared_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -336,6 +359,12 @@ DECLARED
   if [ -n "${prompts_changed}" ]; then
     echo "this pull request changes prompt assets; adding ${prompt_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${prompt_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${themes_changed}" ]; then
+    echo "this pull request changes theme assets; adding ${theme_guard}"
+    sources=$(printf '%s\n%s\n' "${sources}" "${theme_guard}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -529,6 +558,12 @@ self_test() {
   check "a prompt asset reaches the asset guard and the prompt golden" \
     "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
     "config/prompts/foo.md"
+  # And not the asset guard: it runs the real sync, whose domains are Prompts,
+  # Tools and Mcp. A scheme is embedded but never synced, so that guard has
+  # nothing to say about one.
+  check "a theme asset reaches the contrast harness" \
+    "test/test_tui_theme_contrast.ml" \
+    "config/themes/foo.toml"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # The hole this closes: the pattern wanted test_ straight after test/, so a

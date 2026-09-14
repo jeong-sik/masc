@@ -1710,18 +1710,9 @@ let verify_runtime_execution runtime timeout_s =
       ("masc-runtime-verify-" ^ Random_id.hex ~bytes:16) in
     Unix.mkdir private_path 0o700;
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
-    Eio_context.set_env env;
-    (* The process clock, as every other CLI arm installs it at its entry:
-       the runtime agent derives the clock for any deadline a config declares
-       from these globals, and Agent Core refuses a declared deadline it
-       cannot enforce rather than dropping it. The verification's own bound
-       is the command's [timeout_s], held on the [clock] passed below. *)
-    Eio_context.set_clock (Eio.Stdenv.clock env);
-    Time_compat.set_clock (Eio.Stdenv.clock env);
-    Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
-      ~secure_random:(Eio.Stdenv.secure_random env)
-      ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
-      ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
+    (* The env and clock a provider request reads are installed inside; the
+       verification's own bound is the command's [timeout_s]. *)
+    Runtime_verification.verify_as_command ~env ~sw ~private_dir:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
   let unavailable ?detail code message =

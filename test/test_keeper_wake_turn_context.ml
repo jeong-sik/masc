@@ -879,6 +879,83 @@ let test_preview_does_not_invent_wake_reason () =
           ~labels:[ "keeper", preview_meta.name ]
           ()))
 
+(* A Keeper subscribed to a Lane output learns about an unread retained
+   observation from the turn prompt itself, on both the direct and the
+   autonomous path. Every earlier case here passed [Ok (`List [])], so the
+   layer's rendering of an actual notice was never pinned: it names the
+   subscription, the reading position and the tool that reads it, and carries
+   no source rows. An unreadable configuration is reported, not silenced. *)
+let lane_notice =
+  `Assoc
+    [ ( "subscription",
+        `Assoc
+          [ "keeper_name", `String "imp";
+            "run_id", `String "dos-demo";
+            "installation_id", `String "dos-demo";
+            "output_id", `String "guest" ] );
+      "instance_id", `String "01a09f1b-1e11-7000-9e2e-3bf8e3ec79f0";
+      "after_sequence", `Int 1;
+      "latest_sequence", `Int 3;
+      "new_observations", `Bool true;
+      "replaced", `Bool false ]
+
+let direct_context ~lane_updates =
+  Turn.For_testing.direct_turn_dynamic_context
+    ~lane_updates
+    ~workspace_memory:Masc.Workspace_memory_publication.Missing
+    ~current_task:Inputs.No_current_task
+    ~held_task_skills:[]
+    ~task_skill_surfaces:[]
+    ~approval_authority_text:"approval authority"
+    ~recent_direct_conversation_text:"recent owner message"
+    ~worktree_text:"worktree state"
+    ~telemetry_feedback_text:"telemetry state"
+    ~turn_instructions_text:"turn instructions"
+
+let check_lane_notice_rendered ~lane context =
+  check int (lane ^ ": the subscription notice is rendered once") 1
+    (count_occurrences ~needle:"Subscribed Lane observation references" context);
+  check bool (lane ^ ": the notice names the installation and output") true
+    (contains ~needle:"\"installation_id\":\"dos-demo\"" context
+     && contains ~needle:"\"output_id\":\"guest\"" context);
+  check bool (lane ^ ": the notice carries the reading position") true
+    (contains ~needle:"\"after_sequence\":1" context
+     && contains ~needle:"\"latest_sequence\":3" context);
+  check bool (lane ^ ": the notice points at the reading tool") true
+    (contains ~needle:"masc_lane_updates" context
+     && contains ~needle:"operation=read" context);
+  check bool (lane ^ ": no source body travels with the reference") true
+    (contains ~needle:"No source bodies are included" context)
+
+let test_direct_turn_renders_an_unread_lane_notice () =
+  check_lane_notice_rendered ~lane:"direct"
+    (direct_context ~lane_updates:(Ok (`List [ lane_notice ])));
+  check bool "direct: an empty notice list adds no lane section" false
+    (contains ~needle:"Subscribed Lane observation references"
+       (direct_context ~lane_updates:(Ok (`List []))));
+  check bool "direct: an unreadable configuration is reported" true
+    (contains ~needle:"Lane subscriptions unavailable"
+       (direct_context ~lane_updates:(Error "lane-subscriptions.toml: parse error")))
+
+let test_autonomous_turn_renders_an_unread_lane_notice () =
+  let preview ~lane_updates =
+    let { Prompt.world_state; _ } =
+      Prompt.build_prompt_preview
+        ~meta
+        ~config:(Lazy.force prompt_config)
+        ~current_task:Inputs.No_current_task
+        ~observation:base_observation
+        ~lane_updates
+        ()
+    in
+    world_state
+  in
+  check_lane_notice_rendered ~lane:"autonomous"
+    (preview ~lane_updates:(Ok (`List [ lane_notice ])));
+  check bool "autonomous: an empty notice list adds no lane section" false
+    (contains ~needle:"Subscribed Lane observation references"
+       (preview ~lane_updates:(Ok (`List []))))
+
 (* AwaitingVerification does not hold a claim, so its heading must not imply
    active ownership. *)
 let test_submitted_task_heading_does_not_claim_a_hold () =
@@ -1040,6 +1117,13 @@ let () =
             test_bootstrap_stimulus_keeps_reactive_post_action;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
+        ] );
+      ( "subscribed lane observations reach the turn prompt",
+        [
+          test_case "the direct turn renders an unread notice" `Quick
+            test_direct_turn_renders_an_unread_lane_notice;
+          test_case "the autonomous turn renders an unread notice" `Quick
+            test_autonomous_turn_renders_an_unread_lane_notice;
         ] );
       ( "current task heading states the status",
         [

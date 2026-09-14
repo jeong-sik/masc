@@ -1765,7 +1765,7 @@ let test_interactive_admission_respects_stop_authority () =
   check bool "stop does not pause admission" false (Option.get (Owner.projection owner).meta).paused;
   let _, applied = submit "interactive-after-stop" stop_token in
   check bool "new Enter applies with current authority" true (applied.outcome = Owner.Applied && not applied.resumed);
-  check bool "admission issues new authority" false (String.equal stop_token applied.chat_control_token);
+  check bool "admission preserves authority" true (String.equal stop_token applied.chat_control_token);
   let later_pending = operation_id "stop-later" in
   let _, later_stop = owner_ok (Owner.pause_and_interrupt ~expected_control_token:applied.chat_control_token owner (Direct_operation later_pending)) in
   let replay, receipt = submit "interactive-after-stop" later_stop in

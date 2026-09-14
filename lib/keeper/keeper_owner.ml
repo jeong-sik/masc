@@ -286,12 +286,20 @@ type interrupt_resolution =
   | Interrupt_maintenance_running
   | Interrupt_not_current
 
-(* Why the Owner refuses store work. Only [Operation_availability_failure]
-   is retried: a stale SQLite handle heals by close+reopen at an idle wake.
-   The other three need a process restart or an operator, so a wake must not
-   churn the handle for them. *)
-type store_fault =
-  | Metadata_persistence_failure of string
+(* The metadata snapshot store and the chat operation store fail on their own
+   terms and recover on their own terms, so each keeps its own fault slot.
+   One shared slot coupled a chat-store outage to metadata commits: an
+   operation fault refused the keeper's own pause and turn-runtime writes even
+   though the metadata store was healthy (msx-retro-mania, 2026-09-14, #36203).
+   A metadata persistence failure needs a process restart or an operator; it
+   does not clear on a wake. *)
+type metadata_fault = Metadata_persistence_failure of string
+
+(* Why the Owner refuses operation-store work. Only
+   [Operation_availability_failure] is retried: a stale SQLite handle heals by
+   close+reopen at an idle wake. The other two need a process restart or an
+   operator, so a wake must not churn the handle for them. *)
+type operation_fault =
   | Operation_availability_failure of string
   | Operation_integrity_failure of string
   | Operation_reconciliation_required of Chat_operation.Operation_id.t
@@ -299,10 +307,11 @@ type store_fault =
          lost to the outage. [settle_running_after_restart] settles it on
          the next boot; this process never fabricates an outcome. *)
 
+let metadata_fault_detail (Metadata_persistence_failure detail) = detail
+
 (* The integrity prefix matches [owner_error_of_operation_error], so the
    first refusal and every later one read the same. *)
-let store_fault_detail = function
-  | Metadata_persistence_failure detail
+let operation_fault_detail = function
   | Operation_availability_failure detail -> detail
   | Operation_integrity_failure detail ->
     "Keeper chat operation integrity failure: " ^ detail
@@ -311,9 +320,9 @@ let store_fault_detail = function
       "operation %s is Running with no live child; restart the keeper to settle it before storage recovery"
       (Chat_operation.Operation_id.to_string operation_id)
 
-let retain_store_fault fault previous =
+let retain_operation_fault fault previous =
   match previous with
-  | Some (Metadata_persistence_failure _ | Operation_integrity_failure _
+  | Some (Operation_integrity_failure _
          | Operation_reconciliation_required _) -> previous
   | None | Some (Operation_availability_failure _) -> Some fault
 
@@ -329,7 +338,8 @@ type t =
   ; now : unit -> float
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
-  ; store_error : store_fault option ref
+  ; metadata_error : metadata_fault option ref
+  ; operation_error : operation_fault option ref
   ; child_active : bool ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -518,18 +528,27 @@ let request t command =
 (* The first fault is otherwise visible only as [store_unavailable = true] in
    the projection; the detail resurfaces later as a rejected meta commit and
    reads as if that commit were the cause. Log the onset once, at the source. *)
-let set_store_fault t fault =
-  let previous = !(t.store_error) in
-  let next = retain_store_fault fault previous in
-  t.store_error := next;
+let set_metadata_fault t detail =
+  match !(t.metadata_error) with
+  | Some _ -> () (* Sticky until restart; the first detail is the cause. *)
+  | None ->
+    t.metadata_error := Some (Metadata_persistence_failure detail);
+    Log.Keeper.error ~keeper_name:t.keeper_name
+      "keeper Owner metadata store fenced: %s" detail
+;;
+
+let set_operation_fault t fault =
+  let previous = !(t.operation_error) in
+  let next = retain_operation_fault fault previous in
+  t.operation_error := next;
   match previous, next with
   | None, Some fault ->
     Log.Keeper.error ~keeper_name:t.keeper_name
-      "keeper Owner store fenced: %s" (store_fault_detail fault)
+      "keeper Owner operation store fenced: %s" (operation_fault_detail fault)
   | Some before, Some after
-    when store_fault_detail before <> store_fault_detail after ->
+    when operation_fault_detail before <> operation_fault_detail after ->
     Log.Keeper.error ~keeper_name:t.keeper_name
-      "keeper Owner store fault replaced: %s" (store_fault_detail after)
+      "keeper Owner operation store fault replaced: %s" (operation_fault_detail after)
   | Some _, Some _ | None, None | Some _, None -> ()
 ;;
 
@@ -549,7 +568,7 @@ let commit store transition =
 let apply_transition t store old_state transition =
   match commit store transition with
   | Error (Store_unavailable detail as error) ->
-    set_store_fault t (Metadata_persistence_failure detail);
+    set_metadata_fault t detail;
     Error (old_state, error)
   | Error
       (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed as error) ->
@@ -659,7 +678,7 @@ let reopen_operation_store_if_missing t =
                 Error error
               | Ok projection ->
                 t.operation_store <- operation_store;
-                t.store_error := None;
+                t.operation_error := None;
                 Atomic.set t.operation_projection projection;
                 Ok ()))))
 ;;
@@ -672,10 +691,10 @@ let mark_operation_store_unavailable t =
 let record_operation_error t error =
   (match error with
    | Chat_operation_store.Store_unavailable detail ->
-     set_store_fault t (Operation_availability_failure detail);
+     set_operation_fault t (Operation_availability_failure detail);
      mark_operation_store_unavailable t
    | Chat_operation_store.Integrity_error detail ->
-     set_store_fault t (Operation_integrity_failure detail);
+     set_operation_fault t (Operation_integrity_failure detail);
      mark_operation_store_unavailable t
    | Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
    | Idempotency_conflict _ -> ());
@@ -695,11 +714,11 @@ let chat_child_in_flight t =
 ;;
 
 let recover_operation_availability t =
-  match !(t.store_error) with
+  match !(t.operation_error) with
   | None -> Ok ()
-  | Some (Metadata_persistence_failure _ | Operation_integrity_failure _
+  | Some (Operation_integrity_failure _
          | Operation_reconciliation_required _ as fault) ->
-    Error (Store_unavailable (store_fault_detail fault))
+    Error (Store_unavailable (operation_fault_detail fault))
   | Some (Operation_availability_failure detail) when chat_child_in_flight t ->
     Error (Store_unavailable detail)
   | Some (Operation_availability_failure _) ->
@@ -731,11 +750,11 @@ let recover_operation_availability t =
                 an availability fault would reopen the handle on every wake for
                 nothing. *)
              let fault = Operation_reconciliation_required operation_id in
-             set_store_fault t fault;
+             set_operation_fault t fault;
              publish_operation_projection t { projection with store_unavailable = true };
-             Error (Store_unavailable (store_fault_detail fault))
+             Error (Store_unavailable (operation_fault_detail fault))
            | None ->
-             t.store_error := None;
+             t.operation_error := None;
              publish_operation_projection t projection;
              Log.Keeper.info ~keeper_name:t.keeper_name
                "keeper Owner operation store recovered queued=%d" projection.queued_count;
@@ -852,7 +871,8 @@ let start
     ; now
     ; closed = Atomic.make false
     ; closed_p
-    ; store_error = ref None
+    ; metadata_error = ref None
+    ; operation_error = ref None
     ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
@@ -1028,7 +1048,7 @@ let start
       | Some _ when Option.is_some shutdown_operation_id -> ()
       | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
       | Some _ when not (turn_admission_open state) -> ()
-      | Some _ when Option.is_some !(t.store_error) -> ()
+      | Some _ when Option.is_some !(t.operation_error) || Option.is_some !(t.metadata_error) -> ()
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
@@ -1192,6 +1212,15 @@ let start
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
+          (match !(t.metadata_error) with
+           | Some fault ->
+             (* The metadata snapshot store is fenced until a restart. An
+                operation-store fault never reaches here: it no longer blocks a
+                metadata commit. *)
+             Eio.Promise.resolve resolve
+               (Error (Store_unavailable (metadata_fault_detail fault)));
+             loop state shutdown_operation_id
+           | None ->
           let operation_store_ready =
             match command, (Keeper_owner_reducer.projection state).meta with
             | Keeper_owner_reducer.Create _, None ->
@@ -1203,11 +1232,10 @@ let start
              Eio.Promise.resolve resolve (Error error);
              loop state shutdown_operation_id
            | Ok () ->
-          (match recover_operation_availability t with
-           | Error error ->
-             Eio.Promise.resolve resolve (Error error);
-             loop state shutdown_operation_id
-           | Ok () ->
+             (* A fenced operation store must not block a metadata commit; try
+                to reopen it opportunistically so a chat child can start after
+                the commit, but do not gate the commit on the result. *)
+             ignore (recover_operation_availability t : (unit, error) result);
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->
                 Eio.Promise.resolve resolve (Error (Reducer_rejected error));

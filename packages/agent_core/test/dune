@@ -150,6 +150,7 @@
   test_pipeline_common_coverage
   test_pipeline_deep
   test_pipeline_illegal_hook
+  test_periodic_suffix
   test_pipeline_metrics
   test_plan
   test_provider
@@ -290,6 +291,7 @@
   test_pipeline_common_coverage
   test_pipeline_deep
   test_pipeline_illegal_hook
+  test_periodic_suffix
   test_pipeline_metrics
   test_plan
   test_provider

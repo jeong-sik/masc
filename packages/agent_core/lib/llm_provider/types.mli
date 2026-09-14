@@ -674,6 +674,24 @@ type content_delta =
             Carries block-level [media_type] and [source_type] with the [data]
             payload so no new {!ContentBlockStart} fields are required. *)
 
+(** How a generation was found to be repeating itself. The two rules read
+    different blocks and count different things: a paragraph of an answer
+    recurring anywhere in the block, or the tail of a reasoning block being one
+    unit written verbatim over and over. *)
+type repeating_shape =
+  | Repeated_paragraph
+  | Repeated_reasoning_cycle
+
+val repeating_generation_message
+  :  repeated:string
+  -> occurrences:int
+  -> bytes_seen:int
+  -> repeating_shape
+  -> string
+(** The reason given for a {!Stream_repeating} / {!StreamRepeating}: what
+    repeated, how many times, after how many bytes. [repeated] is shown to 120
+    bytes. *)
+
 type sse_event =
   | MessageStart of
       { id : string
@@ -764,9 +782,10 @@ type sse_event =
   | Timeout of string
   | StreamIncomplete of { reason : string }
   | StreamRepeating of
-      { paragraph : string
+      { repeated : string
       ; occurrences : int
       ; bytes_seen : int
+      ; shape : repeating_shape
       }
   (** The provider signalled the turn was cut off before a natural stop (an
       OpenAI Responses [response.incomplete]). Any in-progress tool call is
@@ -798,14 +817,17 @@ type stream_error =
       failure so the HTTP boundary can preserve the declared wire format. *)
   | Stream_incomplete of { reason : string }
   | Stream_repeating of
-      { paragraph : string
+      { repeated : string
       ; occurrences : int
       ; bytes_seen : int
+      ; shape : repeating_shape
       }
-      (** The generation started repeating one paragraph and did not stop.
-          Neither a transport fault nor a malformed payload: the bytes parse and
-          the provider is answering. Ended here rather than at the token ceiling
-          so the reason is legible and the output is not paid for in full. *)
+      (** The generation started repeating itself and did not stop: a paragraph
+          of the answer recurring, or a reasoning block whose tail is one unit
+          written verbatim over and over. Neither a transport fault nor a
+          malformed payload: the bytes parse and the provider is answering.
+          Ended here rather than at the token ceiling so the reason is legible
+          and the output is not paid for in full. *)
   (** The stream ended without its protocol terminal marker.  This is not a
       malformed payload and must remain distinct at the transport boundary. *)
   | Stream_unknown_event of

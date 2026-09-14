@@ -258,7 +258,66 @@ streaming = true
    endpoint that takes the request and never answers; the runtime bound to
    it is what the two cases below verify. [binding_keys] lands inside the
    binding table, so a case can declare [max-concurrent]. *)
-let with_silent_endpoint_runtime ~binding_keys f =
+(* Reads whatever the peer sends and never answers; returns when the peer
+   goes away, which is what the client's deadline does. *)
+let read_until_the_peer_leaves flow =
+  let buf = Cstruct.create 4096 in
+  try
+    while true do
+      ignore (Eio.Flow.single_read flow buf)
+    done
+  with
+  | End_of_file | Eio.Io _ -> ()
+;;
+
+(* One HTTP request off [flow]: the headers up to the blank line and the
+   body the Content-Length announces. *)
+let read_one_request flow =
+  let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+  let rec headers content_length =
+    match Eio.Buf_read.line reader with
+    | "" -> content_length
+    | line ->
+      (match String.index_opt line ':' with
+       | Some colon
+         when String.equal
+                (String.lowercase_ascii (String.trim (String.sub line 0 colon)))
+                "content-length" ->
+         headers
+           (int_of_string
+              (String.trim (String.sub line (colon + 1) (String.length line - colon - 1))))
+       | Some _ | None -> headers content_length)
+  in
+  let content_length = headers 0 in
+  ignore (Eio.Buf_read.take content_length reader : string)
+;;
+
+(* The readiness tool called once, as the OpenAI-compatible sync wire says
+   it. *)
+let readiness_tool_call_completion =
+  {|{"id":"chatcmpl-readiness","object":"chat.completion","model":"first-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"runtime_readiness_challenge","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":15,"completion_tokens":10,"total_tokens":25}}|}
+;;
+
+(* Answers the first request with the readiness tool call after
+   [first_answer_after_s], and never answers the second: the run has done
+   one round trip and the tool call when it meets the silence. *)
+let answer_the_first_request_then_fall_silent ~clock ~first_answer_after_s =
+  let requests = Atomic.make 0 in
+  fun flow ->
+    read_one_request flow;
+    if Atomic.fetch_and_add requests 1 = 0
+    then (
+      Eio.Time.sleep clock first_answer_after_s;
+      Eio.Flow.copy_string
+        (Printf.sprintf
+           "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+           (String.length readiness_tool_call_completion)
+           readiness_tool_call_completion)
+        flow);
+    read_until_the_peer_leaves flow
+;;
+
+let with_endpoint_runtime ~binding_keys ~handle f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let net = env#net in
@@ -272,17 +331,13 @@ let with_silent_endpoint_runtime ~binding_keys f =
       in
       (* A daemon: a case whose verdict arrives before anything connects (a
          run still queued for a permit at the timeout) must not leave the
-         switch waiting on an accept that never comes. *)
+         switch waiting on an accept that never comes. Every connection is
+         accepted: a run's second request opens a new one. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
-        Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
-          let buf = Cstruct.create 4096 in
-          try
-            while true do
-              ignore (Eio.Flow.single_read flow buf)
-            done
-          with
-          | End_of_file | Eio.Io _ -> ());
-        `Stop_daemon);
+        while true do
+          Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+            handle ~clock:env#clock flow)
+        done);
       let port =
         match Eio.Net.listening_addr listening with
         | `Tcp (_, port) -> port
@@ -327,15 +382,20 @@ streaming = true
       f ~env ~sw ~runtime))
 ;;
 
+let with_silent_endpoint_runtime ~binding_keys f =
+  with_endpoint_runtime ~binding_keys ~handle:(fun ~clock:_ flow -> read_until_the_peer_leaves flow) f
+;;
+
 (* Runs [verify] with [timeout_s] under a guard that turns a hang into a
    failure, and returns the verdict with the seconds it took. The call is
    shaped like the CLI's, which installs the process env and clock at its
    entry (`verify_runtime_execution`) and hands the command's [clock] to
    [verify]: the harness installs exactly that pair, no more, so a bound the
    CLI would refuse or miss is refused or missed here too. *)
+(* The command's own entry, so these cases run the shape `masc
+   runtime-verify` runs -- env and clock installed inside it -- and not a
+   copy kept alike by hand. *)
 let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
-  Eio_context.set_env env;
-  Masc_test_deps.init_eio_clock env;
   let directory = Filename.temp_dir "runtime-verification-silent-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
   let clock = env#clock in
@@ -344,16 +404,7 @@ let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
     try
       Some
         (Eio.Time.with_timeout_exn clock guard_s (fun () ->
-           Verify.verify
-             ~secure_random:env#secure_random
-             ~sw
-             ~net:env#net
-             ~mgr:env#process_mgr
-             ~clock
-             ~cwd:Eio.Path.(env#fs / directory)
-             ~cwd_path:directory
-             ~timeout_s
-             runtime))
+           Verify.verify_as_command ~env ~sw ~private_dir:directory ~timeout_s runtime))
     with
     | Eio.Time.Timeout -> None
   in
@@ -394,11 +445,9 @@ let slack_s = 2.5
 (* Turns a hang into a failure; a case that reaches it has no bound at all. *)
 let guard_s = 10.0
 
-(* The HTTP arm ran the readiness turn with no bound: [timeout_s] reached
-   the three CLI arms and not this one, so a binding whose endpoint accepted
-   the request and never answered held `masc runtime verify` and the imp
-   start-up check open. The verdict must be [Timed_out] inside the window the
-   command declared, not the guard this test holds. *)
+(* A binding whose endpoint accepts the request and never answers: the
+   verdict is [Timed_out] inside the window the command declared, not the
+   guard this test holds. *)
 let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
   with_silent_endpoint_runtime ~binding_keys:"" @@ fun ~env ~sw ~runtime ->
   verify_under_guard ~env ~sw ~timeout_s:declared_timeout_s ~guard_s runtime
@@ -426,11 +475,13 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
     | Runtime_execution.Codex_app_server _ -> fail "the fixture binding is an HTTP runtime"
   in
   let clock = env#clock in
-  (* [Fiber.fork] runs the holder until it blocks, so it holds the permit
-     when the fork returns. *)
-  Eio.Fiber.fork ~sw (fun () ->
+  (* [fork_daemon] runs the holder until it blocks, so it holds the permit
+     when the fork returns, and the switch does not wait out its sleep once
+     the verdict is in. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     Llm_provider.Provider_admission.with_admission ~config:provider_cfg (fun () ->
-      Eio.Time.sleep clock (declared_timeout_s +. slack_s)));
+      Eio.Time.sleep clock (declared_timeout_s +. slack_s));
+    `Stop_daemon);
   (match Llm_provider.Provider_admission.snapshot_for ~config:provider_cfg with
    | Some snapshot ->
      check int "the holder has the only permit" 1 snapshot.Llm_provider.Slot_scheduler.active
@@ -441,6 +492,44 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
        ~timeout_s:declared_timeout_s
        ~slack_s
        ~guard_s
+;;
+
+(* One window over both round trips. The readiness run is two provider
+   requests with the tool call between them; the endpoint answers the first
+   late and never answers the second. A deadline that restarted at each
+   request would end the run at the first answer's time plus a whole
+   [timeout_s]; the command's window ends it at [timeout_s] from the start.
+   The first answer comes late enough that the two are apart by more than
+   the slack. *)
+let two_round_trips_timeout_s = 1.0
+let first_answer_after_s = 0.6
+let restarted_deadline_would_end_at_s = first_answer_after_s +. two_round_trips_timeout_s
+
+let test_the_timeout_is_one_window_over_both_round_trips () =
+  with_endpoint_runtime
+    ~binding_keys:""
+    ~handle:(fun ~clock flow ->
+      answer_the_first_request_then_fall_silent ~clock ~first_answer_after_s flow)
+  @@ fun ~env ~sw ~runtime ->
+  let result, elapsed =
+    verify_under_guard ~env ~sw ~timeout_s:two_round_trips_timeout_s ~guard_s runtime
+  in
+  (match result with
+   | None -> failf "verify did not return inside the %.0fs guard" guard_s
+   | Some result ->
+     check
+       string
+       "the verdict is a timed-out verification"
+       "timed_out"
+       (Yojson.Safe.Util.to_string (failure_field result "code")));
+  if elapsed < two_round_trips_timeout_s || elapsed >= restarted_deadline_would_end_at_s
+  then
+    failf
+      "ended at %.2fs; one %.1fs window from the start should have ended it inside [%.1f, %.1f)"
+      elapsed
+      two_round_trips_timeout_s
+      two_round_trips_timeout_s
+      restarted_deadline_would_end_at_s
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -865,6 +954,10 @@ let () =
             "a queued readiness run ends at the declared timeout"
             `Quick
             test_a_queued_readiness_run_ends_at_the_declared_timeout
+        ; test_case
+            "the timeout is one window over both round trips"
+            `Quick
+            test_the_timeout_is_one_window_over_both_round_trips
         ] )
     ]
 ;;

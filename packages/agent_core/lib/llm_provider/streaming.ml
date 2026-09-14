@@ -389,6 +389,11 @@ type openai_sse_parse_result =
       ; raw : string
       }
   | Openai_parse_failed of openai_chunk_parse_error
+  | Openai_undeclared_reasoning_member of
+      { declared : string
+      ; member : string
+      ; raw : string
+      }
 
 (* Agent Core contract: TTFT classification for OpenAI-compat / Gemini /
    Ollama chunk streams. [true] when this chunk would surface a
@@ -428,6 +433,40 @@ let non_blank_json_string = function
   | `Null -> Ok None
   | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> Error "not_string"
 ;;
+
+(* The two members OpenAI-compatible chat deltas carry readable reasoning
+   under: the DeepSeek-direct [reasoning_content] and the OpenRouter /
+   ollama.com [reasoning]. A catalog row declares exactly one of them and the
+   parser reads only that one; a chunk whose text rides the other member is a
+   misdeclared row, not a second place to look. *)
+let documented_reasoning_members = [ "reasoning_content"; "reasoning" ]
+
+(* The documented member other than [declared] that carries non-blank text
+   on this delta, if any. *)
+let undeclared_reasoning_member ~declared delta =
+  List.find_opt
+    (fun member ->
+       (not (String.equal member declared))
+       &&
+       match assoc_field_opt member delta with
+       | None -> false
+       | Some value ->
+         (match non_blank_json_string value with
+          | Ok (Some _) -> true
+          | Ok None | Error _ -> false))
+    documented_reasoning_members
+;;
+
+(* What one delta's reasoning members parsed to. The readable text, the typed
+   [reasoning_details] item, a malformed member, or text under a member the
+   catalog row did not declare. *)
+type openai_reasoning_delta_read =
+  | Reasoning_delta_read of string option * openai_reasoning_details_delta option
+  | Reasoning_delta_malformed of string
+  | Reasoning_delta_undeclared_member of
+      { declared : string
+      ; member : string
+      }
 
 let parse_stream_reasoning_detail ~index = function
   | `Assoc fields as raw ->
@@ -592,7 +631,7 @@ let openai_parse_failed ~raw reason = Openai_parse_failed { reason; raw }
     particular, [delta.tool_calls] is one atomic protocol batch: one malformed
     member rejects the whole chunk, so no valid sibling can be executed after a
     malformed sibling was silently discarded. *)
-let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_result =
+let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_result =
   if String.equal data_str openai_done_sentinel
   then Openai_done
   else (
@@ -686,7 +725,7 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                  in
                  let reasoning_result =
                    match streaming_reasoning with
-                   | Some (Reasoning_dialect.Delta_field_and_details field) ->
+                   | Reasoning_dialect.Delta_field_and_details field ->
                      (* The declared member carries the readable text and the
                         sibling [reasoning_details] carries the typed item. A
                         model can send one without the other: OpenRouter's
@@ -714,44 +753,38 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                      (match reasoning_content_result, details_result with
                       | Ok reasoning_content, Ok details ->
                         (match reasoning_content, details with
-                         | None, None -> Ok (None, None)
+                         | None, None -> Reasoning_delta_read (None, None)
                          | Some _, None | _, Some _ ->
-                           Ok
+                           Reasoning_delta_read
                              ( None
                              , Some
                                  { delta_reasoning_content = reasoning_content
                                  ; delta_details = Option.value details ~default:[]
                                  } ))
                       | Error reason, Ok _ | Ok _, Error reason | Error reason, Error _ ->
-                        Error reason)
-                   | Some (Reasoning_dialect.Delta_field field) ->
-                     (* The declared field wins. When it is absent or blank, a
-                        server spelling reasoning under the other documented
-                        name (a catalog row declares [reasoning_content] while
-                        the wire sends [reasoning]) must not lose the delta. *)
-                     let reasoning =
-                       match non_blank_delta_field field with
-                       | Some _ as reasoning -> reasoning
-                       | None ->
-                         (match non_blank_delta_field "reasoning_content" with
-                          | Some _ as reasoning -> reasoning
-                          | None -> non_blank_delta_field "reasoning")
-                     in
-                     Ok (reasoning, None)
-                   | Some
-                       ( Reasoning_dialect.No_streaming_reasoning
-                       | Reasoning_dialect.Template_parser ) -> Ok (None, None)
-                   | None ->
-                     let reasoning =
-                       match non_blank_delta_field "reasoning_content" with
-                       | Some _ as reasoning -> reasoning
-                       | None -> delta |> member "reasoning" |> to_string_option
-                     in
-                     Ok (reasoning, None)
+                        Reasoning_delta_malformed reason)
+                   | Reasoning_dialect.Delta_field field ->
+                     (* Only the declared member is read. Text arriving under
+                        the other documented spelling is not picked up in its
+                        place: that is a misdeclared catalog row, and reading
+                        it silently is what kept the row wrong (F111). *)
+                     (match non_blank_delta_field field with
+                      | Some _ as reasoning -> Reasoning_delta_read (reasoning, None)
+                      | None ->
+                        (match undeclared_reasoning_member ~declared:field delta with
+                         | Some member ->
+                           Reasoning_delta_undeclared_member { declared = field; member }
+                         | None -> Reasoning_delta_read (None, None)))
+                   | Reasoning_dialect.No_streaming_reasoning
+                   | Reasoning_dialect.Template_parser -> Reasoning_delta_read (None, None)
                  in
                  (match reasoning_result with
-                  | Error reason -> openai_parse_failed ~raw:data_str reason
-                  | Ok (delta_reasoning, delta_reasoning_details) ->
+                  | Reasoning_delta_malformed reason ->
+                    openai_parse_failed ~raw:data_str reason
+                  | Reasoning_delta_undeclared_member { declared; member } ->
+                    Openai_undeclared_reasoning_member
+                      { declared; member; raw = data_str }
+                  | Reasoning_delta_read (delta_reasoning, delta_reasoning_details) ->
                     (match parse_openai_delta_tool_calls delta with
                      | Error reason -> openai_parse_failed ~raw:data_str reason
                      | Ok delta_tool_calls ->
@@ -1411,6 +1444,20 @@ let openai_sse_parse_result_to_events state = function
   | Openai_provider_error { message; error_type; raw } ->
     [ SSEError { message; error_type; raw } ], None
   | Openai_parse_failed { reason; raw } -> [ SSEParseFailed { reason; raw } ], None
+  | Openai_undeclared_reasoning_member { declared; member; raw } ->
+    (* The stream fails on the chunk that exposed the row: the raw payload is
+       the evidence and the reason names both members so the catalog can be
+       corrected. *)
+    ( [ SSEParseFailed
+          { reason =
+              Printf.sprintf
+                "undeclared_reasoning_member:%s:declared:%s"
+                member
+                declared
+          ; raw
+          }
+      ]
+    , None )
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)

@@ -71,6 +71,7 @@ let record_streaming_metrics (metrics : Metrics.t) = function
 let%test "OpenAI-compatible parser preserves a typed provider error" =
   match
     Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       {|{"error":{"type":"rate_limit_exceeded","message":"slow down"}}|}
   with
   | Streaming.Openai_provider_error { message; error_type; _ } ->
@@ -82,48 +83,64 @@ let%test "OpenAI-compatible parser preserves a typed provider error" =
   | Streaming.Openai_chunk _
   | Streaming.Openai_done
   | Streaming.Openai_empty
-  | Streaming.Openai_parse_failed _ -> false
+  | Streaming.Openai_parse_failed _
+  | Streaming.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "OpenAI-compatible parser classifies the DONE sentinel" =
-  match Streaming.parse_openai_sse_chunk "[DONE]" with
+  match
+    Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
+      "[DONE]"
+  with
   | Streaming.Openai_done -> true
   | Streaming.Openai_chunk _
   | Streaming.Openai_empty
   | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _ -> false
+  | Streaming.Openai_parse_failed _
+  | Streaming.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "OpenAI-compatible parser classifies a normal content chunk" =
   match
-    Streaming.parse_openai_sse_chunk {|{"id":"c","choices":[{"delta":{"content":"hi"}}]}|}
+    Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
+      {|{"id":"c","choices":[{"delta":{"content":"hi"}}]}|}
   with
   | Streaming.Openai_chunk _ -> true
   | Streaming.Openai_done
   | Streaming.Openai_empty
   | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _ -> false
+  | Streaming.Openai_parse_failed _
+  | Streaming.Openai_undeclared_reasoning_member _ -> false
 ;;
 
-let%test "OpenAI-compatible parser falls back to sibling reasoning fields" =
-  (* A catalog row declares where reasoning arrives; a server that spells it
-     under the other documented field must not have the delta silently
-     discarded. *)
-  let delta_reasoning field =
-    match
-      Streaming.parse_openai_sse_chunk
-        ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content")
-        (Printf.sprintf {|{"id":"c","model":"m","choices":[{"delta":{%s}}]}|} field)
-    with
-    | Streaming.Openai_chunk chunk -> chunk.delta_reasoning
-    | Streaming.Openai_done
-    | Streaming.Openai_empty
-    | Streaming.Openai_provider_error _
-    | Streaming.Openai_parse_failed _ -> None
+let%test "OpenAI-compatible parser reads only the declared reasoning member" =
+  (* A catalog row declares where reasoning arrives. Text under the other
+     documented member is not read in its place; it surfaces as the typed
+     misdeclaration so the row gets corrected (F111). *)
+  let parse field =
+    Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content")
+      (Printf.sprintf {|{"id":"c","model":"m","choices":[{"delta":{%s}}]}|} field)
   in
-  delta_reasoning {|"reasoning":"pondering"|} = Some "pondering"
-  && delta_reasoning {|"reasoning_content":"declared","reasoning":"shadowed"|}
-     = Some "declared"
+  (match parse {|"reasoning":"pondering"|} with
+   | Streaming.Openai_undeclared_reasoning_member
+       { declared = "reasoning_content"; member = "reasoning"; _ } -> true
+   | Streaming.Openai_undeclared_reasoning_member _
+   | Streaming.Openai_chunk _
+   | Streaming.Openai_done
+   | Streaming.Openai_empty
+   | Streaming.Openai_provider_error _
+   | Streaming.Openai_parse_failed _ -> false)
+  &&
+  match parse {|"reasoning_content":"declared","reasoning":"shadowed"|} with
+  | Streaming.Openai_chunk chunk -> chunk.delta_reasoning = Some "declared"
+  | Streaming.Openai_undeclared_reasoning_member _
+  | Streaming.Openai_done
+  | Streaming.Openai_empty
+  | Streaming.Openai_provider_error _
+  | Streaming.Openai_parse_failed _ -> false
 ;;
 
 (* Native reasoning dialect and inline content framing are independent axes.
@@ -146,7 +163,9 @@ let accumulate_events acc events =
 
 let accumulate_openai_payload acc state payload =
   let events, _telemetry =
-    Streaming.parse_openai_sse_chunk payload
+    Streaming.parse_openai_sse_chunk
+      ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
+      payload
     |> Streaming.openai_sse_parse_result_to_events state
   in
   accumulate_events acc events
@@ -857,7 +876,12 @@ let complete_stream_http
                                 | Streaming.Openai_chunk
                                     { chunk_timings = Some _ as t; _ } ->
                                   stream_timings := t
-                                | _ -> ());
+                                | Streaming.Openai_chunk { chunk_timings = None; _ }
+                                | Streaming.Openai_done
+                                | Streaming.Openai_empty
+                                | Streaming.Openai_provider_error _
+                                | Streaming.Openai_parse_failed _
+                                | Streaming.Openai_undeclared_reasoning_member _ -> ());
                                Streaming.openai_sse_parse_result_to_events
                                  (get_state ())
                                  parsed
@@ -904,7 +928,12 @@ let complete_stream_http
                                 | Streaming.Openai_chunk
                                     { chunk_timings = Some _ as t; _ } ->
                                   stream_timings := t
-                                | _ -> ());
+                                | Streaming.Openai_chunk { chunk_timings = None; _ }
+                                | Streaming.Openai_done
+                                | Streaming.Openai_empty
+                                | Streaming.Openai_provider_error _
+                                | Streaming.Openai_parse_failed _
+                                | Streaming.Openai_undeclared_reasoning_member _ -> ());
                                Streaming.openai_sse_parse_result_to_events
                                  (get_state ())
                                  parsed

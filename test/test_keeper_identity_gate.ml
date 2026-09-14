@@ -137,6 +137,13 @@ let never_token_post ~url:_ ~headers:_ ~body:_ =
 let never_discover ~mcp_url:_ =
   Alcotest.fail "renewal reached the network when it should not have"
 
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
+  in
+  n = 0 || scan 0
+
 let transports_of_post post =
   { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
 
@@ -188,13 +195,6 @@ let pending_dump ~base_path =
   | Error error ->
       Alcotest.failf "the pending queue did not read: %s"
         (Queue.storage_error_to_string error)
-
-let contains ~needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  let rec scan i =
-    i + n <= h && (String.sub haystack i n = needle || scan (i + 1))
-  in
-  n = 0 || scan 0
 
 (* ── routing: the provider's word, and only that word ─────────────────── *)
 

@@ -73,7 +73,10 @@ val agent_tool :
     inside the woken cycle can also spend it. *)
 
 val replay_call_with_outcome :
-  ?post:Mcp_client.post ->
+  ?transports:Keeper_identity_tools.transports ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+      (** Resolved exactly as for {!agent_tool}: injected, else the given
+          clock, else the process clock; with none the replay is refused. *)
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->

@@ -293,6 +293,52 @@ let test_press_ledger () =
   check int "reload empties the ledger" 0 (List.length (Msx_lane.ledger ()))
 ;;
 
+let declared_outcome result =
+  Tool_outcome_declaration.of_metadata (Tool_result.metadata result)
+;;
+
+(* The input-axis repeat guard drops the output fingerprint to catch a clock,
+   so five [masc_msx_step {frames: 300}] in a row -- 25 seconds of play -- had
+   a clock's shape to it and ended every game turn of one keeper in a yield
+   (2026-09-14). The calls that move the machine declare [Progress] beside the
+   observation; a read declares nothing; step_until_change declares only when
+   the screen changed, so polling a key-wait scene is still a loop. The bridge
+   carries the declaration to the hooks as the tool output's [_meta]. *)
+let test_moving_calls_declare_progress () =
+  with_workspace @@ fun base_path ->
+  ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
+  let progress = Some Tool_outcome_declaration.Progress in
+  let outcome =
+    testable
+      (fun fmt o ->
+        Format.pp_print_string fmt
+          (match o with Some Tool_outcome_declaration.Progress -> "Progress" | None -> "None"))
+      ( = )
+  in
+  let step = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 300) ] in
+  check outcome "step declares progress" progress (declared_outcome step);
+  check outcome "press declares progress" progress
+    (declared_outcome
+       (dispatch ~base_path "masc_msx_press" [ ("keys", `List [ `String "space" ]) ]));
+  check outcome "a screen read declares nothing" None
+    (declared_outcome (dispatch ~base_path "masc_msx_screen" []));
+  ignore
+    (dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 120) ]
+     : Tool_result.result);
+  let settled = dispatch ~base_path "masc_msx_step_until_change" [ ("max_frames", `Int 120) ] in
+  check bool "the second run on a settled screen reports changed=false" true
+    (match member "changed" (Tool_result.data settled) with Some (`Bool false) -> true | _ -> false);
+  check outcome "step_until_change on a settled screen declares nothing" None
+    (declared_outcome settled);
+  (match Tool_bridge.to_agent_core_typed_result step with
+   | Ok { Agent_core.Types._meta; _ } ->
+     check bool "the bridge carries the declaration as _meta and the keeper reads Progress" true
+       (match Keeper_tool_outcome_metadata.declared _meta with
+        | Some Keeper_tool_outcome.Progress -> true
+        | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) | None -> false)
+   | Error error -> fail ("bridge refused the step result: " ^ error.Agent_core.Types.message))
+;;
+
 let test_press_validation () =
   with_workspace @@ fun base_path ->
   ignore (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] : Tool_result.result);
@@ -1022,6 +1068,7 @@ let () =
         ; test_case "screen change core (pure)" `Quick test_screen_change_core
         ; test_case "step until change" `Quick test_step_until_change
         ; test_case "press writes the ledger" `Quick test_press_ledger
+        ; test_case "moving calls declare progress" `Quick test_moving_calls_declare_progress
         ; test_case "Backspace sequence ledger" `Quick test_backspace_sequence_ledger
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence

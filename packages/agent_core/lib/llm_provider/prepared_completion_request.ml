@@ -20,7 +20,15 @@ type measured =
   { prepared : t
   ; admitted_body : admitted_body option
   ; measurement : measurement
+  ; count_round_trip_s : float option
   }
+
+type next_stage =
+  | Completion of { call_timeout_s : float option }
+  | Stream of
+      { admission_timeout_s : float option
+      ; first_event_timeout_s : float option
+      }
 
 type context_fit =
   { input_tokens : int
@@ -104,9 +112,9 @@ let transport_failure error =
   Error (Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
 ;;
 
-let measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net prepared =
+let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net prepared =
   let config = prepared.request.Llm_transport.config in
-  let measured () =
+  let count () =
     Count_tokens_sync.measure_completion_request
       ?connection_cache
       ?clock
@@ -114,6 +122,13 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~ne
       ~sw
       ~net
       prepared.request
+  in
+  (* The count round trip is timed when there is a clock to time it on: the
+     stream's first-event budget is one window from this request to the
+     first token, and the route hands the stream what this round trip left. *)
+  let measured () =
+    let started = Option.map Eio.Time.now clock in
+    count ()
     |> Result.map (fun (measurement : Count_tokens_sync.completion_request_measurement) ->
       { prepared
       ; admitted_body = None
@@ -121,71 +136,126 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~ne
           { input_count = measurement.input_count
           ; output_token_receipt = measurement.output_token_receipt
           }
+      ; count_round_trip_s =
+          (match started, clock with
+           | Some started, Some clock -> Some (Eio.Time.now clock -. started)
+           | None, _ | Some _, None -> None)
       })
   in
-  let preflight =
-    match Complete_common.validate_all config with
-    | Error (Http_client.AcceptRejected { reason }) ->
-      Error (Count_tokens_sync.Invalid_completion_request reason)
-    | Error error -> transport_failure error
-    | Ok () ->
-      Http_client.resolve_explicit_deadline
-        ~operation:"Prepared_completion_request.measure"
-        ~parameter:"call_timeout_s"
-        ~clock
-        ~timeout_s:call_timeout_s
-      |> Result.map_error (fun error ->
-        Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
+  let deadline ~parameter timeout_s =
+    Http_client.resolve_explicit_deadline
+      ~operation:"Prepared_completion_request.measure"
+      ~parameter
+      ~clock
+      ~timeout_s
+    |> Result.map_error (fun error ->
+      Count_tokens_sync.Input_count_failed (Input_token_count.Transport error))
   in
-  match preflight with
-  | Error error -> Error error
-  | Ok Http_client.Unbounded -> Provider_admission.with_admission ~config measured
-  | Ok (Http_client.Bounded (call_clock, call_timeout_s)) ->
-    (* The measurement takes the endpoint's permit like the completion
-       does, so a caller's call deadline bounds that wait and the count
-       round trip under it the same way; a declared [timeout_s] still arms
-       inside. *)
-    let call_deadline_exceeded ~phase ~stage =
-      transport_failure
-        (Http_client.TimeoutError
-           { message =
-               Printf.sprintf
-                 "call_timeout_s deadline exceeded after %.17gs %s \
-                  (Prepared_completion_request.measure)"
-                 call_timeout_s
-                 stage
-           ; phase
-           })
-    in
-    (match
-       Provider_admission.with_admission_and_work_until
-         ~clock:call_clock
-         ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
-         ~config
-         measured
-     with
-     | Ok result -> result
-     | Error Provider_admission.Permit_wait_expired ->
-       call_deadline_exceeded
-         ~phase:Http_client.Queue
-         ~stage:"before a provider admission permit was granted for the count-tokens request"
-     | Error Provider_admission.Permit_granted_as_deadline_passed ->
-       call_deadline_exceeded
-         ~phase:Http_client.Queue
-         ~stage:
-           "with a provider admission permit for the count-tokens request granted as the \
-            deadline passed"
-     | Error Provider_admission.Work_expired ->
-       call_deadline_exceeded
-         ~phase:Http_client.Non_streaming_body
-         ~stage:"during the count-tokens round trip")
+  let deadline_exceeded ~parameter ~seconds ~phase ~stage =
+    transport_failure
+      (Http_client.TimeoutError
+         { message =
+             Printf.sprintf
+               "%s deadline exceeded after %.17gs %s (Prepared_completion_request.measure)"
+               parameter
+               seconds
+               stage
+         ; phase
+         })
+  in
+  let permit_wait_expired ~parameter ~seconds =
+    deadline_exceeded
+      ~parameter
+      ~seconds
+      ~phase:Http_client.Queue
+      ~stage:"before a provider admission permit was granted for the count-tokens request"
+  in
+  match Complete_common.validate_all config with
+  | Error (Http_client.AcceptRejected { reason }) ->
+    Error (Count_tokens_sync.Invalid_completion_request reason)
+  | Error error -> transport_failure error
+  | Ok () ->
+    (match next_stage with
+     | Completion { call_timeout_s } ->
+       (* Ahead of a non-streaming completion the caller's bound is the whole
+          call: the measurement takes the endpoint's permit like the
+          completion does, so the call deadline bounds that wait and the
+          count round trip under it the same way; a declared [timeout_s]
+          still arms inside. *)
+       (match deadline ~parameter:"call_timeout_s" call_timeout_s with
+        | Error error -> Error error
+        | Ok Http_client.Unbounded -> Provider_admission.with_admission ~config measured
+        | Ok (Http_client.Bounded (call_clock, call_timeout_s)) ->
+          let exceeded = deadline_exceeded ~parameter:"call_timeout_s" ~seconds:call_timeout_s in
+          (match
+             Provider_admission.with_admission_and_work_until
+               ~clock:call_clock
+               ~deadline_at:(Eio.Time.now call_clock +. call_timeout_s)
+               ~config
+               measured
+           with
+           | Ok result -> result
+           | Error Provider_admission.Permit_wait_expired ->
+             permit_wait_expired ~parameter:"call_timeout_s" ~seconds:call_timeout_s
+           | Error Provider_admission.Permit_granted_as_deadline_passed ->
+             exceeded
+               ~phase:Http_client.Queue
+               ~stage:
+                 "with a provider admission permit for the count-tokens request granted as \
+                  the deadline passed"
+           | Error Provider_admission.Work_expired ->
+             exceeded
+               ~phase:Http_client.Non_streaming_body
+               ~stage:"during the count-tokens round trip"))
+     | Stream { admission_timeout_s; first_event_timeout_s } ->
+       (* Ahead of a stream the caller's bounds are the stream's: the permit
+          wait ends under the admission budget as the stream's own would,
+          and the count round trip is provider silence before the first
+          token, so it runs under the first-event budget; a declared
+          [timeout_s] still arms inside. *)
+       (match deadline ~parameter:"admission_timeout_s" admission_timeout_s with
+        | Error error -> Error error
+        | Ok admission_deadline ->
+          (match deadline ~parameter:"first_event_timeout_s" first_event_timeout_s with
+           | Error error -> Error error
+           | Ok first_event_deadline ->
+             let round_trip () =
+               match first_event_deadline with
+               | Http_client.Unbounded -> measured ()
+               | Http_client.Bounded (clock, first_event_timeout_s) ->
+                 (match
+                    Eio.Time.with_timeout clock first_event_timeout_s (fun () -> Ok (measured ()))
+                  with
+                  | Ok result -> result
+                  | Error `Timeout ->
+                    deadline_exceeded
+                      ~parameter:"first_event_timeout_s"
+                      ~seconds:first_event_timeout_s
+                      ~phase:Http_client.First_token
+                      ~stage:"during the count-tokens round trip, before the stream's first token")
+             in
+             (match admission_deadline with
+              | Http_client.Unbounded -> Provider_admission.with_admission ~config round_trip
+              | Http_client.Bounded (clock, admission_timeout_s) ->
+                (match
+                   Provider_admission.with_admission_until
+                     ~clock
+                     ~deadline_at:(Eio.Time.now clock +. admission_timeout_s)
+                     ~config
+                     round_trip
+                 with
+                 | Ok result -> result
+                 | Error `Permit_wait_expired ->
+                   permit_wait_expired
+                     ~parameter:"admission_timeout_s"
+                     ~seconds:admission_timeout_s)))))
 ;;
 
-let measure ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net (serialized : serialized) =
+let measure ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net (serialized : serialized) =
   let prepared = serialized.prepared in
   Result.map
     (fun measured -> { measured with admitted_body = Some serialized.admitted_body })
-    (measure_prepared ?connection_cache ?clock ?timeout_s ?call_timeout_s ~sw ~net prepared)
+    (measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ~sw ~net prepared)
 ;;
 
 let attach_measurement
@@ -198,6 +268,7 @@ let attach_measurement
       { input_count = measurement.input_count
       ; output_token_receipt = measurement.output_token_receipt
       }
+  ; count_round_trip_s = None
   }
 ;;
 
@@ -259,6 +330,21 @@ let admit ~now_unix_s ~max_context_tokens measured =
 
 let admitted_request admitted = admitted.measured.prepared
 let admitted_fit admitted = admitted.fit
+let count_round_trip_s (measured : measured) = measured.count_round_trip_s
+
+(* The stream stage reads its first-event budget from the request it was
+   prepared with; the route hands it what the count round trip left. The
+   admitted body is untouched: no timeout is part of the wire body. *)
+let with_first_event_timeout_s first_event_timeout_s (admitted : admitted) =
+  let prepared = admitted.measured.prepared in
+  { admitted with
+    measured =
+      { admitted.measured with
+        prepared =
+          { request = { prepared.request with first_event_timeout_s = Some first_event_timeout_s } }
+      }
+  }
+;;
 let admitted_body admitted = admitted.measured.admitted_body
 let serialized_request (serialized : serialized) = serialized.prepared
 let serialized_admitted_body (serialized : serialized) = serialized.admitted_body

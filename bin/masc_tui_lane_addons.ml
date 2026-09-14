@@ -727,7 +727,11 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                    Option.value ~default:"unresolved installation" d.installation_id ^ " · " ^
                    (if d.issues <> [] then "needs attention" else if d.applied = d.desired then "applied" else "pending") ^
                    " · " ^ Filename.basename d.source_path) config.declarations
-                 @ (if config.declarations=[] then ["No Add-ons installed. No installations. Press n to create a TOML declaration."] else [])
+                 (* Names both routes in. The old line repeated "No
+                    installations." and named only [n], leaving out the
+                    guided installer on [i]. The opening words stay put:
+                    three PTY walks wait for "No Add-ons installed.". *)
+                 @ (if config.declarations=[] then ["No Add-ons installed. Press i to install one, or n to write a TOML declaration."] else [])
                  @ [""; "Installation details"]
                  @ configuration_lines {view with configuration_cursor=0}
                      {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}}
@@ -853,10 +857,23 @@ let instance_controls (instance : instance) = match instance.phase with
   | Row.Failed _ -> "o:retry observation" ^
       (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
 
+(* The row named [i] but not [n], and dropped [r] entirely, so the two
+   routes to an installed Add-on were never shown together and refresh was
+   named nowhere. Order matters: [drop_hint_items] drops items from the back,
+   so a key placed early survives every width and one left off the string
+   appears at no width. The cost is the tail -- [J/K:scroll] goes first on a
+   narrow screen. *)
 let overview_hints view =
-  "i:install  S:subscriptions  1-5:views  j/k:select  Tab:focus  " ^
+  (* Draft keys, named only while a draft is open. [n] opens one and [E]
+     reopens a saved declaration; save, reload and revision were on no row
+     and in no help sheet. In front, because the fitter drops from the
+     back. *)
+  (match selected_document view with
+   | Some _ -> "s:save  E:edit  l:reload  u:revision  "
+   | None -> "") ^
+  "i:install  n:new TOML  S:subscriptions  1-5:views  j/k:select  Tab:focus  " ^
   (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
-  "f:flow  D:details  J/K:scroll  Esc:back"
+  "f:flow  D:details  J/K:scroll  r:refresh  Esc:back"
 
 let open_actions ~request_id view =
   let* instance = match action_target view with

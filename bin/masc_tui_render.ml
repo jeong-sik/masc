@@ -10025,7 +10025,13 @@ let render_connectors (state : state) =
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
+    (* Names the exit, which this row did not. Esc leaves for the selected
+       Keeper (masc_tui.ml reads it under [Connectors]) and the key sheet
+       says so, but the footer named no exit key at all. Surfaces built
+       through [hints_of_bindings] cannot drift this way -- footer and sheet
+       come from one list -- and this one writes its own. Esc goes last
+       because [drop_hint_items] never gives it up. *)
+    ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh  Esc:keeper"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "CONNECTOR"

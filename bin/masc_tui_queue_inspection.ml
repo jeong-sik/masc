@@ -45,7 +45,35 @@ let rec map_result f = function
   | [] -> Ok []
   | x :: xs -> let* value = f x in let* rest = map_result f xs in Ok (value :: rest)
 let safe = Masc.Tui_decode.sanitize_terminal_text
-let waiting_lines json =
+(* The snapshot used to print one row per pending stimulus as
+   "source: what — next_action" plus a 64-hex address, in queue order, with no
+   clock: 31 occurrences of one schedule were 62 lines that read the same. The
+   row now opens with when the thing arrived, says how long it has waited, and
+   a schedule's pending occurrences -- one row from the server since the
+   inventory groups them -- show their count and the span of their due
+   instants. The exact address stays on its own line because it is the
+   argument /queue cancel-event and priority-event take. *)
+let clock_text at =
+  let time = Unix.localtime at in
+  Printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+
+let float_field key json =
+  match field key json with
+  | Ok (`Float value) -> Some value
+  | Ok (`Int value) -> Some (float_of_int value)
+  | Ok _ | Error _ -> None
+
+let int_field key json =
+  match field key json with
+  | Ok (`Int value) -> Some value
+  | Ok _ | Error _ -> None
+
+let waiting_text ~now since =
+  match Masc_tui_message_layout.age_text ~now ~since with
+  | Some age -> " · waiting " ^ age
+  | None -> ""
+
+let waiting_lines ~now json =
   let* keepers = list "keepers" json in
   let* groups = map_result (fun keeper ->
     let* state = string "state" keeper in
@@ -56,19 +84,43 @@ let waiting_lines json =
       | `Null -> Ok "unknown"
       | _ -> Error "Queue paused field must be boolean or null" in
     let* rows = list "waiting_on" keeper in
-    let* lines = map_result (fun row ->
+    let* described = map_result (fun row ->
       let* source = string "source" row in
       let* what = string "what" row in
-      let* next = string "next_action" row in
       let* detail = field "detail" row in
-      let event_identity = match detail with
+      let since = float_field "since" row in
+      let count = Option.value (int_field "group_count" detail) ~default:1 in
+      let clock = match since with Some at -> clock_text at ^ "  " | None -> "       " in
+      let span =
+        match float_field "group_first_due_unix" detail, float_field "group_last_due_unix" detail with
+        | Some first, Some last when count > 1 ->
+          Printf.sprintf " · due %s \xe2\x86\x92 %s" (clock_text first) (clock_text last)
+        | _ -> "" in
+      let waiting = match since with Some at -> waiting_text ~now at | None -> "" in
+      let address = match detail with
         | `Assoc fields -> (match List.assoc_opt "source_ref" fields, List.assoc_opt "source_incarnation" fields with
             | Some (`String reference), Some (`String incarnation) ->
-              "\n    event " ^ safe reference ^ " " ^ safe incarnation
+              let more = if count > 1 then Printf.sprintf " \xc2\xb7 +%d more" (count - 1) else "" in
+              "\n         event " ^ safe reference ^ " " ^ safe incarnation ^ more
             | _ -> "")
         | _ -> "" in
-      Ok (Printf.sprintf "  %s: %s — %s%s" (safe source) (safe what) (safe next) event_identity)) rows in
-    Ok (("Queue consumption: " ^ consumption ^ "; server work: " ^ safe state ^ " (" ^ string_of_int (List.length rows) ^ " groups)") :: lines)) keepers in
+      Ok (source, count, since, Printf.sprintf "  %s%s%s%s%s" clock (safe what) span waiting address)) rows in
+    let pending = List.fold_left (fun total (_, count, _, _) -> total + count) 0 described in
+    let header =
+      Printf.sprintf "Queue consumption: %s; server work: %s \xc2\xb7 %d pending in %d %s"
+        consumption (safe state) pending (List.length described)
+        (if List.length described = 1 then "group" else "groups") in
+    (* The autonomous lane is what drains the event queue, and it does not
+       run while an operator chat holds the turn slot. Said once, above the
+       rows it explains, only when both are on the screen. *)
+    let blocker =
+      let has_pending = List.exists (fun (source, _, _, _) -> source = "event_queue_pending") described in
+      match List.find_opt (fun (source, _, _, _) -> source = "chat_operation_running") described with
+      | Some (_, _, since, _) when has_pending ->
+        let since_text = match since with Some at -> " (chat since " ^ clock_text at ^ ")" | None -> "" in
+        [ "  autonomous turn: waits while the operator chat runs" ^ since_text ]
+      | Some _ | None -> [] in
+    Ok (header :: blocker @ List.map (fun (_, _, _, line) -> line) described)) keepers in
   Ok (List.concat groups)
 let operation_lines json =
   let* operations = list "operations" json in

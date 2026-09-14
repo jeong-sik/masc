@@ -7948,7 +7948,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
     (* Keep each failed read visible beside any successful mutation receipt. *)
     let waiting = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/waiting-inventory")
-      |> fun result -> Result.bind result Inbox.waiting_lines in
+      |> fun result -> Result.bind result (Inbox.waiting_lines ~now:(Unix.gettimeofday ())) in
     let rec read_messages after_sequence reversed_pages =
       let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
       let* page = Masc_tui_http.get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in

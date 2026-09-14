@@ -255,6 +255,11 @@ let test_profile_picks_the_lane () =
   @@ fun () ->
   let base_path = temp_dir () in
   let config = workspace ~base_path in
+  (* #36066: the remote lane loads the keeper's declaration before it looks
+     for an endpoint. The metas below carry three different profiles under
+     one declaration, so it names none; the endpoint stays undeclared, which
+     is what the Remote_ssh case asserts. *)
+  Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
   (match
      Keeper_github_login_lane.for_keeper
        ~config

@@ -1,6 +1,7 @@
 open Alcotest
 open Llm_provider.Types
 module S = Llm_provider.Streaming
+module RD = Llm_provider.Reasoning_dialect
 
 let usage ?(input_tokens = 1) ?(output_tokens = 2) () =
   { input_tokens
@@ -71,6 +72,8 @@ let require_openai_chunk label = function
   | S.Openai_provider_error _ -> fail (label ^ ": unexpected provider error")
   | S.Openai_parse_failed { reason; _ } ->
     fail (Printf.sprintf "%s: unexpected parse failure: %s" label reason)
+  | S.Openai_undeclared_reasoning_member { member; _ } ->
+    fail (Printf.sprintf "%s: unexpected undeclared reasoning member %s" label member)
 ;;
 
 let require_ollama_chunk label = function
@@ -256,7 +259,7 @@ let test_openai_parse_edge_shapes () =
   let mixed_tool_calls =
     {|{"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":"bad"},{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}],"usage":{"prompt_tokens":4,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":3}}}|}
   in
-  let mixed_result = S.parse_openai_sse_chunk mixed_tool_calls in
+  let mixed_result = S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning mixed_tool_calls in
   (match mixed_result with
    | S.Openai_parse_failed { reason; raw } ->
      check
@@ -268,7 +271,9 @@ let test_openai_parse_edge_shapes () =
    | S.Openai_chunk _ -> fail "malformed sibling must reject the complete batch"
    | S.Openai_done -> fail "mixed tool-call payload cannot be DONE"
    | S.Openai_empty -> fail "mixed tool-call payload cannot be empty"
-   | S.Openai_provider_error _ -> fail "mixed tool-call payload is not a provider error");
+   | S.Openai_provider_error _ -> fail "mixed tool-call payload is not a provider error"
+   | S.Openai_undeclared_reasoning_member _ ->
+     fail "mixed tool-call payload carries no reasoning member");
   let state = S.create_openai_stream_state ~provider:"p" ~model:"m" () in
   let events, telemetry = S.openai_sse_parse_result_to_events state mixed_result in
   check bool "parse failure has no telemetry" true (Option.is_none telemetry);
@@ -284,7 +289,7 @@ let test_openai_parse_edge_shapes () =
   let valid_then_malformed =
     {|{"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-valid","type":"function","function":{"name":"lookup","arguments":"{}"}},{"index":"bad"}]},"finish_reason":null}]}|}
   in
-  let valid_then_malformed_result = S.parse_openai_sse_chunk valid_then_malformed in
+  let valid_then_malformed_result = S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning valid_then_malformed in
   (match valid_then_malformed_result with
    | S.Openai_parse_failed { reason; raw } ->
      check
@@ -296,7 +301,9 @@ let test_openai_parse_edge_shapes () =
    | S.Openai_chunk _ -> fail "valid prefix must not survive a malformed suffix"
    | S.Openai_done -> fail "valid-first mixed payload cannot be DONE"
    | S.Openai_empty -> fail "valid-first mixed payload cannot be empty"
-   | S.Openai_provider_error _ -> fail "valid-first mixed payload is not a provider error");
+   | S.Openai_provider_error _ -> fail "valid-first mixed payload is not a provider error"
+   | S.Openai_undeclared_reasoning_member _ ->
+     fail "valid-first mixed payload carries no reasoning member");
   let valid_first_events, valid_first_telemetry =
     S.openai_sse_parse_result_to_events
       (S.create_openai_stream_state ~provider:"p" ~model:"m" ())
@@ -319,7 +326,7 @@ let test_openai_parse_edge_shapes () =
   let non_list_tool_calls =
     {|{"id":"c","model":"m","choices":[{"delta":{"tool_calls":{"unexpected":true}},"finish_reason":null}]}|}
   in
-  match S.parse_openai_sse_chunk non_list_tool_calls with
+  match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning non_list_tool_calls with
   | S.Openai_parse_failed { reason; raw } ->
     check string "non-list batch failure" "malformed_delta_tool_calls:not_list" reason;
     check string "non-list batch raw payload" non_list_tool_calls raw
@@ -327,6 +334,8 @@ let test_openai_parse_edge_shapes () =
   | S.Openai_done -> fail "non-list tool_calls payload cannot be DONE"
   | S.Openai_empty -> fail "non-list tool_calls payload cannot be empty"
   | S.Openai_provider_error _ -> fail "non-list payload is not a provider error"
+  | S.Openai_undeclared_reasoning_member _ ->
+    fail "non-list payload carries no reasoning member"
 ;;
 
 let test_openai_object_arguments () =
@@ -338,7 +347,7 @@ let test_openai_object_arguments () =
     {|{"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"f","arguments":{"x":1}}}]},"finish_reason":null}]}|}
   in
   let chunk =
-    require_openai_chunk "openai object args" (S.parse_openai_sse_chunk object_args)
+    require_openai_chunk "openai object args" (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning object_args)
   in
   match chunk.delta_tool_calls with
   | [ tc ] ->
@@ -388,7 +397,7 @@ let test_openai_malformed_tool_call_shapes_fail_closed () =
   in
   List.iter
     (fun (label, raw, expected_reason) ->
-       let parsed = S.parse_openai_sse_chunk raw in
+       let parsed = S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning raw in
        (match parsed with
         | S.Openai_parse_failed { reason; raw = observed_raw } ->
           check string (label ^ " reason") expected_reason reason;
@@ -397,7 +406,9 @@ let test_openai_malformed_tool_call_shapes_fail_closed () =
         | S.Openai_done -> fail (label ^ ": malformed call became DONE")
         | S.Openai_empty -> fail (label ^ ": malformed call became empty")
         | S.Openai_provider_error _ ->
-          fail (label ^ ": malformed call became provider error"));
+          fail (label ^ ": malformed call became provider error")
+        | S.Openai_undeclared_reasoning_member _ ->
+          fail (label ^ ": malformed call became undeclared reasoning member"));
        let events, _telemetry =
          S.openai_sse_parse_result_to_events
            (S.create_openai_stream_state ~provider:"p" ~model:"m" ())
@@ -415,7 +426,7 @@ let test_openai_blank_id_and_name_accepted_as_none () =
   let raw =
     {|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"","function":{"name":"","arguments":"\"argv\": "}}]}}]}|}
   in
-  let parsed = S.parse_openai_sse_chunk raw in
+  let parsed = S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning raw in
   match parsed with
   | S.Openai_chunk { delta_tool_calls = [ call ]; _ } ->
     check int "index" 0 call.tc_index;
@@ -425,7 +436,13 @@ let test_openai_blank_id_and_name_accepted_as_none () =
     (match call.tc_name with
      | None -> ()
      | Some _ -> fail "expected tc_name to be None for blank string")
-  | _ -> fail "expected valid Openai_chunk with tool call"
+  | S.Openai_chunk _
+  | S.Openai_done
+  | S.Openai_empty
+  | S.Openai_provider_error _
+  | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _ ->
+    fail "expected valid Openai_chunk with tool call"
 ;;
 
 let test_openai_tool_route_conflict_is_transactional () =

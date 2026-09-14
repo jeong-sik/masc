@@ -273,6 +273,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
     (fun () ->
       let mascot_root = Filename.concat base_path ".masc" in
       Unix.mkdir mascot_root 0o700;
+      (* #36066: the runtime resolves the keeper's native posture from its
+         declaration before any turn, so the fixture keeper is declared. *)
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let raw_trace_path = Filename.concat base_path "antigravity-raw-trace.jsonl" in
@@ -690,6 +694,8 @@ let test_blank_success_requires_fresh_conversation () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = blank_then_success_fixture_script ~base_path in
@@ -781,6 +787,8 @@ let test_spawn_failure_is_pre_dispatch () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-pre-dispatch";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -881,6 +889,8 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-blank-prompt";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = fixture_script ~base_path in

@@ -116,7 +116,19 @@ class NativeHost(unittest.TestCase):
         self.server.reject_client = self._testMethodName == "test_retired_client_exits_for_fresh_identity"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        self.process = subprocess.Popen([str(HOST), "--base-path", str(base), "--server", f"http://127.0.0.1:{self.server.server_port}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # One test omits --server so the workspace connection.toml decides the
+        # destination, the resolution this file pins for every other client.
+        workspace_connection_port = {
+            "test_workspace_connection_port_is_followed": self.server.server_port,
+        }.get(self._testMethodName)
+        argv = [str(HOST), "--base-path", str(base)]
+        if workspace_connection_port is None:
+            argv += ["--server", f"http://127.0.0.1:{self.server.server_port}"]
+        else:
+            connection = base / ".masc/config/connection.toml"
+            connection.parent.mkdir(parents=True)
+            connection.write_text(f"[server]\nhttp_port = {workspace_connection_port}\n")
+        self.process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         metadata = read_frame(self.process.stdout)
         self.assertEqual(metadata["verb"], "browser.info")
         self.assertFalse(self.server.poll_seen.is_set(), "must discover actual browser before polling")
@@ -156,6 +168,10 @@ class NativeHost(unittest.TestCase):
     def test_firefox_metadata(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1") for row in self.server.identities))
+
+    def test_workspace_connection_port_is_followed(self):
+        self.assertTrue(self.server.poll_seen.wait(timeout=5))
+        self.assertTrue(self.server.identities)
 
     def test_retired_client_exits_for_fresh_identity(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
@@ -296,6 +312,18 @@ class Destination(unittest.TestCase):
         result = subprocess.run([str(HOST), "--base-path", "/unused-browser-host-base"], env=env, input=b"", capture_output=True, timeout=3)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"loopback http origin", result.stderr)
+
+    def test_malformed_workspace_port_is_an_error_not_a_default(self):
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            connection = base / ".masc/config/connection.toml"
+            connection.parent.mkdir(parents=True)
+            connection.write_text('[server]\nhttp_port = "banana"\n')
+            env = {key: value for key, value in os.environ.items() if not key.startswith("MASC_")}
+            result = subprocess.run([str(HOST), "--base-path", str(base)], env=env, input=b"", capture_output=True, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"http_port", result.stderr)
+            self.assertEqual(result.stdout, b"")
 
 
 if __name__ == "__main__":

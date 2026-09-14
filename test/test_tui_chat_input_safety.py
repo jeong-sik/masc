@@ -235,9 +235,23 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         _base_path: str,
     ) -> None:
         # Focus the composer row while Overview is the surface, and prove the
-        # focus by what the row does with a letter. The voice-key hint would
-        # say the same thing, but it is drawn only once a reachable target has
-        # been read, so waiting for it races the roster load.
+        # focus by what the row does with a letter.
+        #
+        # Wait for the row to offer the key first. "i" focuses only when the
+        # composer would accept input (masc_tui_composer.ml: the branch checks
+        # accepts_input before focusing), and that needs a reachable target,
+        # which arrives with the keeper read rather than with the first frame.
+        # Pressed before it, "i" does nothing at all and the three letters go
+        # to the surface as shortcuts -- one of which is "q". So the failure
+        # this waits out is not a slow frame; it is the scenario steering a
+        # different screen.
+        #
+        # "(i to write)" is the row saying exactly the state this needs: a
+        # target is reachable and the row is not focused yet. It carries no
+        # keeper name, so it does not pin which keeper the workspace seeded.
+        h.wait_for_output(
+            process, fd, output, b"(i to write)", start=0, timeout=10.0
+        )
         os.write(fd, b"i")
         h.send_and_wait(process, fd, output, b"zqx", b"zqx")
         os.write(fd, b"\x11")

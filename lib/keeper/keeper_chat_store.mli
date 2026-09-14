@@ -523,8 +523,10 @@ val chat_path : base_dir:string -> keeper_name:string -> string
 
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
-    tool lines belonging to them (absolute bound 400 lines). Missing
-    files return [[]]. Unparseable lines are skipped. *)
+    newest 300 tool lines and receipts among them, so the window never
+    exceeds 400 lines and a tool-heavy turn trims older tool lines, never
+    the conversation. Missing files return [[]]. Unparseable lines are
+    skipped. *)
 val load :
   base_dir:string -> keeper_name:string -> chat_message list
 

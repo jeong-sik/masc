@@ -523,34 +523,37 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     (Agent_core.Tool.ignoring_execution_env handler)
                 ]
               in
-              (* The same [timeout_s] the CLI arms above install, as the
-                 bound on the whole call: the wait for the binding's admission
-                 permit and the round trip after it, connection and response
-                 headers included (Http_client's sync path arms the body
-                 deadline in front of the headers when no connect budget is
-                 declared). Without it this arm had no bound at all: a binding
-                 whose endpoint accepted the request and never answered, or
-                 whose permits a keeper's streams were holding, held
-                 `masc runtime verify` and the imp start-up check for as long
-                 as that lasted, while the same command ended an official
-                 client at [timeout_s]. *)
+              (* [timeout_s] is the command's deadline for this measurement,
+                 the one the CLI arms below install as their wall-clock
+                 ceiling. Here it bounds the whole readiness run on the clock
+                 the command was given: the wait for the binding's admission
+                 permit, both provider round trips and the tool call between
+                 them. It is held here, on [clock], and not as the run's
+                 provider deadlines, because those are enforced on the
+                 process clock, which the CLI does not install: a per-request
+                 deadline set on this config was refused before the request
+                 as "supplied without the clock required to enforce it", and
+                 no HTTP binding verified from `masc runtime-verify` or
+                 `masc setup`. Without any bound this arm held both commands
+                 for as long as a silent endpoint or a held permit lasted. *)
               let config =
-                { (Runtime_agent.default_config
-                     ~name:"runtime-verification"
-                     ~provider_cfg
-                     ~system_prompt:prompt
-                     ~tools)
-                  with
-                  body_timeout_s = Some timeout_s
-                ; call_timeout_s = Some timeout_s
-                }
+                Runtime_agent.default_config
+                  ~name:"runtime-verification"
+                  ~provider_cfg
+                  ~system_prompt:prompt
+                  ~tools
               in
-              (match Runtime_agent.run ~sw ~net ~config prompt with
+              (match
+                 Eio.Time.with_timeout_exn clock timeout_s (fun () ->
+                   Runtime_agent.run ~sw ~net ~config prompt)
+               with
+               | exception Eio.Time.Timeout -> Error Timed_out
                | Error
                    ( Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
                    | Agent_core.Error.Api (Agent_core.Retry.Timeout _) ) ->
-                 (* The deadline above, or the transport's own: the same
-                    verdict the CLI arms give their client's timeout. *)
+                 (* A budget the provider binding declares for itself, such as
+                    its connect budget, or a timeout the provider reports: the
+                    same verdict. *)
                  Error Timed_out
                | Error error ->
                  Error (Provider_rejected (Agent_core.Error.to_string error))

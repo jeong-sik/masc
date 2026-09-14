@@ -4753,8 +4753,24 @@ let render_lanes_overview (state : state) =
   (* The standalone rows are drawn directly rather than through a row list
      because the selection band has to land on a lane row, not on the
      windowed/stale notes that follow them. *)
+  (* The row said "No Add-ons installed. Press A to inspect installed add-ons"
+     as a fixed string: it claimed a count it never read, named a second key
+     for the destination the heading above already names with [o], and
+     offered to inspect what it had just said was not there. Nothing on this
+     surface asks for Add-ons, so before the operator opens them the answer
+     is the one every other unread reading gives. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Lane Add-ons: No Add-ons installed. Press A to inspect installed add-ons";
+    ("  Lane Add-ons: "
+    ^
+    let view =
+      Option.value ~default:state.lane_addons_cached state.lane_addons
+    in
+    match Masc_tui_lane_addons.installed view with
+    | Masc_tui_lane_addons.Not_read ->
+        title_missing_reading ~error:view.Masc_tui_lane_addons.error
+    | Masc_tui_lane_addons.Nothing_installed -> "none installed"
+    | Masc_tui_lane_addons.Installed count ->
+        Message_layout.count_noun count "installed");
   (match state.standalone_lanes with
    | Some snapshot ->
        let label_cells, slots_cells =

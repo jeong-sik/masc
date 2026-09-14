@@ -123,7 +123,7 @@ let transports_of_post post =
 
 let execute_offered ?(post = never_post) ~base_path
     (offered : Identity_tools.offered_tool) arguments =
-  Identity_tools.tool_result_of_call
+  Identity_tools.tool_result_of_call ~read_only:offered.Identity_tools.read_only
     (Identity_tools.run_call ~transports:(transports_of_post post) ~base_path
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())

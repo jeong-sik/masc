@@ -17,11 +17,14 @@ type transports = {
   discover : mcp_url:string -> (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result;
 }
 
-(* The production transports, every request bounded on [clock]. The MCP
-   session runs under the keeper's no-progress threshold
+(* The production transports, every request bounded on [clock]. Each
+   request of the MCP session runs under the keeper's no-progress threshold
    ([Keeper_runtime_resolved.provider_call_deadline_sec]): a tools/call is
    work the model is waiting on, and the attempt watchdog does not watch a
    tool in flight, so this deadline is the only liveness the call has. The
+   bound is per request, not per call: a server that answers nothing ends
+   the call one threshold after its last completed request, and one that
+   answers each request inside the threshold runs the call to its end. The
    OAuth hops a renewal makes -- discovery and the token endpoint -- are
    short JSON round trips of the same class as the Slack and Discord REST
    calls, and run under the shared request timeout those use. *)
@@ -318,7 +321,44 @@ let failed ~recoverable ~error_class message =
   Error { Agent_core.Types.message; recoverable; error_class }
 ;;
 
-let tool_result_of_call answer =
+(* JSON-RPC error codes the server sends before it runs any tool: the
+   request never became a tool execution, so no effect happened. Every other
+   post-send failure keeps the honest answer, which is "unknown". Decided
+   over the typed code sum, not bare literals: the same numbers written out
+   here were the exact "magic number repetition" the [Mcp_error_code.t] sum
+   was introduced to close. *)
+let rpc_rejects_before_execution code =
+  match Mcp_error_code.of_wire_code code with
+  | Some
+      ( Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
+      | Mcp_error_code.Invalid_params ) -> true
+  | Some _ | None -> false
+;;
+
+let effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_disposition
+  = function
+  | Precondition _ | Transient_precondition _ -> Tool_result.Proven_pre_effect
+  (* A session that never came up carries proof the call was not sent. *)
+  | Mcp { phase = Before_send; _ } -> Tool_result.Proven_pre_effect
+  (* The server refused the token; auth precedes the tool run. *)
+  | Mcp { phase = After_send; error = Mcp_client.Unauthorized _ } ->
+    Tool_result.Proven_pre_effect
+  | Mcp { phase = After_send; error = Mcp_client.Rpc { code; _ } }
+    when rpc_rejects_before_execution code -> Tool_result.Proven_pre_effect
+  | Mcp
+      { phase = After_send
+      ; error =
+          Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
+          | Mcp_client.Transport _
+      } -> Tool_result.Effect_outcome_unknown
+;;
+
+let call_error_to_string = function
+  | Precondition message | Transient_precondition message -> message
+  | Mcp { error; _ } -> Mcp_client.error_to_string error
+;;
+
+let tool_result_of_call ~read_only answer =
   match answer with
   | Ok (result : Mcp_client.tool_result) ->
     if result.Mcp_client.is_error
@@ -339,17 +379,32 @@ let tool_result_of_call answer =
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       "this keeper's credential for that service is no longer accepted; attach \
        it again"
-  | Error (Mcp { error = Mcp_client.Transport detail; _ }) ->
-    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) detail
-  | Error
-      (Mcp
-         { error =
-             (Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _) as
-             err
-         ; _
-         }) ->
-    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
-      (Mcp_client.error_to_string err)
+  | Error (Mcp { error; _ } as call_error) ->
+    let detail = Mcp_client.error_to_string error in
+    let error_class =
+      match error with
+      | Mcp_client.Transport _ -> Agent_core.Types.Transient
+      | Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
+      | Mcp_client.Unauthorized _ -> Agent_core.Types.Deterministic
+    in
+    (* "Recoverable" tells the model a second call is safe. It is safe when
+       the provider said the tool only reads (its explicit word, as at the
+       gate: silence is not that), or when the failure proves the effect
+       never began; the disposition is the same fact replay reads. A write
+       whose request reached the service and got no answer back may have
+       applied, and a model told to retry it would apply it twice. *)
+    (match read_only, effect_disposition_of_call_error call_error with
+     | Some true, _ | (Some false | None), Tool_result.Proven_pre_effect ->
+       failed ~recoverable:true ~error_class:(Some error_class) detail
+     | ( (Some false | None)
+       , (Tool_result.Effect_outcome_unknown | Tool_result.Proven_post_effect) ) ->
+       failed
+         ~recoverable:false
+         ~error_class:(Some Agent_core.Types.Unknown)
+         (Printf.sprintf
+            "%s; the request had reached the service, so whether it applied is \
+             unknown: read the service's state before sending it again"
+            detail))
 ;;
 
 let store_tokens ~base_path ~keeper_name ~(provider : Provider.t)

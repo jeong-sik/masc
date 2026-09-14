@@ -366,28 +366,9 @@ let tab_strip ~width (tabs : (string * bool) list) =
         |> String.concat tab_strip_gap
       in
       let mark = Ansi.dim ^ tab_strip_cut ^ Ansi.reset in
-      let drawn =
-        (if !lo > 0 then mark ^ tab_strip_gap else "")
-        ^ shown
-        ^ if !hi < n - 1 then tab_strip_gap ^ mark else ""
-      in
-      (* The window is seeded with the current entry and only grows under
-         [fits], so an entry wider than the whole budget is drawn anyway. At a
-         hundred columns the Config row had two cells left for its strip and
-         the strip spent sixteen on the marked tab and its cut; the frame
-         took those cells back from the end of the row, which is where the
-         clock and the connection badge are. [tab_strip_width] exists to stop exactly that,
-         and its own reasoning says why the strip is the one that gives way:
-         a strip can drop tabs and mark the cut, and a badge has no way of
-         saying it was shortened.
-
-         So the strip keeps its promise here rather than leaving the frame to
-         enforce it on whatever sits furthest right. [fit_width] pads a short
-         string, which would push that tail out by hand, so it is asked only
-         when the strip is actually over. *)
-      if Masc_tui_message_layout.display_width drawn > width then
-        Masc_tui_message_layout.fit_width drawn width
-      else drawn
+      (if !lo > 0 then mark ^ tab_strip_gap else "")
+      ^ shown
+      ^ if !hi < n - 1 then tab_strip_gap ^ mark else ""
     end
   end
 

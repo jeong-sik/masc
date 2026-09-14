@@ -228,8 +228,10 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     rotate Auth_failed
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
   (* The model repeated itself and the stream was ended for it. The bytes
-     were intact, so this is not a provider integration defect and does not
-     count toward the crash threshold; the lane moves to a different model. *)
+     were intact, so this is not a provider integration defect: the lane
+     rotates to a different model. Crash accounting is class-blind (#32105)
+     and unchanged by this route; what changes is the class label and that
+     the model is known to have answered ([response_observed]). *)
   | Llm_provider.Error.RepeatingGeneration _ -> rotate Generation_repeated
   | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch

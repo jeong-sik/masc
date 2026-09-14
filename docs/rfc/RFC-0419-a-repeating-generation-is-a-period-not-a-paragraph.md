@@ -157,8 +157,9 @@ times" 로 바뀐다. 보이는 곳은 keeper 로그와 TUI 의 turn terminal �
 - 레인 회전이 `ProviderFailure _ -> 다음 후보` 로 종류를 안 보아서, 같은 모델을
   다른 공급자로 다시 불렀다 (2026-09-14, `ollama_cloud.glm-5.3-flash` →
   `glm-coding.glm-5.3-flash`). 반복은 모델 습성이라 같은 주사위다.
-- 레인이 소진되면 `Provider_integration` 으로 접혀 Keeper 크래시 임계치에 쌓였다.
-  공급자 통합 결함도 Keeper 결함도 아닌 것이 둘 중 하나로 적혔다.
+- 레인이 소진되면 `Provider_integration`(공급자 통합 결함) 으로 적혔다. 모델의 실패가
+  공급자의 결함으로 기록된 것이다. (크래시 임계치 자체는 #32105 이후 분류를 안 보고
+  모든 턴 실패에 1씩 쌓이므로, 이 분류로 가산 여부가 바뀐 적은 없다.)
 
 지금은 이렇게 간다.
 
@@ -166,8 +167,8 @@ times" 로 바뀐다. 보이는 곳은 keeper 로그와 TUI 의 turn terminal �
 |---|---|---|
 | `Http_client` | `Provider_wire_error { kind = Repeating_generation }` | `provider_failure_kind` 의 자기 생성자 `Repeating_generation { shape; occurrences; unit_bytes }`. wire kind 목록에서 빠진다 |
 | `Llm_provider.Error` | `ProviderWireError` | `RepeatingGeneration { provider; shape; occurrences; unit_bytes; detail }`. `is_retryable = false` |
-| `Keeper_runtime_failure_route` | `Exhausted_visible_alive Provider_integration` | `Rotate_now Generation_repeated`. `response_observed = true` (모델은 답했다) |
-| `Keeper_turn_driver` | 다음 후보 | 반복한 후보의 **served name**(`model.api_name`)을 기억하고, 같은 이름의 뒤 후보는 dispatch 전에 `Attempt_rejected` 로 거절. 마지막까지 같은 모델이면 레인 오류는 거절이 아니라 관측된 반복 |
+| `Keeper_runtime_failure_route` | `Exhausted_visible_alive Provider_integration` | `Rotate_now Generation_repeated`. `response_observed = true` — 모델은 입력을 보고 답했으므로, 이 턴이 들고 있던 HITL 승인 근거는 다음 턴에 다시 배달하지 않는다(#32956 의 MaxTokens 24회 재배달과 같은 이유). 크래시 임계치 가산은 분류를 안 보므로(#32105) 변하지 않는다 |
+| `Keeper_turn_driver` | 다음 후보 | 반복한 후보의 **served name**(`model.api_name`, 프로덕션은 frozen snapshot 에서 읽음)을 기억하고, 같은 이름의 뒤 후보는 dispatch 전에 `Attempt_rejected` 로 거절. 다음 사이클로 넘기는 힌트(`deferred_runtime_lane`)에서도 같은 모델을 뺀다. 마지막까지 같은 모델이면 레인 오류는 거절이 아니라 관측된 반복이고, 회전 중에 본 overflow 가 있으면 그것이 우선한다(#26530 규칙 유지) |
 | 소유권 (`Provider_failure_attribution`) | `Attempt_local` | `Runtime_binding` — 모델 범위 capacity 실패와 같은 자리 |
 
 모델 정체성을 `model.id` 가 아니라 `api_name` 으로 잡는 이유: 라이브 runtime.toml 은

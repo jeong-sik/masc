@@ -772,6 +772,12 @@ let test_provider_failure_string_helpers () =
       , "empty_completion:end_turn" )
     ; ( Http_client.Empty_completion { stop_reason = Types.MaxTokens }
       , "empty_completion:max_tokens" )
+    ; ( Http_client.Repeating_generation
+          { shape = Types.Repeated_reasoning_cycle; occurrences = 3; unit_bytes = 749 }
+      , "repeating_generation:repeated_reasoning_cycle:3x749" )
+    ; ( Http_client.Repeating_generation
+          { shape = Types.Repeated_paragraph; occurrences = 4; unit_bytes = 61 }
+      , "repeating_generation:repeated_paragraph:4x61" )
     ; ( Http_client.Unknown_provider_failure { reason = Some "exit_status" }
       , "unknown_provider_failure:exit_status" )
     ; Http_client.Unknown_provider_failure { reason = None }, "unknown_provider_failure"

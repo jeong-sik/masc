@@ -110,7 +110,9 @@ val request :
     Failure modes (all return [Error]):
     - DNS / TCP / TLS failure during connect
     - HTTP read error during reuse (pool drops the bad connection)
-    - timeout when [clock] and [timeout_seconds] are both provided
+    - timeout when [clock] and [timeout_seconds] are both provided and
+      the request has not finished by then; a response that arrived as
+      the window passed is the result
 
     Notably absent: silent retry. If a reused connection fails, the
     caller sees [Error] with the underlying reason. Caller decides
@@ -224,8 +226,19 @@ val stats : t -> stats
     config defaults) without requiring piaf integration. Do not call
     from production code. *)
 module For_testing : sig
+  (** The request window [request] arms, on its own: a result the work
+      finished as the window passed stands; the timeout is the result only
+      when the work has not finished. *)
+  val with_request_timeout :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    timeout_seconds:float ->
+    (unit -> ('a, string) result) ->
+    ('a, string) result
+
   (** Drive the real establishment sequence with controlled DNS, TCP and
-      client stages, without fabricating a Piaf client. *)
+      client stages, without fabricating a Piaf client. A client whose
+      creation finished as the window closed is the result; "connect
+      timeout" is the result only when no stage had finished. *)
   val establish_connection :
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     timeout_seconds:float ->

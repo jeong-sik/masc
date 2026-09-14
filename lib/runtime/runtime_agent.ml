@@ -288,24 +288,30 @@ let runtime_observation_for_completed_config ~total_duration_ms ~usage_scope con
   runtime_observation_for_terminal_config ~total_duration_ms ~usage_scope config
 
 (* Agent Core contract §4.6: [read_sse] arms the stream-idle deadline only when BOTH a
-   clock and the idle timeout are present. masc's clock derivation resolves to
-   [None] when the process runtime is uninitialised; a [None] clock with a
-   configured [stream_idle_timeout_s] would silently disarm the only
-   I2-legitimate streaming timeout and let a mid-stream stall hang to the
-   attempt watchdog (the exact silent no-op the RFC forbids). Fail loudly so a
-   wiring regression is visible. A [None] idle (the legitimate opt-out) with a
-   [None] clock stays [None]. Split into a pure decision over the two clock
-   sources so the failure path is testable without an Eio runtime. *)
+   clock and the idle timeout are present. A [None] clock with a configured
+   [stream_idle_timeout_s] would silently disarm the only I2-legitimate
+   streaming timeout and let a mid-stream stall hang to the attempt watchdog
+   (the exact silent no-op the RFC forbids). Fail loudly so a wiring
+   regression is visible. A [None] idle (the legitimate opt-out) with a
+   [None] clock stays [None].
+
+   The clock is the one in [Eio_context], the clock the keeper driver's
+   no-progress watchdog and [Time_compat.now] read; an attempt's every
+   bound then counts on one clock. [Process_eio] holds a clock of its own
+   for child processes, and reading it here first (as this did until
+   2026-09-15) let a process with that clock and no [Eio_context] one run
+   the attempt with the stream bounds armed but the driver's deadline
+   unenforced, and let a suite arm a stream bound on a real clock while its
+   mock clock stood still. Split into a pure decision so the failure path is
+   testable without an Eio runtime. *)
 let decide_clock_for_idle
     ~(stream_idle_timeout_s : float option)
     ~(first_event_timeout_s : float option)
-    ~(process_clock : (float Eio.Time.clock_ty Eio.Resource.t, string) result)
-    ~(ctx_clock : float Eio.Time.clock_ty Eio.Resource.t option)
+    ~(clock : float Eio.Time.clock_ty Eio.Resource.t option)
   : (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result =
-  match process_clock, ctx_clock with
-  | Ok c, _ -> Ok (Some c)
-  | Error _, (Some _ as c) -> Ok c
-  | Error e, None ->
+  match clock with
+  | Some _ -> Ok clock
+  | None ->
     (match stream_idle_timeout_s, first_event_timeout_s with
      | Some idle, _ ->
        Error
@@ -315,10 +321,9 @@ let decide_clock_for_idle
                ; detail =
                    Printf.sprintf
                      "runtime_agent: stream_idle_timeout_s configured (%.1fs) \
-                      but no clock resolvable (%s); refusing to run with a \
-                      silently disarmed stream idle timeout"
+                      but no clock is installed in Eio_context; refusing to \
+                      run with a silently disarmed stream idle timeout"
                      idle
-                     e
                }))
      | None, Some first_event ->
        (* The first-event (TTFT/prefill) bound has the same clock dependency
@@ -331,10 +336,9 @@ let decide_clock_for_idle
                ; detail =
                    Printf.sprintf
                      "runtime_agent: first_event_timeout_s configured (%.1fs) \
-                      but no clock resolvable (%s); refusing to run with a \
-                      silently disarmed first-event timeout"
+                      but no clock is installed in Eio_context; refusing to \
+                      run with a silently disarmed first-event timeout"
                      first_event
-                     e
                }))
      | None, None -> Ok None)
 ;;
@@ -346,8 +350,7 @@ let resolve_clock_for_idle
   decide_clock_for_idle
     ~stream_idle_timeout_s
     ~first_event_timeout_s
-    ~process_clock:(Process_eio.get_clock ())
-    ~ctx_clock:(Eio_context.get_clock_opt ())
+    ~clock:(Eio_context.get_clock_opt ())
 ;;
 
 let add_unique_string value values =
@@ -1264,11 +1267,8 @@ let run_blocks_internal
   let run_started_at = Unix.gettimeofday () in
   (try
     let result =
-      let clock =
-        match Process_eio.get_clock () with
-        | Ok c -> Some c
-        | Error _ -> Eio_context.get_clock_opt ()
-      in
+      (* The clock [resolve_clock_for_idle] accepted at build: one source. *)
+      let clock = Eio_context.get_clock_opt () in
       Otel_spans.with_span
         ~name:"llm_call"
         ~attrs:[

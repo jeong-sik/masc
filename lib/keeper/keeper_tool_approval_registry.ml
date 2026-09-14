@@ -108,10 +108,13 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
         t.waiters <-
           List.filter (fun waiter -> waiter.resolve != resolve) t.waiters)
   in
+  (* A decision settled as the wait's timeout passed is the decision: the
+     operator was told it applied, and the call must run under it rather
+     than be reported as timed out. *)
   Fun.protect ~finally:remove_self (fun () ->
-      Eio.Fiber.first
+      Watched_work.run
         (fun () -> Eio.Promise.await promise)
-        (fun () ->
+        ~watcher:(fun () ->
           Eio.Time.sleep clock timeout_sec;
           Timed_out))
 

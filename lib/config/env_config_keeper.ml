@@ -755,6 +755,8 @@ module KeeperKeepalive = struct
       @ops_class operator *)
   let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
 
+  let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+
   let provider_call_deadline_sec_override () =
     declared_timeout_seconds_within
       ~min_sec:provider_call_deadline_min_sec

@@ -42,6 +42,10 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?tool_use_id:string
+     (* #35456: parent agent-core invocation identity, threaded to in-process
+        sub-call provenance rows so candidate attempts join this call. *)
+  -> ?trace_id:string
   -> descriptor:Keeper_tool_descriptor.t
   -> input:Yojson.Safe.t
   -> unit
@@ -63,6 +67,8 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?tool_use_id:string
+  -> ?trace_id:string
   -> name:string
   -> input:Yojson.Safe.t
   -> unit
@@ -84,6 +90,8 @@ module Compatibility : sig
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
     -> ?gate_grant:Keeper_gate.cycle_grant
+    -> ?tool_use_id:string
+    -> ?trace_id:string
     -> descriptor:Keeper_tool_descriptor.t
     -> input:Yojson.Safe.t
     -> unit
@@ -104,6 +112,8 @@ module Compatibility : sig
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
     -> ?gate_grant:Keeper_gate.cycle_grant
+    -> ?tool_use_id:string
+    -> ?trace_id:string
     -> name:string
     -> input:Yojson.Safe.t
     -> unit

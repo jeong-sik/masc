@@ -33,6 +33,12 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (** Exact human decision delivered to this Keeper lane. Permission-capable
         handlers must match it against the normalized request before use. *)
+  ; tool_use_id : string option
+    (** #35456: the parent agent-core invocation's tool_use_id, carried so
+        in-process sub-calls (vision candidate attempts) can join their
+        start/termination rows to this call. [None] on callers without
+        invocation context (tests, direct dispatch). *)
+  ; trace_id : string option
   ; capability_authority : capability_authority
     (** Production Keeper turns carry [Frozen_surface]. [Compatibility_meta]
         is explicit and reserved for direct callers without a turn. *)

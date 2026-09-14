@@ -529,9 +529,13 @@ val dispatch_sync_request
     request/response-header phase. [body_timeout_s] is the caller-owned total
     deadline across connection establishment, request/response headers, and
     full response-body consumption. The earlier deadline wins. Each explicit
-    timeout requires [clock]. Caller-owned cancellation and a nested
-    [Eio.Time.Timeout] are re-raised only after the checked-out connection has
-    been closed. *)
+    timeout requires [clock]. A body that outruns the total deadline ends a
+    successful status as [TimeoutError { phase = Wall_clock; _ }], the body
+    being the answer; under a status that is not a success the answer is
+    already in hand, and the response is returned with that status, its
+    headers, and an empty body, the connection released and not parked.
+    Caller-owned cancellation and a nested [Eio.Time.Timeout] are re-raised
+    only after the checked-out connection has been closed. *)
 val post_sync_once
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
@@ -612,12 +616,15 @@ val post_stream
     Retry-After received and an empty body, not a timeout. A window that
     closes as the connection is handed back closes that connection too.
     With neither budget supplied the phase is unbounded. Two steps run
-    outside the window's reach: DNS
-    resolution, in a systhread the window cannot cancel (a closed window is
-    observed once the lookup returns, and until then the resolver's own
-    timeout is the bound), and the process's first trust-store load for
-    https, synchronous on this domain. [f] receives [pre_header_elapsed_s], the seconds this phase
-    took on [clock] (0 without one), and arms what is left of the
+    outside the window's reach: DNS resolution, in a systhread the window
+    cannot cancel (a closed window is observed once the lookup returns, and
+    until then the resolver's own timeout is the bound), and the trust-store
+    load an https connection makes synchronously on this domain, cached
+    once it succeeds and repeated by every connection while it fails; on a
+    connection that loads the store the two run as one stretch and the
+    window is observed after their sum. [f] receives
+    [pre_header_elapsed_s], the seconds this phase took on [clock] (0
+    without one), and arms what is left of the
     first-event budget on the reader ({!read_sse}, {!read_ndjson}): the
     budget is one window from the request to the first token, not one in
     front of the headers and another after them.

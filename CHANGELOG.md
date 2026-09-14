@@ -23,6 +23,10 @@
 - TUI: the transport list has a way in again (#36217).
 - TUI: the progress row opens with what the model is doing now and how long it has been silent (#36192).
 - Keeper: the prompt and the goal verifier name an unreadable goal store with its reason and file (RFC-0444) (#36126).
+- Agent core: a caller's call deadline reaches the Sync pipeline's admission wait (#36223), a stream's admission wait is bounded and named `Queue` (#36232), and the phase before the response headers runs under the first-event budget, connection included (#36204).
+- Schedule: a new occurrence supersedes the schedule's earlier pending occurrences in the keeper queue (#36230), and pending occurrences of one schedule collapse into one queue row (#36222).
+- Lanes: the DOS chain packages declare the binding contract their installer and workers already require (#36237).
+- TUI: the `/queue` snapshot reads as a timeline with ages, spans and the reason nothing drains (#36226).
 
 ### Fixed
 
@@ -71,6 +75,9 @@
 - Notify: the mention notifier is one bounded process, found without a probe (#36176).
 - TUI: guided Lane operations are restored in the workspace (#35999); live replies are shown for promoted queue requests (#36159); a running turn always has a stop handle (#36030); and the chat header writes `gate: ` with the space its row uses (#36112).
 - TUI: the Keepers title says whether its reading is live (#36216); the Lanes failure row says what failed once (#36211); the empty-page note stops repeating the verdict above it (#36208); the diff pane draws the same failure note as every other page (#36201); the Schedules list names its six columns above them (#36191); the Attention panel's empty note starts where its rows do (#36171); Task Review draws its header and rows from one column set (#36168); the Clients title walks its path with one separator (#36163); and the footer keeps the key that opens a row, not only the ones that leave (#36156).
+- Agent core: an https host is a TLS peer by name or by address, never nameless (#36238); the reasoning repeat rule reads 64 KiB and a miss keeps its window (#36231); and `call_timeout_s` is declared everywhere the runtime config record lives (#36228).
+- Lanes: an action commits its package output once and no longer forces a second observation (#36227).
+- TUI: a slash command's usage wraps on the cheat sheet instead of being cut (#36234), and a labelled field reads the failed word from where the title does (#36225).
 - TUI: the active runtime row states its one timestamp once (#36155); the Context row stops opening with the word its label already said (#36152); the Activity legend stops naming a mark no row draws (#36148); the screen says its timezone once, not on five rows (#36143); and the Overview names each transport path once, marking the one in use (#36136).
 
 ### Documentation

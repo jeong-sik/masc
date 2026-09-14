@@ -16,11 +16,12 @@ Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
 Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
-reaches the server log with `l`. Task Review, Schedules, Fusion, Lanes,
-Clients, Code, Resources, Tools, and Logs also keep `go <name>` palette
-entries;
-Verdicts, Changes, and Keeper operations are reached from their parents
-only.
+reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
+Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
+also keep `go <name>` palette entries, and each Config pane has
+`go Config / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
+`presets`, `themes`, `voice`). Changes follows the Keeper selected on
+Keepers. Keeper operations are reached from their parent only.
 
 ## Quick Start
 

@@ -142,7 +142,11 @@ let test_a_wider_connect_budget_yields_to_the_first_event_budget () =
 
 (* The connection is made inside the window. A peer that completes the TCP
    handshake and never sends a ServerHello stalls the TLS handshake, which
-   ran before the budget started until 2026-09-14. *)
+   ran before the budget started until 2026-09-14. The address is an IP
+   literal on purpose: until the same day the TLS wrapper raised
+   [Invalid_argument "invalid host name"] for one, out of the client as an
+   untyped exception, so this case also holds that an https endpoint written
+   as an address fails typed. *)
 let test_the_budget_covers_the_tls_handshake () =
   match Llm_provider.Api_common.make_https_result () with
   | Error reason ->

@@ -790,13 +790,24 @@ let make_https_result () : (Uri.t -> _ -> _, https_init_error) result =
   | Ok tls_config ->
     Ok
       (fun uri flow ->
+        (* SNI carries a host name, never an address. [Domain_name.of_string]
+           accepts "127.0.0.1" (numeric labels are syntactically a domain
+           name) and [host_exn] then raised [Invalid_argument "invalid host
+           name"] out of the connect path as an untyped exception, so an
+           https endpoint written as an IP literal crashed the attempt
+           instead of failing it. [host] answers the same question as a
+           result; an address goes without SNI and the authenticator
+           decides the rest. *)
         let host =
           match Uri.host uri with
           | None -> None
           | Some h ->
             (match Domain_name.of_string h with
              | Error _ -> None
-             | Ok dn -> Some (Domain_name.host_exn dn))
+             | Ok dn ->
+               (match Domain_name.host dn with
+                | Ok host -> Some host
+                | Error _ -> None))
         in
         Tls_eio.client_of_flow tls_config ?host flow)
 ;;

@@ -463,6 +463,34 @@ def wait_for_output(
     )
 
 
+def wait_for_fixture_state(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    ready: Callable[[], bool],
+    *,
+    timeout: float,
+) -> bool:
+    """Wait for a fixture to record something, as its sibling waits for a signal.
+
+    A key whose whole effect is a request the screen is already showing the
+    answer to cannot be waited for on the screen. Frame_presenter.present
+    writes nothing at all -- not even a frame terminator -- when a frame equals
+    the one before it, so a refresh that is meant to come back with the same
+    scene draws no bytes, and send_and_wait waits out its three seconds for a
+    needle that is already on the screen and will not be written again.
+    """
+    deadline = time.monotonic() + timeout
+    while not ready():
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
 def wait_for_fixture_event(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -14513,11 +14541,30 @@ def run_browser_scene_regression(executable: str) -> None:
         send_and_wait(process, master, output, b"m", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1]["scope"] == {"documentId":"document-after","nodeId":"channel-region"}
         focused = scenes[-1]
-        send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
+        # These three keys are answered on the wire and, by design, leave the
+        # screen as it stands: the refresh is asserted to return the same scene
+        # just below, and the scroll moves the page the scene was read from
+        # rather than the rows drawn from it. An unchanged frame is written as
+        # nothing, so each is waited for where its effect actually lands.
+        def press_and_await(key: bytes, ready: Callable[[], bool], what: str) -> None:
+            read_available(master, output)
+            write_all(master, output, key)
+            # Five seconds, as wait_for_fixture_event is given elsewhere: a
+            # scroll is two round trips, the move and the re-read after it.
+            if not wait_for_fixture_state(
+                process, master, output, ready, timeout=5.0
+            ):
+                raise AssertionError(f"{key!r} did not reach the fixture: {what}")
+
+        def scrolled(sent: int, read: int) -> Callable[[], bool]:
+            return lambda: len(scrolls) > sent and len(scene_viewports) > read
+
+        scoped = len(scenes)
+        press_and_await(b"r", lambda: len(scenes) > scoped, "a scoped refresh")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
-        send_and_wait(process, master, output, b"J", b"SCOPED CHANNEL CONTENT")
+        press_and_await(b"J", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
-        send_and_wait(process, master, output, b"K", b"SCOPED CHANNEL CONTENT")
+        press_and_await(b"K", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")

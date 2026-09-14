@@ -48,3 +48,29 @@ let glyph = function
   | Web -> "\xe2\x97\x88" (* U+25C8 WHITE DIAMOND CONTAINING BLACK DIAMOND *)
   | Media -> "\xe2\x96\xa8" (* U+25A8 SQUARE WITH UPPER RIGHT TO LOWER LEFT FILL *)
   | Plain -> "\xc2\xb7" (* U+00B7 MIDDLE DOT *)
+
+(* The word the sheet prints beside each mark, and the marks in the order the
+   sheet lists them.
+
+   The tree draws the mark alone: a folder takes the arrow and a file takes its
+   kind's mark, with no word after either. The file name does not say the kind
+   either -- it says the extension, which is what the mark was read from. So
+   the help sheet is the only place a reader can find out that the diamond is
+   source and the stacked lines are prose.
+
+   [word] is a match over the closed [kind], so a new kind cannot be added
+   without being given a word. [kinds] is a list and the compiler cannot check
+   it -- it sits here, next to the match that will stop compiling, so both get
+   edited in the same pass. *)
+let word = function
+  | Code -> "source"
+  | Data -> "data or configuration"
+  | Prose -> "prose"
+  | Script -> "a shell script"
+  | Web -> "web markup or style"
+  | Media -> "an image, a PDF, audio or video"
+  | Plain -> "anything else"
+
+let kinds = [ Code; Data; Prose; Script; Web; Media; Plain ]
+
+let legend = List.map (fun kind -> (glyph kind, word kind)) kinds

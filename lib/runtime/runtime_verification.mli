@@ -53,6 +53,7 @@ type result =
 
 val to_json : result -> Yojson.Safe.t
 val failure_code : failure -> string
+val failure_message : failure -> string
 val failure_detail : failure -> string option
 
 type unmeasured =

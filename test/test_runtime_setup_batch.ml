@@ -111,12 +111,14 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
   let id=(Runtime_setup_spec.render (spec "new")).runtime_id in
   let revision=get (Batch.observe ~base_path:base) in
   let outcome verify = fake ~verify base binary "pass"; apply base binary specs [id] revision true in
-  Alcotest.check Alcotest.bool "failed report carries code and detail" true
+  Alcotest.check Alcotest.bool "failed report carries code, message and detail" true
     (outcome "print(report(a[3],status='failed',failure={'code':'provider_rejected','message':'refused','detail':'HTTP 400 from fixture'})); sys.exit(1)"
-     = Error (Batch.Verification_failed { runtime_id = id; code = "provider_rejected"; detail = Some "HTTP 400 from fixture" }));
+     = Error (Batch.Verification_failed { runtime_id = id; code = "provider_rejected"
+                                        ; message = "The selected model request failed; check model access, endpoint and authentication."
+                                        ; detail = Some "HTTP 400 from fixture" }));
   Alcotest.check Alcotest.bool "unmeasured report carries the command's code" true
     (outcome "print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':a[3],'model':None,'observed_model':None,'status':'unavailable','checks':{'response':False,'tool_called':False,'tool_roundtrip':False},'failure':{'code':'runtime_not_configured','message':'not configured','detail':None}})); sys.exit(2)"
-     = Error (Batch.Verification_failed { runtime_id = id; code = "runtime_not_configured"; detail = None }));
+     = Error (Batch.Verification_failed { runtime_id = id; code = "runtime_not_configured"; message = "not configured"; detail = None }));
   let unreadable verify = match outcome verify with
     | Error (Batch.Verification_unreadable { runtime_id; exit = Unix.WEXITED 0; stderr = ""; reason = _ }) -> runtime_id = id
     | Ok _

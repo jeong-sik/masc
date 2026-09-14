@@ -110,6 +110,11 @@ val run_best_effort
     entrypoint. This runtime owns cadence, not the live configuration gate. *)
 
 module For_testing : sig
+  val fit_context_input :
+    input:Keeper_librarian_context.input ->
+    fits:(Keeper_librarian_context.input -> (bool, 'error) result) ->
+    (Keeper_librarian_context.input, 'error) result
+
   val select_source_subset :
     sources:Keeper_librarian_context.source list ->
     fits:(Keeper_librarian_context.source list -> (bool, 'error) result) ->

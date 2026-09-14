@@ -1,10 +1,19 @@
-type attempt_state = Pending | Attempted
+type policy = { instructions : string; task_id : Keeper_id.Task_id.t option }
+
+let policy_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  { instructions = meta.instructions; task_id = meta.current_task_id }
+
+let policy_equal left right =
+  String.equal left.instructions right.instructions
+  && Option.equal Keeper_id.Task_id.equal left.task_id right.task_id
+
+type attempt_state = Pending | Attempted of policy
 
 type remembered =
   { trace_id : string
   ; identity : unit ref
   ; attempt_state : attempt_state
-  ; process : Keeper_librarian_runtime.trigger -> unit
+  ; process : meta:Keeper_meta_contract.keeper_meta -> Keeper_librarian_runtime.trigger -> unit
   }
 
 let remembered : (string * remembered) list Atomic.t = Atomic.make []
@@ -17,14 +26,14 @@ let remember_turn ~base_path ~keeper_name ~trace_id process =
       ((key, {trace_id; identity = ref (); attempt_state = Pending; process}) ::
        List.remove_assoc key (Atomic.get remembered)))
 
-let attempt_remembered ~base_path ~keeper_name ~trace_id ~sources_changed ~trigger =
+let attempt_remembered ~base_path ~keeper_name ~trace_id ~meta ~sources_changed ~trigger =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match List.assoc_opt key (Atomic.get remembered) with
   | Some evidence when String.equal evidence.trace_id trace_id ->
     (match evidence.attempt_state, sources_changed with
-     | Attempted, false -> ()
-     | Pending, _ | Attempted, true ->
-       evidence.process trigger;
+     | Attempted policy, false when policy_equal policy (policy_of_meta meta) -> ()
+     | Pending, _ | Attempted _, _ ->
+       evidence.process ~meta trigger;
        (* Unit return only proves an attempt. In particular run_best_effort can
           return without committing. Exceptions, including cancellation, leave
           evidence pending; a newer turn arriving during this call stays dirty. *)
@@ -32,7 +41,7 @@ let attempt_remembered ~base_path ~keeper_name ~trace_id ~sources_changed ~trigg
          match List.assoc_opt key (Atomic.get remembered) with
          | Some latest when latest.identity == evidence.identity ->
            Atomic.set remembered
-             ((key, {latest with attempt_state = Attempted}) ::
+             ((key, {latest with attempt_state = Attempted (policy_of_meta meta)}) ::
               List.remove_assoc key (Atomic.get remembered))
          | Some _ | None -> ()));
     true
@@ -55,7 +64,7 @@ let run ~trigger ~base_path ~keeper_name =
     let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
     let handled = attempt_remembered ~base_path ~keeper_name
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-        ~sources_changed ~trigger in
+        ~meta ~sources_changed ~trigger in
     if sources_changed && not handled then (
       match Domain_pool_ref.submit_io_or_inline (fun () ->
         Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
@@ -94,9 +103,11 @@ let install () =
       (* Queue commits can originate in HTTP/IO domains. Only the short
          submission crosses to the root switch owner; model work is detached. *)
       Eio_context.run_on_owner_domain (fun () ->
-        ignore (Keeper_memory_lane.submit ~base_path ~keeper_name
-          (fun () -> run ~trigger:Keeper_librarian_runtime.Queue_changed
-            ~base_path ~keeper_name))))
+        let (_ : Keeper_memory_lane.outcome) =
+          Keeper_memory_lane.submit ~base_path ~keeper_name
+            (fun () -> run ~trigger:Keeper_librarian_runtime.Queue_changed
+              ~base_path ~keeper_name)
+        in ()))
 
 module For_testing = struct
   let attempt_remembered = attempt_remembered

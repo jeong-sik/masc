@@ -451,6 +451,48 @@ let select_source_subset ~sources ~fits =
   in select [] sources
 ;;
 
+(* Fit source evidence and the prior catalogue together. Reserve room for an
+   executable organization input before adding prior context: a large catalogue
+   must not make every fresh event permanently unselectable. Skipped context
+   pockets remain in the committed snapshot, outside this prompt projection. *)
+let fit_context_input ~(input : Keeper_librarian_context.input) ~fits =
+  let module Context = Keeper_librarian_context in
+  let ( let* ) = Result.bind in
+  let prior_pockets, organized = match input.previous with
+    | None -> [], []
+    | Some snapshot -> snapshot.pockets, Context.current_references snapshot in
+  let fresh = List.filter (fun (s : Context.source) ->
+    not (List.mem s.reference organized)) input.sources in
+  let project sources pockets =
+    {input with sources; previous = Option.map (fun (snapshot : Context.snapshot) ->
+      {snapshot with pockets}) input.previous} in
+  let rec seed = function
+    | [] -> Ok None
+    | source :: rest ->
+      let* accepted = fits (project [source] []) in
+      if accepted then Ok (Some source) else seed rest in
+  let* seed_source = seed fresh in
+  match seed_source with
+  | None -> Ok (project [] [])
+  | Some source ->
+    let rec fit_pockets chosen = function
+      | [] -> Ok chosen
+      | pocket :: rest ->
+        let candidate = chosen @ [pocket] in
+        let* accepted = fits (project [source] candidate) in
+        fit_pockets (if accepted then candidate else chosen) rest in
+    let* pockets = fit_pockets [] prior_pockets in
+    let remaining = List.filter (fun (candidate : Context.source) ->
+      not (String.equal candidate.reference source.reference)) fresh in
+    let rec fit_sources chosen = function
+      | [] -> Ok (project chosen pockets)
+      | next :: rest ->
+        let candidate = chosen @ [next] in
+        let* accepted = fits (project candidate pockets) in
+        fit_sources (if accepted then candidate else chosen) rest in
+    fit_sources [source] remaining
+;;
+
 let fit_working_sources ~selected_slots ~(selected_input : Keeper_librarian.input) ~messages ~render_at =
   let open Result.Syntax in
   let full_lane = project_lane ~selected_slots ~messages in
@@ -470,20 +512,21 @@ let fit_working_sources ~selected_slots ~(selected_input : Keeper_librarian.inpu
        oversized event is allowed to monopolize the source fitting pass. *)
     let* _, _ = fitted_messages ~selected_slots ~full_messages:base_messages
         ~render_at:(fun _ -> Ok base_messages) in
-    let ordered = (fit_input ~count:(List.length selected_input.working_context.sources) selected_input).working_context.sources in
-    let* sources = select_source_subset ~sources:ordered ~fits:(fun candidate ->
-      let input = {base with working_context = {base.working_context with sources = candidate}} in
-      let* projected = render input in
-      let lane = project_lane ~selected_slots ~messages:projected in
-      Ok (lane.usable <> [] && lane.fits)) in
-    let with_sources = {selected_input with working_context = {selected_input.working_context with sources}} in
+    let* working_context = fit_context_input ~input:selected_input.working_context
+        ~fits:(fun working_context ->
+          let input = {base with working_context} in
+          let* projected = render input in
+          let lane = project_lane ~selected_slots ~messages:projected in
+          Ok (lane.usable <> [] && lane.fits)) in
+    let sources = working_context.sources in
+    let with_sources = {selected_input with working_context} in
     let* full_messages = render with_sources in
     let render_at count = render (prompt_input_for_librarian ~max_messages:count with_sources) in
     let* (messages, fitted_count), unusable = fitted_messages ~selected_slots ~full_messages ~render_at in
     let input = match fitted_count with None -> with_sources
       | Some count -> prompt_input_for_librarian ~max_messages:count with_sources in
     Log.Keeper.info "Librarian source fitting selected=%d deferred=%d; original inputs retained"
-      (List.length sources) (List.length ordered - List.length sources);
+      (List.length sources) (List.length selected_input.working_context.sources - List.length sources);
     Ok (input, messages, fitted_count, unusable)
 ;;
 
@@ -958,6 +1001,43 @@ let run_best_effort
                    messages=%d (registered input shows the full material)"
                   count);
 
+             (* Working context is advisory and has its own revision. A stale
+                or failed context write cannot roll back memory or block the
+                Keeper; original sources remain pending throughout. *)
+             (try match Domain_pool_ref.submit_io_or_inline (fun () ->
+                Keeper_librarian_context.commit ~keepers_dir ~keeper_id
+                  ~expected_version:(Option.map Keeper_librarian_context.version inp.working_context.previous)
+                  ?execution_basis:inp.working_context.execution_basis
+                  ?observed_sources:(if inp.working_context.unavailable = []
+                    then Some inp.working_context.sources else None)
+                  ~sources:(let references = List.concat_map
+                    (fun (p : Keeper_librarian_context.pocket) -> p.sources) selection.working_contexts in
+                    List.filter (fun (s : Keeper_librarian_context.source) ->
+                      List.mem s.reference references) inp.working_context.sources)
+                  selection.working_contexts) with
+              | Ok working ->
+                (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                   Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
+                 | Ok () -> ()
+                 | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
+                     "working context reference publication failed: %s" detail);
+                let covered = Keeper_librarian_context.current_references working in
+                let prior = match inp.working_context.previous with None -> [] | Some previous ->
+                  Keeper_librarian_context.current_references previous in
+                let made_progress = List.exists (fun reference -> not (List.mem reference prior)) covered in
+                let remaining = List.exists (fun (source : Keeper_librarian_context.source) ->
+                  not (List.mem source.reference covered)) inp.working_context.sources in
+                (* Continue incremental organization only after measured source
+                   coverage advances. An unfit source or model failure cannot
+                   create a private retry loop. *)
+                if made_progress && remaining then
+                  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:keeper_id
+              | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
+                  "working context not committed; original intake continues: %s" detail
+              with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Log.Keeper.warn ~keeper_name:keeper_id
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn));
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it
@@ -982,35 +1062,6 @@ let run_best_effort
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
              in
-             (* Working context is advisory and has its own revision. A stale
-                or failed context write cannot roll back memory or block the
-                Keeper; original sources remain pending throughout. *)
-             (match Domain_pool_ref.submit_io_or_inline (fun () ->
-                Keeper_librarian_context.commit ~keepers_dir ~keeper_id
-                  ~expected_revision:(Option.map
-                    (fun (s : Keeper_librarian_context.snapshot) -> s.revision)
-                    inp.working_context.previous)
-                  ?observed_sources:(if inp.working_context.unavailable = []
-                    then Some inp.working_context.sources else None)
-                  ~sources:(let references = List.concat_map
-                    (fun (p : Keeper_librarian_context.pocket) -> p.sources) selection.working_contexts in
-                    List.filter (fun (s : Keeper_librarian_context.source) ->
-                      List.mem s.reference references) inp.working_context.sources)
-                  selection.working_contexts) with
-              | Ok working ->
-                let covered = Keeper_librarian_context.current_references working in
-                let prior = match inp.working_context.previous with None -> [] | Some previous ->
-                  Keeper_librarian_context.current_references previous in
-                let made_progress = List.exists (fun reference -> not (List.mem reference prior)) covered in
-                let remaining = List.exists (fun (source : Keeper_librarian_context.source) ->
-                  not (List.mem source.reference covered)) inp.working_context.sources in
-                (* Continue incremental organization only after measured source
-                   coverage advances. An unfit source or model failure cannot
-                   create a private retry loop. *)
-                if made_progress && remaining then
-                  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:keeper_id
-              | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context not committed; original intake continues: %s" detail);
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)
@@ -1168,6 +1219,7 @@ let run_best_effort
 ;;
 
 module For_testing = struct
+  let fit_context_input = fit_context_input
   let select_source_subset = select_source_subset
   type classified_error = extraction_error
 

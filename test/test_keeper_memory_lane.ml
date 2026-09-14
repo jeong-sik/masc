@@ -859,7 +859,7 @@ let test_queue_coalescing_preserves_completed_turn () =
   let seen = ref [] in
   let attempt trigger () =
     ignore (Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
-      ~trace_id ~sources_changed:false ~trigger)
+      ~trace_id ~meta:(make_meta keeper_name) ~sources_changed:false ~trigger)
   in
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
     Lane.init ~sw;
@@ -870,7 +870,7 @@ let test_queue_coalescing_preserves_completed_turn () =
       Eio.Promise.await release));
     Eio.Promise.await started;
     Refresh.remember_turn ~base_path ~keeper_name ~trace_id
-      (fun trigger -> seen := trigger :: !seen);
+      (fun ~meta:_ trigger -> seen := trigger :: !seen);
     ignore (Lane.submit ~base_path ~keeper_name
       (attempt Librarian_runtime.Conversation_completed));
     let outcome = Lane.submit ~base_path ~keeper_name
@@ -894,17 +894,17 @@ let test_remembered_turn_replacement_and_cancellation () =
   let remember = Refresh.remember_turn ~base_path ~keeper_name ~trace_id in
   let attempt ?(sources_changed = false) trace_id =
     Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
-      ~trace_id ~sources_changed ~trigger:Librarian_runtime.Queue_changed
+      ~trace_id ~meta:(make_meta keeper_name) ~sources_changed ~trigger:Librarian_runtime.Queue_changed
   in
-  remember (fun _ ->
+  remember (fun ~meta:_ _ ->
     seen := "old" :: !seen;
-    remember (fun _ -> seen := "new" :: !seen));
+    remember (fun ~meta:_ _ -> seen := "new" :: !seen));
   ignore (attempt trace_id);
   ignore (attempt trace_id);
   Alcotest.(check (list string)) "new evidence stays pending during old attempt"
     ["new"; "old"] !seen;
   let cancel_once = ref true in
-  remember (fun _ ->
+  remember (fun ~meta:_ _ ->
     if !cancel_once then (
       cancel_once := false;
       raise (Eio.Cancel.Cancelled Test_boom));
@@ -922,6 +922,38 @@ let test_remembered_turn_replacement_and_cancellation () =
   Alcotest.(check int) "changed sources reuse completed-turn evidence" 4 (List.length !seen)
 ;;
 
+let test_remembered_turn_uses_current_policy () =
+  let module Refresh = Masc.Keeper_librarian_queue_refresh in
+  let keeper_name = "queue-policy-change" in
+  let trace_id = "same-trace" in
+  let meta = make_meta keeper_name in
+  let seen = ref [] in
+  let completed_evidence = ["completed user message"; "completed tool result"] in
+  Refresh.remember_turn ~base_path ~keeper_name ~trace_id
+    (fun ~meta _ ->
+      seen := (meta.Masc.Keeper_meta_contract.instructions,
+               meta.current_task_id, completed_evidence) :: !seen);
+  let attempt meta =
+    Refresh.For_testing.attempt_remembered ~base_path ~keeper_name ~trace_id
+      ~meta ~sources_changed:false ~trigger:Librarian_runtime.Queue_changed
+  in
+  Alcotest.(check bool) "first evidence handled" true (attempt meta);
+  let changed = {meta with instructions = "explain only; do not execute"} in
+  Alcotest.(check bool) "same trace policy change handled" true (attempt changed);
+  let task_id = Masc.Keeper_id.Task_id.of_string "task-42" |> Result.get_ok in
+  let changed = {changed with current_task_id = Some task_id} in
+  Alcotest.(check bool) "same trace task change handled" true (attempt changed);
+  Alcotest.(check bool) "unchanged policy handled" true (attempt changed);
+  Alcotest.(check int) "only policy changes repeat extraction" 3 (List.length !seen);
+  match !seen with
+  | (instructions, Some task, evidence) :: _ ->
+    Alcotest.(check string) "current instructions" changed.instructions instructions;
+    Alcotest.(check bool) "current task" true (Masc.Keeper_id.Task_id.equal task_id task);
+    Alcotest.(check (list string)) "completed evidence survives policy refresh"
+      completed_evidence evidence
+  | _ -> Alcotest.fail "current policy was not delivered with completed evidence"
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -929,6 +961,9 @@ let () =
       , [ Alcotest.test_case
             "queue coalescing preserves completed-turn evidence"
             `Quick test_queue_coalescing_preserves_completed_turn
+        ; Alcotest.test_case
+            "current policy preserves remembered evidence"
+            `Quick test_remembered_turn_uses_current_policy
         ; Alcotest.test_case
             "remembered turn replacement and cancellation"
             `Quick test_remembered_turn_replacement_and_cancellation

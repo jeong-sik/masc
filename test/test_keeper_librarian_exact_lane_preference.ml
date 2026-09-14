@@ -161,6 +161,119 @@ let test_keeper_preference_reorders_the_librarian_lane () =
   | Error detail -> fail detail
 ;;
 
+(* Working-context organization must survive an independent Memory OS store
+   failure. A directory at the snapshot path deterministically rejects the
+   memory read/write even when the test runs with elevated filesystem access. *)
+let test_context_commits_when_memory_store_fails () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  with_temp_base "librarian-independent-context" @@ fun base_path ->
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (prompt_root ());
+  Prompt_defaults.init ();
+  let keeper_id = "librarian-independent-context" in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Unix.mkdir keepers_dir 0o700;
+  let memory_path =
+    Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
+  Unix.mkdir memory_path 0o700;
+  let blocker = Filename.concat memory_path "not-a-memory-snapshot" in
+  Out_channel.with_open_bin blocker (fun channel ->
+    output_string channel "preserve the invalid path fixture");
+  let output =
+    match selection_output with
+    | `Assoc fields ->
+      `Assoc
+        (("working_contexts",
+          `List [ `Assoc
+            [ "merge_contexts", `List []
+            ; "sources", `List [ `String "s1" ]
+            ; "context", `String "The campaign still needs a status check."
+            ; "next_steps", `List [ `String "Check the current campaign status." ]
+            ] ])
+         :: List.remove_assoc "working_contexts" fields)
+    | _ -> fail "selection fixture must be an object"
+  in
+  let server =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:"librarian-independent-context"
+      [ { Fixture.id = "librarian-context"; base_url = server.base_url } ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.id = "librarian_exact"
+           ; slot_ids = [ "librarian-context" ]
+           ; cli_slot_ids = []
+           } ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let source : Keeper_librarian_context.source =
+    { reference = "event:campaign:immutable-source"
+    ; content = `Assoc [ "request", `String "Check the campaign status." ]
+    }
+  in
+  let inp =
+    { (input ()) with
+      working_context =
+        { Keeper_librarian_context.empty with sources = [ source ] }
+    }
+  in
+  Runtime.run_best_effort
+    ~trigger:Runtime.Queue_changed
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
+  check int "the exact provider ran" 1 (Fixture.post_count server);
+  (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
+   | Ok (Some context) ->
+     check (list string) "original queue source remains organized"
+       [ source.reference ]
+       (Keeper_librarian_context.current_references context);
+     check (list string) "the selected context survives memory failure"
+       [ "The campaign still needs a status check." ]
+       (List.map
+          (fun (pocket : Keeper_librarian_context.pocket) -> pocket.context)
+          context.pockets)
+   | Ok None -> fail "memory failure prevented working-context commit"
+   | Error detail -> fail detail);
+  check bool "memory snapshot was not written over the invalid path" true
+    (Sys.is_directory memory_path && Sys.file_exists blocker);
+  let journal =
+    Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+  in
+  check bool "the memory failure is recorded" true
+    (List.exists
+       (function
+         | Ok (Keeper_memory_os_current.Journal_failed _) -> true
+         | Ok (Keeper_memory_os_current.Journal_committed _)
+         | Ok (Keeper_memory_os_current.Journal_quarantined _)
+         | Error _ -> false)
+       journal);
+  check bool "no successful memory commit is reported" false
+    (List.exists
+       (function
+         | Ok (Keeper_memory_os_current.Journal_committed _) -> true
+         | Ok (Keeper_memory_os_current.Journal_failed _)
+         | Ok (Keeper_memory_os_current.Journal_quarantined _)
+         | Error _ -> false)
+       journal)
+;;
+
 (* Lane audit W1/W2: the librarian's byte-budget fit. A slot whose
    request-body limit cannot hold the full prompt shrinks the message window
    through render_at; a prompt whose fixed material alone exceeds the limit
@@ -427,6 +540,10 @@ let () =
             "Keeper preference selects first slot and commits"
             `Quick
             test_keeper_preference_reorders_the_librarian_lane
+        ; test_case
+            "working context commits despite Memory OS store failure"
+            `Quick
+            test_context_commits_when_memory_store_fails
         ; test_case
             "fit shrinks to slot budget and types zero-fit"
             `Quick

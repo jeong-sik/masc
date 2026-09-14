@@ -116,7 +116,7 @@ let run
         Config_dir_resolver.keepers_dir_for_base_path
           ~base_path:config.Workspace.base_path
       in
-      let run_admitted_librarian trigger =
+      let run_admitted_librarian ~(live_meta : Keeper_meta_contract.keeper_meta) trigger =
         (* Durable chat is the typed source for direct input. Connector
            attention is also read from its producer-owned store so a
            best-effort ambient chat append cannot erase the actor evidence.
@@ -153,8 +153,8 @@ let run
           let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
           let librarian_input : Keeper_librarian.input =
             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
-            ; goal_context = goal_context_for_task ~config meta.current_task_id
-            ; keeper_instructions = meta.instructions
+            ; goal_context = goal_context_for_task ~config live_meta.current_task_id
+            ; keeper_instructions = live_meta.instructions
             ; current = current_selection
             ; working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
                 Keeper_librarian_context_io.capture
@@ -171,13 +171,13 @@ let run
             ~expected_revision
             librarian_input
       in
-      let librarian_series trigger =
+      let librarian_series ~meta:live_meta trigger =
         (* Submission is asynchronous. Re-check the same live SSOT at the
            execution boundary so an ON -> OFF/INVALID change while queued
            remains a real kill switch before snapshot I/O or provider work. *)
         match Env_config.KeeperMemoryOs.librarian_config_state () with
         | Disabled | Invalid -> ()
-        | Enabled -> run_admitted_librarian trigger
+        | Enabled -> run_admitted_librarian ~live_meta trigger
       in
       Keeper_librarian_queue_refresh.remember_turn
         ~base_path:config.Workspace.base_path ~keeper_name:meta.name

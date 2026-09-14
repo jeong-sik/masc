@@ -159,6 +159,7 @@
   test_keeper_librarian_retry
   test_keeper_librarian_goal_context
   test_keeper_librarian_context
+  test_keeper_librarian_context_recall
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection
@@ -510,6 +511,7 @@
   test_keeper_librarian_retry
   test_keeper_librarian_goal_context
   test_keeper_librarian_context
+  test_keeper_librarian_context_recall
   test_keeper_skill_catalog
   test_surface_ref
   test_inference_inflight_observation

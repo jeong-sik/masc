@@ -435,6 +435,11 @@ module FileSystem = struct
     | `Timed_out
     | `Failed of string ]
 
+  (* How long a domain waits for another domain's population of the key
+     index before giving up on it. The value is the one this wait has
+     always had; no measurement of a population's duration is recorded. *)
+  let key_index_population_wait_s = 30.0
+
   let ensure_key_index t : ensure_index_outcome =
     (* Domain-safe check-and-populate.  Stdlib.Mutex serializes the
        check of key_index length + key_index_promise so that two
@@ -460,10 +465,10 @@ module FileSystem = struct
         match t.clock with
         | Some clock -> (
             match
-              Eio.Fiber.first
+              Watched_work.run
                 (fun () -> `Ok (Eio.Promise.await p))
-                (fun () ->
-                  Eio.Time.sleep clock 30.0;
+                ~watcher:(fun () ->
+                  Eio.Time.sleep clock key_index_population_wait_s;
                   `Timeout)
             with
             | `Ok r -> `Outcome r
@@ -478,7 +483,9 @@ module FileSystem = struct
            Log.Backend.debug "key_index populate wait failed: %s" detail;
            `Failed detail
        | `Wait_timed_out ->
-           Log.Backend.warn "key_index populate wait timed out after 30s";
+           Log.Backend.warn
+             "key_index populate wait timed out after %gs"
+             key_index_population_wait_s;
            `Timed_out)
     | `Populate r ->
       (try

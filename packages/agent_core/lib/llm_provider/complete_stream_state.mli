@@ -6,6 +6,24 @@
 
 type t
 
+(** What the provider announced a content block to be. *)
+type block_kind =
+  | Text_block
+  | Thinking_block
+  | Reasoning_details_block
+  | Redacted_thinking_block
+  | Tool_use_block
+  | Tool_result_block of { is_error : bool }
+  | Image_block
+  | Document_block
+  | Audio_block
+  | Unknown_block of string
+
+(** The kind announced for the block at [index], open or closed; [None] for
+    a block no start event announced. A reader classifying a block's stop
+    event asks this, because the stop event carries only the index. *)
+val block_kind_at : t -> int -> block_kind option
+
 type receipt =
   | Completed of Types.api_response
   | Failed of Types.stream_error

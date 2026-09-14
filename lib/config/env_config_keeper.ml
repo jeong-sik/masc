@@ -577,12 +577,29 @@ module KeeperKeepalive = struct
       (Float.min 3600.0 (get_float ~default:900.0 "MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC"))
   ;;
 
-  let parse_stream_idle_timeout_sec raw =
+  let parse_timeout_seconds raw =
     match Float.of_string_opt (String.trim raw) with
     | Some seconds when Float.is_finite seconds && Float.compare seconds 0.0 > 0 ->
       Ok seconds
     | Some _ | None ->
       Error "expected a finite, positive number of seconds"
+  ;;
+
+  (* The value of a declared timeout setting, read now. Unset is [None]; a
+     declared value that is not a finite positive number of seconds is an
+     operator configuration error, never a fallback: an unparsable string
+     read as unset would switch a deadline off, and NaN would pass every
+     clamp and every comparison against it. *)
+  let declared_timeout_seconds env_key =
+    match Env_config_core.raw_value_opt env_key with
+    | None -> None
+    | Some raw ->
+      (match parse_timeout_seconds raw with
+       | Ok seconds -> Some seconds
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "invalid %s=%S (%s)" env_key raw detail)))
   ;;
 
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
@@ -596,21 +613,7 @@ module KeeperKeepalive = struct
 
       Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
-  let stream_idle_timeout_sec () =
-    match Env_config_core.raw_value_opt stream_idle_timeout_env_key with
-    | None -> None
-    | Some raw ->
-      (match parse_stream_idle_timeout_sec raw with
-       | Ok seconds -> Some seconds
-       | Error detail ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "invalid %s=%S (%s)"
-                 stream_idle_timeout_env_key
-                 raw
-                 detail)))
-  ;;
+  let stream_idle_timeout_sec () = declared_timeout_seconds stream_idle_timeout_env_key
 
   let first_event_timeout_env_key = "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
 
@@ -633,25 +636,11 @@ module KeeperKeepalive = struct
       resolved layer substitutes {!first_event_failsafe_floor_sec}. A
       configured value must be finite and strictly positive; malformed values
       are operator configuration errors, never a fallback. Same value grammar
-      as the idle knob, hence the shared parser.
+      as the other timeout settings, hence the shared reader.
 
       Env: [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
-  let first_event_timeout_sec () =
-    match Env_config_core.raw_value_opt first_event_timeout_env_key with
-    | None -> None
-    | Some raw ->
-      (match parse_stream_idle_timeout_sec raw with
-       | Ok seconds -> Some seconds
-       | Error detail ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "invalid %s=%S (%s)"
-                 first_event_timeout_env_key
-                 raw
-                 detail)))
-  ;;
+  let first_event_timeout_sec () = declared_timeout_seconds first_event_timeout_env_key
 
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
@@ -660,65 +649,47 @@ module KeeperKeepalive = struct
       handled by an explicitly configured [stream_idle_timeout_sec] and the
       attempt liveness observer.
 
-      Opt-in: unset env leaves [None] so {!Runtime_agent_context} skips
-      the builder wiring. Set only for sync completion callers that need a
-      body-read ceiling.
+      Opt-in: unset leaves [None] so {!Runtime_agent_context} skips the
+      builder wiring. Set only for sync completion callers that need a
+      body-read ceiling. Read on every call, so a runtime.toml value applied
+      at boot is seen; a declared value that is not a finite positive number
+      of seconds raises {!Env_config_core.Config_error}.
 
-      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
+      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset -> [None].
       Range when set: [10, 600]. *)
-  let body_timeout_sec_override_live () =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
-    | Some raw ->
-      (match Float.of_string_opt (String.trim raw) with
-       | Some v -> Some (Float.max 10.0 (Float.min 600.0 v))
-       | None -> None)
-    | None -> None
+  let body_timeout_sec_override () =
+    Option.map
+      (fun seconds -> Float.max 10.0 (Float.min 600.0 seconds))
+      (declared_timeout_seconds "MASC_KEEPER_BODY_TIMEOUT_SEC")
   ;;
 
-  let body_timeout_sec_override = body_timeout_sec_override_live ()
+  (** The keeper's no-progress threshold for a provider call attempt, in
+      seconds (#27349; measured against the turn's progress signal since
+      #28417, not against elapsed time). The attempt watchdog ends an attempt
+      that made no progress for this long while no tool is in flight and no
+      approval is pending, and a provider sub-call made from inside a tool,
+      which that watchdog does not see, runs under it
+      ({!Keeper_provider_subcall}).
 
-  (** Total wall-clock deadline for a single provider call attempt (whole
-      operation, independent of streaming progress) — distinct from
-      [stream_idle_timeout_sec] (bounds the GAP between streamed lines, and
-      per RFC-0345 falls back to a 600s failsafe floor when unset) and
-      [body_timeout_sec_override] (non-streaming calls only, no failsafe).
-      Neither narrower knob bounds a call stuck before its first token
-      (Admission/Queue/pre-stream phases) or a non-streaming call left
-      unconfigured, which is exactly the gap #27349 measured: 4 keepers
-      in-flight 25+ minutes with neither narrower knob set.
-
-      Opt-in: unset env leaves [None] so the provider-attempt caller skips
-      the [Eio.Time.with_timeout_exn] wrap and the call runs unbounded,
-      same as before this knob existed. Deliberately NO failsafe floor
-      (unlike [stream_idle_timeout_sec]'s RFC-0345 fallback): a reasonable
-      total-call ceiling depends on provider and workload (tool-heavy turns
-      legitimately run minutes between chunks), so MASC does not guess one.
-      The operator sets it from measured turn durations.
-
-      On expiry the caller classifies the failure as the existing typed
+      On expiry the watchdog classifies the failure as the existing typed
       [Api (Timeout { phase = Some Wall_clock })] and routes it through the
-      existing declared-lane rotation — no new recovery mechanism.
+      existing declared-lane rotation.
 
-      Range when set: [30, 3600] — wider than [body_timeout_sec_override]'s
-      [10, 600] on purpose: this bounds an entire agentic turn's provider
-      call, not one HTTP body read.
+      Opt-in: unset leaves [None], the watchdog off, and no failsafe floor
+      (#36020 tracks what that leaves unbounded). Read on every call, so a
+      runtime.toml value applied at boot is seen; a declared value that is
+      not a finite positive number of seconds raises
+      {!Env_config_core.Config_error}.
+
+      Range when set: [30, 3600].
 
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
-  let provider_call_deadline_sec_override_live () =
-    match
-      Env_config_core.raw_value_opt "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
-    with
-    | Some raw ->
-      (match Float.of_string_opt (String.trim raw) with
-       | Some v -> Some (Float.max 30.0 (Float.min 3600.0 v))
-       | None -> None)
-    | None -> None
-  ;;
-
-  let provider_call_deadline_sec_override =
-    provider_call_deadline_sec_override_live ()
+  let provider_call_deadline_sec_override () =
+    Option.map
+      (fun seconds -> Float.max 30.0 (Float.min 3600.0 seconds))
+      (declared_timeout_seconds "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC")
   ;;
 
 end

@@ -8,6 +8,15 @@
 
 val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
+
+val apply_runtime_toml : base_path:string -> unit
+(** Apply the keeper runtime overrides from the resolved config root's
+    runtime.toml into the boot-override layer the
+    [Env_config_keeper.KeeperKeepalive] readers consult. Process env vars
+    already set take precedence. Every process that resolves keeper settings
+    for a provider call runs this after {!bootstrap_base_path_config_root}:
+    the server at boot, the capability probe CLI before its call. Raises
+    [Env_config_core.Config_error] when the file does not load. *)
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 val bootstrap_prompt_assets : unit -> unit
 (** Converge the runtime prompt directory onto the binary-embedded managed

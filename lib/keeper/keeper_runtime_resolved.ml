@@ -35,23 +35,14 @@ let source_to_string = function
   | Default -> "default"
   | Failsafe_floor -> "failsafe_floor"
 
-(* AGENT_CORE applies this only to non-streaming sync body reads; streaming
-   liveness is progress-based. The parse and the clamp belong to
-   Env_config_keeper — a second copy here read the same variable and would
-   drift on any change to either. *)
-let body_timeout_override_sec_live =
-  Env_config_keeper.KeeperKeepalive.body_timeout_sec_override_live
-
-(* SSOT: Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override
-   (same env var, same clamp [30, 3600]). Opt-in: unset -> None, no failsafe
-   floor (#27349 -- deliberately different from stream_idle_timeout_sec's
-   RFC-0345 fallback below: a total-call ceiling depends on provider and
-   workload, so MASC does not substitute a guessed value).
-   Durable channel (#27416): runtime.toml [turn.provider_call_deadline_sec]
-   reaches this reader through the boot-override layer behind
-   [Env_config_core.raw_value_opt]; a set process env var still wins. *)
-let provider_call_deadline_sec_live =
-  Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override_live
+(* The parse and the clamp of the two opt-in deadlines belong to
+   Env_config_keeper; a second copy here read the same variables and would
+   drift on any change to either. AGENT_CORE applies the body override only
+   to non-streaming sync body reads. The provider-call threshold is opt-in
+   with no failsafe floor. Durable channel (#27416): runtime.toml
+   [turn.provider_call_deadline_sec] reaches the reader through the
+   boot-override layer behind [Env_config_core.raw_value_opt]; a set process
+   env var still wins. *)
 
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
    (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
@@ -121,13 +112,13 @@ let freeze_from_current () =
   in
   let body_timeout_override_sec =
     {
-      value = body_timeout_override_sec_live ();
+      value = Env_config_keeper.KeeperKeepalive.body_timeout_sec_override ();
       source = source_of_env_name "MASC_KEEPER_BODY_TIMEOUT_SEC";
     }
   in
   let provider_call_deadline_sec =
     {
-      value = provider_call_deadline_sec_live ();
+      value = Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ();
       source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
     }
   in

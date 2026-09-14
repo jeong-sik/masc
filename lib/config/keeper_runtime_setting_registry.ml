@@ -298,9 +298,13 @@ let all =
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
       ~value_kind:Float
       ~default:"(none)"
-      ~consumers:[ "Keeper_runtime_resolved"; "Keeper_agent_run provider deadline" ]
+      ~consumers:
+        [ "Keeper_runtime_resolved"
+        ; "Keeper_turn_driver_try_provider attempt watchdog"
+        ; "Keeper_provider_subcall"
+        ]
       ~category:"turn"
-      "Wall-clock deadline for one provider call attempt"
+      "No-progress threshold for a provider call attempt and a tool's provider sub-call"
   ; setting
       ~range:(float_range ~min:10.0 ~max:600.0 ())
       ~env_name:"MASC_KEEPER_BODY_TIMEOUT_SEC"

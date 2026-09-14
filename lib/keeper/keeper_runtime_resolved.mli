@@ -97,12 +97,12 @@ val first_event_timeout_sec : unit -> float option
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option
 
-(** Total wall-clock deadline for one provider call attempt (#27349).
-    [None] (env unset) means no MASC-side enforcement -- the provider
-    attempt caller skips the [Eio.Time.with_timeout_exn] wrap and runs
-    unbounded, same as before this knob existed. Deliberately no failsafe
-    floor: unlike [stream_idle_timeout_sec], a reasonable total-call
-    ceiling depends on provider and workload, so MASC does not guess one.
+(** The keeper's no-progress threshold for a provider call attempt (#27349,
+    measured against the turn's progress signal since #28417). The attempt
+    watchdog ends an attempt that made no progress for this long while no
+    tool is in flight and no approval is pending; a tool's provider sub-call
+    runs under it ({!Keeper_provider_subcall}). [None] (unset) means no
+    MASC-side enforcement and no failsafe floor.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float option

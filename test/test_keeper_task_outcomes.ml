@@ -531,6 +531,8 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
          ; "degraded"
          ; "kind"
          ; "matching_count"
+         ; "new_tasks"
+         ; "new_tasks_count"
          ; "projection"
          ; "returned_count"
          ; "revision"

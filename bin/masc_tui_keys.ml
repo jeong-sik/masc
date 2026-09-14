@@ -1237,6 +1237,12 @@ let help_sections ?current () =
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)
           ; ("Judge marks", Masc_tui_planning_proof_mark.legend)
+          (* The marks and phrases on a chat's tool and skill rows. Six
+             outcome marks, eight skill phrases and two words of proof sat on
+             every transcript with nothing anywhere saying what one meant;
+             an operator reading them asked what "받아서 씀" received and
+             wrote (2026-09-14). *)
+          ; ("Chat marks", Masc_tui_keeper_chat_transcript.legend)
           ])
 
 let footer_hints_browser_lane =

@@ -2069,7 +2069,7 @@ let test_live_skill_is_not_folded_into_generic_tools () =
            check bool "the Skill name is bold" true
              (contains ~needle:"**ci-red-attribution**" row);
            check bool "the pending delivery state is explicit" true
-             (contains ~needle:"**보냈고 확인 중**" row)
+             (contains ~needle:"**읽음, 전달 확인 중**" row)
        | rows -> failf "expected one compact Skill row, got %d" (List.length rows))
   | items ->
       failf "expected skill/text, got %d item(s): %s" (List.length items)
@@ -2095,7 +2095,7 @@ let test_full_skill_rows_show_actions_and_exact_proof () =
   in
   let body = String.concat "\n" (Transcript.skill_rows ~full:true skill) in
   check bool "used is stated in the strongest evidence vocabulary" true
-    (contains ~needle:"**받아서 씀**" body);
+    (contains ~needle:"**전달됨, 도구 씀**" body);
   check bool "observed Execute is visible" true
     (contains ~needle:"**Execute** \xc2\xb7 observed action" body);
   check bool "observed Read is visible" true
@@ -2386,10 +2386,40 @@ let test_checkpoint_wait_keeps_the_request_live () =
   check int "reused stream coordinates preserve both segments" 2 (List.length (Transcript.tool_calls t))
 ;;
 
+(* The sheet's legend for the chat is built from the same functions the rows
+   draw with, so every outcome mark and every skill phrase the pane can
+   print is on it, once, spelled as the pane spells it. A phrase holds no
+   interpunct: on the row that is the separator between the phrase and the
+   skill name, and a phrase with one inside would read as two phrases. *)
+let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
+  let keys = List.map fst Transcript.legend in
+  List.iter
+    (fun outcome ->
+      let key = Transcript.outcome_label outcome in
+      check bool ("outcome " ^ key ^ " is on the legend with its mark") true
+        (List.exists (fun k -> String.ends_with ~suffix:(" " ^ key) k) keys))
+    Transcript.all_outcomes;
+  List.iter
+    (fun state ->
+      let phrase = Transcript.skill_state_label state in
+      check bool ("phrase " ^ phrase ^ " is on the legend") true (List.mem phrase keys);
+      check bool ("phrase " ^ phrase ^ " holds no interpunct") false
+        (contains ~needle:"\xc2\xb7" phrase))
+    Transcript.all_skill_states;
+  check int "no key twice" (List.length keys)
+    (List.length (List.sort_uniq String.compare keys));
+  List.iter
+    (fun (key, meaning) ->
+      check bool ("legend row " ^ key ^ " says something") true
+        (String.length (String.trim meaning) > 0))
+    Transcript.legend
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "content"
-      , [ test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
+      , [ test_case "the legend names every mark and phrase the rows draw" `Quick
+            test_the_legend_names_every_mark_and_phrase_the_rows_draw
+        ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
         ; test_case "started_at keeps the dispatch instant" `Quick
             test_started_at_keeps_the_dispatch_instant
         ; test_case "settled_at takes the first end-of-turn delta" `Quick

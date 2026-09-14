@@ -12,6 +12,7 @@
   masc_types
   masc_core
   masc.masc_random_id
+  masc.watched_work
   masc.config
   masc_process
   masc_compression

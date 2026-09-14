@@ -263,7 +263,11 @@ let take_command ~client_info ~window_sec =
       if not (connected client) then None
       else if Eio.Mutex.use_ro client.mutex (fun () -> Hashtbl.mem client.waiters issued.id)
       then Some issued else take () in
-    Ok (Eio.Fiber.first take (fun () -> Time_compat.sleep window_sec; None))
+    (* A command taken as the window passed is delivered, not dropped:
+       [Fiber.first] would have consumed it from the stream and returned
+       the window's [None], and the issuer would have waited out its own
+       timeout for an answer nobody was asked for. *)
+    Ok (Watched_work.run take ~watcher:(fun () -> Time_compat.sleep window_sec; None))
 let deliver_result ~client_id ~id ~payload =
   match Eio.Mutex.use_ro clients_mutex (fun () ->
     Hashtbl.find_opt clients (client_id_to_string client_id)) with
@@ -299,10 +303,10 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id));
       if not accepted then Refused "optional_document_observation_busy"
-      else Eio.Fiber.first
+      else Watched_work.run
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
-        (fun () -> Time_compat.sleep timeout_sec; Timed_out))
+        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
@@ -313,8 +317,8 @@ let issue_for ~target ~verb ~timeout_sec =
   | Automation ->
     match Atomic.get automation_executor with
     | None -> Lane_absent
-    | Some execute -> Eio.Fiber.first (fun () -> execute verb)
-        (fun () -> Time_compat.sleep timeout_sec; Timed_out)
+    | Some execute -> Watched_work.run (fun () -> execute verb)
+        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
 let issue ~lane_name ~verb ~timeout_sec =
   match resolve_target ~lane_name ~client_id:None with
   | Error error -> Rejected_before_effect error
@@ -338,5 +342,5 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
   | Automation ->
     match Atomic.get automation_document_observer with
     | None -> Lane_absent
-    | Some observe -> Eio.Fiber.first (fun () -> observe ~tab_id)
-        (fun () -> Time_compat.sleep timeout_sec; Timed_out)
+    | Some observe -> Watched_work.run (fun () -> observe ~tab_id)
+        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)

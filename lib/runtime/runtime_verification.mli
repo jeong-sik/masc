@@ -96,6 +96,12 @@ val initial_runtime_id
     bare runtime IDs exactly as initial routing does. This does not try fallbacks
     or claim an empty lane has a usable target. Pass materialized lanes. *)
 
+(** [timeout_s] is one window over a runtime's whole readiness run, on
+    [clock], for every arm: for an HTTP binding that is the wait for its
+    admission permit, both provider round trips and the tool call between
+    them; a run still inside it when the window closes is [Timed_out]. It
+    is held by [measure] around each arm's [run], not declared per request,
+    so nothing restarts it. *)
 val verify
   :  secure_random:Eio.Flow.source_ty Eio.Resource.t
   -> sw:Eio.Switch.t
@@ -104,6 +110,22 @@ val verify
   -> clock:_ Eio.Time.clock
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
   -> cwd_path:string
+  -> timeout_s:float
+  -> Runtime.t
+  -> result
+
+(** {!verify} the way the [runtime-verify] command runs it: installs the
+    process env and clock a provider request reads
+    ({!Eio_context.set_env}, {!Eio_context.set_clock},
+    {!Time_compat.set_clock}) and verifies with the env's network, entropy
+    and file system, working in [private_dir]; children start through
+    {!Posix_spawn_process_mgr.mgr}, the manager the server starts them with.
+    The command and the suite that stands in for it both call this, so the
+    suite runs the command's shape rather than a copy of it. *)
+val verify_as_command
+  :  env:Eio_unix.Stdenv.base
+  -> sw:Eio.Switch.t
+  -> private_dir:string
   -> timeout_s:float
   -> Runtime.t
   -> result

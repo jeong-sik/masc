@@ -96,7 +96,7 @@ let with_admission_and_work_until ~clock ~deadline_at ~config f =
       if Float.compare remaining 0.0 <= 0
       then Error Permit_granted_as_deadline_passed
       else (
-        match Eio.Time.with_timeout clock remaining (fun () -> Ok (f ())) with
+        match Under_deadline.run clock remaining f with
         | Ok value -> Ok value
         | Error `Timeout -> Error Work_expired))
   with

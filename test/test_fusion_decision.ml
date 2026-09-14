@@ -68,7 +68,8 @@ let test_runtime_record_and_read () = with_fixture (fun config task_id goal_id -
     ctx_work=Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture";
     turn_sandbox_factory=None; sw=None; clock=None; proc_mgr=None; net=None; mcp_session_id=None;
     continuation_channel=None; gate_context=Some (fun () -> {Keeper_gate.turn_id=Some 7; snapshot=`Assoc []});
-    gate_grant=None; capability_authority=Keeper_tool_runtime.Compatibility_meta} in
+    gate_grant=None; tool_use_id=None; trace_id=None;
+    capability_authority=Keeper_tool_runtime.Compatibility_meta} in
   let descriptor = match Keeper_tool_runtime.descriptor_for_internal "masc_fusion_decision" with
     | Some descriptor -> descriptor | None -> fail "missing descriptor" in
   check bool "tool is model visible" true

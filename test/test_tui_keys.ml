@@ -808,6 +808,41 @@ let test_the_memory_marks_are_in_the_sheet_not_on_the_roster () =
         (List.mem mark drawable))
     Masc_tui_memory_mark.legend
 
+(* The Code tree draws a mark in front of every row: an arrow for a folder,
+   and for a file one of seven marks read from its extension. Nothing beside
+   the mark says which is which -- the row is the mark and then the file name,
+   and the name only repeats the extension the mark came from. So a reader
+   who wants to know what the diamond means has one place to look, and until
+   [File marks] the sheet was not it.
+
+   Same two halves as the memory marks above: the sheet has the section, and
+   every mark the tree can draw has a word in it. [Masc_tui_file_icon.word]
+   stops compiling when a kind is added without a word, and this stops a word
+   being added for a mark the tree never draws. *)
+let test_the_file_marks_are_in_the_sheet () =
+  Alcotest.(check bool) "the sheet explains the Code tree's marks" true
+    (List.exists
+       (fun (label, _) -> String.equal label "File marks")
+       (Masc_tui_keys.help_sections ()));
+  let explained = List.map fst Masc_tui_file_icon.legend in
+  List.iter
+    (fun kind ->
+      let mark = Masc_tui_file_icon.glyph kind in
+      Alcotest.(check bool)
+        (Printf.sprintf "the sheet explains the mark %S" mark)
+        true
+        (List.mem mark explained))
+    Masc_tui_file_icon.kinds;
+  (* And nothing in the sheet the tree cannot draw. *)
+  let drawable = List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds in
+  List.iter
+    (fun (mark, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the tree can draw %S" mark)
+        true
+        (List.mem mark drawable))
+    Masc_tui_file_icon.legend
+
 (* Lanes is the operator's top-level concurrent lane workspace. Runtime still
    owns configuration and substrate probes; [p] remains the explicit return
    path from the standalone run browser. *)
@@ -2284,6 +2319,8 @@ let () =
             test_keeper_operations_are_not_top_level_tabs
         ; Alcotest.test_case "the memory marks are in the sheet" `Quick
             test_the_memory_marks_are_in_the_sheet_not_on_the_roster
+        ; Alcotest.test_case "the file marks are in the sheet" `Quick
+            test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick
             test_lanes_is_a_main_destination
         ; Alcotest.test_case "Code is a Workspace child" `Quick

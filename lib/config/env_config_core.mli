@@ -125,6 +125,11 @@ val host_env_key : string
 val http_port_env_key : string
 val masc_http_port : unit -> string
 val masc_http_port_int : unit -> int
+
+(** Raw trimmed [MASC_HTTP_PORT] when the environment supplies one, so a caller
+    can keep an explicit override ahead of workspace-file resolution instead of
+    receiving the defaulted value. *)
+val masc_http_port_opt : unit -> string option
 val default_host : string
 val masc_host : unit -> string
 

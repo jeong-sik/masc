@@ -456,9 +456,10 @@ module Glyph = struct
   let progress_done = "\xe2\x97\x8f"
   let progress_ended = "\xc3\x97"
 
-  (* Where you are, on a strip of places you could be. Read by the surface
-     strip and the keeper detail tabs, which are the two strips a reader
-     walks. *)
+  (* Which of a strip of places is the current one. Read by the surface strip
+     and the keeper detail tabs, the two strips a reader walks, and by the
+     Overview's transport tail, where the strip is the paths the workspace
+     could carry traffic on and the mark says which one carries it. *)
   let current_entry = "\xe2\x96\xb8"
 
   (* Only the top priority speaks. The !!!/!!/! ladder made every task list

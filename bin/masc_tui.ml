@@ -2532,9 +2532,8 @@ let post_keeper_chat_watching ~control_generation ~admission_intent ~mailbox ~po
               enqueue_async mailbox
                 (Keeper_chat_stream_unavailable
                    ( request
-                   , Printf.sprintf
-                       "connection lost; reconciling exact request %s before NEXT"
-                       request.Keeper_chat.request_id ));
+                   , Keeper_chat.unverified_retry_notice
+                       ~request_id:request.Keeper_chat.request_id error ));
             (* Re-POSTing the same operation id is the server's idempotent
                subscribe/reconcile path. The in-flight owner stays held until
                one watcher observes terminal truth, so NEXT cannot overlap a

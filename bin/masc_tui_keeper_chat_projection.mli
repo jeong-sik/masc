@@ -215,6 +215,11 @@ val decode_operation_reconciliation :
   request:request -> Yojson.Safe.t -> (operation_reconciliation, stream_error) result
 val stream_error_to_string : stream_error -> string
 val error_to_string : error -> string
+
+(** [unverified_retry_notice ~request_id error] is the status line shown while
+    the TUI re-POSTs an operation whose outcome it could not verify: the cause
+    from {!error_to_string}, then the request being reconciled. *)
+val unverified_retry_notice : request_id:string -> error -> string
 val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty

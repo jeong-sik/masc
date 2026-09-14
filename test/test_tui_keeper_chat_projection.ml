@@ -925,6 +925,45 @@ let test_transport_error_names_the_cause_not_the_certainty () =
     (Chat.error_certainty (Chat.Transport_error cause) = Chat.Outcome_unverified)
 ;;
 
+let test_unverified_retry_notice_names_the_cause () =
+  let notice error = Chat.unverified_retry_notice ~request_id:"tui-01" error in
+  let has ~needle value = String_util.string_contains_substring ~needle value in
+  let fenced =
+    Chat.protocol_error
+      (Chat.Run_failed
+         { accepted = false
+         ; message = "the operation store is fenced"
+         ; code = Some "store_unavailable"
+         })
+  in
+  (* The server answered this one over a live connection. The line used to open
+     with "connection lost", which is not what happened and sends the operator
+     looking at the network. *)
+  check bool "a rejection is not reported as a lost connection" false
+    (has ~needle:"connection lost" (notice fenced));
+  check bool "the rejection names its code" true
+    (has ~needle:"store_unavailable" (notice fenced));
+  check bool "the rejection carries the server's words" true
+    (has ~needle:"the operation store is fenced" (notice fenced));
+  check bool "the request being reconciled is named" true
+    (has ~needle:"reconciling exact request tui-01 before NEXT" (notice fenced));
+  let dropped = Chat.Transport_error "connection refused" in
+  check bool "a real transport failure still names its cause" true
+    (has ~needle:"connection refused" (notice dropped));
+  (* Every error that reaches this line is [Outcome_unverified]; the two above
+     are the ends of that range. *)
+  check bool "both are unverified outcomes" true
+    (Chat.error_certainty fenced = Chat.Outcome_unverified
+     && Chat.error_certainty dropped = Chat.Outcome_unverified);
+  let injected =
+    Chat.protocol_error
+      (Chat.Run_failed
+         { accepted = false; message = "fenced\x1b[31m"; code = Some "store_unavailable" })
+  in
+  check bool "the server's words cannot move the cursor" false
+    (has ~needle:"\x1b[" (notice injected))
+;;
+
 let test_reconciliation_failure_detail () =
   let refused : Chat.error =
     Chat.Http_error
@@ -1480,6 +1519,8 @@ let () =
             test_reader_unauthenticated
         ; test_case "transport error names the cause, not the certainty" `Quick
             test_transport_error_names_the_cause_not_the_certainty
+        ; test_case "unverified retry notice names the cause" `Quick
+            test_unverified_retry_notice_names_the_cause
         ; test_case "reconciliation failure detail" `Quick
             test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick

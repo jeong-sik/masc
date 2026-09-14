@@ -20,3 +20,26 @@ cpus = 1.0
 memory_bytes = 536870912
 pids = 64
 max_reply_bytes = 4194304
+
+[interface]
+# Installation bindings are checked against this contract before a worker starts.
+# The binding is an empty source list: this worker owns its environment.
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "This package owns its DOS machine and takes no external source",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "sources"
+  ],
+  "additionalProperties": false
+}'''

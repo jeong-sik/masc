@@ -6033,6 +6033,14 @@
 (test
  (name test_lane_addon_config)
  (modules test_lane_addon_config)
+ ; The shipped DOS chain manifests and their checked-in declarations are read
+ ; as files; the relative manifest_path in each example resolves inside _build.
+ (deps ../addons/dos-world/lane.toml ../addons/dos-world/install.toml
+       ../addons/value-difference/lane.toml ../addons/output-statistics/lane.toml
+       ../docs/examples/lane-addons/dos-value-difference.toml
+       ../docs/examples/lane-addons/dos-value-statistics.toml
+       ../docs/examples/lane-addons/dos-statistics.toml
+       ../docs/examples/lane-addons/output-statistics.toml)
  (libraries alcotest masc yojson unix))
 
 (test

@@ -16,3 +16,67 @@ cpus = 0.5
 memory_bytes = 134217728
 pids = 16
 max_reply_bytes = 4194304
+
+[interface]
+# Installation bindings are checked against this contract before a worker starts.
+# Inputs are lane_output ports only; field and unit name the compared number.
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "field": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Numeric field compared between consecutive supplied rows"
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unit label reported with each difference"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Latest completed named output of another installation in the same run",
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name this input carries inside the package"
+          },
+          "kind": {
+            "type": "string",
+            "const": "lane_output"
+          },
+          "installation_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable id of the producing installation declaration"
+          },
+          "output_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Named output port published by the producer"
+          },
+          "selection": {
+            "type": "string",
+            "const": "latest_completed"
+          }
+        },
+        "required": [
+          "source_id",
+          "kind",
+          "installation_id",
+          "selection"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "field",
+    "unit",
+    "sources"
+  ],
+  "additionalProperties": false
+}'''

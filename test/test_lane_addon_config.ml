@@ -274,9 +274,60 @@ let refresh_policy_is_explicit () = with_directory (fun _root packages directory
   write manifest (package () ^ "\n[interface]\nrefresh_policy = \"guess\"\n");
   check_error "unknown refresh policy is rejected" path)
 
+
+(* The shipped DOS chain: every package declares the binding contract that
+   `load_file` enforces, and the checked-in declarations satisfy it. Without
+   a contract a wrong binding only failed inside the worker, after the
+   container had started, and the guided installer had nothing to offer. *)
+let repo_file relative = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root relative
+  | None -> Filename.concat (Filename.dirname Sys.executable_name) (Filename.concat ".." relative)
+let shipped_dos_chain_declares_binding_contracts () =
+  let shipped = [
+    "addons/dos-world/install.toml", "dos-world", "dos-demo";
+    "docs/examples/lane-addons/dos-value-difference.toml", "value-difference", "dos-value-difference";
+    "docs/examples/lane-addons/dos-value-statistics.toml", "output-statistics", "dos-value-statistics";
+    "docs/examples/lane-addons/dos-statistics.toml", "output-statistics", "dos-statistics";
+    "docs/examples/lane-addons/output-statistics.toml", "output-statistics", "output-statistics"] in
+  List.iter (fun (relative, addon_id, id) ->
+    let loaded = unwrap (Config.load_file ~path:(repo_file relative)) in
+    check string ("declaration " ^ relative ^ " names its package") addon_id loaded.package.id;
+    check string ("declaration " ^ relative ^ " keeps its id") id loaded.id;
+    check bool (addon_id ^ " declares a binding contract") true (Option.is_some loaded.package.binding_schema))
+    shipped;
+  with_directory (fun _root _packages directory ->
+    let manifest name = Unix.realpath (repo_file ("addons/" ^ name ^ "/lane.toml")) in
+    let path = Filename.concat directory "candidate.toml" in
+    let candidate ~package body = write path (Printf.sprintf {|id = "candidate"
+run_id = "dos-demo"
+manifest_path = %S
+%s|} (manifest package) body) in
+    let source = {|[[binding.sources]]
+source_id = "guest"
+kind = "lane_output"
+installation_id = "dos-demo"
+output_id = "guest"
+selection = "latest_completed"
+|} in
+    candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\n" ^ source);
+    ignore (unwrap (Config.load_file ~path));
+    candidate ~package:"value-difference" ("[binding]\nunit = \"count\"\n" ^ source);
+    check_error "value-difference without the compared field is rejected before install" path;
+    candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\nwindow = 3\n" ^ source);
+    check_error "value-difference rejects a binding key the package does not read" path;
+    candidate ~package:"output-statistics" ("[binding]\n" ^ source);
+    ignore (unwrap (Config.load_file ~path));
+    candidate ~package:"output-statistics" "[binding]\nsources = [{source_id = \"game\", kind = \"msx_capture\"}]\n";
+    check_error "output-statistics accepts lane_output inputs only" path;
+    candidate ~package:"dos-world" "[binding]\nsources = []\n";
+    ignore (unwrap (Config.load_file ~path));
+    candidate ~package:"dos-world" ("[binding]\n" ^ source);
+    check_error "dos-world takes no external source" path)
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
+    [test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
+     test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;
      test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;
      test_case "relative package and source preserve typed bindings" `Quick relative_package_and_source;

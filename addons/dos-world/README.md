@@ -30,7 +30,9 @@ Set `manifest_path` relative to the declaration's new location, or use its actua
 absolute path. Choose a distinct installation ID and run ID. Image build/load is
 explicit: the installation loader does not install npm packages or build images.
 
-The declaration has `sources=[]` because this worker owns its environment. There
+The declaration has `sources=[]` because this worker owns its environment; the
+manifest's `[interface] binding_schema` allows no other binding, so a declaration
+that adds a source is rejected before a container starts. There
 is no runtime path inference, implicit network access, environment variable, or
 additional Keeper approval step. The manifest's container resource envelope
 isolates this optional environment. The production server reads its image files

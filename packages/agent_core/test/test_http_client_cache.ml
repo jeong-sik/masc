@@ -474,7 +474,7 @@ let test_stream_cancellation_closes_connection () =
         ~url
         ~headers:[]
         ~body:""
-        ~f:(fun reader ->
+        ~f:(fun ~pre_header_elapsed_s:_ reader ->
           (* Read one line then block forever, simulating a stuck consumer. *)
           ignore (Eio.Buf_read.line reader);
           Eio.Time.sleep env#clock 60.0;
@@ -506,7 +506,7 @@ let test_stream_typed_error_closes_unconsumed_connection () =
          ~url
          ~headers:[]
          ~body:""
-         ~f:(fun _reader -> Error `Stop)
+         ~f:(fun ~pre_header_elapsed_s:_ _reader -> Error `Stop)
          ()
      with
      | Ok (Error `Stop) -> ()
@@ -566,7 +566,7 @@ let test_stream_connection_close_does_not_park () =
          ~url
          ~headers:[]
          ~body:""
-         ~f:(fun reader ->
+         ~f:(fun ~pre_header_elapsed_s:_ reader ->
            Http_client.read_sse ~reader ~on_data:(fun ~event_type:_ _ ->
              incr seen;
              Http_client.Continue Http_client.Output) ();
@@ -738,7 +738,7 @@ let exercise_raw_stream_cache
       ~url
       ~headers:[]
       ~body:"{}"
-      ~f:Eio.Buf_read.take_all
+      ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader)
       ()
   in
   let first = post () in

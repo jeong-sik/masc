@@ -16,8 +16,8 @@ module Http_client = Llm_provider.Http_client
 
 let outer_budget_s = 10.0
 
-(* On the gate (run 34824991296, 2026-09-14) the four cases of that run
-   took 1.711 s together against 1.7 s of budgets; the slack is for a loaded
+(* On the gate (run 34845109557, 2026-09-14) the suite's seven cases took
+   2.733 s together against 2.7 s of budgets; the slack is for a loaded
    runner's scheduling, and stays well under the guard so the window still
    separates "the budget ended it" from "the guard ended it". *)
 let slack_s = 2.5

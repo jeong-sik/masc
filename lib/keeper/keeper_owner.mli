@@ -249,7 +249,13 @@ val operation_projection : t -> operation_projection
 
 val wake_operation_drain : t -> (unit, error) result
 (** Reconsider existing Queued rows after the operation runner's dependency
-    becomes ready. This command never changes sequence or state itself. *)
+    becomes ready. This command never changes sequence or state itself.
+
+    An idle Owner whose operation store became unavailable first closes and
+    reopens the existing database and continues from its durable queued and
+    terminal rows. Metadata and integrity faults stay fenced. A Running row
+    with no live child fences the Owner until the next restart settles it;
+    this call never replays a failed mutation. *)
 
 val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)

@@ -329,16 +329,13 @@ streaming = true
 
 (* Runs [verify] with [timeout_s] under a guard that turns a hang into a
    failure, and returns the verdict with the seconds it took. The call is
-   shaped like the CLI's: the command's [clock] and nothing installed in the
-   process. `masc runtime-verify` and `masc setup` install no process clock,
-   and an HTTP arm whose deadline needed one refused every binding before
-   the request; a harness that installs one would hide that again. *)
+   shaped like the CLI's, which installs the process env and clock at its
+   entry (`verify_runtime_execution`) and hands the command's [clock] to
+   [verify]: the harness installs exactly that pair, no more, so a bound the
+   CLI would refuse or miss is refused or missed here too. *)
 let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
-  check
-    bool
-    "no process clock is installed, as in the CLI"
-    true
-    (Option.is_none (Eio_context.get_clock_opt ()));
+  Eio_context.set_env env;
+  Masc_test_deps.init_eio_clock env;
   let directory = Filename.temp_dir "runtime-verification-silent-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
   let clock = env#clock in

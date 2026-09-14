@@ -1711,13 +1711,11 @@ let verify_runtime_execution runtime timeout_s =
     Unix.mkdir private_path 0o700;
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
     Eio_context.set_env env;
-    (* The verification's HTTP arm declares body/call deadlines, and the
-       runtime agent derives the clock that enforces them from
-       Eio_context/Process_eio globals. Without this line the CLI process
-       installs neither, every derived clock is None, and the first
-       deadline-bearing request is refused as unenforceable — the Linux
-       install smoke's verification failure (2026-09-14). Other CLI arms
-       install the pair at their own entry (see set_net/set_clock below). *)
+    (* The process clock, as every other CLI arm installs it at its entry:
+       the runtime agent derives the clock for any deadline a config declares
+       from these globals, and Agent Core refuses a declared deadline it
+       cannot enforce rather than dropping it. The verification's own bound
+       is the command's [timeout_s], held on the [clock] passed below. *)
     Eio_context.set_clock (Eio.Stdenv.clock env);
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)

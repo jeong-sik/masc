@@ -254,16 +254,11 @@ streaming = true
     (contains (Yojson.Safe.Util.to_string (failure_field unset "detail")) env_key)
 ;;
 
-(* The HTTP arm ran the readiness turn with no bound: [timeout_s] reached
-   the three CLI arms and not this one, so a binding whose endpoint accepted
-   the request and never answered held `masc runtime verify` and the imp
-   start-up check open. A loopback listener that accepts and stays silent
-   stands in for that endpoint; the verdict must be [Timed_out] inside the
-   window the command declared, not the outer guard this test holds. *)
-let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
-  let declared_timeout_s = 0.5 in
-  let slack_s = 2.5 in
-  let outer_guard_s = 10.0 in
+(* A loopback listener that accepts and stays silent stands in for an
+   endpoint that takes the request and never answers; the runtime bound to
+   it is what the two cases below verify. [binding_keys] lands inside the
+   binding table, so a case can declare [max-concurrent]. *)
+let with_silent_endpoint_runtime ~binding_keys f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let net = env#net in
@@ -309,8 +304,10 @@ max-context = 4096
 tools-support = true
 streaming = true
 [silent.first]
+%s
 |}
-               port)
+               port
+               binding_keys)
         with
         | Ok config -> config
         | Error _ -> fail "silent endpoint fixture parses"
@@ -323,48 +320,109 @@ streaming = true
            | Error reason -> fail (Runtime.string_of_drop_reason reason))
         | [] | _ :: _ :: _ -> fail "silent endpoint fixture declares one binding"
       in
-      let directory = Filename.temp_dir "runtime-verification-silent-" "" in
-      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
-      let clock = env#clock in
-      let started = Eio.Time.now clock in
-      let result =
-        try
-          Some
-            (Eio.Time.with_timeout_exn clock outer_guard_s (fun () ->
-               Verify.verify
-                 ~secure_random:env#secure_random
-                 ~sw
-                 ~net
-                 ~mgr:env#process_mgr
-                 ~clock
-                 ~cwd:Eio.Path.(env#fs / directory)
-                 ~cwd_path:directory
-                 ~timeout_s:declared_timeout_s
-                 runtime))
-        with
-        | Eio.Time.Timeout -> None
-      in
-      let elapsed = Eio.Time.now clock -. started in
-      (match result with
-       | None ->
-         failf
-           "verify did not return inside the %.0fs guard: the HTTP arm has no bound"
-           outer_guard_s
-       | Some result ->
-         check
-           string
-           "a silent endpoint is a timed-out verification"
-           "timed_out"
-           (Yojson.Safe.Util.to_string (failure_field result "code")));
-      if elapsed < declared_timeout_s || elapsed >= declared_timeout_s +. slack_s
-      then
-        failf
-          "verify returned at %.2fs; the declared %.1fs timeout should have ended it \
-           inside [%.1f, %.1f)"
-          elapsed
-          declared_timeout_s
-          declared_timeout_s
-          (declared_timeout_s +. slack_s)))
+      f ~env ~sw ~runtime))
+;;
+
+(* Runs [verify] with [timeout_s] under a guard that turns a hang into a
+   failure, and returns the verdict with the seconds it took. *)
+let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
+  let directory = Filename.temp_dir "runtime-verification-silent-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+  let clock = env#clock in
+  let started = Eio.Time.now clock in
+  let result =
+    try
+      Some
+        (Eio.Time.with_timeout_exn clock guard_s (fun () ->
+           Verify.verify
+             ~secure_random:env#secure_random
+             ~sw
+             ~net:env#net
+             ~mgr:env#process_mgr
+             ~clock
+             ~cwd:Eio.Path.(env#fs / directory)
+             ~cwd_path:directory
+             ~timeout_s
+             runtime))
+    with
+    | Eio.Time.Timeout -> None
+  in
+  result, Eio.Time.now clock -. started
+;;
+
+let check_timed_out_inside ~label ~timeout_s ~slack_s ~guard_s (result, elapsed) =
+  (match result with
+   | None ->
+     failf "[%s] verify did not return inside the %.0fs guard" label guard_s
+   | Some result ->
+     check
+       string
+       (label ^ ": the verdict is a timed-out verification")
+       "timed_out"
+       (Yojson.Safe.Util.to_string (failure_field result "code")));
+  if elapsed < timeout_s || elapsed >= timeout_s +. slack_s
+  then
+    failf
+      "[%s] verify returned at %.2fs; the declared %.1fs timeout should have ended it \
+       inside [%.1f, %.1f)"
+      label
+      elapsed
+      timeout_s
+      timeout_s
+      (timeout_s +. slack_s)
+;;
+
+let declared_timeout_s = 0.5
+let slack_s = 2.5
+let guard_s = 10.0
+
+(* The HTTP arm ran the readiness turn with no bound: [timeout_s] reached
+   the three CLI arms and not this one, so a binding whose endpoint accepted
+   the request and never answered held `masc runtime verify` and the imp
+   start-up check open. The verdict must be [Timed_out] inside the window the
+   command declared, not the guard this test holds. *)
+let test_a_silent_http_endpoint_ends_at_the_declared_timeout () =
+  with_silent_endpoint_runtime ~binding_keys:"" @@ fun ~env ~sw ~runtime ->
+  verify_under_guard ~env ~sw ~timeout_s:declared_timeout_s ~guard_s runtime
+  |> check_timed_out_inside
+       ~label:"silent endpoint"
+       ~timeout_s:declared_timeout_s
+       ~slack_s
+       ~guard_s
+;;
+
+(* The binding's admission permits can all be held by another caller (a
+   keeper streaming a turn on it). The readiness run is one call, so its
+   timeout bounds the wait for a permit too: a probe still queued when the
+   timeout runs out is [Timed_out] then, not after the holder lets go and the
+   silent endpoint spends the timeout again. The holder keeps the only permit
+   past the timeout, so a bound on the round trip alone would wait for it
+   first and return after the window. *)
+let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
+  with_silent_endpoint_runtime ~binding_keys:"max-concurrent = 1" @@ fun ~env ~sw ~runtime ->
+  let provider_cfg =
+    match runtime.Runtime.execution with
+    | Runtime_execution.Agent_core provider_cfg -> provider_cfg
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Codex_app_server _ -> fail "the fixture binding is an HTTP runtime"
+  in
+  let clock = env#clock in
+  (* [Fiber.fork] runs the holder until it blocks, so it holds the permit
+     when the fork returns. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Llm_provider.Provider_admission.with_admission ~config:provider_cfg (fun () ->
+      Eio.Time.sleep clock (declared_timeout_s +. slack_s)));
+  (match Llm_provider.Provider_admission.snapshot_for ~config:provider_cfg with
+   | Some snapshot ->
+     check int "the holder has the only permit" 1 snapshot.Llm_provider.Slot_scheduler.active
+   | None -> fail "the holder did not take a permit");
+  verify_under_guard ~env ~sw ~timeout_s:declared_timeout_s ~guard_s runtime
+  |> check_timed_out_inside
+       ~label:"queued behind a held permit"
+       ~timeout_s:declared_timeout_s
+       ~slack_s
+       ~guard_s
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -785,6 +843,10 @@ let () =
             "a silent http endpoint ends at the declared timeout"
             `Quick
             test_a_silent_http_endpoint_ends_at_the_declared_timeout
+        ; test_case
+            "a queued readiness run ends at the declared timeout"
+            `Quick
+            test_a_queued_readiness_run_ends_at_the_declared_timeout
         ] )
     ]
 ;;

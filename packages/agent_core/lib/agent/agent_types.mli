@@ -100,6 +100,17 @@ type options =
         non-streaming count
         preflight uses this deadline directly.
         @since 0.181.0 *)
+  ; call_timeout_s : float option
+    (** Per-call bound on a non-streaming completion as a whole: the wait for
+        a provider admission permit and the round trip after it. A call still
+        waiting for its permit when it runs out ends as
+        [TimeoutError { phase = Queue }] without being sent; one in its round
+        trip ends as [TimeoutError { phase = Non_streaming_body }] with what
+        the wait left. [body_timeout_s] still arms inside it, so the narrower
+        bound fires and names its own knob. Threaded through
+        {!Pipeline.stage_route} into {!Llm_provider.Complete.complete_serialized}
+        as its [call_timeout_s]; the streaming path does not read it, a
+        stream's duration being its own. Requires [clock]. @since 0.231.15 *)
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t

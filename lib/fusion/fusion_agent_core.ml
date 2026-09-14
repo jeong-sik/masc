@@ -366,9 +366,10 @@ let build_agent
            Ok { base_config with max_tokens = Some n }
          | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
        in
-       (* preset 데드라인은 [Runtime_agent.config.body_timeout_s]로 집행한다 —
-          AGENT_CORE가 이미 소유한 손잡이이며(Builder.with_body_timeout →
-          Complete.complete 비스트리밍 총 왕복 cap), provider의
+       (* preset 데드라인은 [Runtime_agent.config.body_timeout_s]와
+          [call_timeout_s]로 집행한다 — AGENT_CORE가 이미 소유한 손잡이이며
+          (Builder.with_body_timeout → 비스트리밍 왕복 cap, Builder.with_call_timeout
+          → admission 대기까지 포함한 호출 전체 cap), provider의
           [connect_timeout_s]와 달리 이름이 하는 일과 일치한다. provider config를
           변형하지 않으므로 같은 런타임을 쓰는 다른 소비자(키퍼 턴 등)의 예산은
           그대로다: override의 blast radius가 이 fusion 요청으로 한정된다.
@@ -380,7 +381,11 @@ let build_agent
          | (Error _ as err), _ -> err
          | Ok config, None -> Ok config
          | Ok config, Some s when Fusion_policy.valid_timeout_s (Some s) ->
-           Ok { config with body_timeout_s = Some s }
+           (* One deadline for the panelist's whole call: a panelist queued
+              behind a keeper's permits on the same binding ends as [Queue]
+              when it runs out, instead of holding the panel for the wait
+              and then spending the deadline on the round trip. *)
+           Ok { config with body_timeout_s = Some s; call_timeout_s = Some s }
          | Ok _, Some s -> Error (Fusion_types.Invalid_timeout_s s)
        in
        match config with

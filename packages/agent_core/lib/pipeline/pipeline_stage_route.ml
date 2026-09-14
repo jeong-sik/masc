@@ -247,6 +247,7 @@ let dispatch_sync
            ?transport:agent.options.transport
            serialized
            ?body_timeout_s:agent.options.body_timeout_s
+           ?call_timeout_s:agent.options.call_timeout_s
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
            ()
          |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)

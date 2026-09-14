@@ -34,6 +34,7 @@ type t =
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
+  ; call_timeout_s : float option
   ; hooks : Hooks.hooks
   ; tracer : Tracing.t
   ; raw_trace : Raw_trace.t option
@@ -82,6 +83,7 @@ let create ~net ~model =
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None
   ; body_timeout_s = None
+  ; call_timeout_s = None
   ; hooks = Hooks.empty
   ; tracer = Tracing.null
   ; raw_trace = None
@@ -203,6 +205,7 @@ let without_event_bus b = { b with event_bus = None }
 let with_stream_idle_timeout s b = { b with stream_idle_timeout_s = Some s }
 let with_first_event_timeout s b = { b with first_event_timeout_s = Some s }
 let with_body_timeout s b = { b with body_timeout_s = Some s }
+let with_call_timeout s b = { b with call_timeout_s = Some s }
 let with_context_injector injector b = { b with context_injector = Some injector }
 let with_skill_registry reg b = { b with skill_registry = Some reg }
 let with_elicitation cb b = { b with elicitation = Some cb }
@@ -249,6 +252,7 @@ let build b =
     ; stream_idle_timeout_s = b.stream_idle_timeout_s
     ; first_event_timeout_s = b.first_event_timeout_s
     ; body_timeout_s = b.body_timeout_s
+    ; call_timeout_s = b.call_timeout_s
     ; hooks = b.hooks
     ; guardrails_async = Guardrails_async.empty
     ; tracer = b.tracer

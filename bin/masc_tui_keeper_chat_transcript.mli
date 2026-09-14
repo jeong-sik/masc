@@ -45,6 +45,15 @@ type tool_outcome =
   | Never_returned
   | Outcome_unrecorded
 
+val outcome_label : tool_outcome -> string
+(** The word the block rollup counts an outcome by ([3 returned]). *)
+
+val marker_of_outcome : tool_outcome -> string
+(** The one-cell mark a call row leads with for its outcome. *)
+
+val all_outcomes : tool_outcome list
+(** Every outcome, in rollup order. *)
+
 (** One tool call as shared by the live turn and durable history decoders.
     This remains typed until {!project_tool_block}; consumers never recover
     identity or outcome by parsing a rendered row. *)
@@ -81,6 +90,19 @@ type skill_state =
   | Skill_failed
   | Skill_evidence_missing
   | Skill_evidence_unavailable
+
+val skill_state_label : skill_state -> string
+(** The phrase a skill row leads with, one per state. A skill's life is
+    read, delivered, used, and the phrase says how far it got; the last three
+    states are not steps of that life and say so. *)
+
+val all_skill_states : skill_state list
+(** Every state, in the order of the skill's life. *)
+
+val legend : (string * string) list
+(** Each mark and phrase a tool or skill row can carry, with what it means,
+    for the help sheet. Built from {!outcome_label} and
+    {!skill_state_label}, so it prints the words the rows print. *)
 
 type skill_activity = private
   { skill_name : string

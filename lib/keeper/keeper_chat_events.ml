@@ -60,6 +60,7 @@ type continuation_checkpoint =
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
@@ -196,11 +197,12 @@ type t =
    the journal hook has already recorded each of them. *)
 let bus_capacity = 512
 
-let create ?(now = Time_compat.now) ?on_publish () =
+let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
+  if first_seq < 0 then invalid_arg "Keeper_chat_events.create: negative journal sequence";
   { stream = Eio.Stream.create bus_capacity
   ; on_publish
   ; now
-  ; next_seq = 0
+  ; next_seq = first_seq
   ; closed = false
   ; drained = false
   }

@@ -49,10 +49,13 @@ let protocol_error_sparse : E.stream_protocol_error =
   ; raw_bytes = None
   }
 
-(* One instance per [keeper_chat_event] constructor (33 total), covering both
+(* One instance per [keeper_chat_event] constructor, covering both
    population variants of every option field. *)
 let all_events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
+  ; E.Batch_bound {
+      operation_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-member" with Ok id -> id | Error detail -> Alcotest.fail detail);
+      execution_id = (match Masc.Keeper_owner.Chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> Alcotest.fail detail) }
   ; E.Text_message_start { message_id = "msg-1"; role = E.User }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
   ; E.Text_delta "hello"
@@ -848,11 +851,61 @@ let test_golden_replay_matches_live_stream_bytes () =
          5
          (List.length adapter_blocks))
 
+let test_continued_short_reply_uses_monotonic_journal_ids () =
+  let base_dir = temp_base_path "keeper-chat-continued-seq" in
+  Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ()) (fun () ->
+    let journal = L.open_journal ~base_dir ~keeper_name:"k" ~operation_id:"continued" () in
+    (match L.next_sequence ~require_existing:true journal with
+     | Error L.Journal_missing -> () | _ -> Alcotest.fail "missing retained journal must not reset the cursor");
+    let cursor () = match L.next_sequence journal with
+      | Ok seq -> seq | Error _ -> Alcotest.fail "journal cursor unavailable" in
+    let first = E.create ~first_seq:(cursor ()) ~on_publish:(L.append journal) () in
+    let first_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
+      E.Text_message_start {message_id="message"; role=E.Assistant}]
+      @ List.init 20 (fun _ -> E.Text_delta "working")
+      @ [E.Continuation_checkpoint {message=""; request_id=Some "continued"};
+         E.Text_message_end; E.Run_finished {run_id="run"}] in
+    let before_terminal = List.filter (function E.Run_finished _ -> false | _ -> true) first_events in
+    List.iter (E.publish first) before_terminal;
+    (match L.next_sequence ~require_existing:true journal with
+     | Error (L.Journal_corrupt _) -> ()
+     | _ -> Alcotest.fail "missing terminal append must not reuse a possibly delivered cursor");
+    E.publish first (E.Run_finished {run_id="run"});
+    let after = L.After_seq (cursor () - 1) in
+    let live = ref [] in
+    let resumed = E.create ~first_seq:(cursor ()) ~on_publish:(fun ~seq ~ts event ->
+      L.append journal ~seq ~ts event;
+      live := {L.seq; ts; event} :: !live) () in
+    let final_events = [E.Run_started {run_id="run"; thread_id="keeper:k"};
+      E.Text_message_start {message_id="message"; role=E.Assistant};
+      E.Text_delta "actual answer"; E.Text_message_end; E.Run_finished {run_id="run"}] in
+    List.iter (E.publish resumed) final_events;
+    E.close resumed;
+    let rec read_closed_bus entries = match E.subscribe_published resumed with
+      | E.Closed -> List.rev entries
+      | E.Next {seq; ts; event} -> read_closed_bus ({L.seq; ts; event} :: entries) in
+    let delivered = read_closed_bus [] in
+    let replay = read_ok (L.read_journal journal)
+      |> List.filter (fun (entry : L.journaled_event) -> L.seq_is_after after entry.seq) in
+    Alcotest.(check int) "short final answer survives old cursor" (List.length final_events) (List.length replay);
+    let frames entries =
+      let _, frames = List.fold_left (fun (state, frames) (entry : L.journaled_event) ->
+        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id ~redact_json:Fun.id state entry.event in
+        state, (match event with None -> frames | Some event -> Ag_ui.event_to_sse ~id:entry.seq event :: frames))
+        (Projection.initial, []) entries in
+      String.concat "" (List.rev frames) in
+    Alcotest.(check string) "closed resumed bus delivers every journal-stamped frame"
+      (frames (List.rev !live)) (frames delivered);
+    Alcotest.(check string) "live and replay carry identical durable frame IDs"
+      (frames (List.rev !live)) (frames replay))
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
     [ ( "codec"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "continued short reply keeps monotonic journal IDs" `Quick test_continued_short_reply_uses_monotonic_journal_ids
+        ; Alcotest.test_case
             "round trip all constructors"
             `Quick
             test_codec_round_trip_all_constructors

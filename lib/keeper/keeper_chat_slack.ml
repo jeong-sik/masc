@@ -733,6 +733,7 @@ let adapter_loop_with_transport
     | Text_message_start { message_id = _; role = _ } ->
         continue ()
     | Reply_details _
+    | Batch_bound _
     | Continuation_checkpoint _
     | Agent_core_stream_connected
     | Agent_core_stream_message_start _

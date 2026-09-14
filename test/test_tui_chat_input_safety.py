@@ -123,14 +123,18 @@ def approval_typing(binary: str, decision: str) -> None:
 
 
 def queued_attachments(binary: str) -> None:
-    fixtures, gate = h.chat_queue_http_fixtures()
+    """Staged media rides with the line it was staged for, and survives /queue edit.
+
+    Enter admits each line to the server while a turn is held, so the queue
+    that used to live in this TUI is the server's. What the scenario proves
+    is the wire: the attachment and reference staged before "queued-one" go
+    out with it and only it, the next reference goes out with "draft", and
+    editing the queued text on the server keeps the media it was sent with.
+    """
+    fixture = h.AtomicChatFixture()
     requests: h.HttpRequests = []
     reference = "https://example.invalid/queued.png"
     draft_reference = "file-draft-image"
-
-    def prepare(base: str) -> None:
-        h.seed_uncoalesced_queue(base)
-        h.seed_image_workspace(base)
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -140,9 +144,7 @@ def queued_attachments(binary: str) -> None:
         base: str,
     ) -> None:
         try:
-            open_chat(process, fd, output)
-            h.send_and_wait(process, fd, output, b"first", h.composer_showing(b"first"))
-            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            h.open_atomic_chat(process, fd, output)
             image_path = Path(base, h.IMAGE_NAME)
             h.send_and_wait(
                 process, fd, output, f"/attach {image_path}\r".encode(), b"attached "
@@ -153,7 +155,8 @@ def queued_attachments(binary: str) -> None:
             h.send_and_wait(
                 process, fd, output, b"queued-one", h.composer_showing(b"queued-one")
             )
-            h.send_and_wait(process, fd, output, b"\r", b"NEXT 1")
+            os.write(fd, b"\r")
+            h.wait_for_atomic_admissions(process, fd, output, fixture, 1)
             h.send_and_wait(
                 process,
                 fd,
@@ -162,37 +165,12 @@ def queued_attachments(binary: str) -> None:
                 b"reference(s)",
             )
             h.send_and_wait(process, fd, output, b"draft", h.composer_showing(b"draft"))
-            # Returning past newest restores this draft's own reference.
-            h.send_and_wait(
-                process, fd, output, b"\x1b[A", h.composer_showing(b"queued-one")
+            os.write(fd, b"\r")
+            h.wait_for_atomic_admissions(process, fd, output, fixture, 2)
+            queued, draft = fixture.submitted
+            assert [queued["message"], draft["message"]] == ["queued-one", "draft"], (
+                fixture.submitted
             )
-            h.send_and_wait(
-                process, fd, output, b"\x1b[B", h.composer_showing(b"draft")
-            )
-            h.send_and_wait(process, fd, output, b"\r", b"NEXT 2")
-            # Walking across two waiting lines restores each payload independently.
-            h.send_and_wait(
-                process, fd, output, b"\x1b[A", h.composer_showing(b"draft")
-            )
-            h.send_and_wait(
-                process, fd, output, b"\x1b[A", h.composer_showing(b"queued-one")
-            )
-            h.send_and_wait(
-                process, fd, output, b"-fixed", h.composer_showing(b"queued-one-fixed")
-            )
-            h.send_and_wait(process, fd, output, b"\r", b"Enter:queue(2)")
-            before = len(output)
-            gate.release.set()
-            h.wait_for_output(
-                process, fd, output, b"Enter:send", start=before, timeout=10
-            )
-            payloads = [json.loads(body) for path, body in requests if path == CHAT]
-            assert [p["message"] for p in payloads] == [
-                "first",
-                "queued-one-fixed",
-                "draft",
-            ], payloads
-            queued, draft = payloads[1:]
             assert len(queued["attachments"]) == 1, queued
             attachment = queued["attachments"][0]
             assert attachment["name"] == image_path.name, attachment
@@ -204,72 +182,39 @@ def queued_attachments(binary: str) -> None:
                 {"type": "image", "file_id": draft_reference},
                 {"type": "text", "text": "draft"},
             ], draft
-            # Cancelling a recall ends the saved draft, including its reference.
-            h.send_and_wait(
-                process, fd, output, b"/ref file-private\r", b"reference(s)"
+            # Editing the queued text on the server keeps the attachment and
+            # the reference that were sent with it; only the text changes.
+            first_id = queued["request_id"]
+            command = f"/queue edit {first_id} queued-one-fixed".encode()
+            h.send_and_wait(process, fd, output, command, h.composer_showing(command))
+            os.write(fd, b"\r")
+            if not h.wait_for_fixture_event(
+                process, fd, output, fixture.edited, timeout=5
+            ):
+                raise AssertionError("queue edit never reached the server")
+            edited = fixture.operations[0]["input"]
+            assert edited["message"] == "queued-one-fixed", edited
+            assert [item["name"] for item in edited["attachments"]] == [
+                image_path.name
+            ], edited
+            assert {"type": "image", "url": reference} in edited["user_blocks"], edited
+            assert {"type": "text", "text": "queued-one-fixed"} in edited["user_blocks"], (
+                edited
             )
-            h.send_and_wait(
-                process, fd, output, b"private", h.composer_showing(b"private")
-            )
-            h.send_and_wait(
-                process, fd, output, b"\x1b[A", h.composer_showing(b"draft")
-            )
-            h.send_and_wait(process, fd, output, b"\x15", b"> ")
-            h.send_and_wait(
-                process,
-                fd,
-                output,
-                b"\x1b[Bcancel-check",
-                h.composer_showing(b"cancel-check"),
-            )
-            h.send_and_wait(process, fd, output, b"\r", b"reply-cancel-check")
-            cancelled = [json.loads(body) for path, body in requests if path == CHAT][
-                -1
-            ]
-            assert (
-                cancelled["message"] == "cancel-check"
-                and "user_blocks" not in cancelled
-            ), cancelled
-            # The saved draft also belongs to alpha, never the next Keeper.
-            h.send_and_wait(
-                process, fd, output, b"/ref file-private\r", b"reference(s)"
-            )
-            h.send_and_wait(
-                process, fd, output, b"private", h.composer_showing(b"private")
-            )
-            h.send_and_wait(
-                process, fd, output, b"\x1b[A", h.composer_showing(b"cancel-check")
-            )
-            h.send_and_wait(
-                process, fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat"
-            )
-            h.send_and_wait(
-                process,
-                fd,
-                output,
-                b"\x1b[Bbeta-check",
-                h.composer_showing(b"beta-check"),
-            )
-            h.send_and_wait(process, fd, output, b"\r", b"reply-beta-check")
-            switched = [json.loads(body) for path, body in requests if path == CHAT][-1]
-            assert switched["name"] == "beta" and switched["message"] == "beta-check", (
-                switched
-            )
-            assert "user_blocks" not in switched and "attachments" not in switched, (
-                switched
-            )
+            assert fixture.operations[0]["operation_id"] == first_id, fixture.operations
         finally:
-            gate.release.set()
+            fixture.release_interrupt.set()
+            fixture.release.set()
             os.killpg(process.pid, signal.SIGTERM)
 
     h.run_terminal_scenario(
         binary,
-        description="queued recall retains attachments and restores draft references",
+        description="staged media rides with its line and survives a queue edit",
         interact=interact,
         confirm_exit=b"",
-        http_fixtures=fixtures,
+        http_fixtures=fixture.fixtures,
         http_requests=requests,
-        prepare_workspace=prepare,
+        prepare_workspace=h.seed_image_workspace,
     )
 
 

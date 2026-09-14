@@ -44,8 +44,12 @@ val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string
 
+type batch_plan = { members : Operation.Operation_id.t list; input : Yojson.Safe.t }
+type batch_selector = Operation.t -> Operation.t list -> (batch_plan option, string) result
+
 val submit
-  :  t
+  :  ?priority:batch_selector
+  -> t
   -> now:float
   -> operation_id:Operation.Operation_id.t
   -> source:Yojson.Safe.t
@@ -54,7 +58,15 @@ val submit
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
 val inventory : t -> (inventory, error) result
-val claim_next : t -> now:float -> (Operation.t option, error) result
+(** Pure selector receives only fresh, unbound queued operations. Members must
+    include the head, in queue order. The store freezes membership and combined
+    input atomically with claim; resumed executions never acquire new members. *)
+val claim_next : ?batch:batch_selector -> t -> now:float -> (Operation.t option, error) result
+val batch_operations : t -> operation_id:Operation.Operation_id.t -> (Operation.t list, error) result
+(** Ordered original member inputs and digests, including the execution owner.
+    The claimed owner carries the aggregate input; this read preserves each
+    original user message for transcript delivery. Terminal bodies are released.
+    A singleton returns itself. *)
 
 val list_queued
   :  t
@@ -99,6 +111,13 @@ val fail_running
   -> detail:string
   -> outcome_ref:string option
   -> (Operation.t, error) result
+
+(** Durable cooperative checkpoint continuation, independent of provider retry. *)
+val direct_checkpoint : t -> operation_id:Operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
+val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
 
 val direct_runtime_retry :
   t -> operation_id:Operation.Operation_id.t ->

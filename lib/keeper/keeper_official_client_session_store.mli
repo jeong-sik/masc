@@ -108,16 +108,34 @@ type transient_release_record =
   ; released_at : float
   }
 
+(** Delivery provenance for canonical context. Replaced configuration is an
+    external snapshot available to this vendor turn, not persistent history
+    injection. Canonical_source_guard binds the pre-projection source used by
+    a client without replacement support; it does not claim all source bytes
+    were delivered. No receipt asserts that the model understood its contents. *)
+type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
+
+type context_frontier =
+  { snapshot_sha256 : string
+  ; message_count : int
+  ; delivery : context_delivery
+  ; acknowledged_turn : settlement option
+    (** None during claim/inflight. Only exact vendor settlement records Some. *)
+  }
+
 type t =
   { client_kind : client_kind
   ; runtime_id : string
   ; phase : phase
   ; turn_count : int
   ; tool_surface_sha256 : string
+  ; context_frontier : context_frontier option
   ; last_recovery_resolution : recovery_resolution_record option
   ; last_transient_release : transient_release_record option
   ; updated_at : float
   }
+
+type context_admission_error = Context_frontier_missing | Canonical_context_changed
 
 type claim_plan =
   { previous_settlement : settlement option
@@ -175,6 +193,22 @@ val validate_completed_continuation :
 (** After transmitted input settles, require a different turn in the captured
     session with the same runtime and tool surface. Admission still requires
     the original turn through [validate_continuation]. *)
+
+val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
+  (unit, context_admission_error) result
+val context_admission_error_to_string : context_admission_error -> string
+
+val claim_with_context_frontier :
+  context_frontier:context_frontier option ->
+  base_path:string ->
+  keeper_name:string ->
+  expected:t option ->
+  client_kind:client_kind ->
+  owner_epoch:string ->
+  runtime_id:string ->
+  tool_surface_sha256:string ->
+  updated_at:float ->
+  (t, string) result
 
 val claim :
   base_path:string ->

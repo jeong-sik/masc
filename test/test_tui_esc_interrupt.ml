@@ -96,11 +96,21 @@ let test_observed_turn_changes_during_double_escape () =
       ~previous:(Some ("old",t0,true)) = Some Esc.Leave)
 ;;
 
+let test_pending_acknowledgement_does_not_trap_escape () =
+  check string "duplicate request is swallowed"
+    "swallow" (action_to_string (Esc.pending_action ~now_ns:t0 ~requested_at_ns:t0));
+  check string "exact grace boundary is swallowed"
+    "swallow" (action_to_string (Esc.pending_action ~now_ns:(Int64.add t0 Esc.grace_window_ns) ~requested_at_ns:t0));
+  check string "unanswered request permits leaving after existing grace"
+    "leave" (action_to_string (Esc.pending_action ~now_ns:(Int64.succ (Int64.add t0 Esc.grace_window_ns)) ~requested_at_ns:t0))
+;;
+
 let () =
   run
     "tui_esc_interrupt"
     [ ( "esc during a live turn"
-      , [ test_case "token changes during double Escape" `Quick test_observed_turn_changes_during_double_escape
+      , [ test_case "pending acknowledgement preserves navigation grace" `Quick test_pending_acknowledgement_does_not_trap_escape
+        ; test_case "token changes during double Escape" `Quick test_observed_turn_changes_during_double_escape
         ; test_case "first press launches the interrupt" `Quick
             test_first_esc_launches_the_interrupt
         ; test_case "double press inside the grace window is swallowed" `Quick

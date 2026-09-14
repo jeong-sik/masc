@@ -174,6 +174,13 @@ type turn_success =
     and a non-executable phase remain distinct so a durable source cannot be
     acknowledged as completed work. *)
 
+val autonomous_yield_request
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+(** Read Owner chat readiness and ready durable stimuli at a safe boundary.
+    Waiting inputs remain durable without forcing an unproductive checkpoint. *)
+
 val hitl_replay_preemption_request
   :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
   -> now:float

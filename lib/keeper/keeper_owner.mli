@@ -22,6 +22,13 @@ module Chat_operation = Keeper_chat_operation
 
 type operation_projection =
   { queued_count : int
+  ; has_claimable_queued : bool
+      (** Original queued executions eligible for claim at the last Owner
+          mutation or retry wake. Approval waits and cooling retries are
+          excluded. Reading this projection performs no store I/O. *)
+  ; next_runtime_retry_wake : float option
+      (** Next cooling retry deadline, sampled at the same instant as readiness.
+          The Owner arms this deadline even if it has passed since sampling. *)
   ; running_operation_id : Chat_operation.Operation_id.t option
   ; terminal_count : int
   ; interrupted_count : int

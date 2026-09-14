@@ -2709,7 +2709,7 @@ let test_startup_queued_waits_for_runner_readiness () =
          (List.rev_map Chat_operation.Operation_id.to_string !executed))
 ;;
 
-let test_operation_store_failure_fences_owner_mutations () =
+let test_operation_store_failure_is_retried_at_the_next_mutation () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let owner =
@@ -2740,14 +2740,29 @@ let test_operation_store_failure_fences_owner_mutations () =
          "pre-commit failure leaves no operation"
          true
          (Option.is_none (owner_ok (Owner.exact_operation owner operation_id)));
+       check bool "the failure is published as an unavailable store" true
+         (Owner.operation_projection owner).Owner.store_unavailable;
+       (* The store itself is healthy again -- the injected failure rolled
+          back -- and no child holds the handle, so the next mutation is the
+          moment the Owner reopens and proceeds. No wake is needed: none
+          would come until the next keepalive start. *)
+       (match
+          Owner.apply_meta
+            owner
+            (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "recovers-on-use" })
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("metadata mutation did not recover the operation store: " ^ Owner.error_to_string error));
+       check bool "recovery clears the unavailable flag" false
+         (Owner.operation_projection owner).Owner.store_unavailable;
        match
-         Owner.apply_meta
-           owner
-           (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
+         Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-recovery")
+           ~source:operation_source ~input:(operation_input "admitted after recovery")
        with
-       | Error (Owner.Store_unavailable _) -> ()
-       | Error error -> fail ("wrong global fence error: " ^ Owner.error_to_string error)
-       | Ok _ -> fail "operation store failure did not fence metadata mutation")
+       | Ok _ -> ()
+       | Error error ->
+         fail ("submission after recovery was refused: " ^ Owner.error_to_string error))
 ;;
 
 let expect_store_unavailable = function
@@ -2835,6 +2850,11 @@ let test_recovery_keeps_integrity_failure_fenced () =
       Owner.wake_operation_drain owner |> expect_store_unavailable;
       Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-integrity")
         ~source:operation_source ~input:(operation_input "must remain fenced")
+      |> expect_store_unavailable;
+      (* Metadata is refused on the same fault: a command is where the fence
+         is re-examined, and an integrity fault does not lift there either. *)
+      Owner.apply_meta owner
+        (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-remain-fenced" })
       |> expect_store_unavailable)
 ;;
 
@@ -4239,9 +4259,9 @@ let () =
         ; test_case "runtime-deferred child drains the same original operation" `Quick
             test_runtime_deferred_child_keeps_same_operation_and_drains
         ; test_case
-            "operation store failure fences owner mutations"
+            "operation store failure is retried at the next mutation"
             `Quick
-            test_operation_store_failure_fences_owner_mutations
+            test_operation_store_failure_is_retried_at_the_next_mutation
         ; test_case "autonomous operator interrupt is a typed outcome" `Quick
             test_autonomous_operator_interrupt_is_a_typed_outcome
         ; test_case "idle wake recovers storage and answers queued chat" `Quick

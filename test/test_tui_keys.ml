@@ -1024,7 +1024,7 @@ let test_config_footer_names_child_hops () =
      in no list at all -- which pane each belongs to is in the help the ?
      overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter

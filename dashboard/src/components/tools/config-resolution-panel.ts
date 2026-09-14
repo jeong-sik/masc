@@ -401,7 +401,9 @@ const KEEPER_RUNTIME_ROWS: Array<{
   label: string
   fmt: 'int' | 'float' | 'duration'
 }> = [
-  { key: 'stream_idle_timeout_sec', label: 'stream idle timeout (opt-in)', fmt: 'duration' },
+  { key: 'stream_idle_timeout_sec', label: 'stream idle timeout', fmt: 'duration' },
+  { key: 'first_event_timeout_sec', label: 'first event timeout', fmt: 'duration' },
+  { key: 'provider_call_deadline_sec', label: 'provider call deadline', fmt: 'duration' },
   { key: 'body_timeout_override_sec', label: 'response body timeout override', fmt: 'duration' },
 ]
 
@@ -410,6 +412,16 @@ function sourceTone(source: KeeperRuntimeSource): string {
     case 'env': return 'border-[var(--color-accent-fg)]/30 bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]'
     case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
     case 'default': return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
+    case 'failsafe_floor': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
+  }
+}
+
+function keeperSourceLabel(source: KeeperRuntimeSource): string {
+  switch (source) {
+    case 'env': return 'env override'
+    case 'toml': return 'runtime.toml'
+    case 'default': return 'default'
+    case 'failsafe_floor': return 'fail-safe floor (unset)'
   }
 }
 
@@ -424,8 +436,8 @@ function fmtKeeperValue(value: number | null, fmt: 'int' | 'float' | 'duration')
 
 function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null }) {
   if (!runtime) return null
-  const tomlCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'toml').length
-  const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'env').length
+  const tomlCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key].source === 'toml').length
+  const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key].source === 'env').length
 
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
@@ -439,15 +451,14 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
         ` : null}
       </div>
       <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
-        Explicit keeper runtime settings. Disabled timeouts are not inferred from provider/model kind.
+        Resolved keeper runtime thresholds. A threshold nobody configured runs on the server's fail-safe floor; the body timeout override stays disabled until set.
       </div>
       <div class="grid gap-2 md:grid-cols-2">
         ${KEEPER_RUNTIME_ROWS.map(row => {
-          const field: KeeperRuntimeField<number | null> | undefined = runtime[row.key]
-          if (!field) return null
+          const field: KeeperRuntimeField<number | null> = runtime[row.key]
           const sourceText = field.value === null && field.source === 'default'
             ? 'unset'
-            : sourceLabel(field.source)
+            : keeperSourceLabel(field.source)
           return html`
             <div class="v2-lab-row flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>

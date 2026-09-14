@@ -39,6 +39,16 @@ function runtimeResolutionRaw(overrides: Record<string, unknown> = {}): Record<s
   }
 }
 
+function keeperRuntimeRaw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    stream_idle_timeout_sec: { value: 600, source: 'failsafe_floor' },
+    first_event_timeout_sec: { value: 600, source: 'failsafe_floor' },
+    body_timeout_override_sec: { value: null, source: 'default' },
+    provider_call_deadline_sec: { value: 900, source: 'failsafe_floor' },
+    ...overrides,
+  }
+}
+
 function message(overrides: Partial<Message> = {}): Message {
   return {
     id: 'm-1',
@@ -274,29 +284,45 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     })
   })
 
-  it('projects only the active stream and body timeout fields', () => {
+  it('projects all four resolved keeper thresholds with their sources', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_runtime: {
+      keeper_runtime: keeperRuntimeRaw({
         stream_idle_timeout_sec: { value: 75, source: 'toml' },
-        body_timeout_override_sec: { value: null, source: 'default' },
-      },
+        first_event_timeout_sec: { value: 180, source: 'env' },
+        body_timeout_override_sec: { value: 120, source: 'env' },
+        provider_call_deadline_sec: { value: 300, source: 'toml' },
+      }),
     }))
 
     expect(result?.keeper_runtime).toEqual({
       stream_idle_timeout_sec: { value: 75, source: 'toml' },
-      body_timeout_override_sec: { value: null, source: 'default' },
+      first_event_timeout_sec: { value: 180, source: 'env' },
+      body_timeout_override_sec: { value: 120, source: 'env' },
+      provider_call_deadline_sec: { value: 300, source: 'toml' },
     })
   })
 
-  it('projects an unset stream idle timeout as explicitly disabled', () => {
+  it('keeps keeper_runtime when a default install reports fail-safe floors', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_runtime: {
-        stream_idle_timeout_sec: { value: null, source: 'default' },
-        body_timeout_override_sec: { value: null, source: 'default' },
-      },
+      keeper_runtime: keeperRuntimeRaw(),
     }))
 
-    expect(result?.keeper_runtime?.stream_idle_timeout_sec).toEqual({
+    expect(result?.keeper_runtime).toEqual({
+      stream_idle_timeout_sec: { value: 600, source: 'failsafe_floor' },
+      first_event_timeout_sec: { value: 600, source: 'failsafe_floor' },
+      body_timeout_override_sec: { value: null, source: 'default' },
+      provider_call_deadline_sec: { value: 900, source: 'failsafe_floor' },
+    })
+  })
+
+  it('projects an unset body timeout override as null', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: keeperRuntimeRaw({
+        body_timeout_override_sec: { value: null, source: 'default' },
+      }),
+    }))
+
+    expect(result?.keeper_runtime?.body_timeout_override_sec).toEqual({
       value: null,
       source: 'default',
     })
@@ -304,30 +330,51 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
 
   it('rejects unknown keeper runtime sources instead of coercing them', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_runtime: {
-        stream_idle_timeout_sec: { value: null, source: 'compatibility' },
-        body_timeout_override_sec: { value: null, source: 'default' },
-      },
+      keeper_runtime: keeperRuntimeRaw({
+        stream_idle_timeout_sec: { value: 600, source: 'compatibility' },
+      }),
     }))
 
     expect(result?.keeper_runtime).toBeNull()
   })
 
-  it('rejects a missing stream idle value instead of treating it as disabled', () => {
+  it('rejects a missing stream idle value instead of inventing one', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_runtime: {
+      keeper_runtime: keeperRuntimeRaw({
         stream_idle_timeout_sec: { source: 'default' },
-        body_timeout_override_sec: { value: null, source: 'default' },
-      },
+      }),
     }))
 
     expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a null threshold because the server always floors it', () => {
+    for (const key of ['stream_idle_timeout_sec', 'first_event_timeout_sec', 'provider_call_deadline_sec']) {
+      const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+        keeper_runtime: keeperRuntimeRaw({
+          [key]: { value: null, source: 'default' },
+        }),
+      }))
+
+      expect(result?.keeper_runtime, key).toBeNull()
+    }
   })
 
   it('rejects a non-positive stream idle value instead of clamping it', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_runtime: {
+      keeper_runtime: keeperRuntimeRaw({
         stream_idle_timeout_sec: { value: 0, source: 'toml' },
+      }),
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a payload that omits one of the four keeper thresholds', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: 600, source: 'failsafe_floor' },
+        first_event_timeout_sec: { value: 600, source: 'failsafe_floor' },
         body_timeout_override_sec: { value: null, source: 'default' },
       },
     }))

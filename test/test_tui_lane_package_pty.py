@@ -15,6 +15,21 @@ import threading
 
 import test_tui_keyboard_input as terminal
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# Three surface titles come from masc_tui_render.ml; the workspace rows it
+# reads ("TOML installations", "New TOML filename:", "No observations.")
+# from masc_tui_lane_addons.ml; the draft notices ("Draft edited; s saves",
+# "A Lane request is pending") from masc_tui.ml; and the revision note from
+# masc_tui_lane_declaration.ml.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_lane_addons.ml",
+    "bin/masc_tui.ml",
+    "bin/masc_tui_lane_declaration.ml",
+)
+
 
 def main(executable: str) -> None:
     requests: terminal.HttpRequests = []

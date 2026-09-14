@@ -154,7 +154,7 @@ let core_error_to_runtime_outcome err =
            Llm_provider.Http_client.NetworkError { message; kind }
          | Timeout { message; phase } ->
            (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
-              [Retry.Timeout] also covers Admission, Queue, First_token and
+              [Retry.Timeout] also covers Queue, First_token and
               Capacity_backpressure waits that never touched a socket.
               [TimeoutError] carries the phase, so route there and keep it. *)
            Llm_provider.Http_client.TimeoutError

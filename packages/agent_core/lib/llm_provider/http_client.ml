@@ -34,7 +34,6 @@ type stream_idle_state =
 [@@deriving yojson, show]
 
 type timeout_phase =
-  | Admission
   | Queue
   | First_token
   | Wall_clock
@@ -257,7 +256,6 @@ let timeout_phase_of_stream_idle_state = function
 ;;
 
 let timeout_phase_to_label = function
-  | Admission -> "admission"
   | Queue -> "queue"
   | First_token -> "first_token"
   | Wall_clock -> "wall_clock"

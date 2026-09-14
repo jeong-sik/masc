@@ -47,14 +47,10 @@ type stream_idle_state =
     [NetworkError { kind = Timeout; _ }] still exists for low-level OS or
     legacy timeouts.  New call-site-owned deadlines should surface as
     {!TimeoutError} with one of these phases so downstream policy can
-    distinguish admission checks, scheduler queueing, first-token wait,
-    streaming idleness, whole-call wall clocks, capacity backpressure,
-    transport/body deadlines, CLI stdout idleness,
-    and generic caller budgets. *)
+    distinguish scheduler queueing, first-token wait, streaming idleness,
+    whole-call wall clocks, capacity backpressure, transport/body deadlines,
+    CLI stdout idleness, and generic caller budgets. *)
 type timeout_phase =
-  | Admission
-  (** Pre-flight provider/capability/admission checks before a request is
-      allowed to spend body budget. *)
   | Queue
   (** Waiting for an internal scheduler, slot, or provider queue before the
       request starts producing provider output. *)

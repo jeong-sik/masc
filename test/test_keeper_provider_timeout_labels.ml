@@ -2,9 +2,9 @@
 
    A record rehydrated from disk has no typed error left, only its code
    string, and [classify_provider_runtime_error_record] turns that string into
-   the phase the runtime acts on. The mapping is twenty-eight labels across
-   two copy-pasted lists -- nine idle states and eleven phases with eight
-   aliases -- and the suite named two of them.
+   the phase the runtime acts on. The mapping is two copy-pasted lists --
+   the idle states, and the phases with their aliases -- and the suite named
+   two of the labels.
 
    A crossed pair does not fail anything: it reports one timeout as another,
    which is a wrong reason on an operator's screen and a wrong bucket in the

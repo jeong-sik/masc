@@ -61,9 +61,8 @@ let string_field key = function
 
 (* Destructured rather than read field by field so that a field added to
    Voice_config.endpoint fails to compile here instead of being quietly left out
-   of what the writer emits. The loader's whitelist and this list are the same
-   nine names, and a tenth that only one side knows is how a section stops
-   loading. *)
+   of what the writer emits. [command] is named and not written: this writer
+   takes no executable path, which only the file's own author sets. *)
 let endpoint_fields (endpoint : Voice_config.endpoint) =
   let { Voice_config.id = _
       ; kind
@@ -74,6 +73,8 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
       ; enabled
       ; timeout_seconds
       ; default_voice
+      ; model
+      ; command = _
       }
     =
     endpoint
@@ -87,6 +88,7 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
   ; ( "timeout_seconds"
     , Option.map (fun seconds -> Toml_line_editor.Float seconds) timeout_seconds )
   ; string_field "default_voice" default_voice
+  ; string_field "model" model
   ]
 ;;
 

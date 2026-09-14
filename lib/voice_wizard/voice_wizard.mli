@@ -76,9 +76,9 @@ val gaps : draft -> gap list
 val changes : draft -> (Voice_setup.change list, gap list) result
 (** The changes this draft describes, or what it is still missing.
 
-    The section's [default_model] is set alongside the endpoint rather than
-    after it: a section that exists must name one, so an endpoint written on its
-    own would leave a file the loader refuses. *)
+    The model is written on the endpoint, not as the section's
+    [default_model], so adding a provider leaves the model every other endpoint
+    in the section is asked for as it was. *)
 
 type step =
   | Section

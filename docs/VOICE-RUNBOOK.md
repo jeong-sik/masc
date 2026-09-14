@@ -212,10 +212,11 @@ enabled = true
 default_model = "/Users/you/.cache/whisper/ggml-large-v3-turbo.bin"
 ```
 
-The speaking section names no `default_model`: `say` takes none, and the
-section needs one only when it also holds a kind that is asked for a model by
-name. The listening section always needs one, and for `whisper_cli` it is a
-**file path** — what `-m` loads. A `base_url` on either command endpoint fails
+The speaking section names no `default_model`: `say` takes none. The listening
+section names the model its whisper endpoint loads, and for `whisper_cli` that
+is a **file path** — what `-m` loads. A model can also sit on the endpoint
+itself as `model = "..."`, which is what an endpoint is asked for when it has
+one; the section's `default_model` answers for the endpoints that do not. A `base_url` on either command endpoint fails
 the load, naming the endpoint and its kind:
 
 ```
@@ -516,6 +517,7 @@ One section in `runtime.toml`, read by `Voice_config`:
 ```toml
 [voice.tts]             default_model, default_voice, agent_voices, endpoints
 [voice.stt]             default_model, endpoints, send_on_stop
+#   an endpoint may carry model = "..."; default_model answers for the rest
 [voice.session]         endpoints          # realtime; empty unless configured
 [voice.local_playback]  enabled, agents
 [voice.capture]         calibration_seconds, trigger_margin_db, trailing_silence_seconds, speech_margin_db, noise_reduction
@@ -553,12 +555,14 @@ From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
 same way, and the chat pane comes forward as it does for Enter.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
-paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
-non-blank `default_model`. `[voice.tts]` names one when any of its endpoints is
-a kind asked for a model by name — every kind except `macos_say`; a section of
-`macos_say` endpoints alone needs none. A missing or blank one where it is
-needed fails the load as `tts.default_model is required` or
-`stt.default_model is required`.
+paths refuse by name before any endpoint is asked. Every endpoint that is asked
+for a model — every kind except `macos_say` — must have one: its own `model`, or
+the section's `default_model` for the endpoints that name none. A section whose
+endpoints without a model include both an address kind and `whisper_cli` has no
+fallback that serves both, since one string cannot be a provider's model name
+and a file path at once; each of those endpoints then names its own, and the
+load fails as `stt.endpoints[<id>].model is required` until it does. An endpoint
+left with no model at all fails the load naming the endpoint and the section.
 `[voice.capture]` and `[voice.gate]` are read as strictly as an endpoint is: a
 key the section does not know, or a value of the wrong type, fails the load
 naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.
@@ -600,7 +604,7 @@ built — not a string match on the URL:
 | `openai_compat` | `POST <base>/audio/speech` | `POST <base>/audio/transcriptions` | `Authorization: Bearer`, omitted entirely when no `api_key_env` |
 | `voice_mcp` | MCP tool call | — | — |
 | `macos_say` | `say -v <voice> --file-format=WAVE --data-format=LEI16@22050 -o <clip>.wav <text>` | — | — |
-| `whisper_cli` | — | `whisper-cli -m <default_model> -l auto -nt -f <audio>` | — |
+| `whisper_cli` | — | `whisper-cli -m <model> -l auto -nt -f <audio>` | — |
 
 The two command kinds take an optional `command` naming the executable and
 refuse a `base_url`.
@@ -656,8 +660,9 @@ id = "elevenlabs-stt"     # fallback
 ```
 
 Measured with `ggml-large-v3-turbo` on a real Korean utterance: **0.85 s**,
-transcript correct. The STT `default_model` is workspace-wide rather than
-per-endpoint, so `scribe_v2` rides along to whisper, which ignores it.
+transcript correct. Give the whisper endpoint its own `model` — the path above
+— and the hosted endpoint beside it keeps the model name it is asked for; the
+section's `default_model` only answers for endpoints that name none.
 
 The server holds its model resident for as long as it runs — **1.8 GB** for
 large-v3-turbo — with no idle unload of the kind ollama does. Stop it when

@@ -41,6 +41,7 @@ type endpoint = {
   timeout_seconds : float option;
   default_voice : string option;
   command : string option;
+  model : string option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the
@@ -52,7 +53,11 @@ type endpoint = {
     alphanumerics, an OpenAI voice is a name like ["alloy"] -- so the fallback
     chain handing one endpoint's id to the next endpoint asks for a voice that
     does not exist there (#24068). [None] means the endpoint has none declared
-    and falls back to [tts.default_voice]. *)
+    and falls back to [tts.default_voice].
+
+    [model] is the model this endpoint is asked for: a provider's model name for
+    an address kind, the model file for [whisper_cli]. [None] falls back to the
+    section's [default_model]; see {!model_at_endpoint}. *)
 
 (** {1 Voice tuning} *)
 
@@ -67,8 +72,9 @@ type voice_tuning = {
 
 type tts_config = {
   default_model : string option;
-      (** Required once the [tts] section exists, and never blank: every
-          endpoint in the section is asked for this model by name. *)
+      (** The fallback for endpoints that name no model of their own, never
+          blank. Absent when every endpoint names one or none is asked for one
+          (say takes a voice, not a model). *)
   default_voice : string;
   default_voice_settings : voice_tuning;
   agent_voices : (string * string) list;
@@ -80,9 +86,9 @@ type tts_config = {
 }
 
 type stt_config = {
-  default_model : string;
-      (** Required once the [stt] section exists, for the same reason as
-          {!tts_config.default_model}. *)
+  default_model : string option;
+      (** The fallback for endpoints that name no model of their own. Absent
+          when every endpoint names one or none is asked for one. *)
   endpoints : endpoint list;
   send_on_stop : bool;
       (** Whether ending a capture also sends what was heard.
@@ -225,8 +231,11 @@ val parse_json : Yojson.Safe.t -> (t, string) result
     a file.
 
     [tts] and [stt] are optional sections and parse to [None] when absent;
-    present, each requires its [default_model] (and [tts] its
-    [default_voice]) and a non-empty [endpoints] list. [capture] is
+    present, each requires a non-empty [endpoints] list (and [tts] its
+    [default_voice]). Every endpoint that is asked for a model must have one,
+    its own [model] or the section's [default_model]; a section whose endpoints
+    without a model include both a provider kind and [whisper_cli] cannot share
+    one fallback, and each of those endpoints must name its own. [capture] is
     optional and defaults per key to {!default_capture}; a key it does not
     know, or a key of the wrong type, is an [Error] naming
     [capture.<key>], the same way an unknown endpoint field is. *)
@@ -269,6 +278,12 @@ val load_error_to_string : load_error -> string
 (** Render a typed load error at an operator-facing boundary. *)
 
 (** {1 Endpoint selection} *)
+
+val model_at_endpoint : default_model:string option -> endpoint -> string option
+(** [model_at_endpoint ~default_model endpoint] is the model [endpoint] is asked
+    for: its own [model], else [default_model]. Every reader that sends or loads
+    a model goes through this, so a provider added beside a whisper-cli endpoint
+    cannot change which file or model name the other one uses. *)
 
 val select_endpoint :
   ?endpoint_id:string -> endpoint list -> endpoint option

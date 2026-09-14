@@ -149,17 +149,24 @@ let freeze_from_current () =
       }
   in
   (* The no-progress threshold ends an attempt that has been silent for
-     that long. A stream budget longer than it can never be reached: the
-     watchdog cuts the silent prefill (or the silent gap) the operator
-     meant to allow, and rotates the lane. Such a pair is not a policy the
-     keeper can run, whichever of the two was declared and whichever was a
-     floor, so it is refused where it is read, with both values and their
-     sources named. *)
+     that long. A stream budget the operator declared longer than it can
+     never be reached: the watchdog cuts the silent prefill (or the silent
+     gap) the operator meant to allow, and rotates the lane. That pair is
+     refused where it is read, with both values and their sources named. A
+     floor is not an allowance the operator asked for -- it is the ceiling
+     used when nothing was declared -- so an explicit threshold shorter
+     than a floored budget stands: the operator asked for the earlier cut
+     and nothing they declared is negated by it. *)
   let describe (name : string) (field : float field) =
     Printf.sprintf "turn.%s (%g, %s)" name field.value (source_to_string field.source)
   in
+  let declared (field : float field) =
+    match field.source with
+    | Env | Toml -> true
+    | Default | Failsafe_floor -> false
+  in
   let refuse_shorter_than ~budget_name (budget : float field) =
-    if provider_call_deadline_sec.value < budget.value
+    if declared budget && provider_call_deadline_sec.value < budget.value
     then
       raise
         (Env_config_core.Config_error

@@ -53,6 +53,14 @@ type config = {
           streams are not killed by total duration; streaming liveness is
           owned by [stream_idle_timeout_s] and the attempt liveness
           observer. Non-HTTP transports ignore it. *)
+  call_timeout_s : float option;
+      (** Bound on a non-streaming completion as a whole, the wait for the
+          provider's admission permit included: a call still queued behind
+          another caller's permit when it runs out ends as
+          [TimeoutError { phase = Queue }] without being sent. A caller that
+          has one deadline for its whole call (a verification probe, a fusion
+          panelist) sets this together with [body_timeout_s]; the streaming
+          path does not read it. *)
   max_tokens : int option;
       (** Caller-level output-token override. [None] adds no override, so an
           explicit [provider_cfg.max_tokens] remains authoritative; when both

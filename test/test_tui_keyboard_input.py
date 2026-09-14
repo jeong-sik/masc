@@ -7723,8 +7723,18 @@ def chat_visibility_modes_interaction(
             # The skill row names an outcome now, not a chain of receipts.
             # "DELIVERED · USED" was the evidence path; the label says what
             # came of it, and the mark above already carries the state.
+            #
+            # The phrase names the model's side of the step now. 받아서 씀
+            # said who received without saying who sent, and an operator
+            # could not read the row from it (#36268). Each Korean piece
+            # is matched on its own so the comma and space the label
+            # carries, or an SGR run between them, does not hide it.
             re.compile(
-                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
+                "전달됨".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "도구".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
@@ -11406,6 +11416,45 @@ def config_navigation_interaction() -> Interaction:
             if needle not in models_plain:
                 raise AssertionError(
                     f"Models pane omitted {needle!r}: {models_plain!r}"
+                )
+
+        # The title row's note is the path of the file the pane reads, and a
+        # workspace chooses how long that is; this fixture serves a thirty-cell
+        # one and a real base path is longer. At eighty columns it ran the row
+        # past the frame, and the frame takes its cells off the end, where
+        # the clock and the connection badge are. They are the only things on
+        # this surface that say the reading is live, and neither can say it
+        # was shortened; the note can, so the note is what gives way.
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=80,
+            needle=b"MASC Models",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        title_row = next(
+            (
+                text
+                for _, text in sorted(screen_rows(narrow).items())
+                if b"MASC Models" in text
+            ),
+            None,
+        )
+        if title_row is None:
+            raise AssertionError(
+                f"the pane drew no title row at eighty columns: {narrow!r}"
+            )
+        # The badge whole -- "HTTP [con" is what a cut row leaves, and a
+        # reader cannot tell that from a connection state -- and the path's
+        # deciding end, which is the half [fit_middle] keeps.
+        for needle in (b"HTTP [connected]", b".toml"):
+            if needle not in title_row:
+                raise AssertionError(
+                    f"the pane title row lost {needle!r} at eighty columns: "
+                    f"{title_row!r}"
                 )
         os.write(master_fd, b"q")
 

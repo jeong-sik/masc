@@ -1758,6 +1758,13 @@ type runtime_assignment = {
       (** Resolved lane id, or [None] when the assignment is missing. *)
 }
 
+val decode_runtime_resolved_full :
+  Yojson.Safe.t ->
+  (runtime_option list * runtime_resolved_lane list * runtime_assignment list, string) result
+(** Decode the shared resolved-runtime document once, then project its runtime
+    catalogue, configured lanes with candidate failover chains, and keeper
+    assignments for the picker, all in server order. *)
+
 val decode_runtime_resolved :
   Yojson.Safe.t ->
   (runtime_option list * runtime_assignment list, string) result

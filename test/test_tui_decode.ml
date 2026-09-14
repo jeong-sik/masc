@@ -5731,6 +5731,21 @@ let test_decode_runtime_resolved () =
        | other ->
            Alcotest.failf "expected one assignment, got %d" (List.length other))
 
+let test_decode_runtime_resolved_full () =
+  match Tui_decode.decode_runtime_resolved_full runtime_resolved_json with
+  | Error err -> Alcotest.fail err
+  | Ok (runtimes, lanes, assignments) ->
+      Alcotest.(check int) "both runtimes decode" 2 (List.length runtimes);
+      Alcotest.(check int) "lanes decode" 1 (List.length lanes);
+      (match lanes with
+       | [ lane ] ->
+           Alcotest.(check string) "lane id" "ollama_cloud.deepseek" lane.Tui_decode.rrl_id;
+           Alcotest.(check (list string)) "lane candidates"
+             [ "ollama_cloud.deepseek"; "exact.embed" ]
+             lane.rrl_runtime_ids
+       | _ -> Alcotest.fail "expected exactly one lane");
+      Alcotest.(check int) "assignments decode" 1 (List.length assignments)
+
 let test_decode_unavailable_runtime_assignment () =
   let with_resolution resolved =
     let assignment = `Assoc
@@ -8802,6 +8817,8 @@ let () =
     ( "decode_runtime_resolved",
       [ Alcotest.test_case "carries runtimes and assignments" `Quick
           test_decode_runtime_resolved;
+        Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
+          test_decode_runtime_resolved_full;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment
       ] );

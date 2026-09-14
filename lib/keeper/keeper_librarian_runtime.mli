@@ -26,6 +26,11 @@ val prompt_input_for_librarian
     search shrinks through it when the full prompt exceeds an admitted
     slot's request-body limit. *)
 
+val fit_input : count:int -> Keeper_librarian.input -> Keeper_librarian.input
+(** Provider-capacity fallback. Sources not yet organized are selected first;
+    excluded sources remain durable for a later pass. Count zero still permits
+    ordinary memory selection when no queue source fits the provider request. *)
+
 val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result
@@ -87,8 +92,11 @@ val fitted_messages
     place it reaches disk; this function is the one place the classification
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
+type trigger = Conversation_completed | Queue_changed
+
 val run_best_effort
-  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+  :  ?trigger:trigger
+  -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
            catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
            the real official client. *)
@@ -102,6 +110,11 @@ val run_best_effort
     entrypoint. This runtime owns cadence, not the live configuration gate. *)
 
 module For_testing : sig
+  val select_source_subset :
+    sources:Keeper_librarian_context.source list ->
+    fits:(Keeper_librarian_context.source list -> (bool, 'error) result) ->
+    (Keeper_librarian_context.source list, 'error) result
+
   type classified_error
 
   val classified_error_detail : classified_error -> string

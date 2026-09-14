@@ -30,7 +30,8 @@ let prompt_root () =
 
 let selection_output =
   `Assoc
-    [ Librarian.wire_field_retained_memory_ids, `List []
+    [ "working_contexts", `List []
+    ; Librarian.wire_field_retained_memory_ids, `List []
     ; ( Librarian.wire_field_new_claims
       , `List
           [ `Assoc
@@ -54,6 +55,7 @@ let input () : Librarian.input =
           [ Agent_core.Types.Text "remember the preferred result" ]
       ]
   ; tool_observations = []
+  ; working_context = Masc.Keeper_librarian_context.empty
   ; counterpart_observations = []
   }
 ;;

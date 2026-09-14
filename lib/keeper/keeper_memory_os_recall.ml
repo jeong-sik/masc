@@ -146,6 +146,9 @@ let render_if_enabled ~config ~meta ~keepers_dir ~keeper_id ~now () =
           (Printexc.to_string exn);
         omit ~reason:Read_error ()
     in
+    let working = Keeper_librarian_context_io.render
+        ~base_path:config.Workspace.base_path ~keepers_dir ~keeper_name:keeper_id in
+    let result = match working with None -> result | Some block -> result ^ "\n\n" ^ block in
     match String.trim result with
     | "" -> None
     | block -> Some block

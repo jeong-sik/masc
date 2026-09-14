@@ -848,11 +848,91 @@ let test_drain_reports_timeout_when_owner_never_exits () =
     Alcotest.fail "hung owner was reported as drained"
 ;;
 
+(* A queue signal may replace the pending post-turn closure even when source
+   coverage is unchanged. The replacement must still attempt the remembered
+   conversation, while repeated unchanged signals need no further attempt. *)
+let test_queue_coalescing_preserves_completed_turn () =
+  let module Refresh = Masc.Keeper_librarian_queue_refresh in
+  Lane.For_testing.reset ();
+  let keeper_name = "queue-completed-turn" in
+  let trace_id = "queue-trace" in
+  let seen = ref [] in
+  let attempt trigger () =
+    ignore (Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
+      ~trace_id ~sources_changed:false ~trigger)
+  in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    Lane.init ~sw;
+    let started, set_started = Eio.Promise.create () in
+    let release, set_release = Eio.Promise.create () in
+    ignore (Lane.submit ~base_path ~keeper_name (fun () ->
+      Eio.Promise.resolve set_started ();
+      Eio.Promise.await release));
+    Eio.Promise.await started;
+    Refresh.remember_turn ~base_path ~keeper_name ~trace_id
+      (fun trigger -> seen := trigger :: !seen);
+    ignore (Lane.submit ~base_path ~keeper_name
+      (attempt Librarian_runtime.Conversation_completed));
+    let outcome = Lane.submit ~base_path ~keeper_name
+      (attempt Librarian_runtime.Queue_changed) in
+    (match outcome with
+     | Lane.Coalesced -> ()
+     | _ -> Alcotest.fail "queue signal did not replace pending post-turn work");
+    Eio.Promise.resolve set_release ()));
+  (match !seen with
+   | [Librarian_runtime.Queue_changed] -> ()
+   | _ -> Alcotest.fail "unchanged queue lost or duplicated remembered turn");
+  attempt Librarian_runtime.Queue_changed ();
+  Alcotest.(check int) "attempted unchanged evidence is not retried" 1 (List.length !seen)
+;;
+
+let test_remembered_turn_replacement_and_cancellation () =
+  let module Refresh = Masc.Keeper_librarian_queue_refresh in
+  let keeper_name = "queue-turn-replacement" in
+  let trace_id = "trace-current" in
+  let seen = ref [] in
+  let remember = Refresh.remember_turn ~base_path ~keeper_name ~trace_id in
+  let attempt ?(sources_changed = false) trace_id =
+    Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
+      ~trace_id ~sources_changed ~trigger:Librarian_runtime.Queue_changed
+  in
+  remember (fun _ ->
+    seen := "old" :: !seen;
+    remember (fun _ -> seen := "new" :: !seen));
+  ignore (attempt trace_id);
+  ignore (attempt trace_id);
+  Alcotest.(check (list string)) "new evidence stays pending during old attempt"
+    ["new"; "old"] !seen;
+  let cancel_once = ref true in
+  remember (fun _ ->
+    if !cancel_once then (
+      cancel_once := false;
+      raise (Eio.Cancel.Cancelled Test_boom));
+    seen := "resumed" :: !seen);
+  (try ignore (attempt trace_id); Alcotest.fail "expected cancellation"
+   with Eio.Cancel.Cancelled _ -> ());
+  Alcotest.(check bool) "old trace cannot run latest evidence" false
+    (attempt "trace-obsolete");
+  ignore (attempt trace_id);
+  Alcotest.(check (list string)) "cancellation preserves pending evidence"
+    ["resumed"; "new"; "old"] !seen;
+  ignore (attempt trace_id);
+  Alcotest.(check int) "normal return records only one attempt" 3 (List.length !seen);
+  ignore (attempt ~sources_changed:true trace_id);
+  Alcotest.(check int) "changed sources reuse completed-turn evidence" 4 (List.length !seen)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
     [ ( "lane"
       , [ Alcotest.test_case
+            "queue coalescing preserves completed-turn evidence"
+            `Quick test_queue_coalescing_preserves_completed_turn
+        ; Alcotest.test_case
+            "remembered turn replacement and cancellation"
+            `Quick test_remembered_turn_replacement_and_cancellation
+        ; Alcotest.test_case
             "inline when uninitialized"
             `Quick
             test_inline_when_uninitialized

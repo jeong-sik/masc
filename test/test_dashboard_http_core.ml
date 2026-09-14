@@ -7,6 +7,14 @@ module Auth = Auth
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 
+(* [Server_dashboard_http_keeper_api.tool_call_entries] answers
+   [Error Index_unavailable] when the read index cannot be read (audit F397);
+   the cases here are about rows, so that failure fails the case. *)
+let tool_call_entries_exn ~keeper_name ~limit =
+  match Server_dashboard_http_keeper_api.tool_call_entries ~keeper_name ~limit with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
 open Alcotest
 
 let test_dir () =
@@ -2140,7 +2148,10 @@ let test_goal_source_failure_is_not_empty () =
   let original = Fs_compat.load_file primary in
   check int "valid primary is visible" 1
     (planning () |> member "goals" |> to_list |> List.length);
-  let check_unavailable label =
+  (* RFC-0444 §2.3 row 4 / criterion 7: every dashboard projection answers
+     with the MCP envelope (reason, field, file, mirror, reset_step), so the
+     operator sees which file, why, and what the next step is. *)
+  let check_unavailable label ~reason ~field ~mirror_status ~mirror_goal_count ~reset_step =
     let detail = match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
       | Ok json -> json | Error error -> fail error
     in
@@ -2149,11 +2160,20 @@ let test_goal_source_failure_is_not_empty () =
         (json |> member "ok" |> to_bool);
       check string (label ^ surface ^ " source classification")
         "goal_store_unavailable" (json |> member "error_code" |> to_string);
-      check bool (label ^ surface ^ " preserves cause") true
-        (String.length (json |> member "error" |> to_string) > 0);
-      List.iter (fun field ->
-        check bool (label ^ surface ^ " no invented " ^ field) true
-          (member field json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
+      check string (label ^ surface ^ " reason") reason (json |> member "reason" |> to_string);
+      check bool (label ^ surface ^ " field") true (member "field" json = field);
+      check string (label ^ surface ^ " file") primary (json |> member "file" |> to_string);
+      check string (label ^ surface ^ " mirror status") mirror_status
+        (json |> member "mirror" |> member "status" |> to_string);
+      check bool (label ^ surface ^ " mirror goal_count") true
+        (json |> member "mirror" |> member "goal_count" = mirror_goal_count);
+      check string (label ^ surface ^ " reset_step") reset_step
+        (json |> member "reset_step" |> to_string);
+      check bool (label ^ surface ^ " carries no rendered line") true
+        (member "error" json = `Null);
+      List.iter (fun collection ->
+        check bool (label ^ surface ^ " no invented " ^ collection) true
+          (member collection json = `Null)) ["goals"; "tree"; "summary"; "rollup"])
       ["planning", planning (); "tree", tree (); "detail", detail]
   in
   let invalid_schema =
@@ -2168,21 +2188,112 @@ let test_goal_source_failure_is_not_empty () =
     | _ -> fail "saved Goal store must be an object"
   in
   Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
-  check_unavailable "invalid criterion schema: ";
+  check_unavailable "invalid criterion schema: " ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_decodes"
+    ~mirror_goal_count:(`Int 1) ~reset_step:"repair_field";
   Fs_compat.save_file primary "unreadable primary";
-  check_unavailable "valid mirror: ";
+  check_unavailable "valid mirror: " ~reason:"not_json" ~field:`Null
+    ~mirror_status:"mirror_decodes" ~mirror_goal_count:(`Int 1)
+    ~reset_step:"reset_goal_store";
   check string "read does not replace primary" "unreadable primary"
     (Fs_compat.load_file primary);
   check string "read does not alter mirror" original (Fs_compat.load_file mirror);
   Fs_compat.save_file mirror "unreadable mirror";
-  check_unavailable "both invalid: ";
+  check_unavailable "both invalid: " ~reason:"not_json" ~field:`Null
+    ~mirror_status:"mirror_rejected" ~mirror_goal_count:`Null
+    ~reset_step:"reset_goal_store";
   Sys.remove primary;
   Fs_compat.save_file mirror original;
-  check_unavailable "primary missing: ";
+  check_unavailable "primary missing: " ~reason:"missing_after_init" ~field:`Null
+    ~mirror_status:"mirror_decodes" ~mirror_goal_count:(`Int 1)
+    ~reset_step:"reset_goal_store";
   check bool "read does not recreate missing primary" false (Sys.file_exists primary);
   Sys.remove mirror;
   check int "both absent is a fresh store" 0
     (planning () |> member "goals" |> to_list |> List.length)
+
+(* RFC-0444 §2.3 row 4: the keeper detail's [active_goals_tree] member is
+   the same envelope as Planning and the Goal tree, not a second shape for
+   one error code. *)
+let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let name = "goal-envelope-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path name)
+    (fun () ->
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String name; "trace_id", `String (name ^ "-trace") ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (* The per-keeper enrich resolves the keeper's runtime id through
+         [Keeper_meta_contract.runtime_id_of_meta], which reads the process
+         default runtime and raises when none was initialized (RFC-0206
+         §2.1: no silent fallback). This case runs before the groups that
+         call [Runtime.init_default], so it initializes the same fixture
+         runtime itself; without it the worker raised, the degraded row
+         raised again on the same read, and the keeper vanished from the
+         payload before [active_goals_tree] was ever built. *)
+      let runtime_path =
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.Workspace.base_path
+      in
+      mkdir_p (Filename.dirname runtime_path);
+      write_file runtime_path config_sync_runtime_toml;
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> fail ("runtime init: " ^ error));
+      declare_fixture_keeper config name;
+      (match Masc.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      ignore
+        (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
+      (match Goal_store.upsert_goal config ~title:"Keeper detail source"
+               ~metric:"visible goals" ~target_value:"1" () with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_store.write_error_to_string error));
+      let primary = Goal_store.goals_path config in
+      let open Yojson.Safe.Util in
+      let invalid_schema =
+        match Yojson.Safe.from_string (Fs_compat.load_file primary) with
+        | `Assoc fields ->
+            `Assoc (List.map (fun (key, value) ->
+              if key = "goals" then
+                key, `List (value |> to_list |> List.map (function
+                  | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+                  | json -> json))
+              else key, value) fields)
+        | _ -> fail "saved Goal store must be an object"
+      in
+      Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      let row =
+        match
+          json |> member "keepers" |> to_list
+          |> List.find_opt (fun row -> row |> member "name" |> to_string = name)
+        with
+        | Some row -> row
+        | None -> fail "registered keeper is missing from the detail envelope"
+      in
+      let tree = row |> member "active_goals_tree" in
+      check bool "keeper active_goals_tree not successful" false (tree |> member "ok" |> to_bool);
+      check string "keeper active_goals_tree error_code" "goal_store_unavailable"
+        (tree |> member "error_code" |> to_string);
+      check string "keeper active_goals_tree reason" "schema_rejected"
+        (tree |> member "reason" |> to_string);
+      check string "keeper active_goals_tree field" "criterion_revision"
+        (tree |> member "field" |> to_string);
+      check string "keeper active_goals_tree file" primary (tree |> member "file" |> to_string);
+      check string "keeper active_goals_tree reset_step" "repair_field"
+        (tree |> member "reset_step" |> to_string);
+      check bool "keeper active_goals_tree carries no rendered line" true
+        (member "error" tree = `Null))
 
 let test_goal_link_source_failure_preserves_unrelated_planning () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -5435,7 +5546,7 @@ let test_tool_calls_select_keeper_before_limiting () =
           ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
       for index = 1 to 100 do append "target" index done;
       for index = 1 to 1001 do append "busy-neighbor" index done;
-      let entries = Server_dashboard_http_keeper_api.tool_call_entries
+      let entries = tool_call_entries_exn
         ~keeper_name:"target" ~limit:100 in
       check int "other Keepers cannot truncate the requested 100 calls" 100 (List.length entries);
       check bool "every returned row belongs to the requested Keeper" true
@@ -5443,12 +5554,12 @@ let test_tool_calls_select_keeper_before_limiting () =
       let outputs rows = List.map (fun row -> Safe_ops.json_string_opt "output" row) rows in
       check (list (option string)) "chronological order is retained"
         (List.init 100 (fun index -> Some (string_of_int (index+1)))) (outputs entries);
-      let tail = Server_dashboard_http_keeper_api.tool_call_entries
+      let tail = tool_call_entries_exn
         ~keeper_name:"target" ~limit:3 in
       check (list (option string)) "limit applies after Keeper selection"
         [Some "98";Some "99";Some "100"] (outputs tail);
       append "target" 101;
-      let latest = Server_dashboard_http_keeper_api.tool_call_entries
+      let latest = tool_call_entries_exn
         ~keeper_name:"target" ~limit:3 in
       check (list (option string)) "next request sees the committed indexed tail"
         [Some "99";Some "100";Some "101"] (outputs latest))
@@ -5664,6 +5775,8 @@ let () =
             test_goal_proof_surfaces_share_persisted_criterion_truth;
           test_case "Goal source failure is not empty" `Quick
             test_goal_source_failure_is_not_empty;
+          test_case "keeper detail active_goals_tree uses the goal store envelope" `Quick
+            test_keeper_detail_active_goals_tree_uses_goal_store_envelope;
           test_case "Goal link source error preserves unrelated planning" `Quick
             test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick

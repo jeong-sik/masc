@@ -58,6 +58,28 @@ let default_config () =
   }
 ;;
 
+(* The window one [receive] waits under follows where the turn is rather than
+   a value set once after dispatch. Before the [turn/start] reply the client
+   is being admitted. During the model turn a client that has gone silent is
+   the fault the idle window exists to notice. While the model is waiting on
+   an item the app-server runs outside the model stream (a command, an MCP
+   call, a sleep) the app-server may write nothing until the item completes,
+   so that silence is not measured and only the wall-clock ceiling bounds it.
+   The model speaking again (an item of the model stream, a message or plan
+   delta) ends that wait even if the item stays open: a background command
+   under unified exec keeps its item open until its process exits while the
+   turn goes on. *)
+type receive_phase =
+  | Awaiting_admission
+  | Model_turn
+  | Tool_item_running
+
+let window_for_phase config = function
+  | Awaiting_admission -> Some config.admission_timeout_s
+  | Model_turn -> config.timeout_s
+  | Tool_item_running -> None
+;;
+
 type image_input =
   { media_type : string
   ; base64_data : string
@@ -421,7 +443,7 @@ let parse_wire_line line =
 type io =
   { send : Yojson.Safe.t -> unit
   ; receive : unit -> (wire_message, error) result
-  ; set_receive_timeout_s : float option -> unit
+  ; set_receive_phase : receive_phase -> unit
   }
 
 let send_request io ~id ~method_ ~params =
@@ -692,20 +714,70 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-let native_tool_observation_of_item ~stage item =
+(* The item vocabulary this tree acts on. [Unmodelled_item] is a type the
+   app-server announced that nothing here branches on, an item of the model
+   stream as far as this loop is concerned; rejecting it would end the turn on
+   a protocol addition. *)
+type item_kind =
+  | Command_execution
+  | File_change
+  | Mcp_tool_call
+  | Sleep
+  | Unmodelled_item
+
+let item_kind_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
-  | Some (`String (("commandExecution" | "fileChange") as tool_name)) ->
-    let* call_id = required_string stage "id" fields in
-    Ok
-      (Some
-         { Runtime_native_tools.identity = Some (Call_id call_id)
-         ; tool_name = Some tool_name
-         ; origin = Runtime_native_tools.Built_in
-         })
-  | Some (`String _) -> Ok None
+  | Some (`String "commandExecution") -> Ok Command_execution
+  | Some (`String "fileChange") -> Ok File_change
+  | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
+  | Some (`String "sleep") -> Ok Sleep
+  | Some (`String _) -> Ok Unmodelled_item
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
+;;
+
+(* An item the app-server executes outside the model stream: it opens with
+   [item/started], may write nothing while it runs, and closes with
+   [item/completed] carrying the same [id]. [observation] is [None] for a
+   wait the model asked for (the interruptible [clock.sleep] tool, up to
+   twelve hours upstream): not a tool effect, so nothing is projected, but the
+   wire is silent for the declared duration all the same. *)
+type tool_item =
+  { call_id : string
+  ; observation : Runtime_native_tools.observation option
+  }
+
+let tool_item_of_item ~stage item =
+  let* kind = item_kind_of_item ~stage item in
+  let* fields = assoc_at stage item in
+  let tool_item ~observation =
+    let* call_id = required_string stage "id" fields in
+    Ok (Some { call_id; observation = observation call_id })
+  in
+  let built_in tool_name call_id =
+    Some
+      { Runtime_native_tools.identity = Some (Call_id call_id)
+      ; tool_name = Some tool_name
+      ; origin = Runtime_native_tools.Built_in
+      }
+  in
+  match kind with
+  | Command_execution -> tool_item ~observation:(built_in "commandExecution")
+  | File_change -> tool_item ~observation:(built_in "fileChange")
+  | Mcp_tool_call ->
+    (* The item names the server and the tool; the observation keeps both,
+       as the Claude Code runtime keeps an MCP tool's own name. *)
+    let* server = required_string stage "server" fields in
+    let* tool = required_string stage "tool" fields in
+    tool_item ~observation:(fun call_id ->
+      Some
+        { Runtime_native_tools.identity = Some (Call_id call_id)
+        ; tool_name = Some (server ^ "/" ^ tool)
+        ; origin = Runtime_native_tools.Mcp_wrapper
+        })
+  | Sleep -> tool_item ~observation:(fun _ -> None)
+  | Unmodelled_item -> Ok None
 ;;
 
 let active_turn_item ~stage ~thread_id ~turn_id params =
@@ -932,7 +1004,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
 ;;
 
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback ~seen_usage ~on_stream_event =
+    ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -958,33 +1030,26 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~open_tool_call_ids
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
-      ~seen_final ~seen_fallback ~seen_usage ~on_stream_event
+      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
-  | Notification
-      { method_ =
-          (( "item/agentMessage/delta"
-           | "item/commandExecution/outputDelta"
-           | "item/fileChange/outputDelta"
-           | "item/plan/delta" ) as method_)
-      ; params
-      } ->
-    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params
-    in
+  | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    emit_stream_event on_stream_event (Text_delta delta);
     let seen_fallback =
-      if String.equal method_ "item/agentMessage/delta"
-      then (
-        emit_stream_event on_stream_event (Text_delta delta);
-        match seen_fallback with
-        | None -> Some delta
-        | Some text -> Some (text ^ delta))
-      else seen_fallback
+      match seen_fallback with
+      | None -> Some delta
+      | Some text -> Some (text ^ delta)
     in
+    (* The model is speaking: its window applies again, whatever tool items
+       are still open in the background. *)
+    io.set_receive_phase Model_turn;
     await_turn_terminal
       io
       ~tools
@@ -994,33 +1059,96 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~open_tool_call_ids:[]
+      ~on_stream_event
+  | Notification { method_ = "item/plan/delta" as method_; params } ->
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    io.set_receive_phase Model_turn;
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids:[]
+      ~on_stream_event
+  | Notification
+      { method_ =
+          (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
+      ; params
+      } ->
+    (* Output of a running tool item: the item is still running, so the
+       phase stays where it is; the read itself already counted as activity. *)
+    let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
       ~on_stream_event
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
-    let* observation = native_tool_observation_of_item ~stage item in
-    Option.iter
-      (fun observation ->
-         emit_stream_event on_stream_event (Native_tool_started observation))
-      observation;
+    let* tool_item = tool_item_of_item ~stage item in
+    let open_tool_call_ids =
+      match tool_item with
+      | None ->
+        (* An item of the model stream: the model is speaking again, so the
+           tool items still open run in the background and the model turn's
+           window applies until the next tool item starts. *)
+        io.set_receive_phase Model_turn;
+        []
+      | Some { call_id; observation } ->
+        Option.iter
+          (fun observation ->
+             emit_stream_event on_stream_event (Native_tool_started observation))
+          observation;
+        (* Every receive until this item completes waits under no idle
+           window: the app-server may write nothing while the item runs. *)
+        io.set_receive_phase Tool_item_running;
+        call_id
+        :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
+    in
     await_turn_terminal
       io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
-      ~seen_usage ~on_stream_event
+      ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
-    let* observation = native_tool_observation_of_item ~stage item in
-    Option.iter
-      (fun observation ->
-         emit_stream_event on_stream_event (Native_tool_finished observation))
-      observation;
-      let* message = agent_message_of_item ~stage item in
-      let seen_final, seen_fallback =
-        match message with
-        | Some (Some "final_answer", text) -> Some text, seen_fallback
-        | Some (_, text) -> seen_final, Some text
-        | None -> seen_final, seen_fallback
-      in
+    let* tool_item = tool_item_of_item ~stage item in
+    let open_tool_call_ids =
+      match tool_item with
+      | None ->
+        io.set_receive_phase Model_turn;
+        []
+      | Some { call_id; observation } ->
+        Option.iter
+          (fun observation ->
+             emit_stream_event on_stream_event (Native_tool_finished observation))
+          observation;
+        let still_open =
+          List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
+        in
+        (match still_open with
+         | [] -> io.set_receive_phase Model_turn
+         | _ :: _ -> ());
+        still_open
+    in
+    let* message = agent_message_of_item ~stage item in
+    let seen_final, seen_fallback =
+      match message with
+      | Some (Some "final_answer", text) -> Some text, seen_fallback
+      | Some (_, text) -> seen_final, Some text
+      | None -> seen_final, seen_fallback
+    in
     await_turn_terminal
       io
       ~tools
@@ -1030,6 +1158,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~open_tool_call_ids
       ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
@@ -1053,6 +1182,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~seen_final
         ~seen_fallback
         ~seen_usage
+        ~open_tool_call_ids
         ~on_stream_event
     else
       let* error_json = required_member stage "error" fields in
@@ -1090,6 +1220,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~open_tool_call_ids
       ~on_stream_event
   (* App-server progress and account notifications are observational. Protocol
      evolution must not turn them into a computation failure; each valid wire
@@ -1104,6 +1235,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~open_tool_call_ids
       ~on_stream_event
 ;;
 
@@ -1306,7 +1438,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   (* The complete request is now outside this process. Admission stays finite
      through dispatch; only the subsequent model turn adopts its declared
      idle policy, including [None]. *)
-  io.set_receive_timeout_s config.timeout_s;
+  io.set_receive_phase Model_turn;
   let* turn =
     match await_response io ~id:turn_request_id ~method_:"turn/start" with
     | Error (Timeout { seconds; turn_accepted = _ }) ->
@@ -1333,6 +1465,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~seen_final:None
       ~seen_fallback:None
       ~seen_usage:None
+      ~open_tool_call_ids:[]
       ~on_stream_event
   in
   emit_stream_event on_stream_event (Turn_finished { text });
@@ -1503,7 +1636,7 @@ let client_argv (config : config) =
      | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
 ;;
 
-let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
+let with_spawned_client ~mgr ~clock ~cwd config run =
   let* environment = client_environment () in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
@@ -1536,7 +1669,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     let wall_clock =
       Runtime_wall_clock.make ?ceiling_s:config.wall_clock_ceiling_s ~now:(fun () -> Eio.Time.now clock) ()
     in
-    let active_receive_timeout_s = ref initial_timeout_s in
+    let receive_phase = ref Awaiting_admission in
     let send json =
       let payload = Yojson.Safe.to_string json in
       (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
@@ -1569,7 +1702,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
       else
       try
         with_optional_timeout clock
-          (Runtime_wall_clock.cap_window wall_clock !active_receive_timeout_s)
+          (Runtime_wall_clock.cap_window wall_clock (window_for_phase config !receive_phase))
           (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
       with
@@ -1605,8 +1738,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
          run
            { send
            ; receive
-           ; set_receive_timeout_s =
-               (fun timeout_s -> active_receive_timeout_s := timeout_s)
+           ; set_receive_phase = (fun phase -> receive_phase := phase)
            }))
 ;;
 
@@ -1617,7 +1749,6 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~mgr
     ~clock
     ~cwd
-    ~initial_timeout_s:(Some config.admission_timeout_s)
     config
     (fun io ->
     let with_admission_timeout callback =
@@ -1725,7 +1856,6 @@ let probe_metadata ~mgr ~clock ~cwd config protocol =
         ~mgr
         ~clock
         ~cwd
-        ~initial_timeout_s:(Some config.admission_timeout_s)
         config
         protocol
     with

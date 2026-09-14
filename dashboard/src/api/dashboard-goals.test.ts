@@ -2,12 +2,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const getMock = vi.hoisted(() => vi.fn())
 
-vi.mock('./core', () => ({
+vi.mock('./core', async importOriginal => ({
+  ...await importOriginal<typeof import('./core')>(),
   get: getMock,
 }))
 
-import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-goals'
+import {
+  GoalSourceUnavailableError,
+  GoalStoreEnvelopeError,
+  fetchDashboardGoalDetail,
+  fetchDashboardGoalsTree,
+  goalSourceUnavailable,
+} from './dashboard-goals'
 import { fetchDashboardPlanning } from './dashboard-mission'
+import {
+  GOAL_STORE_MIRROR_STATUSES,
+  GOAL_STORE_RESET_STEPS,
+  GOAL_STORE_UNAVAILABLE_REASONS,
+} from '../types/goal-store-unavailable'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -369,15 +381,101 @@ describe('Goal proof projection through tree and detail APIs', () => {
 })
 
 
+// RFC-0444 §2.3 row 4: the wire envelope Goal_unavailable_envelope.to_yojson
+// emits for a store this build rejected on the criterion_revision field.
+const schemaRejectedEnvelope = {
+  ok: false,
+  error_code: 'goal_store_unavailable',
+  reason: 'schema_rejected',
+  field: 'criterion_revision',
+  file: '/srv/masc/.masc/goals.json',
+  mirror: { status: 'mirror_decodes', goal_count: 97 },
+  reset_step: 'repair_field',
+}
+
+const schemaRejectedUnion = {
+  kind: 'unavailable',
+  reason: 'schema_rejected',
+  field: 'criterion_revision',
+  file: '/srv/masc/.masc/goals.json',
+  mirror: { status: 'mirror_decodes', goalCount: 97 },
+  resetStep: 'repair_field',
+} as const
+
 describe('Goal source unavailable across HTTP projections', () => {
   it.each([
     ['planning', () => fetchDashboardPlanning()],
     ['tree', () => fetchDashboardGoalsTree()],
     ['detail', () => fetchDashboardGoalDetail('goal-1')],
-  ] as const)('%s retains the backend source error', async (_name, fetch) => {
-    getMock.mockResolvedValue({ ok: false, error_code: 'goal_store_unavailable',
-      error: 'goals.json: criterion_revision is missing' })
-    await expect(fetch()).rejects.toThrow('goals.json: criterion_revision is missing')
+  ] as const)('%s throws the parsed Goal store union', async (_name, fetch) => {
+    getMock.mockResolvedValue(schemaRejectedEnvelope)
+    const thrown = await fetch().then(() => null, (error: unknown) => error)
+    expect(thrown).toBeInstanceOf(GoalSourceUnavailableError)
+    expect((thrown as GoalSourceUnavailableError).unavailable).toEqual(schemaRejectedUnion)
+    expect((thrown as GoalSourceUnavailableError).message).toContain('/srv/masc/.masc/goals.json')
+    expect((thrown as GoalSourceUnavailableError).message).toContain('criterion_revision')
+  })
+
+  it.each([
+    ['planning', () => fetchDashboardPlanning()],
+    ['tree', () => fetchDashboardGoalsTree()],
+    ['detail', () => fetchDashboardGoalDetail('goal-1')],
+  ] as const)('%s refuses an envelope with an unknown reason instead of defaulting', async (_name, fetch) => {
+    getMock.mockResolvedValue({ ...schemaRejectedEnvelope, reason: 'corrupt', field: null })
+    await expect(fetch()).rejects.toBeInstanceOf(GoalStoreEnvelopeError)
+    await expect(fetch()).rejects.toThrow('unknown reason "corrupt"')
+  })
+})
+
+
+describe('goalSourceUnavailable', () => {
+  it('parses the full envelope into the closed union', () => {
+    expect(goalSourceUnavailable(schemaRejectedEnvelope)).toEqual(schemaRejectedUnion)
+  })
+
+  it('returns null for a snapshot and for an unrelated failure', () => {
+    expect(goalSourceUnavailable({ ok: true, goals: [] })).toBeNull()
+    expect(goalSourceUnavailable({ ok: false, error_code: 'internal_error', error: 'boom' })).toBeNull()
+    expect(goalSourceUnavailable(null)).toBeNull()
+  })
+
+  it.each(GOAL_STORE_UNAVAILABLE_REASONS)('accepts reason %s exactly as the server spells it', reason => {
+    const field = reason === 'schema_rejected' ? 'criterion_revision' : null
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, reason, field })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, reason, field })
+  })
+
+  it.each(GOAL_STORE_MIRROR_STATUSES)('accepts mirror status %s', status => {
+    const goal_count = status === 'mirror_decodes' ? 3 : null
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, mirror: { status, goal_count } })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, mirror: { status, goalCount: goal_count } })
+  })
+
+  it.each(GOAL_STORE_RESET_STEPS)('accepts reset step %s', reset_step => {
+    const parsed = goalSourceUnavailable({ ...schemaRejectedEnvelope, reset_step })
+    expect(parsed).toEqual({ ...schemaRejectedUnion, resetStep: reset_step })
+  })
+
+  it.each([
+    ['unknown reason', { reason: 'corrupt', field: null }, 'unknown reason "corrupt"'],
+    ['unknown mirror status', { mirror: { status: 'mirror_stale', goal_count: null } }, 'unknown mirror status "mirror_stale"'],
+    ['unknown reset step', { reset_step: 'reboot' }, 'unknown reset_step "reboot"'],
+    ['schema_rejected without a field', { field: null }, 'schema_rejected names no field'],
+    ['not_json carrying a field', { reason: 'not_json' }, 'not_json carries a field'],
+    ['mirror_decodes without a count', { mirror: { status: 'mirror_decodes', goal_count: null } }, 'mirror_decodes carries no goal_count'],
+    ['a rendered error line added to the envelope', { error: 'goals.json: criterion_revision is missing' }, 'expected 7 members, got 8'],
+    ['an empty file', { file: '' }, 'file is not a path'],
+  ] as const)('refuses %s', (_name, patch, detail) => {
+    expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(GoalStoreEnvelopeError)
+    expect(() => goalSourceUnavailable({ ...schemaRejectedEnvelope, ...patch })).toThrow(detail)
+  })
+
+  it('parses the Goal–Task link registry failure into its own constructor', () => {
+    expect(goalSourceUnavailable({ ok: false, error_code: 'goal_task_links_unavailable',
+      error: 'goal_task_links: primary registry is missing' }))
+      .toEqual({ kind: 'links_unavailable', detail: 'goal_task_links: primary registry is missing' })
+    expect(() => goalSourceUnavailable({ ok: false, error_code: 'goal_task_links_unavailable' }))
+      .toThrow(GoalStoreEnvelopeError)
   })
 })
 

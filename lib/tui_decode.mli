@@ -155,6 +155,38 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+(** The RFC-0444 Goal store envelope
+    [{ok:false, error_code:"goal_store_unavailable", reason, field, file,
+    mirror:{status, goal_count}, reset_step}] as the TUI reads it. [reason]
+    and [mirror] are views: the wire carries the constructor name, the refused
+    member and the mirror's row count, not the Unix error, parse detail or
+    mirror stamp the store keeps beside them. The reset step travels whole. *)
+type goal_store_unavailable_reason_view =
+  | Missing_after_init_view
+  | Unreadable_view
+  | Not_json_view
+  | Schema_rejected_view of string  (** The refused member (wire [field]). *)
+
+type goal_store_mirror_view =
+  | Mirror_absent_view
+  | Mirror_unreadable_view
+  | Mirror_decodes_view of int  (** The mirror's goal count. *)
+  | Mirror_rejected_view
+
+type goal_store_unavailable_view = {
+  gsu_file : string;
+  gsu_reason : goal_store_unavailable_reason_view;
+  gsu_mirror : goal_store_mirror_view;
+  gsu_reset_step : Goal_store_unavailable.reset_step;
+}
+
+(** A goal projection body that is a failure envelope instead of the
+    projection. The Goal–Task link registry is a different source from the
+    Goal store and keeps its one-line envelope. *)
+type goal_source_failure =
+  | Goal_store_unavailable of goal_store_unavailable_view
+  | Goal_task_links_unavailable of string
+
 (** One line of the server's system log, as {!val:decode_system_log_snapshot}
     reads it from [GET /api/v1/dashboard/logs]. *)
 
@@ -1758,6 +1790,13 @@ type runtime_assignment = {
       (** Resolved lane id, or [None] when the assignment is missing. *)
 }
 
+val decode_runtime_resolved_full :
+  Yojson.Safe.t ->
+  (runtime_option list * runtime_resolved_lane list * runtime_assignment list, string) result
+(** Decode the shared resolved-runtime document once, then project its runtime
+    catalogue, configured lanes with candidate failover chains, and keeper
+    assignments for the picker, all in server order. *)
+
 val decode_runtime_resolved :
   Yojson.Safe.t ->
   (runtime_option list * runtime_assignment list, string) result
@@ -2348,8 +2387,25 @@ val toggle_system_log_verbose :
 val system_log_level_query : system_log_level -> string
 (** The lowercase spelling the [/api/v1/dashboard/logs] route validates. *)
 
+val decode_goal_source_failure :
+  Yojson.Safe.t -> (goal_source_failure option, string) result
+(** [Ok None] when the body is the projection itself. Every token is parsed
+    exactly against the constructor names [Goal_store_unavailable.reason_name]
+    and siblings emit; an unknown token, a missing member, a [field] beside a
+    reason other than [schema_rejected] or a [goal_count] beside a mirror
+    other than [mirror_decodes] is an [Error], never a default. *)
+
+val goal_store_unavailable_view_to_string : goal_store_unavailable_view -> string
+(** [goal_store: unavailable reason=… file=… mirror=… reset=…], the shape of
+    [Goal_store_unavailable.to_string] minus the payloads the wire omits. The
+    line the Planning header and the detail pane show until RFC-0444 PR-4
+    draws the view in the pane body. *)
+
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
+(** An unreadable Goal store is the rendered
+    {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
+    lifts it into a [Planning_unavailable] constructor. *)
 
 val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.

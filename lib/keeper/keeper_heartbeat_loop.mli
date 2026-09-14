@@ -139,7 +139,7 @@ val owner_turn_rejection_cycle_status :
     from MASC's own slot and client capacity envelopes, which clear on their
     own, so that sleep stays [Interrupt_on_wakeup]. *)
 type provider_backoff =
-  { retry_after_hint : float
+  { retry_after_hint : float option
   ; wake_policy : Keeper_keepalive_signal.wake_policy
   }
 
@@ -154,8 +154,8 @@ type keepalive_turn_outcome = {
       (** [Some backoff] when the cycle's turn failure routed as a provider
           retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
           [Capacity_backpressure] class), carrying the route's own
-          [Retry-After] hint when the provider sent one ([0.0] when it did
-          not) and the wake policy the class implies. The loop replaces the
+          [Retry-After] hint as the provider sent it ([None] when it sent
+          none) and the wake policy the class implies. The loop replaces the
           plain cadence with a capped backoff for such a cycle (#26068);
           [None] keeps the cadence. *)
 }

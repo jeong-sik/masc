@@ -4796,6 +4796,7 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_cursor: int;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
   (* Lazy loads for the two detail panes; the id names which row the answer
@@ -6511,6 +6512,7 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
   runtime_catalog = [];
+  runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
   goal_timeline = None;
@@ -7893,6 +7895,23 @@ let runtime_picker_projection (state : state) =
     in
     { rlp_lane = lane; rlp_already = already; rlp_providers = providers; rlp_choices = choices })
     state.runtime_lane_pick
+
+type runtime_pick_item =
+  | Pick_lane of Tui_decode.runtime_resolved_lane
+  | Pick_model of Tui_decode.runtime_option
+
+let runtime_picker_items (state : state) : runtime_pick_item list =
+  let lanes = List.map (fun lane -> Pick_lane lane) state.runtime_lanes in
+  let models =
+    state.runtime_catalog
+    |> List.filter (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
+    |> List.map (fun model -> Pick_model model)
+  in
+  lanes @ models
+
+let runtime_pick_item_id = function
+  | Pick_lane lane -> lane.Tui_decode.rrl_id
+  | Pick_model model -> model.Tui_decode.ro_id
 
 let runtime_surface_listing_chrome state =
   runtime_listing_chrome ~error:state.runtime_surface_error

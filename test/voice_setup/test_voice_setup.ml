@@ -88,7 +88,7 @@ let comments contents =
        let trimmed = String.trim line in
        String.length trimmed > 0 && Char.equal trimmed.[0] '#')
 
-let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config.endpoint =
+let endpoint ?base_url ?api_key_env ?timeout_seconds ?model ~id ~kind () : Voice_config.endpoint =
   { Voice_config.id
   ; kind
   ; base_url
@@ -99,6 +99,7 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   ; timeout_seconds
   ; default_voice = None
   ; command = None
+  ; model
   }
 
 let apply path changes =
@@ -201,7 +202,7 @@ let test_a_stale_revision_writes_nothing () =
     | Ok _revision -> Alcotest.fail "a stale revision must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
-(* A first endpoint and the default_model its section requires have to land
+(* An endpoint that is asked for a model and the model it reads have to land
    together: applied one at a time, the first half is refused. *)
 let test_changes_that_depend_on_each_other_land_together () =
   with_config runtime_base (fun path ->
@@ -214,7 +215,7 @@ let test_changes_that_depend_on_each_other_land_together () =
     in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Stt, added) ] with
      | Error (Voice_setup.Voice_section_invalid _) -> ()
-     | Ok _revision -> Alcotest.fail "an stt section with no default_model must be refused"
+     | Ok _revision -> Alcotest.fail "an endpoint with no model to read must be refused"
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     Alcotest.(check string) "nothing was written by the refused half" runtime_base (read path);
     match
@@ -507,6 +508,36 @@ let test_a_write_over_the_standalone_source_is_refused () =
     Alcotest.(check string) "and so is the standalone file" standalone_json
       (read (standalone path)))
 
+(* The writer emits the endpoint's model and the loader reads it back, so an
+   endpoint added with its own model needs no section fallback and leaves the
+   one that is there alone. *)
+let test_an_endpoint_carries_its_own_model () =
+  with_config runtime_base (fun path ->
+    let added =
+      endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli
+        ~model:"/models/ggml-large-v3-turbo.bin" ()
+    in
+    match apply path [ Voice_setup.Put_endpoint (Voice_setup.Stt, added) ] with
+    | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    | Ok _revision ->
+      Alcotest.(check bool) "the model is written on the endpoint" true
+        (Astring.String.is_infix ~affix:{|model = "/models/ggml-large-v3-turbo.bin"|}
+           (read path));
+      (match Voice_config.parse_runtime_toml_text (read path) with
+       | Error message -> Alcotest.fail message
+       | Ok None -> Alcotest.fail "the section should exist"
+       | Ok (Some config) ->
+         (match config.Voice_config.stt with
+          | None -> Alcotest.fail "speech in should be configured"
+          | Some stt ->
+            Alcotest.(check (option string)) "and read back from it"
+              (Some "/models/ggml-large-v3-turbo.bin")
+              (match stt.Voice_config.endpoints with
+               | endpoint :: _ -> endpoint.Voice_config.model
+               | [] -> Alcotest.fail "the endpoint should be there");
+            Alcotest.(check (option string)) "with no section fallback invented" None
+              stt.Voice_config.default_model)))
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -535,6 +566,8 @@ let () =
             test_an_endpoint_is_added_and_the_notes_survive
         ; Alcotest.test_case "dependent changes land together" `Quick
             test_changes_that_depend_on_each_other_land_together
+        ; Alcotest.test_case "an endpoint carries its own model" `Quick
+            test_an_endpoint_carries_its_own_model
         ; Alcotest.test_case "an agent voice is set and cleared" `Quick
             test_an_agent_voice_is_set_and_cleared
         ; Alcotest.test_case "a local voice goes where its default is not someone else's"

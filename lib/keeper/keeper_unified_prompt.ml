@@ -1498,8 +1498,19 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
      have the keeper read a partial record of what it did. *)
   let own_recent_actions_section : Keeper_context_layers.section option =
     match observation.own_recent_actions with
-    | [] -> None
-    | turns ->
+    | Ok [] -> None
+    | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+      (* The history could not be read. Saying so is the whole section: a
+         silent absence reads as "no calls made", which is exactly the
+         repeat-a-finished-task failure this layer exists to prevent. One
+         fixed line, so [Block] rather than trimmable rows. *)
+      Some
+        (Keeper_context_layers.Block
+           (render_fragment
+              Prompt_names.keeper_world_own_recent_actions_unavailable
+              [ "detail", detail ]
+            ^ "\n\n"))
+    | Ok turns ->
       let failures = Keeper_own_recent_actions.digest_failures turns in
       let render kept =
         let ubuf = Buffer.create 1024 in

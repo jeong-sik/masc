@@ -1,6 +1,9 @@
 (** Native Firefox WebDriver client. The session and tab handles belong to
     this client; callers never supply a remote session id or JavaScript. *)
-type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
+(** W3C WebDriver error codes the client recovers from, parsed once by
+    [decode_response]. [Other] carries an unlisted code verbatim. *)
+type remote_error = Invalid_session_id | No_such_window | No_such_alert | Unexpected_alert_open | Other of string
+type error = Transport of string | Protocol of string | Remote of { code : remote_error; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type t
 val create : ?binary:string -> start_downloads:Browser_downloads.start -> request:request -> unit -> t

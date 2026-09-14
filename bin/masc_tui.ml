@@ -1952,6 +1952,7 @@ type async_msg =
   | Runtime_lane_slots_written of (unit, string) result
   | Runtime_catalog_loaded of
       ( Masc.Tui_decode.runtime_option list
+        * Masc.Tui_decode.runtime_resolved_lane list
         * Masc.Tui_decode.runtime_assignment list,
         string )
       result
@@ -13809,18 +13810,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            else state.runtime_lane_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
-      | Ok (runtimes, assignments) ->
+      | Ok (runtimes, lanes, assignments) ->
           state.runtime_catalog <- runtimes;
+          state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
           state.runtime_catalog_error <- None;
-          let dispatchable =
-            List.length
-              (List.filter
-                 (fun (o : Tui_decode.runtime_option) -> o.ro_dispatchable)
-                 runtimes)
-          in
-          if state.runtime_pick_cursor >= dispatchable then
-            state.runtime_pick_cursor <- max 0 (dispatchable - 1)
+          let count = List.length (Masc_tui_types.runtime_picker_items state) in
+          if state.runtime_pick_cursor >= count then
+            state.runtime_pick_cursor <- max 0 (count - 1)
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
@@ -20918,14 +20915,10 @@ and is loaded on demand through keeper_skill.
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
-                let dispatchable =
-                  List.length
-                    (List.filter
-                       (fun (o : Tui_decode.runtime_option) ->
-                         o.ro_dispatchable)
-                       state.runtime_catalog)
+                let count =
+                  List.length (Masc_tui_types.runtime_picker_items state)
                 in
-                if state.runtime_pick_cursor < dispatchable - 1 then
+                if state.runtime_pick_cursor < count - 1 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
             | Keepers Keeper_message -> ())
        | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
@@ -21432,19 +21425,17 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick ->
                 (match state.runtime_pick_keeper with
                  | Some keeper_name ->
-                     let options =
-                       List.filter
-                         (fun (o : Tui_decode.runtime_option) ->
-                           o.ro_dispatchable)
-                         state.runtime_catalog
-                     in
+                     let items = Masc_tui_types.runtime_picker_items state in
                      (match
-                        List.nth_opt options state.runtime_pick_cursor
+                        List.nth_opt items state.runtime_pick_cursor
                       with
-                      | Some option ->
+                      | Some item ->
+                          let target_id =
+                            Masc_tui_types.runtime_pick_item_id item
+                          in
                           launch_runtime_assignment_set state
                             ~mailbox:async_messages ~keeper_name
-                            ~runtime_id:(Some option.ro_id);
+                            ~runtime_id:(Some target_id);
                           state.runtime_pick_keeper <- None;
                           state.runtime_pick_cursor <- 0;
                           state.view <- Keepers Keeper_list

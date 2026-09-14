@@ -769,7 +769,11 @@ let window ~below ~scroll ~overview body =
     in
     (drawn, scroll_max)
 
-let fleet_lines ~below ~scroll input =
+(* The rows before the window takes a slice of them, with the overview the
+   scope folds to. Split out of [fleet_lines] so the heading above them can
+   be decided from what they are: the column names belong over rows that use
+   the columns, and beside the roster there may be none. *)
+let fleet_body input =
   let chunks = input.chunks in
   let newest = newest_chunk_by_keeper chunks in
   let focus = focus_keeper input newest in
@@ -802,7 +806,7 @@ let fleet_lines ~below ~scroll input =
         | [], rows | rows, [] -> rows
         | waiting, rows -> waiting @ (Rule :: rows)
       in
-      window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
+      (body, fun ~below -> folded_rows ~below body)
   | Whole_fleet ->
       (* The full list: every fleet row, then the rule and the focus block
          when there is one. Scrolling walks this; the overview folds it. *)
@@ -813,8 +817,21 @@ let fleet_lines ~below ~scroll input =
            | [] -> []
            | _ :: _ -> Rule :: focus_rows)
       in
-      window ~below ~scroll body ~overview:(fun () ->
-        overview_rows ~below fleet_rows focus focus_rows)
+      (body, fun ~below -> overview_rows ~below fleet_rows focus focus_rows)
+
+let fleet_lines ~below ~scroll (body, overview) =
+  window ~below ~scroll body ~overview:(fun () -> overview ~below)
+
+(* A row that spends the pane's four columns -- state, tool, calls and tokens.
+   The column names sit over these. A focus header with no record of its own
+   is a sentence ("alpha \xc2\xb7 no events on this feed yet"), and beside the
+   roster it can be every row the pane has: the roster already draws the fleet,
+   so the pane keeps only the selected keeper's record and what waits on the
+   reader. Naming four columns over one sentence spends a row saying nothing. *)
+let row_uses_the_columns = function
+  | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
+  | Focus_header _ | Approval_row _ | Rule | More _ | Indicator _
+  | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -950,19 +967,23 @@ let lines ~rows ~cols ~scroll input =
   if rows = 0 then { rows = []; targets = []; scroll_max = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
+    let fleet = match input.tab with
+      | Tab_fleet -> Some (fleet_body input)
+      | Tab_changes -> None
+    in
     let headers =
-      match input.tab with
-      | Tab_fleet when rows >= 2 ->
+      match fleet with
+      | Some (body, _) when rows >= 2 && List.exists row_uses_the_columns body ->
         [ header; (fit_line ~cols (with_border [ { text = legend; tone = Dim } ]), Target_none) ]
-      | Tab_fleet | Tab_changes -> [ header ]
+      | Some _ | None -> [ header ]
     in
     let below = rows - List.length headers in
     let visible, scroll_max =
       if below <= 0 then [], 0
       else
-        match input.tab with
-        | Tab_fleet -> fleet_lines ~below ~scroll input
-        | Tab_changes -> changes_lines ~cols ~below ~scroll input
+        match fleet with
+        | Some fleet -> fleet_lines ~below ~scroll fleet
+        | None -> changes_lines ~cols ~below ~scroll input
     in
     let drawn = headers @ List.map (materialize_row ~cols input) visible in
     let padding =

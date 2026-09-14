@@ -178,16 +178,8 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
     ; ("hourly_trend", `List [])
     ])
 
-let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
-  let records, sampling_mode, window_hours =
-    match window_hours with
-    | Some hours when hours > 0.0 ->
-      ( Keeper_tool_call_log.read_window ~window_hours:hours ()
-      , "window_hours"
-      , Some hours )
-    | _ ->
-      (Keeper_tool_call_log.read_recent ~n (), "recent_n", None)
-  in
+(* The payload over already-read [records]; the read is [aggregate]'s. *)
+let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   let deferred_records, records = List.partition tool_record_is_deferred records in
   let deferred = List.length deferred_records in
   let malformed, records =
@@ -422,3 +414,18 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("failure_categories", `List failure_categories);
     ("hourly_trend", `List hourly);
   ])
+
+let aggregate ?(n = 5000) ?window_hours ()
+  : (Yojson.Safe.t, Keeper_tool_call_log.index_error) result
+  =
+  match window_hours with
+  | Some hours when hours > 0.0 ->
+    Ok
+      (summarize ~n ~sampling_mode:"window_hours" ~window_hours:(Some hours)
+         (Keeper_tool_call_log.read_window ~window_hours:hours ()))
+  | _ ->
+    (match Keeper_tool_call_log.read_recent ~n () with
+     | Ok records ->
+       Ok (summarize ~n ~sampling_mode:"recent_n" ~window_hours:None records)
+     | Error (Keeper_tool_call_log.Index_unavailable _ as error) -> Error error)
+;;

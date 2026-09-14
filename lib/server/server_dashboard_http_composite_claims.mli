@@ -26,20 +26,29 @@ val claim_window_rows : int
 
 type claim_window
 (** One fleet-wide tail of tool-call rows, read once and shared by every keeper
-    in the same composite envelope instead of re-read per keeper. Abstract so a
-    caller cannot substitute a list read with a different window. *)
+    in the same composite envelope instead of re-read per keeper, or the
+    detail of the index read that could not produce it. Abstract so a caller
+    cannot substitute a list read with a different window. *)
 
 val read_claim_window : unit -> claim_window
-(** Read the shared window. One store read per envelope, not one per keeper. *)
+(** Read the shared window. One store read per envelope, not one per keeper.
+    An index that cannot be read yields the unavailable window, never an
+    empty one. *)
 
 val latest_task_claim_row :
-  claim_window -> keeper_name:string -> Yojson.Safe.t option
+  claim_window ->
+  keeper_name:string ->
+  (Yojson.Safe.t option, Keeper_tool_call_log.index_error) result
 (** The keeper's most recent [Keeper_tooling.Name.Task_claim] row within the
-    window, by row order, or [None] if it did not claim inside it. *)
+    window, by row order; [Ok None] if it did not claim inside it; the
+    [Error] when the window itself could not be read. *)
 
 val composite_claim_attempt_json :
   claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
+(** The claim attempt for [keeper_name] inside the window. An unreadable
+    window renders [status = "tool_log_unavailable"] with the index's
+    [detail], not the [not_observed] shape. *)
 val find_override_field_source :
   string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :

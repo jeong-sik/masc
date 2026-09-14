@@ -1,4 +1,8 @@
-type error = Transport of string | Protocol of string | Remote of { code : string; message : string }
+(* The W3C WebDriver error code is parsed once, in [decode_response], into a
+   closed sum; every recovery site below matches a constructor, never the wire
+   string. [Other] keeps the raw code so an unlisted error stays reportable. *)
+type remote_error = Invalid_session_id | No_such_window | No_such_alert | Unexpected_alert_open | Other of string
+type error = Transport of string | Protocol of string | Remote of { code : remote_error; message : string }
 type request = method_:Masc_http_client.Pool.http_method -> path:string -> body:Yojson.Safe.t option -> (Yojson.Safe.t, error) result
 type pointer_state = Released | Release_required
 type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result }
@@ -8,9 +12,21 @@ let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
   | Some (`String value) when value <> "" -> Ok value
   | _ -> Error (Protocol ("missing string field: " ^ key))
+let remote_error_of_code = function
+  | "invalid session id" -> Invalid_session_id
+  | "no such window" -> No_such_window
+  | "no such alert" -> No_such_alert
+  | "unexpected alert open" -> Unexpected_alert_open
+  | code -> Other code
+let remote_error_code = function
+  | Invalid_session_id -> "invalid session id"
+  | No_such_window -> "no such window"
+  | No_such_alert -> "no such alert"
+  | Unexpected_alert_open -> "unexpected alert open"
+  | Other code -> code
 let error_message = function
   | Transport message | Protocol message -> message
-  | Remote { code; message } -> code ^ ": " ^ message
+  | Remote { code; message } -> remote_error_code code ^ ": " ^ message
 let error_at_tab tab_id error =
   let context message = Printf.sprintf "tabId=%d: %s" tab_id message in
   match error with
@@ -29,7 +45,7 @@ let decode_response ~status body =
       let* message = match field "message" value with
         | Some (`String message) -> Ok message
         | _ -> Error (Protocol "missing string field: message") in
-      Error (Remote { code; message })
+      Error (Remote { code = remote_error_of_code code; message })
 let create ?binary ~start_downloads ~request () = { start_downloads; binary; request; mutex = Eio.Mutex.create (); active = Atomic.make 0; session = None; next_tab = 1 }
 let path session suffix = "/session/" ^ Uri.pct_encode session.id ^ suffix
 let release_resources session =
@@ -38,7 +54,7 @@ let release_resources session =
 let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
-   | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; release_resources session
+   | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session
    | Ok _ | Error _ -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
@@ -61,7 +77,7 @@ let close_unlocked ?request t = match t.session with
     let request = Option.value ~default:t.request request in
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
-    | Ok _ | Error (Remote { code = "invalid session id"; _ }) -> t.session <- None; release_resources session; Ok ()
+    | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session; Ok ()
     | Error error -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
@@ -123,7 +139,7 @@ let enter_frames t session selectors =
 let dialog_text t session =
   match call t session `GET "/alert/text" None with
   | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
-  | Error (Remote {code="no such alert";_}) -> Ok (`Assoc ["open",`Bool false])
+  | Error (Remote {code=No_such_alert;_}) -> Ok (`Assoc ["open",`Bool false])
   | Ok _ -> Error (Protocol "invalid dialog text response")
   | Error error -> Error error
 let element_call perform_effect id suffix body =
@@ -183,7 +199,7 @@ let execute_action t action =
     let* () = absolute_http_url url in
     let* session = session t in
     let* _ = match call t session `GET "/window" None with
-      | Error (Remote {code="no such window";_}) ->
+      | Error (Remote {code=No_such_window;_}) ->
         let* handles = call t session `GET "/window/handles" None in
         (match handles with
          | `List (`String handle :: _) -> select t session handle
@@ -198,7 +214,7 @@ let execute_action t action =
       page_summary t session in
     (match navigate () with
      | Ok summary -> Ok (`Assoc ["tabId",`Int id;"page",summary])
-     | Error (Remote {code="unexpected alert open";_}) ->
+     | Error (Remote {code=Unexpected_alert_open;_}) ->
        (* The tab was created, and its document is waiting on a user prompt.
           Retain the identity without claiming that navigation completed. *)
        Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
@@ -429,7 +445,7 @@ let execute_unlocked t = function
     let* session = session t in
     let* handles = call t session `GET "/window/handles" None in
     let* current = match call t session `GET "/window" None with
-      | Error (Remote { code = "no such window"; _ }) -> Ok `Null
+      | Error (Remote { code = No_such_window; _ }) -> Ok `Null
       | result -> result in
     match current, handles with
     | (`String _ | `Null), `List handles ->
@@ -458,7 +474,7 @@ let execute_unlocked t = function
         | None -> Ok `Null
         | Some handle ->
           (match select t session handle with
-           | Error (Remote { code = "no such window"; _ }) -> Ok `Null
+           | Error (Remote { code = No_such_window; _ }) -> Ok `Null
            | result -> result) in
       (match result, restored with
        | Error error, _ | _, Error error -> Error error

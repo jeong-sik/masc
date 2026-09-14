@@ -175,7 +175,7 @@ let owner_turn_rejection_cycle_status
    this route from MASC's own slot and client capacity envelopes, which clear
    on their own, so that sleep stays interruptible (#34663 review). *)
 type provider_backoff =
-  { retry_after_hint : float
+  { retry_after_hint : float option
   ; wake_policy : Keeper_keepalive_signal.wake_policy
   }
 
@@ -189,8 +189,8 @@ type keepalive_turn_outcome = {
       (** [Some backoff] when the cycle's turn failure routed as a provider
           retry ([Retry_after_observed] with a [Rate_limited] / [Hard_quota] /
           [Capacity_backpressure] class), carrying the route's own
-          [Retry-After] hint when the provider sent one ([0.0] when it did
-          not) and the wake policy the class implies. The inter-cycle sleep
+          [Retry-After] hint as the provider sent it ([None] when it sent
+          none) and the wake policy the class implies. The inter-cycle sleep
           replaces the plain cadence with a capped backoff for such a cycle
           (#26068); [None] keeps the cadence. *)
 }
@@ -213,23 +213,19 @@ let failure_route_rate_limited_backoff_hint
     (failure : Keeper_unified_turn.turn_failure)
   : provider_backoff option
   =
-  (* A hint of [0.0] means "rate-limited, but the provider sent no usable
-     [Retry-After]": the backoff then takes its bounded default rather than
-     the plain cadence, because the rate-limit signal is real even without a
-     duration. *)
-  let hint = function
-    | Some seconds -> seconds
-    | None -> 0.0
-  in
+  (* The route's [retry_after] is carried as-is: [None] means "rate-limited,
+     but the provider sent no usable [Retry-After]", and
+     {!Keeper_runtime_failure_route.retry_backoff_sec} owns what that case
+     sleeps for. No sentinel value is invented here. *)
   match failure.route with
   | Route.Retry_after_observed { retry_class = Rate_limited | Hard_quota; retry_after } ->
     Some
-      { retry_after_hint = hint retry_after
+      { retry_after_hint = retry_after
       ; wake_policy = Keeper_keepalive_signal.Serve_wakeup_after_duration
       }
   | Route.Retry_after_observed { retry_class = Capacity_backpressure; retry_after } ->
     Some
-      { retry_after_hint = hint retry_after
+      { retry_after_hint = retry_after
       ; wake_policy = Keeper_keepalive_signal.Interrupt_on_wakeup
       }
   | Route.Retry_after_observed _ | Route.Rotate_now _ | Route.Exhausted_visible_alive _ ->
@@ -1531,7 +1527,7 @@ let run_heartbeat_loop
             let backoff =
               Keeper_runtime_failure_route.retry_backoff_sec
                 ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-                ~retry_after_hint:(Some retry_after_hint)
+                ~retry_after_hint
                 ~cadence_sec
             in
             (* A stimulus cannot be served while the lane is rate-limited or

@@ -329,6 +329,10 @@ let keeper_world_own_recent_actions_turn_rejected_detail_row =
   "keeper.world.own_recent_actions.turn_rejected_detail_row"
 ;;
 
+let keeper_world_own_recent_actions_unavailable =
+  "keeper.world.own_recent_actions.unavailable"
+;;
+
 let keeper_world_pending_messages_heading = "keeper.world.pending_messages.heading"
 let keeper_world_pending_messages_intro = "keeper.world.pending_messages.intro"
 

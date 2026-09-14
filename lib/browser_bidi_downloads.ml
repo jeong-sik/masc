@@ -114,8 +114,8 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
             (try Eio.Time.with_timeout_exn clock command_timeout (fun () -> Eio.Promise.await reply)
              with Eio.Time.Timeout ->
                disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
-        let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun s -> `String s)
-          ["browsingContext.contextCreated";"browsingContext.downloadWillBegin";"browsingContext.downloadEnd"])]) in
+        let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun (_, name) -> `String name)
+          Browser_downloads.subscribed_methods)]) in
         let* tree = command "browsingContext.getTree" (`Assoc []) in
         let* () = Browser_downloads.add_tree model tree in
         let directory = Eio_unix.run_in_systhread (fun () ->

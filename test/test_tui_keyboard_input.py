@@ -4250,7 +4250,15 @@ def clients_footer_interaction(
     # Landing on a row first: a search arms over rows, not over a roster that
     # has not loaded. Each step below changes the footer row itself, so the
     # presenter has to draw it again -- an unchanged row can be skipped.
-    palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    landed = palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    # Column names are drawn the way every other list on the screen draws
+    # them. Clients and the Activity feed spelled theirs "Status"/"Time"
+    # while Memory, Board, Planning, Lanes and the logs used capitals.
+    landed_plain = CSI_RE.sub(b"", landed)
+    if b"STATUS" not in landed_plain or b"LAST SEEN" not in landed_plain:
+        raise AssertionError(
+            f"Clients did not name its columns in capitals: {landed_plain!r}"
+        )
     # A query being typed ends in the caret search_marker draws, and carries
     # the count of rows it reaches when the surface can count them.
     send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  j/k:move")
@@ -10843,7 +10851,12 @@ def enter_outside_changes_interaction(
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
     send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
-    send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    events = send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    # The same capitals, on the feed's own columns.
+    if b"TIME" not in CSI_RE.sub(b"", events):
+        raise AssertionError(
+            f"the Activity feed did not name its columns in capitals: {events!r}"
+        )
     send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
     send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")
@@ -12488,6 +12501,18 @@ def fusion_list_detail_interaction(
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
         )
+        drain_until_quiet(process, master_fd, output)
+        # Nothing is running in this fixture, and the title says so by not
+        # saying it: it used to end "· 0 run", a pair that names no run and
+        # reads as a third total beside the two counts before it.
+        title_rows = screen_rows(bytes(output))
+        title = title_rows.get(screen_row_of(title_rows, b"MASC Fusion"), b"")
+        if b"0 run" in title or b"running" in title:
+            raise AssertionError(
+                f"the Fusion title counted runs that are not running: {title!r}"
+            )
+        if b"runs" not in title or b"done" not in title:
+            raise AssertionError(f"the Fusion title lost its counts: {title!r}")
 
         selected = send_and_wait(
             process, master_fd, output, b"j", FUSION_TARGET_LISTED
@@ -14266,7 +14291,8 @@ def run_browser_scene_regression(executable: str) -> None:
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
             "text": text, "rects": [{"x": 0, "y": 0, "width": 100, "height": 20}],
-            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal"}
+            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal",
+            "sourceContext": None}
         if kind == "control":
             result.update(clickable=True, editable=False, disabled=False)
         return result
@@ -15024,12 +15050,18 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+        for wanted in ("put_endpoint", "set_tts_default_voice"):
             if wanted not in changes:
                 raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        # The model rides on the endpoint. Sent as the section's default it
+        # became the model every other endpoint in the section was asked for.
+        if "set_default_model" in changes:
+            raise AssertionError(f"the save rewrote the section's model: {body!r}")
         endpoint = changes["put_endpoint"].get("endpoint", {})
         if endpoint.get("id") != "pty-endpoint":
             raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
+        if endpoint.get("model") != "eleven_multilingual_v2":
+            raise AssertionError(f"the endpoint lost its model: {endpoint!r}")
         if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":
             raise AssertionError(f"the credential variable was lost: {endpoint!r}")
         # The name of the variable, never its value: runtime.toml is committed.
@@ -15474,6 +15506,15 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 evidence("initial-read-failed")
             else:
                 require("schedule-proof-701", "status:running", "Requests: 1")
+                # The count and the next wake share one row: with nothing due
+                # the second row used to be drawn blank.
+                summary_rows = screen_rows(bytes(output))
+                summary_row = summary_rows.get(
+                    screen_row_of(summary_rows, b"Requests: 1"), b"")
+                if b"Next due:" not in summary_row:
+                    raise AssertionError(
+                        f"the schedule count and its next wake split rows: {summary_row!r}"
+                    )
                 fail_reads.set()
                 send_and_wait(process, master_fd, output, b"r", b"503")
                 require("이전 조회 유지 ·", "503", "schedule-proof-701",

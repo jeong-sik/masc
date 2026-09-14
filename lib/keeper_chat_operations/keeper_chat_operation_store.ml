@@ -795,8 +795,8 @@ let open_existing ~path =
     (match result with
      | Ok _ -> result
      | Error error ->
-       (* Failed candidates never become the Owner's active handle. See open
-          failure contract: preserve the typed store error; close is best-effort. *)
+       (* Failed candidates never become the Owner's active handle. *)
+       (* See open failure contract: preserve the typed store error; close is best-effort. *)
        ignore (close_db db : bool);
        Error error)
 ;;

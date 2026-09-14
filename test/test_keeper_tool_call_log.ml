@@ -2,6 +2,25 @@
 
 open Masc
 
+(* [Keeper_tool_call_log.read_recent], [read_recent_rows] and
+   [Dashboard_http_tool_quality.aggregate] answer [Error Index_unavailable]
+   when the read index cannot be read (audit F397). Every case in this file
+   exercises rows, so the failure is the case's failure. *)
+let read_recent ?keeper_name ?n () =
+  match Keeper_tool_call_log.read_recent ?keeper_name ?n () with
+  | Ok rows -> rows
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+let read_recent_rows ~n () =
+  match Keeper_tool_call_log.read_recent_rows ~n () with
+  | Ok rows -> rows
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+let aggregate ?n ?window_hours () =
+  match Dashboard_http_tool_quality.aggregate ?n ?window_hours () with
+  | Ok summary -> summary
+  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
 let eio_test name fn =
   Alcotest.test_case name `Quick (fun () ->
     Eio_main.run @@ fun env ->
@@ -440,7 +459,7 @@ let test_read_recent_n_zero () =
       ~keeper_name:"k" ~tool_name:"tool_a"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:1.0 ();
-    let result = Keeper_tool_call_log.read_recent ~n:0 () in
+    let result = read_recent ~n:0 () in
     Alcotest.(check int) "n=0 returns empty" 0 (List.length result))
 
 let test_read_recent_n_negative () =
@@ -449,7 +468,7 @@ let test_read_recent_n_negative () =
       ~keeper_name:"k" ~tool_name:"tool_a"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:1.0 ();
-    let result = Keeper_tool_call_log.read_recent ~n:(-1) () in
+    let result = read_recent ~n:(-1) () in
     Alcotest.(check int) "n<0 returns empty" 0 (List.length result))
 
 let test_read_recent_keeper_filter () =
@@ -462,9 +481,9 @@ let test_read_recent_keeper_filter () =
       ~keeper_name:"bob" ~tool_name:"tool_y"
       ~input:(`Assoc []) ~output_text:"out"
       ~success:true ~duration_ms:5.0 ();
-    let alice_entries = Keeper_tool_call_log.read_recent ~keeper_name:"alice" () in
-    let bob_entries = Keeper_tool_call_log.read_recent ~keeper_name:"bob" () in
-    let all_entries = Keeper_tool_call_log.read_recent () in
+    let alice_entries = read_recent ~keeper_name:"alice" () in
+    let bob_entries = read_recent ~keeper_name:"bob" () in
+    let all_entries = read_recent () in
     Alcotest.(check int) "alice gets 1 entry" 1 (List.length alice_entries);
     Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
     Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
@@ -500,13 +519,13 @@ let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
     Alcotest.(check (list string))
       "unfiltered read returns exactly the newest n"
       [ "t9"; "t10" ]
-      (tools (Keeper_tool_call_log.read_recent ~n:2 ()));
+      (tools (read_recent ~n:2 ()));
     (* alice's two rows sit at opposite ends of the store, so finding both
        requires reading well past n — this is what the over-scan buys. *)
     Alcotest.(check (list string))
       "keeper-filtered read still scans past n to find n matches"
       [ "t1"; "t10" ]
-      (tools (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:2 ())))
+      (tools (read_recent ~keeper_name:"alice" ~n:2 ())))
 ;;
 
 let test_fleet_rows_derivation_matches_read_recent () =
@@ -521,13 +540,13 @@ let test_fleet_rows_derivation_matches_read_recent () =
         ("carol", "t4"); ("alice", "t5"); ("bob", "t6") ];
     let n = 2 in
     let fleet =
-      Keeper_tool_call_log.read_recent_rows
+      read_recent_rows
         ~n:(n * Keeper_tool_call_log.read_over_scan_factor) ()
     in
     List.iter
       (fun keeper ->
         let direct =
-          Keeper_tool_call_log.read_recent ~keeper_name:keeper ~n ()
+          read_recent ~keeper_name:keeper ~n ()
         in
         let derived =
           Keeper_tool_call_log.filter_rows_for_keeper
@@ -555,7 +574,7 @@ let test_exact_agent_core_occurrence_persisted () =
       ~batch_size:3
       ~execution_mode:Agent_core.Tool_contract.Concurrent
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ entry ] ->
       Alcotest.(check (option string))
         "blank provider id persisted"
@@ -598,7 +617,7 @@ let test_ordinary_path_disposition_persisted () =
       ~duration_ms:3.0
       ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ entry ] ->
       Alcotest.(check (option string))
         "the row says which kind of failure"
@@ -627,7 +646,7 @@ let test_file_change_evidence_persists_with_execution_identity () =
       ~execution_id
       ~file_change_evidence:evidence
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ entry ] ->
       Alcotest.(check (option string))
         "same row keeps canonical execution id"
@@ -658,7 +677,7 @@ let test_row_without_a_typed_outcome_omits_the_field () =
       ~success:true
       ~duration_ms:1.0
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ entry ] ->
       Alcotest.(check (option string))
         "no disposition is written when none was known"
@@ -706,7 +725,7 @@ let test_composition_action_context_persisted () =
       ~composition_execution:Keeper_tool_composition_catalog.Async
       ~parent_tool_use_id:"outer-7"
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ entry ] ->
       List.iter
         (fun (label, key, expected) ->
@@ -787,7 +806,7 @@ let test_composition_rows_separate_submitted_from_autonomous_turn () =
       ~turn_kind:Turn_record.Autonomous
       ~keeper_turn_id:3
       ~run_id:"run-autonomous";
-    let entries = Keeper_tool_call_log.read_recent ~n:16 () in
+    let entries = read_recent ~n:16 () in
     Alcotest.(check int) "every node row of both runs persisted" 8
       (List.length entries);
     let run_ids_for kind =
@@ -831,7 +850,7 @@ let test_sensitive_named_tool_logged_with_redaction () =
       ~keeper_name:"k" ~tool_name:"mcp_auth_create"
       ~input:(`Assoc [("token", `String "secret123")]) ~output_text:"done"
       ~success:true ~duration_ms:1.0 ();
-    let result = Keeper_tool_call_log.read_recent () in
+    let result = read_recent () in
     Alcotest.(check int) "tool call logged" 1 (List.length result);
     let encoded = Yojson.Safe.to_string (List.hd result) in
     Alcotest.(check bool)
@@ -851,7 +870,7 @@ let test_sensitive_input_fields_redacted () =
       ])
       ~output_text:"done"
       ~success:true ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent () in
+    let entries = read_recent () in
     Alcotest.(check int) "one entry logged" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "token value redacted" false
@@ -868,7 +887,7 @@ let test_model_field_stored () =
       ~model:"glm-4-9b"
       ~runtime_profile:"local_qwen3_27b_only"
       ();
-    let entries = Keeper_tool_call_log.read_recent () in
+    let entries = read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "raw model absent" false
@@ -925,7 +944,7 @@ let test_turn_context_fields_stored () =
       ?network_mode:tctx.network_mode
       ?runtime_profile:tctx.runtime_profile
       ();
-    let entries = Keeper_tool_call_log.read_recent () in
+    let entries = read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
     Alcotest.(check (option string)) "lane field"
@@ -1062,7 +1081,7 @@ let test_turn_context_fields_absent_without_context () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0 ();
-    let entries = Keeper_tool_call_log.read_recent () in
+    let entries = read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
     Alcotest.(check (option string)) "lane absent"
@@ -1117,7 +1136,7 @@ let test_route_evidence_stored_for_git_push () =
       ~success:true
       ~duration_ms:42.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1187,7 +1206,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       ~success:true
       ~duration_ms:42.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1225,7 +1244,7 @@ let test_route_evidence_redacts_wrapped_git_push () =
       ~success:true
       ~duration_ms:42.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     match entries with
     | [ entry ] ->
       let evidence = Yojson.Safe.Util.member "route_evidence" entry in
@@ -1255,7 +1274,7 @@ let test_route_evidence_command_redaction_fails_closed () =
            ~success:true
            ~duration_ms:42.0
            ();
-         match Keeper_tool_call_log.read_recent ~n:1 () with
+         match read_recent ~n:1 () with
          | [ entry ] ->
            let evidence = Yojson.Safe.Util.member "route_evidence" entry in
            Alcotest.(check (option string))
@@ -1290,7 +1309,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
       ~success:true
       ~duration_ms:4.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1329,7 +1348,7 @@ let test_route_evidence_records_internal_descriptor () =
       ~success:true
       ~duration_ms:1.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1370,7 +1389,7 @@ let test_route_evidence_records_masc_board_descriptor () =
       ~success:true
       ~duration_ms:2.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1431,7 +1450,7 @@ let test_non_object_input_still_logs_action_radius () =
       ~success:false
       ~duration_ms:3.0
       ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entries = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
@@ -1474,7 +1493,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~tool_choice:"auto"
       ~thinking_enabled:true
       ~runtime_profile:"local_qwen3_27b_only" ();
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check (option string)) "sampling mode present"
       (Some "recent_n")
       (Safe_ops.json_string_opt "sampling_mode" summary);
@@ -1535,7 +1554,7 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ~success:true
       ~duration_ms:1.0
       ();
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
     let unknown_bucket =
       find_bucket Dashboard_http_tool_quality.unknown_runtime_profile_bucket by_runtime
@@ -1563,7 +1582,7 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
       ~duration_ms:(Tool_result.duration_ms result)
       ~typed_result:result
       ();
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check int)
       "deferred remains visible as typed neutral outcome"
       1
@@ -1609,7 +1628,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
         tm.Unix.tm_hour
     in
     let hourly =
-      Dashboard_http_tool_quality.aggregate ~n:10 ()
+      aggregate ~n:10 ()
       |> Yojson.Safe.Util.member "hourly_trend"
       |> Yojson.Safe.Util.to_list
     in
@@ -1655,7 +1674,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("success", `Bool false)
          ; ("duration_ms", `Float 5.0)
          ]);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 ~window_hours:24.0 () in
+    let summary = aggregate ~n:10 ~window_hours:24.0 () in
     Alcotest.(check (option string)) "window sampling mode"
       (Some "window_hours")
       (Safe_ops.json_string_opt "sampling_mode" summary);
@@ -1698,7 +1717,7 @@ let test_dashboard_aggregate_drops_rows_without_result_bytes () =
          ; ("success", `Bool false)
          ; ("duration_ms", `Float 5.0)
          ]);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check int) "malformed row counted" 1
       (Safe_ops.json_int ~default:(-1) "malformed" summary);
     Alcotest.(check int) "malformed row excluded from total" 1
@@ -1730,7 +1749,7 @@ let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check int) "malformed row counted" 1
       (Safe_ops.json_int ~default:(-1) "malformed" summary);
     Alcotest.(check int) "nothing aggregated" 0
@@ -1774,7 +1793,7 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
       ~keeper_name:"k"
       ~trace_id:"trace-gap"
       ();
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check (option string)) "coverage gap health"
       (Some "coverage_gap")
       (Safe_ops.json_string_opt "health" summary);
@@ -1802,7 +1821,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
       ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~trace_id:"trace-recovered" ();
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let summary = aggregate ~n:10 () in
     Alcotest.(check (option string)) "recovered gap health"
       (Some "ok")
       (Safe_ops.json_string_opt "health" summary);
@@ -1828,7 +1847,7 @@ let test_output_invalid_utf8_sanitized () =
       ~keeper_name:"k" ~tool_name:"tool_bin"
       ~input:(`Assoc []) ~output_text:raw_output
       ~success:true ~duration_ms:1.0 ();
-    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     let today =
       let open Unix in
@@ -1868,7 +1887,7 @@ let test_output_valid_utf8_untouched () =
       ~keeper_name:"k" ~tool_name:"tool_ok"
       ~input:(`Assoc []) ~output_text:korean
       ~success:true ~duration_ms:1.0 ();
-    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     match results with
     | [ json ] ->
@@ -1896,7 +1915,7 @@ let test_output_blob_marker_normalized () =
       ~keeper_name:"k" ~tool_name:"tool_blob"
       ~input:(`Assoc []) ~output_text:marker
       ~success:true ~duration_ms:1.0 ();
-    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     match results with
     | [ json ] ->
@@ -1930,7 +1949,7 @@ let test_output_inline_string_preserved () =
       ~keeper_name:"k" ~tool_name:"tool_inline"
       ~input:(`Assoc []) ~output_text:"small inline result"
       ~success:true ~duration_ms:1.0 ();
-    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    let results = read_recent ~n:1 () in
     match results with
     | [ json ] ->
       let s = Safe_ops.json_string ~default:"" "output" json in
@@ -1950,7 +1969,7 @@ let test_output_preview_derives_truncation_metadata () =
       ~success:true
       ~duration_ms:1.0
       ();
-    match Keeper_tool_call_log.read_recent ~n:1 () with
+    match read_recent ~n:1 () with
     | [ `Assoc fields ] ->
       Alcotest.(check (option int))
         "producer bytes retained"
@@ -1971,7 +1990,7 @@ let test_action_radius_tells_a_file_from_a_directory () =
       Keeper_tool_call_log.log_call
         ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
         ~success:true ~duration_ms:1.0 ();
-      match Keeper_tool_call_log.read_recent ~n:1 () with
+      match read_recent ~n:1 () with
       | [ json ] ->
         let radius =
           match json with
@@ -2012,7 +2031,7 @@ let test_string_input_keeps_action_radius () =
       ~input:(`String "{\"action\":\"write\"}")
       ~output_text:"ok"
       ~success:true ~duration_ms:1.0 ();
-    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    let results = read_recent ~n:1 () in
     match results with
     | [ json ] ->
       let action_radius =
@@ -2055,13 +2074,13 @@ let test_async_append_defers_until_flush env =
       Alcotest.(check int)
         "queued record not visible before explicit flush"
         0
-        (List.length (Keeper_tool_call_log.read_recent ~n:1 ()));
+        (List.length (read_recent ~n:1 ()));
       Keeper_tool_call_log.flush_now ();
       Alcotest.(check int)
         "queue drained by explicit flush"
         0
         (Keeper_tool_call_log.queued_count_for_testing ());
-      let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+      let entries = read_recent ~n:1 () in
       Alcotest.(check int) "record persisted after flush" 1 (List.length entries);
       match entries with
       | [ entry ] ->
@@ -2089,7 +2108,7 @@ let test_commit_callback_bypasses_async_queue ~success env =
         ~on_committed:(fun () ->
           (* Publication may trigger an immediate history read from here. *)
           Alcotest.(check int) "row readable inside publication callback" 1
-            (List.length (Keeper_tool_call_log.read_recent ~n:1 ()));
+            (List.length (read_recent ~n:1 ()));
           Alcotest.(check bool) "history revision advanced before publication" true
             (Keeper_tool_call_log.committed_revision () > before_revision);
           committed := true)
@@ -2102,7 +2121,7 @@ let test_commit_callback_bypasses_async_queue ~success env =
       Alcotest.(check int)
         "committed row is immediately readable"
         1
-        (List.length (Keeper_tool_call_log.read_recent ~n:1 ()))))
+        (List.length (read_recent ~n:1 ()))))
 
 let test_commit_callback_fails_closed_without_store () =
   Keeper_tool_call_log.reset_for_testing ();
@@ -2169,17 +2188,17 @@ let test_read_recent_returns_every_row_the_store_holds () =
       write_rows store ~keeper:"quiet" ~count:1 ~label
         ~base_ts:(base_ts +. (float_of_int i *. 10.) +. 5.)
     done;
-    let quiet = Keeper_tool_call_log.read_recent ~keeper_name:"quiet" ~n:120 () in
+    let quiet = read_recent ~keeper_name:"quiet" ~n:120 () in
     Alcotest.(check int) "every quiet row comes back" 120 (List.length quiet);
-    let fleet = Keeper_tool_call_log.read_recent ~n:600 () in
+    let fleet = read_recent ~n:600 () in
     Alcotest.(check int) "every fleet row comes back" 600 (List.length fleet);
-    let short = Keeper_tool_call_log.read_recent ~keeper_name:"quiet" ~n:5 () in
+    let short = read_recent ~keeper_name:"quiet" ~n:5 () in
     Alcotest.(check int) "a smaller request is honoured exactly" 5 (List.length short);
     Alcotest.(check (list string))
       "and it is the newest five, oldest first"
       [ "quiet-115-0"; "quiet-116-0"; "quiet-117-0"; "quiet-118-0"; "quiet-119-0" ]
       (tool_names short);
-    let absent = Keeper_tool_call_log.read_recent ~keeper_name:"nobody" ~n:10 () in
+    let absent = read_recent ~keeper_name:"nobody" ~n:10 () in
     Alcotest.(check int) "a keeper with no rows answers empty" 0 (List.length absent))
 ;;
 
@@ -2189,19 +2208,19 @@ let test_read_recent_picks_up_rows_appended_between_reads () =
     let base_ts = Unix.gettimeofday () in
     write_rows store ~keeper:"alice" ~count:3 ~base_ts ~label:"first";
     Alcotest.(check int) "the first read sees three" 3
-      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ()));
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ()));
     Alcotest.(check int) "reading again does not double them" 3
-      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ()));
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ()));
     write_rows store ~keeper:"alice" ~count:2 ~base_ts:(base_ts +. 100.) ~label:"second";
     Alcotest.(check int) "rows appended between reads appear" 5
-      (List.length (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 ())))
+      (List.length (read_recent ~keeper_name:"alice" ~n:50 ())))
 ;;
 
 let test_read_recent_rebuilds_a_removed_index () =
   with_tmp_log (fun () ->
     let store = log_store () in
     write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"only";
-    let before = Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 () in
+    let before = read_recent ~keeper_name:"alice" ~n:50 () in
     Alcotest.(check int) "four before" 4 (List.length before);
     let ledger_dir =
       match Keeper_tool_call_log.store_dir () with
@@ -2211,7 +2230,7 @@ let test_read_recent_rebuilds_a_removed_index () =
     Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
     (try Sys.remove (Keeper_tool_call_index.database_path ~ledger_dir) with
      | Sys_error _ -> ());
-    let after = Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:50 () in
+    let after = read_recent ~keeper_name:"alice" ~n:50 () in
     Alcotest.(check int) "the same four after the index is deleted" 4 (List.length after))
 ;;
 

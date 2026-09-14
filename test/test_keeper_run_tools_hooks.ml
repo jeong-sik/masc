@@ -733,7 +733,9 @@ let test_retained_observation_commits_through_production_hook () =
         (List.length (Log.peek_retained_artifacts ~invocation:first ()));
       check int "blank provider id does not consume sibling observation" 1
         (List.length (Log.peek_retained_artifacts ~invocation:second ()));
-      let rows = Log.read_recent ~keeper_name:"observation-reader" () in
+      let rows = match Log.read_recent ~keeper_name:"observation-reader" () with
+        | Ok rows -> rows
+        | Error (Log.Index_unavailable detail) -> fail detail in
       let row = match rows with [row] -> row | _ -> fail "exactly one durable receipt required" in
       let open Yojson.Safe.Util in
       let root = match Tool_output.normalized_artifact_refs_in_json
@@ -790,7 +792,9 @@ let test_plain_tool_commits_before_hook_returns ~success () =
         (Log.queued_count_for_testing ());
       check bool "history freshness changes before hook returns" true
         (Log.committed_revision () > revision);
-      let rows = Log.read_recent ~keeper_name:"plain-reader" () in
+      let rows = match Log.read_recent ~keeper_name:"plain-reader" () with
+        | Ok rows -> rows
+        | Error (Log.Index_unavailable detail) -> fail detail in
       check int "execution row is readable before ToolCompleted publication" 1
         (List.length rows))
 ;;
@@ -842,7 +846,68 @@ let rejected_rows_for ?on_tool_result_ready ~stage () =
               })
        in
        Masc.Keeper_tool_call_log.flush_now ();
-       Masc.Keeper_tool_call_log.read_recent ~keeper_name:"rejection-keeper" ())
+       match
+         Masc.Keeper_tool_call_log.read_recent ~keeper_name:"rejection-keeper" ()
+       with
+       | Ok rows -> rows
+       | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> fail detail)
+;;
+
+(* Proves audit F397: a tool-call read index the reader cannot open is
+   answered as [Error (Index_unavailable detail)] carrying the index's own
+   failure text. On origin/main the same failure was logged and answered as
+   [[]], which no caller could tell from a keeper that made no calls -- the
+   dashboard showed "no tool calls" while the index was what was broken.
+
+   The ledger directory is made unreadable after one row is committed, so
+   the index has a ledger to advance over and cannot. Root and some
+   privileged environments can still read a chmod(000) directory; that is
+   checked, and there the read is expected to succeed with the row, so the
+   case never claims an EACCES it did not get. *)
+let test_an_unreadable_index_is_an_error_not_an_empty_read () =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       Masc.Keeper_tool_call_log.log_call
+         ~keeper_name:"blind-keeper" ~tool_name:"keeper_time_now"
+         ~input:(`Assoc []) ~output_text:"now" ~success:true ~duration_ms:1.0 ();
+       Masc.Keeper_tool_call_log.flush_now ();
+       let ledger_dir =
+         match Masc.Keeper_tool_call_log.store_dir () with
+         | Some dir -> dir
+         | None -> fail "tool-call store did not initialise"
+       in
+       let previous_mode = (Unix.stat ledger_dir).Unix.st_perm in
+       Fun.protect
+         ~finally:(fun () -> Unix.chmod ledger_dir previous_mode)
+         (fun () ->
+            Unix.chmod ledger_dir 0;
+            let unreadable =
+              try ignore (Sys.readdir ledger_dir); false with
+              | Sys_error _ -> true
+              | Unix.Unix_error ((Unix.EACCES | Unix.EPERM), _, _) -> true
+            in
+            let outcome = Masc.Keeper_tool_call_log.read_recent ~n:10 () in
+            match unreadable, outcome with
+            | true, Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+              check bool "the index names what it could not do" true
+                (String.length detail > 0)
+            | true, Ok rows ->
+              failf "an unreadable index answered %d rows instead of an error"
+                (List.length rows)
+            | false, Ok [ _ ] ->
+              Printf.printf
+                "permission denial unavailable; verified the committed row reads back \
+                 instead\n%!"
+            | false, Ok rows ->
+              failf "readable ledger with one committed row answered %d rows"
+                (List.length rows)
+            | false, Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+              failf "readable ledger answered an index error: %s" detail))
 ;;
 
 let test_a_rejected_call_leaves_a_row () =
@@ -1551,6 +1616,10 @@ let () =
             "validation callback follows exact log commit"
             `Quick
             test_validation_rejection_notifies_after_exact_log_commit
+        ; test_case
+            "an unreadable read index is an error, not an empty read (F397)"
+            `Quick
+            test_an_unreadable_index_is_an_error_not_an_empty_read
         ] )
     ; ( "Skill delivery observation"
       , [ test_case

@@ -661,7 +661,8 @@ type raw_snapshot =
   { observations : raw_observations
   ; registry_entry : Keeper_registry.registry_entry option
   ; runtime_contract : Yojson.Safe.t
-  ; recent_tool_call_rows : Yojson.Safe.t list
+  ; recent_tool_call_rows :
+      (Yojson.Safe.t list, Keeper_tool_call_log.index_error) result
   ; recent_approval_audit_rows : Yojson.Safe.t list
   ; recent_transition_rows : Yojson.Safe.t list
   }
@@ -949,10 +950,19 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt:observations.latest_receipt
   in
+  (* An unreadable tool-call index leaves the timeline without tool events
+     and says so in [recent_tool_calls_unavailable] below; before, the same
+     failure was an empty row list and the timeline read as "no tool calls"
+     (audit F397). *)
+  let recent_tool_call_rows, recent_tool_calls_unavailable =
+    match raw.recent_tool_call_rows with
+    | Ok rows -> rows, `Null
+    | Error (Keeper_tool_call_log.Index_unavailable detail) -> [], `String detail
+  in
   let causal_timeline =
     causal_timeline_json
       ~observed_at_unix:observations.observed_at_unix
-      ~recent_tool_call_rows:raw.recent_tool_call_rows
+      ~recent_tool_call_rows
       ~recent_approval_audit_rows:raw.recent_approval_audit_rows
       ~recent_transition_rows:raw.recent_transition_rows ~meta
       ~latest_decision:observations.latest_decision
@@ -986,6 +996,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      ; ("selected_model", Json_util.string_opt_to_json selected_model)
      ; ("runtime_contract", raw.runtime_contract)
      ; ("runtime_blockers", `Assoc observations.runtime_blocker_fields)
+     ; ("recent_tool_calls_unavailable", recent_tool_calls_unavailable)
      ]
      @ trust_model_json_fields trust_model
      @ [ ("approval_queue_state", observations.pending_approval_projection.state)

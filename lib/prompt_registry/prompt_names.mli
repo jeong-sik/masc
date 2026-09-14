@@ -222,6 +222,7 @@ val keeper_world_own_recent_actions_intro : string
 val keeper_world_own_recent_actions_turn_ok_row : string
 val keeper_world_own_recent_actions_turn_rejected_row : string
 val keeper_world_own_recent_actions_turn_rejected_detail_row : string
+val keeper_world_own_recent_actions_unavailable : string
 val keeper_world_pending_messages_heading : string
 val keeper_world_pending_messages_intro : string
 val keeper_world_pending_messages_mention_row : string

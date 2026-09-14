@@ -4,6 +4,14 @@ open Alcotest
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+(* [Masc.Keeper_tool_call_log.read_recent] answers [Error Index_unavailable]
+   when the read index cannot be read (audit F397); here the rows are the
+   subject, so that failure fails the case. *)
+let tool_call_rows ?keeper_name ?n () =
+  match Masc.Keeper_tool_call_log.read_recent ?keeper_name ?n () with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
 module U = Yojson.Safe.Util
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
@@ -760,7 +768,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         ~execution_id:(Ids.Execution_id.generate ())
         ~duration_ms:87;
       let rows =
-        Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
+        tool_call_rows ~keeper_name ~n:1 ()
       in
       check int "logged row count" 1 (List.length rows);
       let row = List.hd rows in
@@ -885,7 +893,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
       check int "native observation root bypasses the lossy async queue" 0
         (Masc.Keeper_tool_call_log.queued_count_for_testing ());
-      let observed_row = Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 () |> List.hd in
+      let observed_row = tool_call_rows ~keeper_name ~n:1 () |> List.hd in
       let roots = Tool_output.normalized_artifact_refs_in_json (observed_row |> U.member "artifact_refs") in
       check bool "native MCP logger retains the producer observation" true
         (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256) roots);
@@ -983,8 +991,8 @@ let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
       check int "one physical browser dispatch" 1 !dispatch_count;
       check bool "audit failure remains visible after root commit" fail_audit failed;
       if rebind then check int "old and later cache owner has no receipt" 0
-        (List.length (Masc.Keeper_tool_call_log.read_recent ~keeper_name:original_name ()));
-      let rows = Masc.Keeper_tool_call_log.read_recent ~keeper_name () in
+        (List.length (tool_call_rows ~keeper_name:original_name ()));
+      let rows = tool_call_rows ~keeper_name () in
       let row = match rows with [row] -> row | _ -> fail "canonical Keeper needs exactly one receipt" in
       let roots = Tool_output.normalized_artifact_refs_in_json (row |> U.member "artifact_refs") in
       check int "canonical caller owns the retained scene" 1 (List.length roots);

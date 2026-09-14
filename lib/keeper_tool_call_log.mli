@@ -288,11 +288,17 @@ val log_call :
     retained preview size when one exists; it never describes mutation of the
     Tool result delivered to the Keeper. Best-effort (failures logged). *)
 
+type index_error = Index_unavailable of string
+(** The derived read index (RFC-0437) could not be opened, advanced, or read
+    back; the string is the index's own detail. Every reader below returns it
+    rather than an empty list, so a caller can tell a ledger with no rows from
+    a ledger it could not read. *)
+
 val read_recent :
   ?keeper_name:string ->
   ?n:int ->
   unit ->
-  Yojson.Safe.t list
+  (Yojson.Safe.t list, index_error) result
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     oldest first, optionally only one keeper's. Default [n=100].
 
@@ -305,8 +311,9 @@ val read_recent :
     Answered from the derived read index (RFC-0437), which advances itself to
     the store's current end before the query and names rows the store is then
     read for - the store stays the authority. An index that cannot be built
-    is logged and answered as empty rather than fallen back from, so there is
-    one read path. *)
+    or read is [Error (Index_unavailable detail)] rather than fallen back from
+    or answered as empty, so there is one read path and its failure is the
+    caller's to state. An unconfigured store is [Ok []]. *)
 
 val read_over_scan_factor : int
 (** Scan multiplier for callers that share one fleet read
@@ -318,11 +325,12 @@ val read_over_scan_factor : int
     {!read_recent} no longer applies it. That read goes through the index and
     is exact. *)
 
-val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
+val read_recent_rows : n:int -> unit -> (Yojson.Safe.t list, index_error) result
 (** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
     with no keeper filter. One shared read serves every per-keeper
     {!filter_rows_for_keeper} derivation, instead of each keeper
-    re-parsing the store. *)
+    re-parsing the store. Read through the same index as {!read_recent},
+    with the same [Error] on an index that cannot be read. *)
 
 val filter_rows_for_keeper :
   keeper_name:string -> n:int -> Yojson.Safe.t list -> Yojson.Safe.t list

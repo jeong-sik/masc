@@ -67,7 +67,7 @@ let base_observation : WO.world_observation =
     connected_surface_failures = [];
     own_recent_board_posts = [];
     fleet_messages = [];
-    own_recent_actions = [];
+    own_recent_actions = Ok [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =
@@ -223,7 +223,7 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
     user_message
       { base_observation with
         own_recent_actions =
-          [ { Actions.turn_id = 27486
+          Ok [ { Actions.turn_id = 27486
             ; calls =
                 [ { Actions.tool = "keeper_board_post"
                   ; input = {|{"title":"status"}|}
@@ -272,7 +272,7 @@ let turn_with_a_large_refusal turn_id =
 let test_a_briefing_over_its_budget_withholds_the_oldest_turns () =
   let observation =
     { base_observation with
-      own_recent_actions = List.map turn_with_a_large_refusal [ 1; 2; 3; 4; 5 ]
+      own_recent_actions = Ok (List.map turn_with_a_large_refusal [ 1; 2; 3; 4; 5 ])
     }
   in
   let unbudgeted = user_message observation in
@@ -309,7 +309,7 @@ let test_a_briefing_over_its_budget_withholds_the_oldest_turns () =
    already fits is the same bytes it was before the budget existed. *)
 let test_a_briefing_under_its_budget_is_unchanged () =
   let observation =
-    { base_observation with own_recent_actions = [ turn_with_a_large_refusal 1 ] }
+    { base_observation with own_recent_actions = Ok [ turn_with_a_large_refusal 1 ] }
   in
   let unbudgeted = user_message observation in
   check string "fits -> byte-identical to the unbudgeted briefing" unbudgeted
@@ -392,7 +392,7 @@ let test_a_turn_the_read_window_cut_is_dropped_whole () =
 ;;
 
 let test_no_recent_actions_no_section () =
-  let user = user_message { base_observation with own_recent_actions = [] } in
+  let user = user_message { base_observation with own_recent_actions = Ok [] } in
   check bool "absent when the keeper has done nothing" false
     (contains ~needle:"### Your Recent Actions" user)
 ;;

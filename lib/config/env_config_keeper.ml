@@ -671,12 +671,13 @@ module KeeperKeepalive = struct
      a default install runs no attempt watchdog at all and a tool's provider
      sub-call has no bound: an attempt that never produces a token holds the
      keeper until an operator interrupts it. The value is the one the live
-     workspace ran under for a month, chosen there from measurement
-     (2026-08-12: longest legitimate progress gap in a healthy turn 120 s,
-     the wedge it caught 65 min): 30 times the gap, and above the two 600 s
-     stream floors, so a silent prefill is ended by the reader's typed
-     first-token timeout, not by this. A universal liveness ceiling, not a
-     per-provider tuning; an explicit env/toml value overrides it. *)
+     workspace has run under since 2026-08-07 (#27416), validated by the
+     2026-08-12 measurement (longest legitimate progress gap in a healthy
+     turn 120 s, the wedge it caught 65 min): 7.5 times the gap, a quarter
+     of the wedge, and above the two stream floors, so a silent prefill is
+     ended by the reader's typed first-token timeout, not by this. A
+     universal liveness ceiling, not a per-provider tuning; an explicit
+     env/toml value overrides it. *)
   let provider_call_deadline_failsafe_floor_sec = 900.0
 
   (** The keeper's no-progress threshold for a provider call attempt, in

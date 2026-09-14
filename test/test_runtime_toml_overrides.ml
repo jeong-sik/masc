@@ -309,6 +309,7 @@ let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
      the fail-safe liveness floor (not [None]) so AGENT_CORE enforces a bound and a hung
      stream cannot freeze the lane forever. Reverting the floor (back to [None])
      makes this fail. *)
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
@@ -328,6 +329,7 @@ let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
      first-event resolver falls through to the much shorter inter-line idle
      value and any provider that prefills silently past it dies at
      awaiting_first_event (canary-multiturn-localmlx, 9/9 on 2026-08-16). *)
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
@@ -348,6 +350,7 @@ let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
    ([Keeper_turn_driver_try_provider] and [Keeper_provider_subcall]) treat
    [None] as "no bound". *)
 let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
@@ -364,6 +367,62 @@ let test_resolved_provider_call_deadline_defaults_to_failsafe_floor () =
     true
     (Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec
      > Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+
+(* The no-progress threshold must cover both stream budgets. An operator who
+   allows a longer silent prefill than the threshold has written a budget
+   that can never be reached: the watchdog would rotate the lane first. The
+   pair is refused where the configuration is frozen, naming both values
+   and their sources, whether the shorter value was declared or a floor. *)
+let test_a_stream_budget_longer_than_the_threshold_is_refused () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let longer_than_the_floor =
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec +. 600.0
+  in
+  write_toml
+    base_path
+    (Printf.sprintf "[turn]\nfirst_event_timeout_sec = %g\n" longer_than_the_floor);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  match Keeper_runtime_resolved.provider_call_deadline_sec () with
+  | _ -> fail "a first-event budget above the floored threshold was frozen"
+  | exception Env_config_core.Config_error message ->
+    let names needle = String.length needle > 0 && Astring.String.is_infix ~affix:needle message in
+    check bool "the refusal names the threshold and its floor source" true
+      (names "turn.provider_call_deadline_sec" && names "failsafe_floor");
+    check bool "the refusal names the budget and its toml source" true
+      (names "turn.first_event_timeout_sec" && names "toml");
+    check bool "the refusal says what to declare" true
+      (names (Printf.sprintf ">= %g" longer_than_the_floor))
+
+let test_a_threshold_covering_the_stream_budgets_is_frozen () =
+  with_env "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" None @@ fun () ->
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let allowance =
+    Keeper_runtime_resolved.provider_call_deadline_failsafe_floor_sec +. 600.0
+  in
+  write_toml
+    base_path
+    (Printf.sprintf
+       "[turn]\nfirst_event_timeout_sec = %g\nprovider_call_deadline_sec = %g\n"
+       allowance
+       allowance);
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.reset_for_tests ();
+  check (float 0.0001) "an equal threshold covers the budget"
+    allowance
+    (Keeper_runtime_resolved.provider_call_deadline_sec ());
+  check (float 0.0001) "the budget is frozen as declared"
+    allowance
+    (Keeper_runtime_resolved.first_event_timeout_sec ())
 
 let test_resolved_first_event_timeout_uses_toml () =
   (* End-to-end pin for the registry-driven mapping: runtime.toml
@@ -797,6 +856,8 @@ let () =
         ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
         ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor
         ; test_case "resolved provider-call threshold defaults to fail-safe floor" `Quick test_resolved_provider_call_deadline_defaults_to_failsafe_floor
+        ; test_case "a stream budget longer than the threshold is refused" `Quick test_a_stream_budget_longer_than_the_threshold_is_refused
+        ; test_case "a threshold covering the stream budgets is frozen" `Quick test_a_threshold_covering_the_stream_budgets_is_frozen
         ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error

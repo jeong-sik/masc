@@ -148,6 +148,30 @@ let freeze_from_current () =
         source = Failsafe_floor;
       }
   in
+  (* The no-progress threshold ends an attempt that has been silent for
+     that long. A stream budget longer than it can never be reached: the
+     watchdog cuts the silent prefill (or the silent gap) the operator
+     meant to allow, and rotates the lane. Such a pair is not a policy the
+     keeper can run, whichever of the two was declared and whichever was a
+     floor, so it is refused where it is read, with both values and their
+     sources named. *)
+  let describe (name : string) (field : float field) =
+    Printf.sprintf "turn.%s (%g, %s)" name field.value (source_to_string field.source)
+  in
+  let refuse_shorter_than ~budget_name (budget : float field) =
+    if provider_call_deadline_sec.value < budget.value
+    then
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "%s is shorter than %s: the no-progress threshold would end a silence \
+               that budget still allows; declare turn.provider_call_deadline_sec >= %g"
+              (describe "provider_call_deadline_sec" provider_call_deadline_sec)
+              (describe budget_name budget)
+              budget.value))
+  in
+  refuse_shorter_than ~budget_name:"first_event_timeout_sec" first_event_timeout_sec;
+  refuse_shorter_than ~budget_name:"stream_idle_timeout_sec" stream_idle_timeout_sec;
   {
     stream_idle_timeout_sec;
     first_event_timeout_sec;

@@ -45,11 +45,20 @@ per_suite_timeout=300
 # --self-test can exercise the same code the pull-request path does rather
 # than a copy of it.
 select_sources() {
+  # One directory down as well. A suite under test/<dir>/ is a suite the same
+  # way a flat one is -- the run loop builds it from its own directory -- but
+  # the pattern required test_ to follow test/ directly, so editing one
+  # selected nothing and the pull request that edited it ran no test of its
+  # own. Measured 2026-09-14: 57 suites live under test/<dir>/, all exactly
+  # one level down, against 1459 at the top. #36291 edited two of them and
+  # the gate reported "test sources this pull request edits: 1".
+  #
   # Guard grep's own no-match exit rather than the pipeline's: under pipefail a
   # bare `|| true` at the end also swallows a sed or sort that failed, and an
   # empty list then reads the same as "this pull request edits no tests".
   sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '(^|/)test/test_[a-z0-9_]+\.(ml|py)$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '(^|/)test/([a-z0-9_]+/)?test_[a-z0-9_]+\.(ml|py)$' \
+      || [ $? -eq 1 ]; } | sort -u)
 
   # A .py suite is run by a dune rule rather than a linked executable, so it
   # is a suite only when a rule declares an alias for it; the other 25 under
@@ -483,6 +492,11 @@ self_test() {
     "config/prompts/foo.md"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
+  # The hole this closes: the pattern wanted test_ straight after test/, so a
+  # suite one directory down was not a "test source this pull request edits".
+  check "an edited suite under a test directory is selected too" \
+    "test/keeper_chat_operations/test_keeper_chat_operation_store.ml" \
+    "test/keeper_chat_operations/test_keeper_chat_operation_store.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \

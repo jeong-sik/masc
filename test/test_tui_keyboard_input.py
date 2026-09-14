@@ -350,16 +350,17 @@ def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
     What follows the number inside the parens is where those asks came from --
-    held calls, Gate rows, operator entries -- and the renderer writes that
-    breakdown whenever the count is above zero. Spelling the header as
-    "(3)" asserted the parenthesis closes right after the number, which is a
-    fact about that breakdown rather than about how many asks are waiting.
+    held calls, Gate rows, operator entries, only the ones with rows. With one
+    kind the number is that kind's, painted in its colour ("(3 op)"); with
+    more the total leads ("(5: 2 gate · 3 op)"). Spelling the header as "(3)"
+    asserted the parenthesis closes right after the number, which is a fact
+    about that breakdown rather than about how many asks are waiting.
     """
     return re.compile(
         re.escape(b"MASC Approvals")
-        + rb"(?:\x1b\[[0-9;]*m)* \("
+        + rb"(?:\x1b\[[0-9;]*m)* \((?:\x1b\[[0-9;]*m)*"
         + str(count).encode()
-        + rb"[ )]"
+        + rb"[ ):]"
     )
 
 
@@ -3945,12 +3946,19 @@ def approval_selection_identity_interaction(
             timeout=3.0,
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(
+        landed = tab_until(
             process,
             master_fd,
             output,
             approvals_header(3),
         )
+        # Three operator entries, no held call, no Gate row: the title names
+        # the one kind that has rows and says no zero for the two that do not.
+        landed_plain = CSI_RE.sub(b"", frame_containing(landed, approvals_header(3)))
+        if b"MASC Approvals (3 op)" not in landed_plain or b"0 held" in landed_plain:
+            raise AssertionError(
+                f"Approvals title did not read its count by kind: {landed_plain!r}"
+            )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
         if not re.search(
@@ -9140,6 +9148,22 @@ def planning_review_hierarchy_interaction() -> Interaction:
             raise AssertionError(
                 f"the Task Review title repeats the badge's count: {title!r}"
             )
+        # The request's detail: Created in the terminal's zone, not the
+        # server's RFC 3339 text with its offset, and the reading note whole
+        # rather than cut at the row's end.
+        send_and_wait(process, master_fd, output, b"\r", b"VERIFICATION REQUEST")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        created = rows.get(screen_row_of(rows, b"Created"), b"")
+        if b"+09:00" in created or not re.search(rb"Created\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", created):
+            raise AssertionError(
+                f"the request's Created is not the terminal's clock: {created!r}"
+            )
+        if screen_row_of(rows, b"inspect now.") < 0:
+            raise AssertionError(
+                f"the reading note was cut instead of wrapped: {screen_text(bytes(output))!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Task Review")
         verdicts = send_and_wait(
             process,
             master_fd,
@@ -10100,6 +10124,61 @@ def keeper_lanes_ia_interaction(
             if detail not in lanes_plain:
                 raise AssertionError(
                     f"Lanes omitted selected-lane detail {detail!r}: "
+                    f"{lanes_plain!r}"
+                )
+
+        # The list is a table under one header, not five rows each carrying
+        # its own labels: the labels cost some forty cells a row, so beside
+        # the roster pane every row was cut at "runs 12", and the name column
+        # was a literal fifteen that "Workspace Curator" overran, pushing its
+        # whole row two cells right of the others. The header's words and the
+        # column each begins at are read in cells (one code point each here),
+        # and the lane whose name overran must start its status, its counts
+        # and its slots where the running lane and the header do.
+        lane_rows = {
+            row: text.decode("utf-8")
+            for row, text in screen_rows(bytes(output)).items()
+        }
+        header_row = screen_row_of(
+            screen_rows(bytes(output)), b"OK/FAIL/CANCEL"
+        )
+        if header_row < 0:
+            raise AssertionError(f"Lanes drew no column header: {lanes_plain!r}")
+        header = lane_rows[header_row]
+        column_words = (
+            "LANE", "STATUS", "ACTIVE", "RUNS", "OK/FAIL/CANCEL", "P50",
+            "SLOTS", "OBSERVED",
+        )
+        word_columns = [header.find(word) for word in column_words]
+        if word_columns != sorted(word_columns) or -1 in word_columns:
+            raise AssertionError(
+                f"Lanes header does not carry {column_words} in order: "
+                f"{header!r}"
+            )
+        status_column = header.index("STATUS")
+        counts_column = header.index("OK/FAIL/CANCEL")
+        slots_column = header.index("SLOTS")
+        for lane_name, status_word in (
+            ("Board Attention", "running "),
+            ("Workspace Curator", "idle "),
+        ):
+            row = lane_rows[
+                screen_row_of(screen_rows(bytes(output)), lane_name.encode())
+            ]
+            for column, cell in (
+                (status_column, status_word),
+                (counts_column, "12/0/0 "),
+                (slots_column, "glm-coding.glm-5-turbo "),
+            ):
+                if row.find(cell) != column:
+                    raise AssertionError(
+                        f"{lane_name} row puts {cell!r} at {row.find(cell)}, "
+                        f"header column is {column}: {row!r}"
+                    )
+        for own_label in ("slots glm", "runs 12", "ok/fail/cancel"):
+            if own_label in lanes_plain:
+                raise AssertionError(
+                    f"a lane row still carries its own label {own_label!r}: "
                     f"{lanes_plain!r}"
                 )
 

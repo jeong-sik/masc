@@ -1362,22 +1362,34 @@ let render_approvals (state : state) =
     | None -> ""
   in
   let action_badge = if action_inflight then "  [submitting]" else "" in
-  let type_breakdown =
-    let held_c = List.length state.keeper_tool_approvals in
-    let gate_c = List.length state.gate_pending in
-    let op_c = List.length (operator_approval_items state) in
-    if count > 0 then
-      Printf.sprintf " [%s%d held%s · %s%d gate%s · %s%d op%s]"
-        (Theme.warn ()) held_c Ansi.reset
-        (Theme.bad ()) gate_c Ansi.reset
-        (Theme.info ()) op_c Ansi.reset
-    else ""
+  (* The count and where it came from, naming only the lists that have a row
+     on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
+     with nothing in them, a bracket inside the parenthesis, and a total the
+     one kind that did have rows had already said. With one kind its count is
+     the total; with more, the total leads and the kinds follow it. *)
+  let count_text =
+    let kinds =
+      [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
+      ; (Theme.bad (), List.length state.gate_pending, "gate")
+      ; (Theme.info (), List.length (operator_approval_items state), "op")
+      ]
+      |> List.filter_map (fun (style, kind_count, word) ->
+             if kind_count = 0 then None
+             else
+               Some
+                 (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    match kinds with
+    | [] -> string_of_int count
+    | [ only ] -> only
+    | several ->
+      Printf.sprintf "%d: %s" count (String.concat " \xc2\xb7 " several)
   in
   let header =
     Printf.sprintf
-      "%s (%d%s%s%s)  %s  %s%s"
+      "%s (%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count type_breakdown queue_note held_note timestamp
+      count_text queue_note held_note timestamp
       (connection_badge state) action_badge
   in
 
@@ -4329,7 +4341,81 @@ let standalone_lane_status_style = function
   | Tui_decode.Standalone_unavailable -> (Theme.bad ())
   | Tui_decode.Standalone_no_retained_observation -> (Theme.muted ())
 
-let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
+(* Why the lane cannot admit, where the cell used to restate that it cannot.
+   "no admitted slot" says the same thing the status word beside it already
+   says; the projection carries the reason -- an unconfigured lane and a lane
+   whose registry could not be read are different problems and the operator
+   acts on them differently -- and nothing drew it. *)
+let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
+  let base =
+    match lane.sl_admitted_slots, lane.sl_admission_error with
+    | [], Some reason -> reason
+    | [], None ->
+      (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
+         cli suffix declared, an empty catalog list is a shape, not a
+         failure. *)
+      if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
+    | admitted, None -> String.concat "," admitted
+    | admitted, Some reason ->
+      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
+  in
+  let base =
+    match lane.sl_cli_slots with
+    | [] -> base
+    | cli -> base ^ " +cli:" ^ String.concat "," cli
+  in
+  (* A declared slot publication could not admit is the difference between
+     "configured single" and "configured double, one silently dropped" —
+     the boot WARN was the only place that said so before this. *)
+  match lane.sl_dropped_slots with
+  | [] -> base
+  | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
+
+(* The lane table's two measured columns. Every other column has a fixed
+   width; the lane's name and its slot list are the two the data sizes, and
+   the name column was a literal 15 that "Workspace Curator" overran, pushing
+   its whole row two cells right of the others. Measured from the rows the
+   way Schedules measures its subject, floored at the header's own word and
+   capped so one long slot list cannot take the row. *)
+let standalone_lane_status_cells = 14
+let standalone_lane_ok_fail_cancel_cells = 14
+let standalone_lane_p50_cells = 6
+
+let standalone_lane_columns (lanes : Tui_decode.standalone_lane list) =
+  let widest header value_of cap =
+    List.fold_left
+      (fun widest lane ->
+        max widest (Message_layout.display_width (Terminal_text.single_line (value_of lane))))
+      (Message_layout.display_width header) lanes
+    |> min cap
+  in
+  ( widest "LANE" (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label) 24
+  , widest "SLOTS" standalone_lane_slots_text 28 )
+
+(* The header the rows share, so a reader meets each label once instead of
+   on every row: the rows carried "slots", "active", "runs", "ok/fail/cancel",
+   "p50" and "observed" as words of their own, which beside the roster pane
+   cut every row at "runs 12" and left the failure counts off the screen for
+   all five lanes. The mark's cell is blank here.
+
+   The counts come before the slot list. They are what a reader compares
+   down the column, and they are fixed-width; the slot list is the one cell
+   that can run long, and the block under the list prints the selected lane's
+   slots in full, so it is the cell to lose first when the frame is narrow. *)
+let standalone_lane_header ~label_cells ~slots_cells width =
+  fit_width
+    (Printf.sprintf "    %s  %s  %6s  %4s  %s  %s  %s  %s"
+       (fit_width "LANE" label_cells)
+       (fit_width "STATUS" standalone_lane_status_cells)
+       "ACTIVE" "RUNS"
+       (fit_width "OK/FAIL/CANCEL" standalone_lane_ok_fail_cancel_cells)
+       (fit_width "P50" standalone_lane_p50_cells)
+       (fit_width "SLOTS" slots_cells)
+       "OBSERVED")
+    width
+
+let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
+    (lane : Tui_decode.standalone_lane) =
   let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
   (* A lane that is running says so twice and neither says for how long: the
      word "running", and a count of how many. The server has sent the start
@@ -4361,36 +4447,7 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
       ("\xe2\x9c\x97", status)
     | Tui_decode.Standalone_no_retained_observation, _ -> ("\xc2\xb7", status)
   in
-  (* Why the lane cannot admit, where the cell used to restate that it cannot.
-     "no admitted slot" says the same thing the status word beside it already
-     says; the projection carries the reason -- an unconfigured lane and a lane
-     whose registry could not be read are different problems and the operator
-     acts on them differently -- and nothing drew it. *)
-  let slots =
-    let base =
-      match lane.sl_admitted_slots, lane.sl_admission_error with
-      | [], Some reason -> reason
-      | [], None ->
-        (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
-           cli suffix declared, an empty catalog list is a shape, not a
-           failure. *)
-        if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
-      | admitted, None -> String.concat "," admitted
-      | admitted, Some reason ->
-        String.concat "," admitted ^ " \xc2\xb7 " ^ reason
-    in
-    let base =
-      match lane.sl_cli_slots with
-      | [] -> base
-      | cli -> base ^ " +cli:" ^ String.concat "," cli
-    in
-    (* A declared slot publication could not admit is the difference between
-       "configured single" and "configured double, one silently dropped" —
-       the boot WARN was the only place that said so before this. *)
-    match lane.sl_dropped_slots with
-    | [] -> base
-    | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
-  in
+  let slots = standalone_lane_slots_text lane in
   let observed_slots =
     match lane.sl_selected_slots with
     | [] -> "none"
@@ -4407,11 +4464,19 @@ let standalone_lane_row ~now ~frame width (lane : Tui_decode.standalone_lane) =
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
-    Printf.sprintf
-      "  %s%s %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
-      prefix mark lane.sl_label status Ansi.reset slots lane.sl_running_count
-      lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count
-      lane.sl_cancelled_count p50 observed_slots
+    Printf.sprintf "  %s%s %s  %s%s  %6d  %4d  %s  %s  %s  %s"
+      prefix mark
+      (fit_width (Terminal_text.single_line lane.sl_label) label_cells)
+      (fit_width status standalone_lane_status_cells)
+      Ansi.reset
+      lane.sl_running_count lane.sl_retained_run_count
+      (fit_width
+         (Printf.sprintf "%d/%d/%d" lane.sl_succeeded_count lane.sl_failed_count
+            lane.sl_cancelled_count)
+         standalone_lane_ok_fail_cancel_cells)
+      (fit_width p50 standalone_lane_p50_cells)
+      (fit_width (Terminal_text.single_line slots) slots_cells)
+      observed_slots
   in
   fit_width line width
 
@@ -4572,11 +4637,17 @@ let render_lanes_overview (state : state) =
      windowed/stale notes that follow them. *)
   (match state.standalone_lanes with
    | Some snapshot ->
+       let label_cells, slots_cells =
+         standalone_lane_columns snapshot.Tui_decode.sls_lanes
+       in
+       if snapshot.sls_lanes <> [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (standalone_lane_header ~label_cells ~slots_cells inner);
        List.iteri
          (fun index (lane : Tui_decode.standalone_lane) ->
            let row =
              standalone_lane_row ~now:(Unix.gettimeofday ())
-               ~frame:state.activity_frame inner lane
+               ~frame:state.activity_frame ~label_cells ~slots_cells inner lane
            in
            if
              index = state.lanes_standalone_cursor
@@ -5849,41 +5920,48 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Recent activity, folded from the metrics rows already read for this
        Keeper. The window is bounded by row count, so it can fall short of the
-       span; when it does, say what it reached instead of implying a full day. *)
-    let activity =
-      Keeper_activity.summarize
-        ~since:
-          (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
-        state.log_entries
-    in
+       span; when it does, say what it reached instead of implying a full day.
+       With no rows there is nothing to total, so the section says why and
+       draws no zeros: the same sentence the Logs tab gives for the same
+       read. *)
     add_section "Last 24h";
-    if not activity.Keeper_activity.aw_covered then
-      add_row "Window:"
-        (match activity.Keeper_activity.aw_oldest_ts with
-         | Some oldest ->
-           Printf.sprintf "partial, reaches %s"
-             (Terminal_text.short_timestamp oldest)
-         | None -> "no metrics rows read");
-    add_row "Turns / Heartbeats:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
-         activity.Keeper_activity.aw_heartbeats);
-    add_row "Tokens In / Out:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
-         activity.Keeper_activity.aw_output_tokens);
-    add_row "Cost:"
-      (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
-    add_row "Tool Calls:"
-      (string_of_int activity.Keeper_activity.aw_tool_calls);
-    add_row "Top Tools:"
-      (match activity.Keeper_activity.aw_top_tools with
-       | [] -> "-"
-       | tools ->
-         tools
-         |> List.map (fun (tool : Keeper_activity.tool_use) ->
-                Printf.sprintf "%s x%d"
-                  (Terminal_text.single_line tool.Keeper_activity.tu_name)
-                  tool.Keeper_activity.tu_calls)
-         |> String.concat "  ");
+    (match
+       Keeper_activity.read
+         ~since:
+           (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
+         state.log_entries
+     with
+     | Keeper_activity.No_rows ->
+       add_row "Window:"
+         (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
+     | Keeper_activity.Rows activity ->
+       if not activity.Keeper_activity.aw_covered then
+         add_row "Window:"
+           (match activity.Keeper_activity.aw_oldest_ts with
+            | Some oldest ->
+              Printf.sprintf "partial, reaches %s"
+                (Terminal_text.short_timestamp oldest)
+            | None -> "partial");
+       add_row "Turns / Heartbeats:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
+            activity.Keeper_activity.aw_heartbeats);
+       add_row "Tokens In / Out:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
+            activity.Keeper_activity.aw_output_tokens);
+       add_row "Cost:"
+         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+       add_row "Tool Calls:"
+         (string_of_int activity.Keeper_activity.aw_tool_calls);
+       add_row "Top Tools:"
+         (match activity.Keeper_activity.aw_top_tools with
+          | [] -> "-"
+          | tools ->
+            tools
+            |> List.map (fun (tool : Keeper_activity.tool_use) ->
+                   Printf.sprintf "%s x%d"
+                     (Terminal_text.single_line tool.Keeper_activity.tu_name)
+                     tool.Keeper_activity.tu_calls)
+            |> String.concat "  "));
     add_empty ();
 
     add_section "Autonomy";
@@ -7076,7 +7154,10 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
-  ; field "Created" request.vr_created_at
+    (* In the terminal's zone, like every other Created on a detail. This
+       one printed the server's RFC 3339 text, offset and all, under a header
+       clock in local time. *)
+  ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
@@ -7085,11 +7166,15 @@ let verification_detail_lines ~width
      drawn, two of them as "No X was recorded". The pane already tells a
      reader how to read the request from its artifacts and evidence, which is
      what those rows were pointing away from. *)
+  @ [ Ansi.dim, ""; Ansi.bold, "  HOW TO READ THIS" ]
+    (* Wrapped like the evidence items under it. As one row it was cut at
+       "what the verifier can …" beside the roster pane, and a reading
+       instruction that stops mid-sentence instructs nothing. *)
+  @ (Message_layout.wrap_body ~max_cells:(max 1 (width - 4))
+       ~sanitize:Keeper_chat.terminal_safe_text
+       "Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now."
+     |> List.map (fun line -> Ansi.dim, "    " ^ line))
   @ [ Ansi.dim, ""
-    ; Ansi.bold, "  HOW TO READ THIS"
-    ; ( Ansi.dim
-      , "    Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now." )
-    ; Ansi.dim, ""
     ; Ansi.bold
     , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
         (List.length request.vr_required_artifacts)

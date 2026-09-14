@@ -1,0 +1,8 @@
+Testing `exec shim observe drain'.
+This run has ID `ESXVZ916'.
+
+  [OK]          user_notif          0   socket attempt is recorded then denied.
+
+Full test results in `/masc-work/goo-yang-bong/masc/_build/.sandbox/d3dd19e2b0e937a474216acd8278a4b3/default/test/_build/_tests/exec shim observe drain'.
+Test Successful in 0.001s. 1 test run.
+exit=0

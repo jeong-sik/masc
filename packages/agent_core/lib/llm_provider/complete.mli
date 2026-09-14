@@ -316,10 +316,10 @@ val complete_serialized
     (see {!Http_client.read_ndjson}) and the SSE format used by
     Anthropic, OpenAI-compatible, Gemini, and Glm
     (see {!Http_client.read_sse}). The deadline resets after each
-    successful line. Thinking, answer, tool-call, heartbeat, substrate, and
-    terminal lines are all liveness; there is no thinking-only or total stream
-    wall-clock cutoff.
-    SSE keepalive comments reset the deadline like any other line.
+    payload-bearing line. Thinking, answer, tool-call, heartbeat, substrate,
+    and terminal lines are all liveness; there is no thinking-only or total
+    stream wall-clock cutoff. SSE keepalive comments do not renew the
+    deadline (see {!Http_client.read_sse}).
     A stalled endpoint surfaces as
     [TimeoutError { phase = Stream_idle state; _ }], where [state]
     records whether the stream was waiting for the first event, answer
@@ -331,12 +331,15 @@ val complete_serialized
     [stream_idle_timeout_s].
 
     Agent Core contract: [first_event_timeout_s], when set, bounds the wait for the
-    FIRST streaming event separately from [stream_idle_timeout_s]. Until the
-    first event arrives the read is bounded by [first_event_timeout_s];
-    [stream_idle_timeout_s] arms for inter-token idle only AFTER the first
-    event. This prevents a slow-but-alive silent prefill on a large context
-    (no keepalives) from being cancelled as [phase=first_token] under the
-    short inter-token idle value. When omitted the first-event wait falls back
+    first token-bearing streaming event separately from
+    [stream_idle_timeout_s]. Until a text, thinking, tool-argument or media
+    delta arrives the read is bounded by [first_event_timeout_s];
+    [stream_idle_timeout_s] arms for inter-token idle only after it. A
+    provider's opening frame (Responses [response.created], Anthropic
+    [message_start]) arrives before prefill and does not end that wait. This
+    prevents a slow-but-alive silent prefill on a large context (no
+    keepalives) from being cancelled as [phase=first_token] under the short
+    inter-token idle value. When omitted the first-event wait falls back
     to [body_timeout_s] (below), then to [stream_idle_timeout_s] — the bound
     that applied before this change — and stays unarmed when the caller wired
     none of the three. Inter-token idle still guards once the stream produces,

@@ -53,14 +53,34 @@ let gap_names draft =
     (fun gap -> Voice_wizard.gap_message gap)
     (Voice_wizard.gaps draft)
 
-(* An MCP tool synthesizes through a tool call and has no transcribe path.
-   Offering it for speech in would produce an endpoint every probe reports as
-   not asked. *)
-let test_speech_in_is_not_offered_an_mcp_tool () =
-  Alcotest.(check int) "speech out has three providers" 3
-    (List.length (Voice_wizard.providers_for Voice_setup.Tts));
-  Alcotest.(check bool) "speech in is not offered the tool kind" false
-    (List.mem Voice_wizard.Mcp_tool (Voice_wizard.providers_for Voice_setup.Stt))
+let offered section =
+  List.map Voice_wizard.provider_label (Voice_wizard.providers_for section)
+
+(* An MCP tool and say synthesize through something that has no transcribe
+   path, and whisper-cli is the mirror. Offering either across the line would
+   produce an endpoint every probe reports as not asked.
+
+   The whole list is pinned rather than its length, so the order is pinned too:
+   what a side offers first is what most people take. *)
+let test_each_side_is_offered_what_can_do_its_half () =
+  Alcotest.(check (list string)) "speech out, the command kind first"
+    [ "macos_say"; "elevenlabs"; "openai_compatible"; "mcp_tool" ]
+    (offered Voice_setup.Tts);
+  Alcotest.(check (list string)) "speech in, the same"
+    [ "whisper_cli"; "elevenlabs"; "openai_compatible" ]
+    (offered Voice_setup.Stt)
+
+(* Neither command is reached over the network, so neither is asked for an
+   address or for the variable holding a key. say is asked for no model
+   either: what it takes is a voice. *)
+let test_a_command_is_asked_for_neither_an_address_nor_a_key () =
+  Alcotest.(check (list string)) "say is asked for a name and a voice"
+    [ "section"; "provider"; "name"; "voice"; "review" ]
+    (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say));
+  Alcotest.(check (list string)) "whisper-cli is asked for the file it loads"
+    [ "section"; "provider"; "name"; "model"; "review" ]
+    (steps
+       (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli))
 
 let test_the_questions_depend_on_the_provider () =
   Alcotest.(check (list string))
@@ -163,6 +183,42 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
        Alcotest.(check (option string)) "and not to base_url" None
          endpoint.Voice_config.base_url)
 
+(* say starts with nothing prefilled, unlike ElevenLabs, and needs nothing
+   beyond a name and the voice speech out always asks for. An address or a key
+   on it would be a field nothing reads. *)
+let test_say_needs_only_a_name_and_a_voice () =
+  let blank = Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say in
+  Alcotest.(check string) "no address is guessed" "" blank.Voice_wizard.address;
+  Alcotest.(check string) "and no credential variable" ""
+    blank.Voice_wizard.credential_variable;
+  let draft =
+    { blank with
+      Voice_wizard.endpoint_id = "say-local"
+    ; Voice_wizard.voice = "Yuna"
+    }
+  in
+  Alcotest.(check (list string)) "nothing is missing" [] (gap_names draft)
+
+(* whisper-cli loads a file. Without it there is nothing to transcribe with,
+   and the refusal has to name the model rather than an address the command
+   never reaches. *)
+let test_whisper_cli_is_incomplete_without_the_model_file () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli)
+      with
+      Voice_wizard.endpoint_id = "whisper-local"
+    }
+  in
+  match Voice_wizard.changes draft with
+  | Ok _ -> Alcotest.fail "whisper-cli has nothing to load without the model file"
+  | Error gaps ->
+    Alcotest.(check bool) "the model is what it names" true
+      (List.mem Voice_wizard.Model_is_blank gaps);
+    Alcotest.(check bool) "and not an address it never reaches" false
+      (List.mem Voice_wizard.Address_is_blank gaps);
+    Alcotest.(check bool) "nor a key nothing sends" false
+      (List.mem Voice_wizard.Credential_variable_is_blank gaps)
+
 (* The one that matters. A draft the wizard calls complete has to produce a file
    the loader reads back, with the model on the endpoint it was given for. *)
 let test_a_complete_draft_writes_a_configuration_that_loads () =
@@ -215,6 +271,63 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
               (fun (endpoint : Voice_config.endpoint) -> endpoint.Voice_config.id)
               stt.Voice_config.endpoints)))
 
+(* The loader refuses an address on a command kind, so a draft that carried one
+   would write a file the next start cannot read back. This is the half the
+   step list cannot prove: the questions can be right while the endpoint still
+   goes out with a base_url nobody asked for. *)
+let test_a_command_endpoint_is_written_with_nothing_to_reach () =
+  with_config runtime_base (fun path ->
+    let draft =
+      { (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli)
+        with
+        Voice_wizard.endpoint_id = "whisper-local"
+      ; Voice_wizard.model = "/opt/models/ggml-large-v3.bin"
+      }
+    in
+    let changes =
+      match Voice_wizard.changes draft with
+      | Ok changes -> changes
+      | Error gaps ->
+        Alcotest.failf "the draft should be complete: %s"
+          (String.concat "; " (List.map Voice_wizard.gap_message gaps))
+    in
+    let standalone_path = Filename.concat (Filename.dirname path) "voice_config.json" in
+    let revision =
+      match Voice_setup.observe ~runtime_config_path:path ~standalone_path with
+      | Ok (revision, _) -> revision
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    (match
+       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+         ~expected_revision:revision changes
+     with
+     | Ok _revision -> ()
+     | Error error -> Alcotest.fail (Voice_setup.error_message error));
+    match Voice_config.parse_runtime_toml_text (read path) with
+    | Error message ->
+      Alcotest.failf "the wizard wrote something that does not load: %s" message
+    | Ok None -> Alcotest.fail "the section should exist after the wizard ran"
+    | Ok (Some config) ->
+      (match config.Voice_config.stt with
+       | None -> Alcotest.fail "speech in should be configured"
+       | Some stt ->
+         (match stt.Voice_config.endpoints with
+          | [ endpoint ] ->
+            Alcotest.(check bool) "the kind that runs a command" true
+              (endpoint.Voice_config.kind = Voice_config.Whisper_cli);
+            Alcotest.(check (option string)) "the file it loads, on the endpoint"
+              (Some "/opt/models/ggml-large-v3.bin") endpoint.Voice_config.model;
+            Alcotest.(check (option string)) "no address" None
+              endpoint.Voice_config.base_url;
+            Alcotest.(check (option string)) "no tool url" None
+              endpoint.Voice_config.mcp_url;
+            Alcotest.(check (option string)) "no key to send" None
+              endpoint.Voice_config.api_key_env;
+            Alcotest.(check (option string)) "and the name it is installed under" None
+              endpoint.Voice_config.command
+          | endpoints ->
+            Alcotest.failf "one endpoint was written, found %d" (List.length endpoints))))
+
 (* An MCP tool speaks and does not listen, so a draft carried to speech in has
    to give it up rather than sit on a provider its own offered list refuses. *)
 let test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen () =
@@ -229,6 +342,24 @@ let test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen () =
   Alcotest.(check string) "the name survives the move" "kept"
     moved.Voice_wizard.endpoint_id
 
+(* Toggling the side on the first step is how most drafts start, and each
+   command kind serves one side only. Landing on the other side's command
+   rather than on a provider that needs an account is what keeps the toggle
+   cheap. *)
+let test_moving_lands_on_the_command_the_other_side_runs () =
+  let heard =
+    Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli
+  in
+  Alcotest.(check bool) "speech in's command becomes speech out's" true
+    ((Voice_wizard.with_section heard Voice_setup.Tts).Voice_wizard.provider
+     = Voice_wizard.Macos_say);
+  let spoken =
+    Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say
+  in
+  Alcotest.(check bool) "and back" true
+    ((Voice_wizard.with_section spoken Voice_setup.Stt).Voice_wizard.provider
+     = Voice_wizard.Whisper_cli)
+
 let test_moving_keeps_a_provider_that_serves_both () =
   let draft =
     Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Openai_compatible
@@ -241,8 +372,10 @@ let () =
   Alcotest.run
     "voice_wizard"
     [ ( "which questions"
-      , [ Alcotest.test_case "speech in is not offered an mcp tool" `Quick
-            test_speech_in_is_not_offered_an_mcp_tool
+      , [ Alcotest.test_case "each side is offered what can do its half" `Quick
+            test_each_side_is_offered_what_can_do_its_half
+        ; Alcotest.test_case "a command is asked for neither an address nor a key" `Quick
+            test_a_command_is_asked_for_neither_an_address_nor_a_key
         ; Alcotest.test_case "the questions depend on the provider" `Quick
             test_the_questions_depend_on_the_provider
         ; Alcotest.test_case "elevenlabs arrives with what is the same everywhere" `Quick
@@ -251,6 +384,8 @@ let () =
             test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen
         ; Alcotest.test_case "moving keeps a provider that serves both" `Quick
             test_moving_keeps_a_provider_that_serves_both
+        ; Alcotest.test_case "moving lands on the command the other side runs" `Quick
+            test_moving_lands_on_the_command_the_other_side_runs
         ] )
     ; ( "when a draft is complete"
       , [ Alcotest.test_case "a local endpoint may go without a credential" `Quick
@@ -260,9 +395,15 @@ let () =
         ; Alcotest.test_case "speech out needs a voice" `Quick test_speech_out_needs_a_voice
         ; Alcotest.test_case "a tool endpoint carries its url as mcp_url" `Quick
             test_a_tool_endpoint_carries_its_url_as_mcp_url
+        ; Alcotest.test_case "say needs only a name and a voice" `Quick
+            test_say_needs_only_a_name_and_a_voice
+        ; Alcotest.test_case "whisper-cli is incomplete without the model file" `Quick
+            test_whisper_cli_is_incomplete_without_the_model_file
         ] )
     ; ( "what it writes"
       , [ Alcotest.test_case "a complete draft writes a configuration that loads" `Quick
             test_a_complete_draft_writes_a_configuration_that_loads
+        ; Alcotest.test_case "a command endpoint is written with nothing to reach" `Quick
+            test_a_command_endpoint_is_written_with_nothing_to_reach
         ] )
     ]

@@ -287,12 +287,22 @@ type timeout_knob =
 (** Parameter name of [timeout_knob], as callers spell it. *)
 val timeout_knob_to_param : timeout_knob -> string
 
-(** Which knob governs a timeout fired in [state]. For
-    [Awaiting_first_event] this follows the same precedence chain that arms
+(** Which budget the reader had armed when a deadline fired: the first-event
+    budget until the consumer reports its first [Output], the inter-token idle
+    budget after it. The consumer derives the phase from the same report it
+    returned to the reader, so the knob it names cannot drift from the bound
+    that fired. *)
+type budget_phase =
+  | Before_first_output
+  | After_first_output
+
+(** Which knob governs a timeout fired in [phase]. For
+    [Before_first_output] this follows the same precedence chain that arms
     the first-event wait ([first_event_timeout] > [body_timeout] >
-    [idle_timeout]); every later phase is inter-token idle by construction. *)
+    [idle_timeout]); [After_first_output] is inter-token idle by
+    construction. *)
 val governing_timeout_knob
-  :  state:stream_idle_state
+  :  phase:budget_phase
   -> first_event_timeout:float option
   -> body_timeout:float option
   -> idle_timeout:float option
@@ -654,17 +664,19 @@ val with_post_stream
     policy can see which stream state stalled.
 
     Agent Core contract: [first_event_timeout], when supplied (with [clock]),
-    bounds the wait for the FIRST meaningful line — the time-to-first-event
-    (TTFT / prefill) window — separately from [idle_timeout], which arms
-    only AFTER the first meaningful line for inter-token idle. A silent
-    prefill on a large context is slow-but-alive, not a hang, so it must not
-    be cut by the short [idle_timeout] value. A "meaningful line" here is a
-    genuine [data] field, and only that. An [event] field selects the dispatch
-    type but carries no payload, and a bare blank line is only a dispatch
-    delimiter: neither ends the first-event wait. Ending it on either would
-    replace the caller's first-event bound with the shorter inter-token one
-    before any provider data arrived — and when only [first_event_timeout] is
-    wired, it would leave the read unarmed entirely.
+    bounds the wait for the first event the consumer reports as [Output] —
+    the time-to-first-token (prefill) window — separately from
+    [idle_timeout], which arms only after that first output for inter-token
+    idle. A silent prefill on a large context is slow-but-alive, not a hang,
+    so it must not be cut by the short [idle_timeout] value. The reader
+    cannot tell output from a provider's opening frame, so it does not try:
+    the consumer returns [Continue Output] or [Continue Prelude] from
+    [on_data] and the reader switches budgets on the first [Output]. An
+    [event] field, a bare blank line and a [Prelude] event all leave the
+    first-event wait armed. Ending it on any of them would replace the
+    caller's first-event bound with the shorter inter-token one before the
+    model produced anything — and when only [first_event_timeout] is wired,
+    it would leave the read unarmed entirely.
     The effective bound is resolved from caller-supplied values only, in the
     order [first_event_timeout] > [body_timeout] (the caller's total body
     budget) > [idle_timeout] (the pre-RFC bound, kept so callers that wired
@@ -681,7 +693,21 @@ exception
     }
 (** Raised before an SSE event payload exceeds [max_event_bytes]. *)
 
-(** What the consumer wants after one dispatched event or line.
+(** What one dispatched event or line carried, as only the consumer's parser
+    can tell. The reader keeps the first-event budget armed until the consumer
+    reports the first [Output] and arms the inter-token idle budget after it.
+    A provider's opening frame is [Prelude]: Responses sends
+    [response.created] and Anthropic sends [message_start] before prefill and
+    before any reasoning, so a reader that switched budgets on the first data
+    line put a silent prefill under the short inter-token bound. Pings,
+    structural frames and anything else that carries no token are [Prelude]
+    too; a text, thinking, tool-argument or media delta is [Output]. *)
+type dispatched_event =
+  | Prelude
+  | Output
+
+(** What the consumer wants after one dispatched event or line, and what that
+    event was.
 
     [Stop] ends the read loop before its next blocking read. A consumer that
     has stopped consuming must return it: otherwise the socket keeps
@@ -697,7 +723,7 @@ exception
     truncated on purpose and finalize it as a complete answer. Stop because
     the answer is void, not because you have enough of it. *)
 type stream_continuation =
-  | Continue
+  | Continue of dispatched_event
   | Stop
 
 (** [max_event_bytes] bounds the JOINED payload of a single event, defaulting
@@ -736,10 +762,11 @@ val read_sse
     downstream policy can see which stream state stalled.
 
     Agent Core contract: [first_event_timeout], when supplied (with [clock]),
-    bounds the wait for the FIRST line — the time-to-first-event (TTFT /
-    prefill) window — separately from [idle_timeout], which arms only AFTER
-    the first line for inter-token idle. A leading blank line does NOT end the
-    first-event wait. Omitting [first_event_timeout] falls back to
+    bounds the wait for the first line the consumer reports as [Output] — the
+    time-to-first-token (prefill) window — separately from [idle_timeout],
+    which arms only after that first output for inter-token idle. A leading
+    blank line and a line reported as [Prelude] do NOT end the first-event
+    wait. Omitting [first_event_timeout] falls back to
     [body_timeout], then to [idle_timeout]; with none supplied the wait stays
     unarmed, as before this change. Inter-token idle still guards once the
     stream produces. Supplying [first_event_timeout] or [body_timeout] WITHOUT

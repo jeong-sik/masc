@@ -1681,7 +1681,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
           (Printf.sprintf
              "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
              (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
-      with_optional_timeout clock
+      with_idle_timeout clock
         (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
         (fun () ->
           Eio.Flow.copy_string payload stdin_w;
@@ -1701,7 +1701,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
              })
       else
       try
-        with_optional_timeout clock
+        with_idle_timeout clock
           (Runtime_wall_clock.cap_window wall_clock (window_for_phase config !receive_phase))
           (fun () -> Eio.Buf_read.line reader)
         |> parse_wire_line
@@ -1752,7 +1752,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     config
     (fun io ->
     let with_admission_timeout callback =
-      with_optional_timeout clock (Some config.admission_timeout_s) callback
+      with_idle_timeout clock config.admission_timeout_s callback
     in
     run_protocol
       io

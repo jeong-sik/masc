@@ -2613,17 +2613,29 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" in
   let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
+  (* The clock and the badge always ride this row; the modes ride it when the
+     row can hold them, and take one of their own when it cannot. Measured
+     against the title the strip has already been sized for, so the strip is
+     not asked to shrink twice. *)
+  let chrome = Printf.sprintf "  %s  %s" timestamp (connection_badge state) in
+  let title =
+    planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+      ~after:chrome
+  in
+  (* Unchanged: whether the modes ride this row is the same question it was,
+     asked of the title the strip has now been sized for. What changed is that
+     the clock and the badge are no longer what falls off when the answer is
+     wrong -- they are reserved before the strip is measured, and the modes
+     have a row of their own to fall back to. *)
   let modes_fit_header =
-    (* The timestamp can overflow and require a truncation cell after modes. *)
     Message_layout.display_width (title ^ "  " ^ modes) < framed_inner_width cols
   in
-  let header = Printf.sprintf "%s%s  %s  %s" title
+  let header = Printf.sprintf "%s%s%s" title
     (if modes_fit_header then "  " ^ modes else "")
-    timestamp (connection_badge state) in
+    chrome in
 
   box_top buf cols;
   box_line buf cols header;
@@ -2929,7 +2941,11 @@ let planning_detail_pane (state : state)
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf "%s  %s%s%s  %s"
-    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:"")
+    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+       ~after:
+         (Printf.sprintf "  %s  %s"
+            (bracketed ~max_cells:planning_phase_column status_label)
+            (fit_width (Terminal_text.single_line goal.pg_id) 20)))
     status_color (bracketed ~max_cells:planning_phase_column status_label) Ansi.reset
     (fit_width (Terminal_text.single_line goal.pg_id) 20)
   in
@@ -4756,7 +4772,8 @@ let render_lanes_overview (state : state) =
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap))
+                  ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
+                  ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
              [ ( Printf.sprintf "Lanes (%d)" keeper_lane_count, false )
              ; ( Printf.sprintf "All runtimes (%d)" all_count, false )
              ; ( Printf.sprintf "Standalone (%s)"
@@ -6707,7 +6724,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
         Ansi.reset tab_strip_gap
     in
     let tabs =
-      tab_strip ~width:(tab_strip_width ~cols ~before)
+      tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         (List.map
            (fun tab ->
              (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
@@ -7064,9 +7081,11 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
-let activity_tab_strip ~cols ~on_logs =
+let activity_tab_strip ~cols ~on_logs ~after =
   tab_strip
-    ~width:(tab_strip_width ~cols ~before:(screen_title " MASC Activity" ^ tab_strip_gap))
+    ~width:
+      (tab_strip_width ~cols
+         ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
     [ ("Events", not on_logs); ("Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
@@ -7074,10 +7093,13 @@ let activity_tab_strip ~cols ~on_logs =
    the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
    as that tab's count. It stays after the strip rather than moving before it,
    so the tabs do not shift sideways when the count grows a digit. *)
-let activity_title ~cols ~on_logs reading =
+(* [after] is what the caller draws past this title on the same row -- the
+   clock and the badge -- so the strip can leave room for it. *)
+let activity_title ~cols ~on_logs ~after reading =
   Printf.sprintf "%s  %s  \xc2\xb7  %s"
     (screen_title " MASC Activity")
-    (activity_tab_strip ~cols ~on_logs)
+    (activity_tab_strip ~cols ~on_logs
+       ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after))
     reading
 
 let render_system_logs (state : state) =
@@ -7121,6 +7143,7 @@ let render_system_logs (state : state) =
     | None ->
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
+             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
              (title_missing_reading ~error:state.system_logs_error))
           timestamp (connection_badge state)
     | Some snapshot ->
@@ -7128,6 +7151,7 @@ let render_system_logs (state : state) =
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
+             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
              (Printf.sprintf "(%d of %d, seq %d)%s" total_entries
                 snapshot.sys_total snapshot.sys_latest_seq filter_note))
           timestamp (connection_badge state)
@@ -7255,7 +7279,11 @@ let render_verification_list (state : state) =
     match state.verification with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
+             ~after:
+               (Printf.sprintf "  %s  %s  %s"
+                  (title_missing_reading ~error:state.verification_error)
+                  timestamp (connection_badge state)))
           (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
@@ -7273,7 +7301,8 @@ let render_verification_list (state : state) =
           else Printf.sprintf " (%d of %d)" shown total
         in
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window)
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
+             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state)))
           timestamp (connection_badge state)
   in
   box_top buf cols;
@@ -7539,6 +7568,9 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_line buf cols
     (Printf.sprintf "%s  %s"
        (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 details  %s"
+               (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
         ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
@@ -7706,7 +7738,11 @@ let render_harness_list (state : state) =
     match state.harness with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:"")
+          (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
+             ~after:
+               (Printf.sprintf "  %s  %s  %s"
+                  (title_missing_reading ~error:state.harness_error)
+                  timestamp (connection_badge state)))
           (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
@@ -7728,7 +7764,8 @@ let render_harness_list (state : state) =
         Printf.sprintf "%s  %s  %s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts
              ~window:
-               (Printf.sprintf " (%d%s%s)" shown of_total by_fallback))
+               (Printf.sprintf " (%d%s%s)" shown of_total by_fallback)
+             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state)))
           timestamp (connection_badge state)
   in
   box_top buf cols;
@@ -7985,6 +8022,10 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
        (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
+          ~after:
+            (Printf.sprintf " \xe2\x96\xb8 verdict  %s  %s"
+               (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
+               (connection_badge state))
         ^ " \xe2\x96\xb8 verdict")
        (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
        (connection_badge state));
@@ -10402,7 +10443,10 @@ let render_runtime (state : state) =
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap))
+                  ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap)
+                  ~after:
+                    (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
+                       timestamp (connection_badge state)))
              [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
                    (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
@@ -11187,6 +11231,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf "%s  %s  %s"
       (activity_title ~cols ~on_logs:false
+         ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
          (Printf.sprintf "(%s \xc2\xb7 %s held)"
             (Message_layout.count_noun shown "row")
             (Message_layout.count_noun held "event")))
@@ -12471,7 +12516,7 @@ let render_runtime_params (state : state) =
   box_top buf cols;
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -12730,7 +12775,7 @@ let render_prompt_registry (state : state) =
            (List.length entries) Ansi.reset)
   in
   box_line buf cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -12927,7 +12972,7 @@ let render_runtime_prompt_assets (state : state) =
       Ansi.dim count_text Ansi.reset
   in
   box_line buf cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
@@ -13065,7 +13110,7 @@ let render_presets (state : state) =
       Ansi.reset
   in
   box_line buf cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_divider buf cols;
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
@@ -13201,7 +13246,7 @@ let render_themes (state : state) =
     ^ tab_strip_gap
   in
   box_line buf cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_divider buf cols;
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
@@ -13212,22 +13257,23 @@ let render_themes (state : state) =
      product's tab strip draws a choice: the one in force marked. It read
      "Filter: [f] [All 53] · Dark 40 · Light 13", where the brackets meant a
      key once and the chosen filter once, on the same row. *)
-  let filter_tag =
-    let chip label active count = (label ^ " " ^ string_of_int count, active) in
-    Ansi.dim ^ "f:filter  " ^ Ansi.reset
-    ^ tab_strip
-        ~width:(tab_strip_width ~cols ~before:"  f:filter  ")
-        [ chip "All" (state.theme_filter = `All) (List.length all_entries)
-        ; chip "Dark" (state.theme_filter = `Dark) dark_count
-        ; chip "Light" (state.theme_filter = `Light) light_count
-        ]
-  in
   let explanation =
     if cols >= 92 then
       "  ·  "
       ^ (if lift_on then "native 7/7=no lift · lift N/7=N raised"
          else "native 7/7=all pass · N/7 low=below 4.5:1")
     else ""
+  in
+  let filter_tag =
+    let chip label active count = (label ^ " " ^ string_of_int count, active) in
+    Ansi.dim ^ "f:filter  " ^ Ansi.reset
+    ^ tab_strip
+        ~width:
+          (tab_strip_width ~cols ~before:"  f:filter  " ~after:explanation)
+        [ chip "All" (state.theme_filter = `All) (List.length all_entries)
+        ; chip "Dark" (state.theme_filter = `Dark) dark_count
+        ; chip "Light" (state.theme_filter = `Light) light_count
+        ]
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
   let chosen = state.theme_choice in
@@ -13316,8 +13362,7 @@ let render_config_models (state : state) =
   in
   let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
-    (Printf.sprintf "%s%s  %s  %s" before (config_pane_strip ~cols ~before state)
-       path_note (connection_badge state));
+    (config_pane_title ~cols ~before ~note:path_note state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -13510,7 +13555,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   box_top head cols;
   let before = screen_title " MASC Voice · setup" ^ tab_strip_gap in
   box_line head cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_line buf cols "";
   box_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
@@ -13624,7 +13669,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   box_top head cols;
   let before = screen_title " MASC Voice \xc2\xb7 keeper voices" ^ tab_strip_gap in
   box_line head cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_line buf cols "";
   list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
     Terminal_text.single_line agent);
@@ -13720,7 +13765,7 @@ let render_voice (state : state) =
   box_top head cols;
   let before = screen_title " MASC Voice" ^ tab_strip_gap in
   box_line head cols
-    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+    (config_pane_title ~cols ~before state);
   box_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -13813,14 +13858,14 @@ let render_config (state : state) =
   in
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
-    Printf.sprintf "%s%s  %s  %s  %s" before
-      (config_pane_strip ~cols ~before state) path_note
-      (Printf.sprintf "%s%s%s" Ansi.dim
-         (let now = Unix.localtime (Unix.gettimeofday ()) in
-          Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-            now.Unix.tm_sec)
-         Ansi.reset)
-      (connection_badge state)
+    config_pane_title ~cols ~before ~note:path_note
+      ~clock:
+        (Printf.sprintf "%s%s%s" Ansi.dim
+           (let now = Unix.localtime (Unix.gettimeofday ()) in
+            Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+              now.Unix.tm_sec)
+           Ansi.reset)
+      state
   in
   (* The frame, its fill and the footer are the contract's. The surface
      subtracted a literal 7 and drew six fixed rows, so the footer stood one
@@ -14084,19 +14129,20 @@ let render_context_inspector state =
     if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
     else ""
   in
+  (* The search query, drawn where the typing lands: the Keepers strip's
+     own indicator sits on a surface this pane replaced. *)
+  let search_marker = search_marker_styled state in
   let tabs =
     tab_strip
       ~width:
         (tab_strip_width ~cols
-           ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  "))
+           ~before:(screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  ")
+           ~after:search_marker)
       [ ("stack", state.context_inspector_tab = Masc_tui_context_inspector.Composition)
       ; ("request", state.context_inspector_tab = Masc_tui_context_inspector.Exact_input)
       ; ("proof", state.context_inspector_tab = Masc_tui_context_inspector.Input_map)
       ]
   in
-  (* The search query, drawn where the typing lands: the Keepers strip's
-     own indicator sits on a surface this pane replaced. *)
-  let search_marker = search_marker_styled state in
   let hints =
     match state.context_inspector_exact with
     | Some _ -> "j/k:scroll  Esc:list"

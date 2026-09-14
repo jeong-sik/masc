@@ -144,7 +144,7 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
   let line =
     "  "
     ^ tab_strip
-        ~width:(tab_strip_width ~cols ~before:"  ")
+        ~width:(tab_strip_width ~cols ~before:"  " ~after:"")
         (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
   if Layout.display_width line > inner_width then

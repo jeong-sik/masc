@@ -10250,7 +10250,6 @@ def keeper_lanes_ia_interaction(
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
-            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
             "Output meaning: the accepted candidate judgment JSON.",
             "Evidence: structured-output generation, not a MASC tool loop;",
         ):

@@ -416,6 +416,13 @@ let display_string_option = function
 ;;
 let display_float_option = Option.fold ~none:"(none)" ~some:display_float
 
+(* A credential is projected as present or absent, never as its value. The
+   web-search chain admits a provider on the same test, a non-blank value. *)
+let display_credential_presence = function
+  | Some value when String.trim value <> "" -> "(set)"
+  | Some _ | None -> "(none)"
+;;
+
 let bounded_int_from_env ~default ~min_value ~max_value env_name =
   Env_config_core.get_int ~default env_name |> max min_value |> min max_value
 ;;
@@ -478,6 +485,12 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
               row.env_name)
        | "MASC_KEEPER_ENABLE_THINKING" ->
          display_bool (Env_config_core.get_bool ~default:false row.env_name)
+       | "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED" ->
+         display_bool (Feature_flag_registry.get_bool row.env_name)
+       | "MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES" ->
+         display_int Env_config_keeper.KeeperSpawn.spawn_output_buffer_bytes
+       | "MASC_KEEPER_LANE_ADMISSION_WAIT_BUDGET_SEC" ->
+         display_float (Env_config_keeper.KeeperLaneGate.admission_wait_budget_sec ())
        | "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" ->
          (match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
           | Some value -> display_float value
@@ -531,6 +544,10 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_float (Env_config_keeper.KeeperVision.candidate_backoff_base_sec ())
        | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" ->
          display_float (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())
+       | "MASC_KEEPER_VISION_MAX_DIMENSION" ->
+         display_int (Env_config_keeper.KeeperVision.max_dimension ())
+       | "MASC_KEEPER_PEER_ARTIFACT_MAX_BYTES" ->
+         display_int (Env_config_keeper.KeeperPeerArtifact.max_bytes ())
        | "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" ->
          display_int (Env_config_keeper.KeeperGeneratedMedia.max_bytes ())
        | "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES" ->
@@ -574,6 +591,17 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_int (Env_config_runtime.Tools.web_search_timeout_sec ())
        | "MASC_WEB_SEARCH_CACHE_TTL_SEC" ->
          display_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())
+       | "BRAVE_SEARCH_API_KEY"
+       | "TAVILY_API_KEY"
+       | "EXA_API_KEY"
+       | "BING_SEARCH_API_KEY"
+       | "AZURE_BING_SEARCH_API_KEY"
+       | "OLLAMA_API_KEY" -> display_credential_presence (Env_config_core.raw_value_opt row.env_name)
+       | "MASC_OTEL_ENABLED" ->
+         display_bool
+           (Env_config_core.get_bool
+              ~default:Masc_network_defaults.otel_default_enabled
+              row.env_name)
        | unsupported ->
          raise
            (Env_config_core.Config_error

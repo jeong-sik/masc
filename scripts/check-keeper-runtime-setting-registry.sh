@@ -18,9 +18,22 @@ for required in "$REGISTRY" "$RUNTIME_CONFIG" "$KEEPER_CONFIG" "$SUPERVISOR_CONF
   [ -f "$required" ] || fail "missing required source: $required"
 done
 
-registry_envs="$({
-  sed -n 's/.*~env_name:"\(MASC_[A-Z0-9_]*\)".*/\1/p' "$REGISTRY"
-} | sort -u)"
+# A row names its env either as a literal or through a constant the reader
+# defines once (`~env_name:Env_config_keeper.KeeperKeepalive.x_env_key`);
+# the constant resolves to the literal it is bound to, and a constant the
+# reader does not define is an error rather than a silently missing row.
+registry_env_names() {
+  sed -n 's/.*~env_name:"\([A-Z][A-Z0-9_]*\)".*/\1/p' "$REGISTRY"
+  sed -n 's/.*~env_name:Env_config_keeper\.[A-Za-z_]*\.\([a-z_]*\).*/\1/p' "$REGISTRY" \
+    | while IFS= read -r ident; do
+        [ -n "$ident" ] || continue
+        literal="$(sed -n "s/^ *let $ident = \"\([A-Z][A-Z0-9_]*\)\".*/\1/p" "$KEEPER_CONFIG")"
+        [ -n "$literal" ] || fail "registry row names $ident, which $KEEPER_CONFIG does not bind to a literal"
+        echo "$literal"
+      done
+}
+
+registry_envs="$(registry_env_names | grep '^MASC_' | sort -u)"
 
 declared_keeper_envs="$({
   grep -ho 'MASC_KEEPER_[A-Z0-9_]*' "$KEEPER_CONFIG" "$SUPERVISOR_CONFIG" || true
@@ -41,9 +54,7 @@ done <<<"$declared_keeper_envs"
 # ones — provider credentials (BRAVE_SEARCH_API_KEY etc.) are registered
 # without the prefix and must not escape this check. The coverage check
 # above stays MASC_KEEPER_-scoped by design.
-duplicate_envs="$({
-  sed -n 's/.*~env_name:"\([A-Z][A-Z0-9_]*\)".*/\1/p' "$REGISTRY"
-} | sort | uniq -d)"
+duplicate_envs="$(registry_env_names | sort | uniq -d)"
 [ -z "$duplicate_envs" ] || fail "duplicate env identities: $duplicate_envs"
 
 duplicate_toml="$({

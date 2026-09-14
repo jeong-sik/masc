@@ -440,3 +440,13 @@ type capture_outcome =
           status with an invented name. *)
 
 val capture_outcome_of_json : Yojson.Safe.t -> capture_outcome
+
+module For_testing : sig
+  (** The window one Voice MCP call runs under: an answer that arrived as
+      the window closed is the answer; [Timed_out] only when none had. *)
+  val with_timeout
+    :  clock:_ Eio.Time.clock
+    -> ?timeout:float
+    -> (unit -> ('a, mcp_call_error) result)
+    -> ('a, mcp_call_error) result
+end

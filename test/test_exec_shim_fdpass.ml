@@ -11,7 +11,13 @@ open Alcotest
    body), [b] exactly once (in the finally).  The child closes its own
    copies — fork gives it a separate descriptor table, so its closes do
    not touch the parent's.  The child reports failure through its exit
-   status so a dead child cannot masquerade as a short read. *)
+   status so a dead child cannot masquerade as a short read.
+
+   scripts/ci/run-edited-tests.sh selects a suite for an edited source by
+   an exact quoted path match, not by directory: this suite exercises
+   "lib/exec_shim/fdpass_stub.c" and "lib/exec_shim/shim_fdpass.ml"
+   directly, so both are named here to stay selected when either changes
+   (review 5198897765 on PR #36319, observation 3). *)
 
 let child_exit_ok = 0
 let child_exit_send_failed = 3

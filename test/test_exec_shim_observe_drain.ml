@@ -6,7 +6,13 @@ open Alcotest
    receives the fd, drains one notification, answers EPERM, and the child's
    socket(2) returns EPERM.  This is the "record the attempt, then refuse"
    shape the design note defers to phase 2 — the refusal now carries
-   evidence of the attempt itself, not only "the box applied". *)
+   evidence of the attempt itself, not only "the box applied".
+
+   scripts/ci/run-edited-tests.sh selects a suite for an edited source by
+   an exact quoted path match, not by directory: this suite exercises
+   "lib/exec_shim/observe_stub.c" and "lib/exec_shim/shim_fdpass.ml"
+   directly, so both are named here to stay selected when either changes
+   (review 5198897765 on PR #36319, observation 3). *)
 
 external observe_install : Unix.file_descr -> bool = "ocaml_shim_observe_install"
 external drain : Unix.file_descr -> int = "ocaml_shim_user_notif_drain"

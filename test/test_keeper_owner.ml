@@ -1927,10 +1927,18 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
           Eio.Promise.await release)
       }
   in
+  let path = Filename.temp_file "keeper-owner-settle-stop-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~sw
     ~keeper_name:"settle-stop"
     ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~runner ~initial_meta:(Some (make_meta "settle-stop")) ()) in
+    ~operation_store_path:path
+    ~now:(fun () -> 42.0)
+    ~operation_runner:(Some runner)
+    ~on_turn_slot_released:None
+    ~initial_meta:(Some (make_meta "settle-stop"))) in
   let only = operation_id "settle-only" in
   ignore (owner_ok (Owner.submit_operation owner
     ~operation_id:only ~source:operation_source ~input:(operation_input "wait")));

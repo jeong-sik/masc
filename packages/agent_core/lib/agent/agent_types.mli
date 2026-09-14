@@ -110,10 +110,11 @@ type options =
         bound fires and names its own knob. Threaded through
         {!Pipeline.stage_route} into {!Llm_provider.Complete.complete_serialized}
         and {!Llm_provider.Complete.complete_admitted} as their
-        [call_timeout_s]; on the exact-fit path the count-tokens round trip
-        spends from the same window first, and the completion arms what it
-        left. The streaming path does not read it, a stream's duration being
-        its own. Requires [clock]. @since 0.231.15 *)
+        [call_timeout_s]; on the exact-fit path the count-tokens request,
+        its permit wait and its round trip, spends from the same window
+        first, and the completion arms what it left. The streaming path does
+        not read it, a stream's duration being its own. Requires [clock].
+        @since 0.231.15 *)
   ; admission_timeout_s : float option
     (** Bound on the wait for a provider admission permit before a streaming
         completion, the one part of a stream call that is not the stream. A

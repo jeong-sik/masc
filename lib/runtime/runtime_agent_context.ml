@@ -66,10 +66,10 @@ type config =
         provider's admission permit included: a call still queued behind
         another caller's permit when it runs out ends as
         [TimeoutError { phase = Queue }] without being sent. On the exact-fit
-        path the count-tokens round trip spends from the same window first.
-        A caller that has one deadline for its whole call (a fusion panelist
-        or judge) sets this together with [body_timeout_s]; the streaming
-        path does not read it. *)
+        path the count-tokens request, its permit wait and its round trip,
+        spends from the same window first. A caller that has one deadline
+        for its whole call (a fusion panelist or judge) sets this together
+        with [body_timeout_s]; the streaming path does not read it. *)
   ; admission_timeout_s : float option
     (** Bound on the wait for the provider's admission permit before a
         streaming completion. A keeper turn queued behind other keepers'

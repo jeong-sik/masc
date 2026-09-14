@@ -56,6 +56,7 @@ val measure
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
+  -> ?call_timeout_s:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized

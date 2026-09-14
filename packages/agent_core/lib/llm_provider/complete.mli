@@ -73,12 +73,19 @@ val admit_request_body
 (** Validate and measure the exact prepared request through the provider-native
     count protocol. Invalid local configuration fails before admission or I/O;
     the count round-trip uses the same provider admission authority as
-    completion dispatch. Unsupported protocols return the existing typed
-    [Unsupported] measurement error; no estimate is used. *)
+    completion dispatch, so it waits for the endpoint's permit like the
+    completion does. [timeout_s] bounds the count round trip; [call_timeout_s]
+    bounds the permit wait and the round trip together, in seconds from the
+    call, ending the wait as [TimeoutError { phase = Queue }] and the round
+    trip as [TimeoutError { phase = Non_streaming_body }], both carried as
+    [Input_count_failed (Transport _)]. Neither is a bound without [clock].
+    Unsupported protocols return the existing typed [Unsupported] measurement
+    error; no estimate is used. *)
 val measure_request
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
+  -> ?call_timeout_s:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized_request

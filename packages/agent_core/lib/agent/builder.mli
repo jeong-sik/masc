@@ -106,9 +106,9 @@ val with_body_timeout : float -> t -> t
     still waiting for its permit when the bound runs out ends as
     [TimeoutError { phase = Queue }] without being sent; [with_body_timeout]
     still arms inside it for the round trip. On the exact-fit path the
-    count-tokens round trip spends from the same window first. The streaming
-    completion does not read it. Requires a clock on the underlying request.
-    @since 0.231.15 *)
+    count-tokens request, its permit wait and its round trip, spends from the
+    same window first. The streaming completion does not read it. Requires a
+    clock on the underlying request. @since 0.231.15 *)
 val with_call_timeout : float -> t -> t
 
 (** Set the bound on the wait for a provider admission permit before a

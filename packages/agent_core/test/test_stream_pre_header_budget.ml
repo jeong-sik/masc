@@ -1,12 +1,14 @@
-(** The phase before the response headers is bounded.
+(** The phase before the first body read is bounded.
 
     A server that accepts the request and never answers held
     [Http_client.with_post_stream] for as long as the socket stayed open
     unless the provider declared a connect budget: the first-event budget is
     armed on the reader, and such a server never lets the caller reach the
-    reader. These cases run the real client against loopback listeners that
-    accept and stay silent, and read the elapsed time off the clock, so a
-    hang is a failure at [outer_budget_s] and not a wait. *)
+    reader. A server that answers with a refusing status line and no body
+    held it the same way, past the headers. These cases run the real client
+    against loopback listeners that stall at one of those points, and read
+    the elapsed time off the clock, so a hang is a failure at
+    [outer_budget_s] and not a wait. *)
 
 module Http_client = Llm_provider.Http_client
 
@@ -30,6 +32,50 @@ let start_silent_server ~sw ~net =
     Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
       let buf = Cstruct.create 4096 in
       try
+        while true do
+          ignore (Eio.Flow.single_read flow buf)
+        done
+      with
+      | End_of_file | Eio.Io _ -> ()));
+  match Eio.Net.listening_addr listening with
+  | `Tcp (_, port) -> port
+  | `Unix _ -> invalid_arg "expected a TCP listening socket"
+;;
+
+(* Length the refusing server promises and never delivers, and the body it
+   delivers when told to. The number only has to be non-zero so the client
+   waits for bytes that never come. *)
+let refusal_body = {|{"error":{"message":"slow down","type":"rate_limit_error"}}|}
+
+(* Accepts one connection, reads the request until the blank line that ends
+   its headers, answers with a 429 status line and headers that promise
+   [refusal_body], and then either sends that body or nothing more. The
+   status line reaches the client, so this peer stalls AFTER the headers,
+   where the silent server above never gets. *)
+let start_refusing_server ~sw ~net ~sends_body =
+  let listening =
+    Eio.Net.listen ~sw ~backlog:5 ~reuse_addr:true net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+      let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+      let rec drop_request_headers () =
+        match Eio.Buf_read.line reader with
+        | "" -> ()
+        | _ -> drop_request_headers ()
+      in
+      try
+        drop_request_headers ();
+        Eio.Flow.copy_string
+          (Printf.sprintf
+             "HTTP/1.1 429 Too Many Requests\r\n\
+              Content-Type: application/json\r\n\
+              Content-Length: %d\r\n\
+              \r\n"
+             (String.length refusal_body))
+          flow;
+        if sends_body then Eio.Flow.copy_string refusal_body flow;
+        let buf = Cstruct.create 4096 in
         while true do
           ignore (Eio.Flow.single_read flow buf)
         done
@@ -159,6 +205,31 @@ let test_the_budget_covers_the_tls_handshake () =
          ~budget_s:0.5
 ;;
 
+(* The refusal body is read inside the window. A 429 whose body never
+   arrives used to hold the client with no bound of its own once the status
+   line was in: the reader's budgets are armed only on a 200. *)
+let test_a_refusal_whose_body_never_arrives_runs_out_the_first_event_budget () =
+  with_env @@ fun ~sw ~clock ~net ->
+  let port = start_refusing_server ~sw ~net ~sends_body:false in
+  run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:0.5 ()
+  |> check_timeout_phase
+       ~label:"429 headers, no body"
+       ~expected:Http_client.First_token
+       ~budget_s:0.5
+;;
+
+let test_a_complete_refusal_is_still_the_typed_http_error () =
+  with_env @@ fun ~sw ~clock ~net ->
+  let port = start_refusing_server ~sw ~net ~sends_body:true in
+  match run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:5.0 () with
+  | Ended (Error (Http_client.HttpError { code = 429; body; _ })), elapsed ->
+    Alcotest.(check string) "the refusal body is the one the peer sent" refusal_body body;
+    if elapsed >= slack_s
+    then Alcotest.failf "a complete refusal took %.2fs; it must not wait on the budget" elapsed
+  | other, elapsed ->
+    Alcotest.failf "expected HttpError 429 with the peer's body, got %s after %.2fs" (describe other) elapsed
+;;
+
 let () =
   Alcotest.run
     "stream pre-header budget"
@@ -179,6 +250,16 @@ let () =
             "the budget covers the TLS handshake"
             `Quick
             test_the_budget_covers_the_tls_handshake
+        ] )
+    ; ( "after a refusing status line"
+      , [ Alcotest.test_case
+            "a refusal whose body never arrives runs out the first-event budget"
+            `Quick
+            test_a_refusal_whose_body_never_arrives_runs_out_the_first_event_budget
+        ; Alcotest.test_case
+            "a complete refusal is still the typed HTTP error"
+            `Quick
+            test_a_complete_refusal_is_still_the_typed_http_error
         ] )
     ]
 ;;

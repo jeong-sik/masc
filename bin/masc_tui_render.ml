@@ -5382,8 +5382,8 @@ let render_clients (state : state) =
     |> min 24
   in
   let col_hdr =
-    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "Status" name_width
-      "Name" "Type" "Keeper" "Task" "Last seen"
+    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "STATUS" name_width
+      "NAME" "TYPE" "KEEPER" "TASK" "LAST SEEN"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -9662,8 +9662,8 @@ let render_connectors (state : state) =
     ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"
-           "Configured" "Reachable" "Status" "Channel");
+        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "CONNECTOR"
+           "CONFIGURED" "REACHABLE" "STATUS" "CHANNEL");
       c.push_divider ();
       (match state.connectors_error with
        | None -> ()
@@ -10790,8 +10790,8 @@ let render_acting (state : state) =
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
-      "Detail"
+    Printf.sprintf "  %-8s %-16s %s %-16s %s" "TIME" "KEEPER" " " "EVENT"
+      "DETAIL"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;

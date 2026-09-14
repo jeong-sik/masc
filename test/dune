@@ -5068,6 +5068,7 @@
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
+(include stanzas/test_tui_sheet_names_every_palette_destination.inc)
 (include stanzas/test_tui_board_read_title.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)

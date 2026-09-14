@@ -1086,7 +1086,13 @@ let help_surfaces : (string * surface) list =
   ; "Planning / Task Review", Verification
   ; "Planning / Task Verdicts", Harness
   ; "Fusion", Fusion
-  ; "Keeper detail / Automation", Schedules
+  (* "Schedules", the name the title bar and the palette both use. It read
+     "Keeper detail / Automation" -- a Keeper detail tab that has no keys of
+     its own and no route to this screen -- so a reader who typed "go
+     Schedules" and pressed [?] found this screen's keys under the name of a
+     screen they were not on. The family is Keepers, which is where the strip
+     puts the highlight while this surface is open. *)
+  ; "Keepers / Schedules", Schedules
   ; "Memory", Memory
   ; "Workspace", Repositories
   ; "Workspace / Code", Code

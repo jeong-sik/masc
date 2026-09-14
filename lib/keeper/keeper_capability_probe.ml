@@ -224,7 +224,7 @@ let reply_bytes (response : Agent_core.Types.api_response) =
     response.content
 ;;
 
-let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
+let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
   match probe_surface ~tool with
   | (Not_a_descriptor | Operator_only | Aliased _ | Withheld_by_schema_error _) as v ->
     Error (Not_on_surface v)
@@ -284,7 +284,7 @@ let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
                 Keeper_provider_subcall.complete
                   ~sw
                   ~net
-                  ?clock
+                  ~clock
                   ~config
                   ~messages
                   ~tools:[ tool_json ]

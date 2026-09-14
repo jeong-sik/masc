@@ -4,10 +4,10 @@ status: live
 
 # Product Operating Plan
 
-> Current package version: v0.35.15
-> Latest changelog entry: v0.35.15 (2026-09-13)
+> Current package version: v0.35.16
+> Latest changelog entry: v0.35.16 (2026-09-14)
 > Latest published GitHub release: v0.35.14 (2026-09-12)
-> Updated: 2026-09-13
+> Updated: 2026-09-14
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope

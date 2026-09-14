@@ -2393,12 +2393,32 @@ let test_checkpoint_wait_keeps_the_request_live () =
    skill name, and a phrase with one inside would read as two phrases. *)
 let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
+  (* The two lists are written by hand: a constructor added later compiles
+     (the label functions are exhaustive) but would be missing from the
+     rollup and the legend, so their lengths are held here. *)
+  check int "six outcomes" 6 (List.length Transcript.all_outcomes);
+  check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
-      let key = Transcript.outcome_label outcome in
+      let key =
+        Transcript.marker_of_outcome outcome ^ " " ^ Transcript.outcome_label outcome
+      in
       check bool ("outcome " ^ key ^ " is on the legend with its mark") true
-        (List.exists (fun k -> String.ends_with ~suffix:(" " ^ key) k) keys))
+        (List.mem key keys))
     Transcript.all_outcomes;
+  (* The two words a full skill row draws beside its ids and actions are
+     on the legend as the row spells them. *)
+  let full =
+    String.concat "\n"
+      (Transcript.skill_rows ~full:true
+         (Transcript.make_skill_activity ~skill_name:"s" ~skill_tool_use_id:"use-1"
+            ~state:Transcript.Skill_used ~actions:[ "Read" ] ()))
+  in
+  List.iter
+    (fun word ->
+      check bool ("the row draws " ^ word) true (contains ~needle:word full);
+      check bool ("the legend explains " ^ word) true (List.mem word keys))
+    [ "proof"; "observed action" ];
   List.iter
     (fun state ->
       let phrase = Transcript.skill_state_label state in

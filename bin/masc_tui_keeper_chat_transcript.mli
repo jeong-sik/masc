@@ -48,6 +48,9 @@ type tool_outcome =
 val outcome_label : tool_outcome -> string
 (** The word the block rollup counts an outcome by ([3 returned]). *)
 
+val marker_of_outcome : tool_outcome -> string
+(** The one-cell mark a call row leads with for its outcome. *)
+
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
 

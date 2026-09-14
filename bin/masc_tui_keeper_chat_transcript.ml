@@ -795,10 +795,15 @@ let all_skill_states =
   ; Skill_evidence_unavailable
   ]
 
+(* The two words a full skill row draws beside its ids and its actions,
+   named once so the legend explains the words the row prints. *)
+let proof_word = "proof"
+let observed_action_word = "observed action"
+
 (* What each mark and phrase on a tool or skill row means, for the help
    sheet, in the shape the other legends take: the mark or phrase as the row
-   draws it, and what it says. Built from the same functions the rows use,
-   so the sheet cannot explain a mark the pane no longer draws. *)
+   draws it, and what it says. Built from the same functions and words the
+   rows use, so the sheet cannot explain a mark the pane no longer draws. *)
 let legend =
   let outcome_meaning = function
     | Started -> "arguments still arriving"
@@ -836,9 +841,10 @@ let legend =
   @ List.map
       (fun state -> skill_state_label state, skill_meaning state)
       all_skill_states
-  @ [ ("proof", "the ids behind a skill row: use= the read call, turn= the turn, \
-                runtime= who ran it, rev= the skill text's revision")
-    ; ("observed action", "a tool call the server attributes to the skill above it")
+  @ [ ( proof_word
+      , "the ids behind a skill row: use= the read call, turn= the turn, \
+         runtime= who ran it, rev= the skill text's revision" )
+    ; (observed_action_word, "a tool call the server attributes to the skill above it")
     ]
 
 let short_proof value =
@@ -867,7 +873,7 @@ let skill_rows ~full (activity : skill_activity) =
     let actions =
       List.map
         (fun action ->
-          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 observed action" action)
+          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 %s" action observed_action_word)
         activity.actions
     in
     let proof_parts =
@@ -883,7 +889,7 @@ let skill_rows ~full (activity : skill_activity) =
     let proof =
       match proof_parts with
       | [] -> []
-      | parts -> [ "  proof \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts ]
+      | parts -> [ "  " ^ proof_word ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts ]
     in
     let detail =
       match activity.detail with

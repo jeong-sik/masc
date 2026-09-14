@@ -60,8 +60,9 @@ let parse json_str =
    present and complete -- with the sections a test is about replaced in it.
 
    [tts] and [stt] are optional sections: absent, they parse to [None].
-   Present, each requires its [default_model] and endpoints, so a fixture
-   that carries a half-written section is refused for that and never reaches
+   Present, each requires endpoints and a model for every endpoint asked for
+   one, so a fixture that carries a half-written section is refused for that and
+   never reaches
    the thing the test is checking. Building on the full document keeps a
    test about [capture] from passing on a complaint about [tts]. *)
 let config_with sections =
@@ -152,7 +153,7 @@ let test_load_detailed_valid_config () =
     (fun () ->
       match Vc.load_detailed () with
       | Ok config ->
-        check string "stt model from config" "scribe_v1"
+        check (option string) "stt model from config" (Some "scribe_v1")
           (stt_of config).Vc.default_model
       | Error Vc.Not_configured ->
         fail "expected Ok, got Not_configured"
@@ -914,6 +915,109 @@ let test_a_gate_error_is_invalid_at_load () =
       | Ok _ -> fail "expected Invalid, got Ok")
 ;;
 
+(* ── Per-endpoint model ─────────────────────────────────────────────── *)
+
+let parse_stt_endpoints ?default_model endpoints =
+  let section =
+    `Assoc
+      ((match default_model with
+        | Some model -> [ "default_model", `String model ]
+        | None -> [])
+       @ [ "endpoints", `List endpoints ])
+  in
+  Vc.parse_json (config_with [ "stt", section ])
+
+let endpoint_json ?model ?base_url ~id ~kind () =
+  `Assoc
+    ([ "id", `String id; "kind", `String kind ]
+     @ (match base_url with Some url -> [ "base_url", `String url ] | None -> [])
+     @ (match model with Some model -> [ "model", `String model ] | None -> []))
+
+let hosted ?model id =
+  endpoint_json ?model ~base_url:"http://127.0.0.1:2022/v1" ~id ~kind:"openai_compat" ()
+
+let whisper ?model id = endpoint_json ?model ~id ~kind:"whisper_cli" ()
+
+let model_of (stt : Vc.stt_config) id =
+  match List.find_opt (fun (e : Vc.endpoint) -> e.Vc.id = id) stt.Vc.endpoints with
+  | Some endpoint -> Vc.model_at_endpoint ~default_model:stt.Vc.default_model endpoint
+  | None -> fail ("no endpoint " ^ id)
+
+(* The case this exists for: a provider and whisper-cli in one section. The
+   file path is whisper's and the model name is the provider's; neither is
+   handed the other's. *)
+let test_each_endpoint_is_asked_for_its_own_model () =
+  match
+    parse_stt_endpoints ~default_model:"scribe_v1"
+      [ hosted "hosted"; whisper ~model:"/models/ggml-base.bin" "whisper-local" ]
+  with
+  | Error message -> fail message
+  | Ok config ->
+    let stt = stt_of config in
+    check (option string) "the provider reads the section's name" (Some "scribe_v1")
+      (model_of stt "hosted");
+    check (option string) "whisper reads its own file" (Some "/models/ggml-base.bin")
+      (model_of stt "whisper-local")
+
+(* One string cannot be a provider's model name and a model file at once, so a
+   section whose unbound endpoints need both has no fallback to give. *)
+let test_a_shared_fallback_cannot_serve_a_provider_and_whisper () =
+  match
+    parse_stt_endpoints ~default_model:"scribe_v1" [ hosted "hosted"; whisper "whisper-local" ]
+  with
+  | Ok _ -> fail "a section fallback shared by a provider and whisper-cli must be refused"
+  | Error message ->
+    check bool "the refusal names the endpoint's model" true
+      (String_util.string_contains_substring ~needle:"stt.endpoints[hosted].model" message)
+
+let test_a_section_whose_endpoints_all_name_models_needs_no_fallback () =
+  match
+    parse_stt_endpoints
+      [ hosted ~model:"scribe_v1" "hosted"; whisper ~model:"/models/ggml-base.bin" "whisper-local" ]
+  with
+  | Error message -> fail message
+  | Ok config ->
+    check (option string) "no section fallback" None (stt_of config).Vc.default_model;
+    check (option string) "the provider keeps its own" (Some "scribe_v1")
+      (model_of (stt_of config) "hosted")
+
+let test_a_blank_endpoint_model_is_refused () =
+  match
+    parse_stt_endpoints ~default_model:"scribe_v1"
+      [ endpoint_json ~model:"  " ~base_url:"http://127.0.0.1:2022/v1" ~id:"hosted"
+          ~kind:"openai_compat" () ]
+  with
+  | Ok _ -> fail "a blank model is not absent; it must be refused"
+  | Error message ->
+    check bool "the refusal names the field" true
+      (String_util.string_contains_substring ~needle:".model must be a non-blank string" message)
+
+(* The wire names the model the endpoint that would answer is asked for, and
+   lists every model the section's endpoints are asked for. *)
+let test_the_public_json_reads_the_endpoint_models () =
+  let tts =
+    `Assoc
+      [ "default_model", `String "eleven_multilingual_v2"
+      ; "default_voice", `String "v"
+      ; ( "endpoints"
+        , `List
+            [ endpoint_json ~model:"eleven_flash_v2_5" ~id:"eleven" ~kind:"elevenlabs_direct" ()
+            ; endpoint_json ~base_url:"http://127.0.0.1:8880/v1" ~id:"local"
+                ~kind:"openai_compat" ()
+            ] )
+      ]
+  in
+  match Vc.parse_json (config_with [ "tts", tts ]) with
+  | Error message -> fail message
+  | Ok config ->
+    let json = Vc.public_json config in
+    let tts = Yojson.Safe.Util.(json |> member "tts") in
+    check (option string) "the active endpoint's own model" (Some "eleven_flash_v2_5")
+      Yojson.Safe.Util.(tts |> member "default_model" |> to_string_option);
+    check (list string) "every model the section asks for"
+      [ "eleven_flash_v2_5"; "eleven_multilingual_v2" ]
+      Yojson.Safe.Util.(tts |> member "available_models" |> to_list |> List.map to_string)
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -1039,5 +1143,17 @@ let () =
             "send_on_stop is read and reaches the wire"
             `Quick
             test_send_on_stop_is_read_when_declared
+        ] )
+    ; ( "per_endpoint_model"
+      , [ test_case "each endpoint is asked for its own model" `Quick
+            test_each_endpoint_is_asked_for_its_own_model
+        ; test_case "a shared fallback cannot serve a provider and whisper" `Quick
+            test_a_shared_fallback_cannot_serve_a_provider_and_whisper
+        ; test_case "endpoints that all name models need no fallback" `Quick
+            test_a_section_whose_endpoints_all_name_models_needs_no_fallback
+        ; test_case "a blank endpoint model is refused" `Quick
+            test_a_blank_endpoint_model_is_refused
+        ; test_case "the public json reads the endpoint models" `Quick
+            test_the_public_json_reads_the_endpoint_models
         ] )
     ]

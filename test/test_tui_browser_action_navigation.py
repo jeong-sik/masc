@@ -40,7 +40,7 @@ def run(binary):
         return {"nodeId": identity, "kind": kind, "tag": "section" if kind == "region" else "p",
                 "text": text, "rects": [{"x": 0, "y": 0, "width": 100, "height": 20}],
                 "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400",
-                "whiteSpace": "normal", **fields}
+                "whiteSpace": "normal", "sourceContext": None, **fields}
 
     def control(identity, text, disabled=False, source=None):
         return node(identity, "control", text, clickable=True, editable=False, disabled=disabled,

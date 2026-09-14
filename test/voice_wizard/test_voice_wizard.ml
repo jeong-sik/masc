@@ -164,8 +164,7 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
          endpoint.Voice_config.base_url)
 
 (* The one that matters. A draft the wizard calls complete has to produce a file
-   the loader reads back -- including the section default_model, which a section
-   that exists must name. *)
+   the loader reads back, with the model on the endpoint it was given for. *)
 let test_a_complete_draft_writes_a_configuration_that_loads () =
   with_config runtime_base (fun path ->
     let draft =
@@ -203,7 +202,12 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
       (match config.Voice_config.stt with
        | None -> Alcotest.fail "speech in should be configured"
        | Some stt ->
-         Alcotest.(check string) "the model the wizard was given" "scribe_v2"
+         Alcotest.(check (list (option string))) "the model the wizard was given, on its endpoint"
+           [ Some "scribe_v2" ]
+           (List.map
+              (fun (endpoint : Voice_config.endpoint) -> endpoint.Voice_config.model)
+              stt.Voice_config.endpoints);
+         Alcotest.(check (option string)) "and not as the section's fallback" None
            stt.Voice_config.default_model;
          Alcotest.(check (list string)) "and the endpoint it was given"
            [ "whisper-local" ]

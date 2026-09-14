@@ -247,7 +247,6 @@ let transcribe_audio ~audio_file ?language_code () =
        model to send, so nothing is sent. *)
     Error "voice config has no [stt] section, so STT is not set up"
   | Ok { Voice_config.stt = Some stt; _ } ->
-    let model = stt.Voice_config.default_model in
     let endpoints = available_stt_endpoints stt in
     let rec try_endpoints attempted = function
       | [] ->
@@ -263,6 +262,16 @@ let transcribe_audio ~audio_file ?language_code () =
            while [voice-verify --audio] on the same configuration worked.
            [transcriber_of_kind] is the same closed answer the probe reads, so
            a kind added later stops this compiling until it has one. *)
+        (* The model is this endpoint's: a whisper-cli file and a provider's
+           model name are different vocabularies, so the section's fallback
+           only applies to an endpoint that names none. The loader refuses a
+           section that leaves a transcriber without one; [None] here is said,
+           not sent as a blank. *)
+        let with_model f =
+          match Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint with
+          | Some model -> f model
+          | None -> Error "this endpoint has no model and [voice.stt] names none"
+        in
         let heard =
           match transcriber_of_kind endpoint.Voice_config.kind with
           | Does_not_transcribe ->
@@ -273,16 +282,18 @@ let transcribe_audio ~audio_file ?language_code () =
           | By_command ->
             (* The command answers with its own output and knows no language
                field; [language_code] is then the caller's or unknown. *)
-            Result.map
-              (fun transcript -> transcript, None)
-              (transcribe_via_command endpoint ~audio_file ~model)
+            with_model (fun model ->
+              Result.map
+                (fun transcript -> transcript, None)
+                (transcribe_via_command endpoint ~audio_file ~model))
           | Over_http ->
-            (match transcribe_via_http_stt endpoint ~audio_file ~model with
-             | Ok json ->
-               Result.map
-                 (fun text -> text, Json_util.get_string json "language_code")
-                 (transcript_of_stt_json json)
-             | Error error -> Error error)
+            with_model (fun model ->
+              match transcribe_via_http_stt endpoint ~audio_file ~model with
+              | Ok json ->
+                Result.map
+                  (fun text -> text, Json_util.get_string json "language_code")
+                  (transcript_of_stt_json json)
+              | Error error -> Error error)
         in
         (match heard with
          | Ok (text, reported_language) ->
@@ -329,13 +340,11 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
-  (* The dashboard's own attempt, which only knows the HTTP endpoints. A
-     section that names no model has none of those to try, so there is nothing
-     to attempt rather than something to attempt with a blank name. *)
-  match model with
-  | None -> None
-  | Some model ->
+let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~message ~voice
+      ~audio_device () =
+  (* The dashboard's own attempt, which only knows the HTTP endpoints. Each is
+     asked for its own model; one that has none is passed over rather than
+     asked with a blank name. *)
   let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
@@ -344,6 +353,11 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
       if Voice_runtime_overlay.speaker_of_transport adapter.transport
          = Voice_runtime_overlay.Over_http
       then (
+        match
+          Voice_config.model_at_endpoint ~default_model:tts.Voice_config.default_model endpoint
+        with
+        | None -> try_endpoint rest
+        | Some model ->
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
         in
@@ -533,18 +547,24 @@ let probe_stt ~audio_file () =
                        then "reached, and heard nothing in the audio"
                        else Printf.sprintf "heard %s" spoken)
                   in
-                  let model = stt.Voice_config.default_model in
-                  match transcriber_of_kind endpoint.Voice_config.kind with
-                  | Does_not_transcribe ->
+                  (* Asked with the model the transcription path would use. *)
+                  let model =
+                    Voice_config.model_at_endpoint ~default_model:stt.Voice_config.default_model
+                      endpoint
+                  in
+                  match transcriber_of_kind endpoint.Voice_config.kind, model with
+                  | Does_not_transcribe, (Some _ | None) ->
                     Skipped "this endpoint kind does not transcribe"
-                  | Over_http ->
+                  | (Over_http | By_command), None ->
+                    Refused "this endpoint has no model and [voice.stt] names none"
+                  | Over_http, Some model ->
                     (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
                        (match transcript_of_stt_json json with
                         | Ok transcript -> heard transcript
                         | Error reason -> Refused reason)
                      | Error reason -> Refused reason)
-                  | By_command ->
+                  | By_command, Some model ->
                     (match transcribe_via_command endpoint ~audio_file ~model with
                      | Ok transcript -> heard transcript
                      | Error reason -> Refused reason))
@@ -858,11 +878,14 @@ let probe_tts ?(agent_id = "probe") ~message () =
                            endpoint ~message ~voice ~output_file))
                   | Voice_runtime_overlay.Over_http ->
                     clip (fun ~voice ~output_file ->
-                      match tts.Voice_config.default_model with
+                      match
+                        Voice_config.model_at_endpoint
+                          ~default_model:tts.Voice_config.default_model endpoint
+                      with
                       | None ->
                         Error
-                          "this endpoint is asked for a model by name and [voice.tts] \
-                           names none"
+                          "this endpoint is asked for a model by name and neither it \
+                           nor [voice.tts] names one"
                       | Some model ->
                         speak_via_http_tts_to_file
                           endpoint ~agent_id ~message ~voice ~model ~output_file)
@@ -913,13 +936,15 @@ let attempt_tts_endpoint
       ~agent_id
       ~message
       ~voice
-      ~model
       ~priority
-      ~tts
+      ~(tts : Voice_config.tts_config)
       ?audio_device
       endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  let model =
+    Voice_config.model_at_endpoint ~default_model:tts.Voice_config.default_model endpoint
+  in
   match adapter.transport with
   (* One branch for every way of producing the audio, because everything after
      it -- playing the file, the dedup record, what gets reported -- is the
@@ -940,16 +965,15 @@ let attempt_tts_endpoint
         | Voice_runtime_overlay.Elevenlabs_direct
         | Voice_runtime_overlay.Voice_mcp
         | Voice_runtime_overlay.Whisper_cli ->
-          (* These are asked for the section's model by name. A section that
-             names none is one whose endpoints all take none, so an endpoint
-             here means the two disagree -- said rather than sent as
-             [model_id ""]. *)
+          (* These are asked for a model by name, the endpoint's own or the
+             section's. The loader refuses a section that leaves one without,
+             so [None] here is said rather than sent as [model_id ""]. *)
           (match model with
            | None ->
              Error
                (Printf.sprintf
                   "voice config endpoint %s is asked for a model by name and \
-                   [voice.tts] names none"
+                   neither it nor [voice.tts] names one"
                   endpoint.Voice_config.id)
            | Some model ->
              speak_via_http_tts_to_file
@@ -1076,7 +1100,6 @@ let attempt_tts_endpoint
                  ~agent_id
                  ~message
                  ~voice
-                 ~model
                  ~audio_device
                  ()
              with
@@ -1102,20 +1125,13 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
-      ~tts
+      ~(tts : Voice_config.tts_config)
       ~agent_id
       ~message
-      ~model
       ~priority
       ?audio_device
       endpoints
   =
-  (* Same reason as the dashboard chain above: these are the HTTP endpoints,
-     every one of them asked for the model by name, so a section that names
-     none has nothing here to try. *)
-  match model with
-  | None -> None
-  | Some model ->
   let http_endpoints =
     List.filter
       (fun endpoint ->
@@ -1126,6 +1142,13 @@ let try_http_tts_for_browser_audio
   let rec try_endpoints = function
     | [] -> None
     | endpoint :: rest ->
+      (* Same as the dashboard chain above: each HTTP endpoint is asked for its
+         own model, and one that has none is passed over. *)
+      match
+        Voice_config.model_at_endpoint ~default_model:tts.Voice_config.default_model endpoint
+      with
+      | None -> try_endpoints rest
+      | Some model ->
       let audio_file =
         make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
       in
@@ -1224,7 +1247,6 @@ let agent_speak_json
       in
       cleanup_old_audio_files ();
       let endpoints = available_tts_endpoints ?provider tts in
-      let model = tts.Voice_config.default_model in
       let rec try_endpoints attempted = function
         | [] ->
           Error
@@ -1240,7 +1262,6 @@ let agent_speak_json
                ~agent_id
                ~message
                ~voice
-               ~model
                ~priority
                ~tts
                ?audio_device
@@ -1281,7 +1302,6 @@ let agent_speak_json
                ~tts
                ~agent_id
                ~message
-               ~model
                ~priority
                ?audio_device
                endpoints

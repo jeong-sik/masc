@@ -7,6 +7,11 @@ type download = {
 }
 type t
 val create : unit -> t
+
+(** BiDi event kinds this model handles, with the wire method names to pass
+    to [session.subscribe]. [event] fails with the method name on any other. *)
+type subscribed = Context_created | Download_will_begin | Download_end
+val subscribed_methods : (subscribed * string) list
 val event : t -> method_:string -> Yojson.Safe.t -> (unit, string) result
 val add_tree : t -> Yojson.Safe.t -> (unit, string) result
 val interrupt : t -> string -> unit

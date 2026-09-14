@@ -243,6 +243,15 @@ let approval_retry =
 (* Where a Fusion run's caller and its Board evidence are, on the list and
    in the detail alike: one binding each, so the two footers cannot name the
    key two ways. *)
+(* The keys a post answers to, in the Board's surface list and in the read
+   footer alike. The read pane spelled them a second time in its own row --
+   "[c] Reply   [v/V] Vote (+/-)   [Y] Copy Link   [Esc] Back" -- above a
+   footer that spelled c, Y and Esc again and had no vote key at all, so that
+   row was the only place on the screen that said v votes. *)
+let board_vote_key = b Act "v / V" "vote" ~help:"vote the post up or down"
+let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
+let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
+
 let fusion_caller_key = b Navigate "K" "calling Keeper"
 let fusion_board_key = b Navigate "B" "Board evidence"
 
@@ -404,8 +413,8 @@ let for_surface = function
       ; b Act "Right / Enter" "read" ~help:"read the post"
       ; b Act "Left / Esc" "back" ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
-      ; b Act "v / V" "vote up / down"
-      ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; board_vote_key
+      ; board_reply_key
       ; b Navigate "[ / ]" "previous / next post"
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
@@ -413,7 +422,7 @@ let for_surface = function
           ~help:"move forward or backward through all hearths"
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
       ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
-      ; b Act "Y" "copy link" ~help:"copy the selected post reference"
+      ; board_copy_key
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
@@ -928,6 +937,23 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
+let footer_hints_board_read ~focus_posts ~split =
+  hints_of_bindings
+    ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
+     ; b Navigate "[/]" "post"
+     ; b Navigate "PgUp/PgDn" "page"
+     ]
+     @ (if split then [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+        else [])
+     @ [ b Navigate "z" "wide"
+       ; board_vote_key
+       ; board_reply_key
+       ; board_copy_key
+       ; b Act "Left / Esc" "back"
+       ; b Meta "r" "refresh"
+       ; b Meta "Tab" "next"
+       ])
+
 let footer_hints_fusion_detail ~position =
   Printf.sprintf "%s  %s"
     (hints_of_bindings

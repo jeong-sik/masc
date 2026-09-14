@@ -60,8 +60,8 @@ let lane = "agent_core-glm-coding.glm-5.3"
 
 (* tester is mid-turn: one call returned, a second still out. probe settled a
    turn earlier. polisher is waiting on an approval. quiet-one never acted.
-   The full list is eight rows: four fleet rows, the rule, and tester's
-   three focus rows (its header, Read, Execute). *)
+   The full list is nine rows: four fleet rows, the rule, and tester's four
+   focus rows (its header, the calls heading, Read, Execute). *)
 let fixture_entries =
   entries
         [ (900., settled ~at:900. "probe")
@@ -71,7 +71,7 @@ let fixture_entries =
               ; kt_turn = None
               ; kt_tool = "keeper_artifact_read"
               ; kt_duration_ms = Some 5.
-              ; kt_disposition = Some "completed"
+              ; kt_disposition = Some (Ok Masc.Tui_decode.Keeper_call_completed)
               ; kt_at = 905.
       ; kt_tool_use_id = None
       ; kt_schedule = None
@@ -111,9 +111,11 @@ let fixture : Pane.input =
   ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
   ; chunks = chunks [ "quiet-one"; "tester"; "probe"; "polisher" ] fixture_entries
   ; changes = Pane.Changes_absent
+  ; call_order = Pane.Oldest_first
+  ; expanded = []
   }
 
-let full_list_rows = 8
+let full_list_rows = 9
 
 let text (line : Pane.line) = String.concat "" (List.map (fun s -> s.Pane.text) line)
 
@@ -191,6 +193,8 @@ let target_text = function
   | Pane.Target_more -> "more"
   | Pane.Target_file index -> "file:" ^ string_of_int index
   | Pane.Target_calls name -> "calls:" ^ name
+  | Pane.Target_call (name, _) -> "call:" ^ name
+  | Pane.Target_call_order -> "order"
 
 let rows = 14
 let cols = Pane.pane_cols
@@ -465,15 +469,17 @@ let test_focus_block_names_the_latest_observed_record () =
   let header = last_index_of "tester" in
   check bool "the record has no observed settlement" true (contains "unsettled" (nth header));
   check bool "the header carries the receipt age" true (contains "last event 10.0s" (nth header));
-  check bool "first call returned" true (contains "Read" (nth (header + 1)));
-  check bool "with its duration" true (contains "2.0s" (nth (header + 1)));
-  check bool "second call still out" true (contains "Execute" (nth (header + 2)));
+  check bool "the heading names the order" true
+    (contains "calls \xc2\xb7 oldest first" (nth (header + 1)));
+  check bool "first call returned" true (contains "Read" (nth (header + 2)));
+  check bool "with its duration" true (contains "2.0s" (nth (header + 2)));
+  check bool "second call still out" true (contains "Execute" (nth (header + 3)));
   check bool "a tool without a duration does not borrow the record clock" false
-    (contains "10.0s" (nth (header + 2)));
+    (contains "10.0s" (nth (header + 3)));
   check bool "an unclosed tool record uses a neutral mark" true
-    (contains "~ " (nth (header + 2)));
+    (contains "~ " (nth (header + 3)));
   check bool "the call line does not repeat the header's state" false
-    (contains "in turn" (nth (header + 2)))
+    (contains "in turn" (nth (header + 3)))
 
 let test_focus_falls_back_to_who_acted_last () =
   let drawn = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.selected = None } in
@@ -538,9 +544,9 @@ let test_targets_name_the_keeper_under_each_fleet_row () =
   check string "the rule acts on nothing" "none" (List.nth targets 6);
   let header = last_index_of "tester" in
   check string "the focus header acts on nothing" "none" (List.nth targets header);
-  check string "a call row opens the keeper's calls" "calls:tester"
-    (List.nth targets (header + 1));
-  check string "so does the call still out" "calls:tester" (List.nth targets (header + 2));
+  check string "the calls heading turns the order" "order" (List.nth targets (header + 1));
+  check string "a call row opens that call" "call:tester" (List.nth targets (header + 2));
+  check string "so does the call still out" "call:tester" (List.nth targets (header + 3));
   check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
 
 (* ── scroll ─────────────────────────────────────────────────────────── *)
@@ -568,7 +574,7 @@ let test_scrolling_walks_the_full_list_under_the_header () =
   check bool "the first visible row is the second fleet row" true
     (contains "tester" (List.nth texts (header_rows + 1)));
   check bool "the bottom indicator counts what is below" true
-    (contains "\xe2\x86\x93 5 more" (List.nth texts (short_rows - 1)));
+    (contains "\xe2\x86\x93 6 more" (List.nth texts (short_rows - 1)));
   check string "a visible fleet row still names its keeper" "keeper:tester"
     (target_text (List.nth scrolled.Pane.targets (header_rows + 1)));
   check string "indicators act on nothing" "none"
@@ -578,10 +584,10 @@ let test_scrolling_walks_the_full_list_under_the_header () =
     scrolled.Pane.rows
 
 let test_scroll_clamps_at_the_last_row () =
-  let at_max = Pane.lines ~rows:short_rows ~cols ~scroll:5 fixture in
+  let at_max = Pane.lines ~rows:short_rows ~cols ~scroll:6 fixture in
   let texts = List.map text at_max.Pane.rows in
   check bool "the top indicator counts everything above" true
-    (contains "\xe2\x86\x91 5 more" (List.nth texts header_rows));
+    (contains "\xe2\x86\x91 6 more" (List.nth texts header_rows));
   check bool "the last row of the list is on screen" true
     (contains "Execute" (List.nth texts (short_rows - 1)));
   check bool "no bottom indicator when nothing is below" false
@@ -1006,7 +1012,8 @@ let test_beside_the_roster_only_the_selected_keepers_record_draws () =
   check bool "no rule" false (List.exists (fun row -> contains rule_glyphs row) texts);
   check bool "the selected keeper's header is first under the legend" true
     (contains "tester" (List.nth texts 2) && contains "last event 10.0s" (List.nth texts 2));
-  check string "its call rows open its calls" "calls:tester" (target_text (List.nth view.Pane.targets 3));
+  check string "the calls heading follows" "order" (target_text (List.nth view.Pane.targets 3));
+  check string "its call rows open the call" "call:tester" (target_text (List.nth view.Pane.targets 4));
   check int "everything fits" 0 view.Pane.scroll_max;
   List.iteri
     (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
@@ -1022,8 +1029,8 @@ let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
     (contains "approval" (List.nth texts 2) && contains "tool_execute" (List.nth texts 2));
   check bool "a rule separates it from the record" true (contains rule_glyphs (List.nth texts 3));
   check bool "the selected keeper's header follows" true (contains "tester" (List.nth texts 4));
-  check string "its call rows still open its calls" "calls:tester"
-    (target_text (List.nth view.Pane.targets 5))
+  check string "its call rows still open the call" "call:tester"
+    (target_text (List.nth view.Pane.targets 6))
 
 (* A sixteen-cell name, a four-digit settled turn and the clock share one
    row: the number already says the turn settled, so no word is drawn and
@@ -1204,6 +1211,160 @@ let test_only_offline_is_dropped () =
   check bool "and one whose health did not read" true (says "unread-one");
   check bool "only the offline one is gone" false (says "gone-one")
 
+(* ── calls: marks, order, an opened call ───────────────────────────── *)
+
+module Contract = Agent_core.Tool_contract
+
+let schedule ~step ~batch_index ~at_once execution_mode : Contract.schedule =
+  { Contract.planned_index = step - 1; batch_index; batch_size = at_once; execution_mode }
+
+let runner_call ~at ?duration_ms ~id ?schedule ?disposition ?input ?output tool =
+  ( at
+  , Observer.Keeper_tool_call
+      { Observer.kt_keeper = "runner"
+      ; kt_turn = Some 12
+      ; kt_tool = tool
+      ; kt_duration_ms = duration_ms
+      ; kt_disposition = disposition
+      ; kt_at = at
+      ; kt_tool_use_id = Some id
+      ; kt_schedule = Option.map Result.ok schedule
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = input
+      ; kt_tool_output_preview = output
+      } )
+
+(* runner's turn: a serial read that completed, a delegation that ran in a
+   batch of three and returned a deferral, and a failed execute still without
+   a duration. Receipt order is Read, masc_delegate, Execute. *)
+let runner_calls =
+  [ runner_call ~at:950. ~duration_ms:5. ~id:"first"
+      ~schedule:(schedule ~step:1 ~batch_index:0 ~at_once:1 Contract.Serial)
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+      ~input:"{\"path\":\"lib/a.ml\"}" ~output:"12 lines" "Read"
+  ; runner_call ~at:960. ~duration_ms:50. ~id:"second"
+      ~schedule:(schedule ~step:2 ~batch_index:1 ~at_once:3 Contract.Concurrent)
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_deferred)
+      ~input:"{\"to\":\"probe\"}" ~output:"queued\nkmsg-1" "masc_delegate"
+  ; runner_call ~at:970. ~id:"third"
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_failed)
+      ~input:"{\"cmd\":\"false\"}" "Execute"
+  ]
+
+let runner_input ?(order = Pane.Oldest_first) ?(expanded = []) () =
+  { fixture with
+    Pane.scope = Pane.Selected_only
+  ; keepers = Some [ keeper "runner" ]
+  ; selected = Some "runner"
+  ; approvals = []
+  ; chunks = chunks [ "runner" ] (entries runner_calls)
+  ; call_order = order
+  ; expanded
+  }
+
+let call_rows view =
+  List.combine view.Pane.rows view.Pane.targets
+  |> List.filter_map (fun (row, target) ->
+         match target with
+         | Pane.Target_call ("runner", _) -> Some (text row)
+         | _ -> None)
+
+(* Beside the roster the rows are: header, legend, focus header, calls
+   heading, then the calls. *)
+let first_call_row = 4
+
+let test_the_call_row_marks_a_batch_and_a_deferral () =
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 (runner_input ())).Pane.rows in
+  check bool "a serial completed call wears no mark" true
+    (contains "\xe2\x96\xa0    Read" (List.nth texts first_call_row));
+  check bool "a call that ran three at once and deferred wears both" true
+    (contains "\xe2\x96\xa0 &> masc_delegate" (List.nth texts (first_call_row + 1)));
+  check bool "a failed call wears the failure glyph" true
+    (contains "\xe2\x9c\x97    Execute" (List.nth texts (first_call_row + 2)));
+  check bool "and does not borrow the open-record mark" false
+    (contains "~" (List.nth texts (first_call_row + 2)))
+
+let test_an_opened_call_draws_its_facts_and_previews () =
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0
+      (runner_input ~expanded:[ "runner", Acting.Call_by_id "second" ] ())
+  in
+  let texts = List.map text view.Pane.rows in
+  let facts = List.nth texts (first_call_row + 2) in
+  check bool "the receipt age" true (contains "40.0s ago" facts);
+  check bool "the schedule in words" true
+    (contains "step 2 \xc2\xb7 concurrent, 3 at once" facts);
+  check bool "the disposition" true (contains "deferred" facts);
+  check bool "the input preview" true
+    (contains "in  {\"to\":\"probe\"}" (List.nth texts (first_call_row + 3)));
+  let out = List.nth texts (first_call_row + 4) in
+  check bool "the output preview on one row" true
+    (contains "out queued" out && contains "kmsg-1" out && not (contains "\n" out));
+  check bool "the next call follows the detail" true
+    (contains "Execute" (List.nth texts (first_call_row + 5)));
+  List.iter
+    (fun i ->
+      check string (Printf.sprintf "detail row %d closes the same call" i) "call:runner"
+        (target_text (List.nth view.Pane.targets (first_call_row + i))))
+    [ 1; 2; 3; 4 ];
+  check bool "the unopened calls draw no detail" false
+    (List.exists (fun row -> contains "lib/a.ml" row) texts);
+  List.iteri
+    (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
+    view.Pane.rows
+
+(* The wire plane stands in with a name and a duration and nothing else,
+   and the detail says so rather than drawing blanks. *)
+let test_an_opened_wire_call_says_what_it_does_not_carry () =
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0
+      { fixture with
+        Pane.scope = Pane.Selected_only
+      ; approvals = []
+      ; expanded = [ "tester", Acting.Call_by_id "a" ]
+      }
+  in
+  let texts = List.map text view.Pane.rows in
+  check bool "the receipt age alone" true (contains "19.0s ago" (List.nth texts 5));
+  check bool "no schedule word" false (contains "step" (List.nth texts 5));
+  check bool "no input" true (contains "in  not carried" (List.nth texts 6));
+  check bool "no output" true (contains "out not carried" (List.nth texts 7));
+  check bool "the call still out follows" true (contains "Execute" (List.nth texts 8))
+
+let test_each_order_lists_the_calls_as_the_heading_says () =
+  List.iter
+    (fun (order, label, expected) ->
+      let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ~order ()) in
+      let texts = List.map text view.Pane.rows in
+      check bool (label ^ ": the heading names it") true
+        (contains ("calls \xc2\xb7 " ^ label) (List.nth texts 3));
+      check string (label ^ ": the heading turns the order") "order"
+        (target_text (List.nth view.Pane.targets 3));
+      let names = List.map (fun row -> String.trim row) (call_rows view) in
+      List.iter2
+        (fun name row -> check bool (label ^ ": " ^ name) true (contains name row))
+        expected names)
+    [ Pane.Oldest_first, "oldest first", [ "Read"; "masc_delegate"; "Execute" ]
+    ; Pane.Newest_first, "newest first", [ "Execute"; "masc_delegate"; "Read" ]
+    ; Pane.Longest_first, "longest first", [ "masc_delegate"; "Read"; "Execute" ]
+    ; Pane.By_tool, "by tool", [ "Execute"; "Read"; "masc_delegate" ]
+    ]
+
+let test_the_order_cycles_through_all_four () =
+  let rec walk seen order =
+    if List.mem order seen then List.rev seen
+    else walk (order :: seen) (Pane.next_call_order order)
+  in
+  check int "four orders before it comes back" 4
+    (List.length (walk [] Pane.Oldest_first))
+
+let test_a_call_row_names_the_call_a_press_opens () =
+  let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
+  check bool "by the provider's call id" true
+    (List.nth view.Pane.targets first_call_row
+     = Pane.Target_call ("runner", Acting.Call_by_id "first"))
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -1262,6 +1423,20 @@ let () =
             test_targets_name_the_keeper_under_each_fleet_row
         ; test_case "an earlier turn row opens the keeper's calls" `Quick
             test_an_earlier_turn_row_opens_the_keepers_calls
+        ; test_case "a call row names the call a press opens" `Quick
+            test_a_call_row_names_the_call_a_press_opens
+        ] )
+    ; ( "calls"
+      , [ test_case "the call row marks a batch and a deferral" `Quick
+            test_the_call_row_marks_a_batch_and_a_deferral
+        ; test_case "an opened call draws its facts and previews" `Quick
+            test_an_opened_call_draws_its_facts_and_previews
+        ; test_case "an opened wire call says what it does not carry" `Quick
+            test_an_opened_wire_call_says_what_it_does_not_carry
+        ; test_case "each order lists the calls as the heading says" `Quick
+            test_each_order_lists_the_calls_as_the_heading_says
+        ; test_case "the order cycles through all four" `Quick
+            test_the_order_cycles_through_all_four
         ] )
     ; ( "scroll"
       , [ test_case "a pane that fits does not scroll" `Quick

@@ -76,7 +76,7 @@ let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
     ; kt_turn = turn
     ; kt_tool = tool
     ; kt_duration_ms = duration_ms
-    ; kt_disposition = Some "completed"
+    ; kt_disposition = Some (Ok Masc.Tui_decode.Keeper_call_completed)
     ; kt_at = 100.
       ; kt_tool_use_id = None
       ; kt_schedule = None
@@ -579,8 +579,16 @@ let test_skill_tools_wear_a_skill_label () =
   in
   check string "keeper skill call is named" "skill call"
     (row (keeper_tool_call "keeper_skill")).Acting.label;
-  check string "a disposition keeps the tag beside it" "skill \xc2\xb7 delivered"
-    (row (keeper_tool_call ~disposition:"delivered" "keeper_compose_work-intake"))
+  check string "a disposition keeps the tag beside it" "skill \xc2\xb7 deferred"
+    (row
+       (keeper_tool_call
+          ~disposition:(Ok Masc.Tui_decode.Keeper_call_deferred)
+          "keeper_compose_work-intake"))
+      .Acting.label;
+  check string "a word outside the vocabulary is said to be one"
+    "unknown disposition"
+    (row (keeper_tool_call ~disposition:(Error "keeper call has unknown disposition delivered")
+            "masc_board_stats"))
       .Acting.label;
   check string "a plain keeper tool stays a tool call" "tool call"
     (row (keeper_tool_call "masc_board_stats")).Acting.label
@@ -719,6 +727,103 @@ let test_chunk_projection_rebuilds_after_append_and_trim () =
   check int "empty retained feed clears chunks" 0 (List.length (Acting.projection_chunks empty));
   check bool "previous projection remains unclosed" false (only first).Acting.ck_settled
 
+(* The fold carries what the ledger row said past the name and the
+   duration: the schedule, the disposition and the two previews reach the
+   folded call as they were, and the receipt clock of the row is the
+   call's. A wire-plane call stands in with none of them. *)
+let test_a_folded_ledger_call_keeps_the_rows_facts () =
+  let schedule : Agent_core.Tool_contract.schedule =
+    { Agent_core.Tool_contract.planned_index = 1
+    ; batch_index = 1
+    ; batch_size = 3
+    ; execution_mode = Agent_core.Tool_contract.Concurrent
+    }
+  in
+  let row : Observer.event =
+    Observer.Keeper_tool_call
+      { Observer.kt_keeper = "alpha"
+      ; kt_turn = Some 7
+      ; kt_tool = "masc_delegate"
+      ; kt_duration_ms = Some 50.
+      ; kt_disposition = Some (Ok Masc.Tui_decode.Keeper_call_deferred)
+      ; kt_at = 5.
+      ; kt_tool_use_id = Some "call-2"
+      ; kt_schedule = Some (Ok schedule)
+      ; kt_tool_args = None
+      ; kt_tool_result = None
+      ; kt_tool_args_preview = Some "{\"to\":\"probe\"}"
+      ; kt_tool_output_preview = Some "queued"
+      }
+  in
+  let chunk =
+    match
+      Acting.chunks ~traces:[]
+        (entries_of [ agent_core ~kind:Observer.Turn_started ~turn:7 ~at:100. "alpha"; row ])
+      |> List.filter (fun c -> String.equal c.Acting.ck_keeper "alpha")
+    with
+    | [ chunk ] -> chunk
+    | _ -> fail "one turn, one chunk"
+  in
+  match Acting.chunk_tools chunk with
+  | [ call ] ->
+      check string "the tool" "masc_delegate" call.Acting.ct_tool;
+      check (option string) "the provider's call id" (Some "call-2") call.Acting.ct_tool_use_id;
+      check bool "the disposition as the ledger typed it" true
+        (call.Acting.ct_disposition = Some (Ok Masc.Tui_decode.Keeper_call_deferred));
+      check bool "the schedule whole" true (call.Acting.ct_schedule = Some (Ok schedule));
+      check (option string) "the input preview" (Some "{\"to\":\"probe\"}") call.Acting.ct_input;
+      check (option string) "the output preview" (Some "queued") call.Acting.ct_output;
+      (* [entries_of] gives the second event receipt clock 101, not the
+         row's own [kt_at] of 5: the fold keeps the feed's clock, the one the
+         pane ages every other row by. *)
+      check (float 0.) "the receipt clock, not the producer's" 101. call.Acting.ct_at
+  | calls -> failf "one call expected, %d folded" (List.length calls)
+
+let test_call_key_prefers_the_provider_id () =
+  let call ?id ~at tool : Acting.chunk_tool =
+    { Acting.ct_tool = tool
+    ; ct_duration_ms = None
+    ; ct_at = at
+    ; ct_tool_use_id = id
+    ; ct_disposition = None
+    ; ct_schedule = None
+    ; ct_input = None
+    ; ct_output = None
+    }
+  in
+  let equal = Acting.call_key_equal in
+  check bool "an id names the call" true
+    (equal (Acting.call_key (call ~id:"x" ~at:1. "Read")) (Acting.Call_by_id "x"));
+  check bool "without one the receipt clock and the tool do" true
+    (equal
+       (Acting.call_key (call ~at:2. "Read"))
+       (Acting.Call_by_receipt { at = 2.; tool = "Read" }));
+  check bool "the same clock under another tool is another call" false
+    (equal
+       (Acting.call_key (call ~at:2. "Read"))
+       (Acting.call_key (call ~at:2. "Grep")));
+  check bool "an id and a receipt never name the same call" false
+    (equal (Acting.Call_by_id "2") (Acting.Call_by_receipt { at = 2.; tool = "2" }));
+  (* The wire plane's stand-in carries the wire's call id, so a press on a
+     wire call is keyed the way a press on its ledger row would be. *)
+  let chunk =
+    match
+      Acting.chunks ~traces:[]
+        (entries_of
+           [ agent_core ~kind:Observer.Turn_started ~turn:3 ~at:100. "alpha"
+           ; agent_core ~tool:"Read" ~turn:3 ~tool_use_id:"wire-1" ~at:101. "alpha"
+           ])
+      |> List.filter (fun c -> String.equal c.Acting.ck_keeper "alpha")
+    with
+    | [ chunk ] -> chunk
+    | _ -> fail "one turn, one chunk"
+  in
+  match Acting.chunk_tools chunk with
+  | [ call ] ->
+      check bool "keyed by the wire id" true
+        (equal (Acting.call_key call) (Acting.Call_by_id "wire-1"))
+  | calls -> failf "one call expected, %d folded" (List.length calls)
+
 let () =
   run "tui acting"
     [ ( "rows"
@@ -781,5 +886,9 @@ let () =
             test_chunk_projection_tracks_ordered_trace_identity
         ; test_case "chunk projection rebuilds after append and trim" `Quick
             test_chunk_projection_rebuilds_after_append_and_trim
+        ; test_case "a folded ledger call keeps the row's facts" `Quick
+            test_a_folded_ledger_call_keeps_the_rows_facts
+        ; test_case "a call key prefers the provider's id" `Quick
+            test_call_key_prefers_the_provider_id
         ] )
     ]

@@ -82,7 +82,11 @@ let summary = function
         (match c.Observer.kt_duration_ms with
          | Some ms -> Printf.sprintf "%.0fms" ms
          | None -> "-")
-        (Option.value ~default:"-" c.Observer.kt_disposition)
+        (match c.Observer.kt_disposition with
+         | Some (Ok disposition) ->
+             Masc.Tui_decode.keeper_call_disposition_to_string disposition
+         | Some (Error error) -> "error:" ^ error
+         | None -> "-")
   | Observer.Event (Observer.Keeper_turn_complete t) ->
       Printf.sprintf "turn_complete(%s,turn=%s,cost=%s)" t.Observer.tc_keeper
         (match t.Observer.tc_turn with Some n -> string_of_int n | None -> "-")

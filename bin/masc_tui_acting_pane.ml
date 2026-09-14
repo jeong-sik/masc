@@ -107,6 +107,27 @@ type scope =
   | Whole_fleet
   | Selected_only
 
+(* How the focus block orders the record's calls: receipt order either way,
+   or the two readings that are not an order in time. The heading over the
+   calls names which is up, and a press on it moves to the next. *)
+type call_order =
+  | Oldest_first
+  | Newest_first
+  | Longest_first
+  | By_tool
+
+let call_order_label = function
+  | Oldest_first -> "oldest first"
+  | Newest_first -> "newest first"
+  | Longest_first -> "longest first"
+  | By_tool -> "by tool"
+
+let next_call_order = function
+  | Oldest_first -> Newest_first
+  | Newest_first -> Longest_first
+  | Longest_first -> By_tool
+  | By_tool -> Oldest_first
+
 type input = {
   now : float;
   tab : tab;
@@ -118,6 +139,8 @@ type input = {
   approvals : approval list;
   chunks : Acting.chunk list;
   changes : changes;
+  call_order : call_order;
+  expanded : (string * Acting.call_key) list;
 }
 
 type span = {
@@ -134,6 +157,8 @@ type row_target =
   | Target_more
   | Target_file of int
   | Target_calls of string
+  | Target_call of string * Acting.call_key
+  | Target_call_order
 
 type rendering = {
   rows : line list;
@@ -160,6 +185,25 @@ let edited_glyph = "~"
 let written_glyph = "+"
 let failed_glyph = "!"
 let unfinished_glyph = "!"
+
+(* Two cells after a call's record glyph say how it was dispatched. The
+   first is [&] when the call ran in a batch with others -- the runtime's
+   concurrent batch, its size above one; the second is [>] when the call
+   returned a deferral, the ledger's [deferred]: the work goes on after the
+   call. A serial call, or a batch of one, that completed draws neither:
+   that is the ordinary case, and a mark on every row would say nothing.
+   ASCII for the reason the change kinds are. The detail rows under an
+   opened call spell both facts out. *)
+let batch_glyph = "&"
+let deferred_glyph = ">"
+let dispatch_cells = 2
+let failed_call_glyph = Acting.glyph_text Acting.Failure
+
+(* An opened call's detail rows sit under its name, past the record glyph
+   and the dispatch marks, and each names what it holds in a fixed label
+   so the two previews line up. *)
+let detail_indent_cells = mark_cells + dispatch_cells + gap_cells
+let detail_label_cells = 4
 
 let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
 let last_event_text ~now at = "last event " ^ age_text ~now at
@@ -247,11 +291,18 @@ type record_state = Record_open | Record_unfinished | Record_settled
    descriptors live for one frame; presentation still uses that frame's input. *)
 type direction = Above | Below
 
+type detail_part =
+  | Detail_facts
+  | Detail_input
+  | Detail_output
+
 type logical_row =
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
+  | Calls_heading
   | Tool_row of Acting.chunk * Acting.chunk_tool * record_state
+  | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
   | Rule
   | More of int
@@ -550,6 +601,25 @@ let health_of input name =
   | Some keeper -> keeper.health
   | None -> None
 
+(* The batch a call ran in, when the ledger said and the runtime ran more
+   than one call in it at once. *)
+let ran_in_a_batch (tool : Acting.chunk_tool) =
+  match tool.Acting.ct_schedule with
+  | Some (Ok schedule) -> schedule.Agent_core.Tool_contract.batch_size > 1
+  | Some (Error _) | None -> false
+
+let dispatch_marks (tool : Acting.chunk_tool) =
+  let batch =
+    { text = (if ran_in_a_batch tool then batch_glyph else " "); tone = Info }
+  in
+  let deferred =
+    match tool.Acting.ct_disposition with
+    | Some (Ok Reading.Keeper_call_deferred) -> { text = deferred_glyph; tone = Info }
+    | Some (Ok (Reading.Keeper_call_completed | Reading.Keeper_call_failed))
+    | Some (Error _) | None -> { text = " "; tone = Plain }
+  in
+  [ batch; deferred; { text = String.make gap_cells ' '; tone = Plain } ]
+
 let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
     match tool.Acting.ct_duration_ms with
@@ -559,23 +629,110 @@ let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
     | None -> { text = ""; tone = Dim }
   in
   let glyph =
-    if (not chunk.Acting.ck_settled) && Option.is_none tool.Acting.ct_duration_ms
-    then
-      (match state with
-       | Record_unfinished -> { text = unfinished_glyph ^ " "; tone = Warn }
-       | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
-    else { text = settled_glyph ^ " "; tone = Dim }
+    match tool.Acting.ct_disposition with
+    | Some (Ok Reading.Keeper_call_failed) -> { text = failed_call_glyph ^ " "; tone = Bad }
+    | Some (Ok (Reading.Keeper_call_completed | Reading.Keeper_call_deferred))
+    | Some (Error _) | None ->
+        if (not chunk.Acting.ck_settled) && Option.is_none tool.Acting.ct_duration_ms
+        then
+          (match state with
+           | Record_unfinished -> { text = unfinished_glyph ^ " "; tone = Warn }
+           | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
+        else { text = settled_glyph ^ " "; tone = Dim }
   in
-  let inner = cols - border_cells - mark_cells in
+  let inner = cols - border_cells - mark_cells - dispatch_cells - gap_cells in
   let right = Layout.display_width duration.text in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
     (with_border
-       [ glyph
-       ; { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
-       ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
-       ; duration
+       ((glyph :: dispatch_marks tool)
+        @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
+          ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
+          ; duration
+          ]))
+
+(* The heading over the calls: which order they are in. Beside it the
+   order is a press away, so the heading is the control as well as the
+   label. *)
+let calls_heading_line ~cols order =
+  fit_line ~cols
+    (with_border
+       [ { text = String.make mark_cells ' '; tone = Plain }
+       ; { text = "calls" ^ middle_dot ^ call_order_label order; tone = Dim }
        ])
+
+(* Text cut to [room] cells, the cut shown: a preview that ends mid-word
+   with no mark reads as the whole. *)
+let clip_cells text room =
+  if Layout.display_width text <= room then text
+  else Layout.take_cells text (max 0 (room - 1)) ^ ellipsis
+
+let schedule_text (tool : Acting.chunk_tool) =
+  match tool.Acting.ct_schedule with
+  | None -> ""
+  | Some (Error _) -> "schedule ?"
+  | Some (Ok schedule) ->
+      let mode =
+        match schedule.Agent_core.Tool_contract.execution_mode with
+        | Agent_core.Tool_contract.Concurrent -> "concurrent"
+        | Agent_core.Tool_contract.Serial -> "serial"
+      in
+      let at_once =
+        if schedule.Agent_core.Tool_contract.batch_size > 1 then
+          Printf.sprintf ", %d at once" schedule.Agent_core.Tool_contract.batch_size
+        else ""
+      in
+      Printf.sprintf "step %d" (schedule.Agent_core.Tool_contract.planned_index + 1)
+      ^ middle_dot ^ mode ^ at_once
+
+let disposition_span (tool : Acting.chunk_tool) =
+  match tool.Acting.ct_disposition with
+  | None -> None
+  | Some (Error _) -> Some { text = "disposition ?"; tone = Warn }
+  | Some (Ok disposition) ->
+      let tone =
+        match disposition with
+        | Reading.Keeper_call_completed -> Dim
+        | Reading.Keeper_call_deferred -> Info
+        | Reading.Keeper_call_failed -> Bad
+      in
+      Some { text = Reading.keeper_call_disposition_to_string disposition; tone }
+
+(* One of an opened call's three rows. The facts row is the receipt age,
+   the schedule and the disposition -- the words behind the marks on the
+   call's own row. The two previews are what the producer redacted and sent,
+   one row each, cut to the pane; "not carried" is the wire plane, which
+   sends none. *)
+let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
+  let indent = { text = String.make detail_indent_cells ' '; tone = Plain } in
+  let room = max 0 (cols - border_cells - detail_indent_cells) in
+  let preview_row ~label preview =
+    let body =
+      match preview with
+      | Some text ->
+          { text = clip_cells (Reading.preview_line text) (max 0 (room - detail_label_cells))
+          ; tone = Plain
+          }
+      | None -> { text = "not carried"; tone = Dim }
+    in
+    fit_line ~cols
+      (with_border [ indent; { text = pad_right detail_label_cells label; tone = Dim }; body ])
+  in
+  match part with
+  | Detail_facts ->
+      let facts =
+        { text = join [ age_text ~now tool.Acting.ct_at ^ " ago"; schedule_text tool ]
+        ; tone = Dim
+        }
+      in
+      let disposition =
+        match disposition_span tool with
+        | Some span -> [ { text = middle_dot; tone = Dim }; span ]
+        | None -> []
+      in
+      fit_line ~cols (with_border (indent :: facts :: disposition))
+  | Detail_input -> preview_row ~label:"in" tool.Acting.ct_input
+  | Detail_output -> preview_row ~label:"out" tool.Acting.ct_output
 
 (* The turn number a settle confirmed is the keeper's own count. An
    unsettled chunk still carries the agent session's numbering, which the
@@ -659,8 +816,37 @@ let approval_line ~cols tool =
        ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
        ])
 
-(* Every logical focus row, oldest call first, then the earlier turns. No
-   text is formatted until the caller selects the visible window. *)
+(* The calls in the order the heading names. Receipt order is what the fold
+   holds; the other two are stable over it, so calls that tie keep their
+   receipt order. A call still out has no duration and sorts after every
+   call that has one. *)
+let ordered_calls order (calls : Acting.chunk_tool list) =
+  match order with
+  | Oldest_first -> calls
+  | Newest_first -> List.rev calls
+  | Longest_first ->
+      List.stable_sort
+        (fun (a : Acting.chunk_tool) (b : Acting.chunk_tool) ->
+          match a.Acting.ct_duration_ms, b.Acting.ct_duration_ms with
+          | Some took_a, Some took_b -> Float.compare took_b took_a
+          | Some _, None -> -1
+          | None, Some _ -> 1
+          | None, None -> 0)
+        calls
+  | By_tool ->
+      List.stable_sort
+        (fun (a : Acting.chunk_tool) (b : Acting.chunk_tool) ->
+          String.compare a.Acting.ct_tool b.Acting.ct_tool)
+        calls
+
+let is_expanded input ~keeper key =
+  List.exists
+    (fun (name, opened) -> String.equal name keeper && Acting.call_key_equal opened key)
+    input.expanded
+
+(* Every logical focus row: the heading, the calls in the heading's order
+   with an opened call's detail under it, then the earlier turns. No text
+   is formatted until the caller selects the visible window. *)
 let focus_rows input chunks name =
   let own =
     List.filter (fun (c : Acting.chunk) -> String.equal c.Acting.ck_keeper name) chunks
@@ -678,11 +864,21 @@ let focus_rows input chunks name =
     | current :: earlier ->
         let state = record_state ~health current in
         let calls =
-          List.map (fun tool -> Tool_row (current, tool, state)) (Acting.chunk_tools current)
+          ordered_calls input.call_order (Acting.chunk_tools current)
+          |> List.concat_map (fun tool ->
+                 Tool_row (current, tool, state)
+                 ::
+                 (if is_expanded input ~keeper:name (Acting.call_key tool) then
+                    List.map
+                      (fun part -> Call_detail (current, tool, part))
+                      [ Detail_facts; Detail_input; Detail_output ]
+                  else []))
         in
         (* A call-less record draws no body row: the header already states
-           the observation state and its receipt age. *)
-        calls @ List.map (fun chunk -> Earlier_turn (chunk, health)) earlier
+           the observation state and its receipt age. The heading names the
+           order only when there are calls in it. *)
+        let heading = match calls with [] -> [] | _ :: _ -> [ Calls_heading ] in
+        heading @ calls @ List.map (fun chunk -> Earlier_turn (chunk, health)) earlier
   in
   Focus_header (name, current, health) :: approval @ body
 
@@ -830,8 +1026,8 @@ let fleet_lines ~below ~scroll (body, overview) =
    reader. Naming four columns over one sentence spends a row saying nothing. *)
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
-  | Focus_header _ | Approval_row _ | Rule | More _ | Indicator _
-  | File_row _ | Formatted_status _ -> false
+  | Focus_header _ | Approval_row _ | Calls_heading | Call_detail _ | Rule | More _
+  | Indicator _ | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
 
@@ -935,8 +1131,12 @@ let materialize_row ~cols input = function
   | Focus_header (name, current, health) ->
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
+  | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
   | Tool_row (chunk, tool, state) ->
-      tool_line ~cols ~state chunk tool, Target_calls chunk.Acting.ck_keeper
+      tool_line ~cols ~state chunk tool, Target_call (chunk.Acting.ck_keeper, Acting.call_key tool)
+  | Call_detail (chunk, tool, part) ->
+      ( call_detail_line ~cols ~now:input.now tool part
+      , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Earlier_turn (chunk, health) ->
       turn_summary_line ~cols ~health chunk, Target_calls chunk.Acting.ck_keeper
   | Rule -> rule_line ~cols, Target_none

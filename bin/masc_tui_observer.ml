@@ -89,7 +89,7 @@ type keeper_tool_call = {
   kt_turn : int option;
   kt_tool : string;
   kt_duration_ms : float option;
-  kt_disposition : string option;
+  kt_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
   kt_at : float;
   kt_tool_use_id : string option;
   kt_schedule : (Agent_core.Tool_contract.schedule, string) result option;
@@ -298,7 +298,9 @@ let decode_keeper_tool_call fields =
        ; kt_turn = int_field fields "turn"
        ; kt_tool
        ; kt_duration_ms = float_field fields "duration_ms"
-       ; kt_disposition = string_field fields "disposition"
+       ; kt_disposition =
+           Option.map Masc.Tui_decode.keeper_call_disposition_of_string
+             (string_field fields "disposition")
        ; kt_at
        ; kt_tool_use_id
        ; kt_schedule = keeper_schedule fields

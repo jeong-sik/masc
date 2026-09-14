@@ -4550,6 +4550,13 @@ type state = {
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
+  (* The order the focus block lists the record's calls in; the heading
+     over them names it and a press on that heading moves to the next. *)
+  mutable acting_pane_call_order: Masc_tui_acting_pane.call_order;
+  (* The calls a press opened, by keeper and call key: an opened call draws
+     its receipt age, schedule, disposition and the two previews under its
+     row. A second press on any of those rows closes it. *)
+  mutable acting_pane_expanded: (string * Masc_tui_acting.call_key) list;
   (* One event-derived projection; live presentation inputs are never cached. *)
   mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
@@ -6455,6 +6462,8 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
+  acting_pane_call_order = Masc_tui_acting_pane.Oldest_first;
+  acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
   acting_pane_changes_at = None;

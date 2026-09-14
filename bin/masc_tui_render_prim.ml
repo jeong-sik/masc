@@ -981,6 +981,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
         (Masc_tui_types.approval_items state)
   ; chunks
   ; changes = acting_pane_changes state
+  ; call_order = state.acting_pane_call_order
+  ; expanded = state.acting_pane_expanded
   }
 
 

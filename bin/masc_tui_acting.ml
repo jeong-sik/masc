@@ -243,7 +243,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label =
           (match c.Observer.kt_disposition with
            | Some disposition ->
-               if skill then "skill \xc2\xb7 " ^ disposition else disposition
+               let word =
+                 match disposition with
+                 | Ok disposition ->
+                     Masc.Tui_decode.keeper_call_disposition_to_string disposition
+                 | Error _ -> "unknown disposition"
+               in
+               if skill then "skill \xc2\xb7 " ^ word else word
            | None -> if skill then "skill call" else "tool call")
       ; detail =
           (match c.Observer.kt_duration_ms with
@@ -337,7 +343,29 @@ let row_of_entry ~duration_ms entry =
 type chunk_tool = {
   ct_tool : string;
   ct_duration_ms : float option;
+  ct_at : float;
+  ct_tool_use_id : string option;
+  ct_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
+  ct_schedule : (Agent_core.Tool_contract.schedule, string) result option;
+  ct_input : string option;
+  ct_output : string option;
 }
+
+type call_key =
+  | Call_by_id of string
+  | Call_by_receipt of { at : float; tool : string }
+
+let call_key tool =
+  match tool.ct_tool_use_id with
+  | Some id -> Call_by_id id
+  | None -> Call_by_receipt { at = tool.ct_at; tool = tool.ct_tool }
+
+let call_key_equal a b =
+  match a, b with
+  | Call_by_id a, Call_by_id b -> String.equal a b
+  | Call_by_receipt a, Call_by_receipt b ->
+      Float.equal a.at b.at && String.equal a.tool b.tool
+  | Call_by_id _, Call_by_receipt _ | Call_by_receipt _, Call_by_id _ -> false
 
 (* A wire-plane call keeps its start and id so its return can settle the
    duration in place; the tool is on screen from the call, not from the
@@ -378,6 +406,11 @@ type chunk_member =
       tool : string;
       duration_ms : float option;
       turn : int option;
+      tool_use_id : string option;
+      disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
+      schedule : (Agent_core.Tool_contract.schedule, string) result option;
+      input : string option;
+      output : string option;
     }
   | Member_settle of Observer.keeper_turn_complete
   | Member_quiet
@@ -418,6 +451,11 @@ let member_of_event (event : Observer.event) =
            { tool = c.Observer.kt_tool
            ; duration_ms = c.Observer.kt_duration_ms
            ; turn = c.Observer.kt_turn
+           ; tool_use_id = c.Observer.kt_tool_use_id
+           ; disposition = c.Observer.kt_disposition
+           ; schedule = c.Observer.kt_schedule
+           ; input = c.Observer.kt_tool_args_preview
+           ; output = c.Observer.kt_tool_output_preview
            })
   | Observer.Keeper_turn_complete t -> Some (Member_settle t)
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
@@ -503,12 +541,22 @@ let apply_member chunk ~at member =
             ]
       in
       { chunk with ck_wire_tools }
-  | Member_ledger_tool { tool; duration_ms; turn } ->
+  | Member_ledger_tool
+      { tool; duration_ms; turn; tool_use_id; disposition; schedule; input; output } ->
       let chunk = stamp_session_turn chunk turn in
       { chunk with
         ck_ledger_tools =
           chunk.ck_ledger_tools
-          @ [ { ct_tool = tool; ct_duration_ms = duration_ms } ]
+          @ [ { ct_tool = tool
+              ; ct_duration_ms = duration_ms
+              ; ct_at = at
+              ; ct_tool_use_id = tool_use_id
+              ; ct_disposition = disposition
+              ; ct_schedule = schedule
+              ; ct_input = input
+              ; ct_output = output
+              }
+            ]
       }
   | Member_settle t ->
       let ck_turn =
@@ -524,19 +572,29 @@ let apply_member chunk ~at member =
 
 let chunk_tools_text tools =
   tools
-  |> List.map (fun { ct_tool; ct_duration_ms } ->
+  |> List.map (fun { ct_tool; ct_duration_ms; _ } ->
       match ct_duration_ms with
       | Some ms -> ct_tool ^ " " ^ elapsed_text ms
       | None -> ct_tool)
   |> String.concat " \xc2\xb7 "
 
 (* The ledger is the authority when it reported at all; the wire list only
-   stands in for runtimes whose ledger plane is silent. *)
+   stands in for runtimes whose ledger plane is silent. A wire call has no
+   disposition, schedule or I/O to stand in with: those are the ledger's. *)
 let chunk_tools chunk =
   match chunk.ck_ledger_tools with
   | [] ->
       List.map
-        (fun wt -> { ct_tool = wt.wt_tool; ct_duration_ms = wt.wt_duration_ms })
+        (fun wt ->
+          { ct_tool = wt.wt_tool
+          ; ct_duration_ms = wt.wt_duration_ms
+          ; ct_at = wt.wt_started
+          ; ct_tool_use_id = wt.wt_id
+          ; ct_disposition = None
+          ; ct_schedule = None
+          ; ct_input = None
+          ; ct_output = None
+          })
         chunk.ck_wire_tools
   | l -> l
 
@@ -798,7 +856,12 @@ let evidence_fields (entry : entry) =
       ; some "Keeper" call.kt_keeper
       ; some "Tool name" call.kt_tool
       ; number "Turn" call.kt_turn
-      ; field "Disposition" call.kt_disposition
+      ; (match call.kt_disposition with
+         | None -> field "Disposition" None
+         | Some (Ok disposition) ->
+             some "Disposition"
+               (Masc.Tui_decode.keeper_call_disposition_to_string disposition)
+         | Some (Error error) -> some "Disposition error" error)
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields

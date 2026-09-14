@@ -3,7 +3,11 @@
     Capacity is the only scheduling constraint. When capacity is exhausted,
     requests are queued and granted slots in arrival order.
 
-    Cancel-safe: if a waiting fiber is cancelled, the slot is not leaked.
+    Cancel-safe: whether a waiter owns a slot once its wait has ended is
+    decided by the waiter's state transition, not by how the wait ended. A
+    waiter cancelled, or timed out, after the slot was handed to it in the
+    same instant still owns that slot, and uses or returns it; one that was
+    never handed a slot leaves the queue. Nothing is leaked either way.
 
     @since 0.96.0 *)
 
@@ -19,8 +23,10 @@ val with_permit : t -> (unit -> 'a) -> 'a
 
 (** [with_permit] whose wait for a slot ends at [deadline_at] on [clock]:
     [Error `Permit_wait_expired] when no slot was granted by then (the waiter
-    leaves the queue), [Ok (f ())] otherwise. [f] runs without this deadline;
-    the caller bounds it. *)
+    leaves the queue), [Ok (f ())] otherwise, including when the slot was
+    granted in the same instant the deadline passed: the wait this deadline
+    bounds is over, and the slot is the caller's. [f] runs without this
+    deadline; the caller bounds it. *)
 val with_permit_until
   :  clock:_ Eio.Time.clock
   -> deadline_at:float

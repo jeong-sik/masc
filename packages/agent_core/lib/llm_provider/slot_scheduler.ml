@@ -63,43 +63,22 @@ let create ~max_slots =
   { max_slots; active = 0; waiters = empty_queue; mutex = Eio.Mutex.create () }
 ;;
 
-let rec acquire t =
-  let action =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      if t.active < t.max_slots && t.waiters.length = 0
-      then (
-        t.active <- t.active + 1;
-        `Got_slot)
-      else (
-        let promise, resolver = Eio.Promise.create () in
-        let waiter = { resolver; state = Atomic.make Waiting } in
-        t.waiters <- enqueue waiter t.waiters;
-        `Wait (promise, waiter)))
-  in
-  match action with
-  | `Got_slot -> ()
-  | `Wait (promise, waiter) ->
-    (try Eio.Promise.await promise with
-     | exn ->
-       if Atomic.compare_and_set waiter.state Waiting Cancelled
-       then (
-         Eio.Cancel.protect (fun () ->
-           Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-             t.waiters <- remove_waiter waiter t.waiters));
-         raise exn)
-       else (
-         match Atomic.get waiter.state with
-         | Granted ->
-           (* The slot was transferred to this waiter before cancellation.
-              Return it to the oldest remaining waiter. *)
-           Eio.Cancel.protect (fun () -> release_slot t);
-           raise exn
-         | Cancelled ->
-           invalid_arg "Slot_scheduler.acquire: waiter cancelled more than once"
-         | Waiting ->
-           invalid_arg "Slot_scheduler.acquire: invalid waiter state transition"))
+(* Takes a free slot, or joins the queue. Under the mutex so the count and
+   the queue move together. *)
+let request_slot t =
+  Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    if t.active < t.max_slots && t.waiters.length = 0
+    then (
+      t.active <- t.active + 1;
+      `Got_slot)
+    else (
+      let promise, resolver = Eio.Promise.create () in
+      let waiter = { resolver; state = Atomic.make Waiting } in
+      t.waiters <- enqueue waiter t.waiters;
+      `Wait (promise, waiter)))
+;;
 
-and release_slot t =
+let release_slot t =
   let to_wake =
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
       let release_active_slot () =
@@ -132,21 +111,78 @@ and release_slot t =
   | None -> ()
 ;;
 
+(* Whether a waiter whose wait has ended owns a slot is decided by its state
+   transition, never by which fiber finished first. [release_slot] hands a
+   slot over with the CAS Waiting -> Granted; a waiter that wins the CAS
+   Waiting -> Cancelled here was never handed one and leaves the queue. A
+   waiter that loses it was granted the slot in the same instant, however
+   its wait ended, and owns it: it is used or returned, never dropped.
+   ([Fiber.first] discards the later of two results, so a wait raced
+   against a timer can end "expired" with the grant already made.) *)
+let leave_or_own t waiter =
+  if Atomic.compare_and_set waiter.state Waiting Cancelled
+  then (
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        t.waiters <- remove_waiter waiter t.waiters));
+    `Left_queue)
+  else (
+    match Atomic.get waiter.state with
+    | Granted -> `Owns_slot
+    | Cancelled -> invalid_arg "Slot_scheduler: waiter cancelled more than once"
+    | Waiting -> invalid_arg "Slot_scheduler: invalid waiter state transition")
+;;
+
+let acquire t =
+  match request_slot t with
+  | `Got_slot -> ()
+  | `Wait (promise, waiter) ->
+    (try Eio.Promise.await promise with
+     | exn ->
+       (match leave_or_own t waiter with
+        | `Left_queue -> ()
+        | `Owns_slot ->
+          (* The slot was transferred to this waiter before the exception.
+             Return it to the oldest remaining waiter. *)
+          Eio.Cancel.protect (fun () -> release_slot t));
+       raise exn)
+;;
+
+(* [acquire] whose wait for a slot ends at [deadline_at] on [clock]. *)
+let acquire_until ~clock ~deadline_at t =
+  match request_slot t with
+  | `Got_slot -> Ok ()
+  | `Wait (promise, waiter) ->
+    let remaining = Float.max 0.0 (deadline_at -. Eio.Time.now clock) in
+    (match
+       Eio.Time.with_timeout clock remaining (fun () -> Ok (Eio.Promise.await promise))
+     with
+     | Ok () -> Ok ()
+     | Error `Timeout ->
+       (match leave_or_own t waiter with
+        | `Left_queue -> Error `Permit_wait_expired
+        | `Owns_slot ->
+          (* Granted as the deadline passed: the wait this deadline bounded is
+             over and the slot is this caller's. *)
+          Ok ())
+     | exception exn ->
+       (match leave_or_own t waiter with
+        | `Left_queue -> ()
+        | `Owns_slot -> Eio.Cancel.protect (fun () -> release_slot t));
+       raise exn)
+;;
+
 let with_permit t f =
   acquire t;
   Fun.protect f ~finally:(fun () -> release_slot t)
 ;;
 
 let with_permit_until ~clock ~deadline_at t f =
-  let remaining = deadline_at -. Eio.Time.now clock in
-  if Float.compare remaining 0.0 <= 0
+  if Float.compare (deadline_at -. Eio.Time.now clock) 0.0 <= 0
   then Error `Permit_wait_expired
   else (
-    (* [acquire] is cancel-safe: a waiter cancelled by the timer leaves the
-       queue, and one granted in the same instant returns its slot, so
-       nothing leaks when the wait ends here. *)
-    match Eio.Time.with_timeout clock remaining (fun () -> Ok (acquire t)) with
-    | Error `Timeout -> Error `Permit_wait_expired
+    match acquire_until ~clock ~deadline_at t with
+    | Error `Permit_wait_expired as expired -> expired
     | Ok () -> Ok (Fun.protect f ~finally:(fun () -> release_slot t)))
 ;;
 

@@ -393,7 +393,14 @@ let for_surface = function
       ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
-      ; b Navigate "o" "Lane Add-ons"
+      (* One destination, two keys. [o] came from #35915 and [A] from #35761,
+         and each arrived with its own binding and its own wording -- the
+         footer then spent two of its items saying "Lane Add-ons" and
+         "add-ons", the heading named [o], and the guide named [A]. The
+         dispatch was one arm the whole time ([Some "o" | Some "O" | Some "A"]
+         on Lanes), so the table says so too. Both keys stay: a PTY walk
+         presses [A] and the guide's first line names it. *)
+      ; b Navigate "o / A" "Lane Add-ons"
           ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
@@ -401,8 +408,6 @@ let for_surface = function
           ~help:"add a failover candidate to this lane's walk order"
       ; b Navigate "e" "lane config"
           ~help:"open this lane's runtime.exact_output_lanes section"
-      ; b Navigate "A" "add-ons"
-          ~help:"open Lane add-ons, declarations, instances, and output"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "overview" ~help:"back to Overview"

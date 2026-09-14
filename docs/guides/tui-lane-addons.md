@@ -1,7 +1,7 @@
 # TUI에서 TOML Lane Add-on 설치·연결하기
 
 같은 서버를 사용하는 `masc-tui --base-path <base-path> --port <server-port>`를 연다.
-메인 `Lanes` 탭에서 `A`로 Lane Add-ons를 연다.
+메인 `Lanes` 탭에서 `o` 또는 `A`로 Lane Add-ons를 연다. 둘은 같은 화면을 열며, Lanes 머리글과 아래 키 줄이 `o / A`로 함께 적는다.
 입력창의 `/addons`나 `:` 팔레트의 `go Lane Add-ons`로도 연다.
 `Lanes`는 standalone 실행과 실행 상세를 다룬다. Add-ons는 패키지 설치·연결·여러 Lane의 관측을 다룬다.
 

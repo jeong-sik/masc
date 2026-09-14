@@ -2027,8 +2027,16 @@ let voice_local_setup_exit base_path speak_voice hear_model =
           (* Where the choice is written decides whether per-keeper voices
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
+          let alongside =
+            match tts with
+            | None -> []
+            | Some (tts : Voice_config.tts_config) ->
+              List.map
+                (fun (endpoint : Voice_config.endpoint) -> Some endpoint.Voice_config.kind)
+                tts.Voice_config.endpoints
+          in
           let endpoint_voice, section =
-            match Voice_setup.voice_placement tts with
+            match Voice_setup.voice_placement ~alongside ~adding:Voice_config.Macos_say with
             | Voice_setup.On_the_endpoint -> Some voice, []
             | Voice_setup.On_the_section ->
               None, [ Voice_setup.Set_tts_default_voice voice ]

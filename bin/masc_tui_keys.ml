@@ -352,6 +352,8 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
+      ; b Act "Ctrl-T" "queue"
+          ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
@@ -368,9 +370,8 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
-      ; b Act "Q" "leave"
-          ~help:"leave with a turn running, without interrupting it \
-                 (empty draft, no capture or edit in flight)"
+      ; b Act "Ctrl-Q" "leave"
+          ~help:"leave with a turn running, without interrupting it"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
@@ -390,9 +391,11 @@ let for_surface = function
           ~help:"add a failover candidate to this lane's walk order"
       ; b Navigate "e" "lane config"
           ~help:"open this lane's runtime.exact_output_lanes section"
+      ; b Navigate "A" "add-ons"
+          ~help:"open Lane add-ons, declarations, instances, and output"
       ; b Navigate "p" "runtime"
-          ~help:"back to the Runtime surface this hangs off"
-      ; b Act "Esc" "runtime" ~help:"back to the Runtime surface it hangs off"
+          ~help:"open the Runtime surface"
+      ; b Act "Esc" "overview" ~help:"back to Overview"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching standalone lane; the run list \
                  and a run's detail carry no searchable rows"
@@ -1053,7 +1056,7 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
-  ; "Config / Runtime / Lanes", Lanes
+  ; "Lanes", Lanes
   ; "Config / Runtime / Clients", Clients
   ; "Board", Board
   ; "Approvals", Approvals

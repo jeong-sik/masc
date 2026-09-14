@@ -88,6 +88,13 @@ def main(executable: str) -> None:
             def key(value: bytes, needle: bytes):
                 return terminal.send_and_wait(process, master_fd, output, value, needle)
 
+            key(b":go lanes\r", b"MASC Lanes")
+            key(b"A", b"MASC Lane Add-ons")
+            key(b"4", b"No Add-ons installed.")
+            key(b"5", b"No observations.")
+            key(b"3", b"No Add-ons installed.")
+            key(b"q", b"MASC Lanes")
+            key(b"\x1b", b"MASC Overview")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
             key(b"D", b"TOML installations")
             key(b"n", b"New TOML filename:")
@@ -133,26 +140,37 @@ def main(executable: str) -> None:
             edit_text.write_text("# second draft retained")
             key(b"second.toml\r", b"TOML draft second.toml")
             key(b"q", b"MASC Overview")
-            key(b":go lane add-ons\r", b"TOML draft second.toml")
+            # The save is still gated here, so this reopen is refused with the
+            # pending note instead of fetching: the pane comes up from the
+            # cached view. That note is the only observable handle on the
+            # completion -- this pane renders the selected draft's summary,
+            # which the save does not touch, so nothing else in the frame
+            # changes when the held response lands.
+            refused = key(b":go lane add-ons\r", b"TOML draft second.toml")
+            if b"A Lane request is pending" not in terminal.CSI_RE.sub(b"", refused):
+                raise AssertionError("reopening during a pending save fetched instead of refusing")
             terminal.read_available(master_fd, output)
-            after_release = len(output)
+            mark = len(output)
             release.set()
             if not terminal.wait_for_fixture_event(process, master_fd, output, finished, timeout=5):
                 raise AssertionError("delayed save did not finish")
-            terminal.wait_for_output(process, master_fd, output, b"Retained server observations",
-                                     start=after_release, timeout=5)
+            # Processing the save clears the refusal, and every row under it
+            # moves up, printing the selected summary again. Until that
+            # reprint the pane is still loading and r would be refused the
+            # same way, so the refresh below waits for it.
+            terminal.wait_for_output(process, master_fd, output, b"TOML draft second.toml",
+                start=mark, timeout=5)
             state["delay"] = False
             # Inspect leaves the selected draft unchanged, so an incremental
             # frame need not print its title again. Join the new request and
             # its completion, then inspect B in a freshly opened pane below.
             refreshed = terminal.GatedHttpResponse(inspect())
             fixtures["/api/v1/lane-addons"] = refreshed
-            key(b"r", b"Request pending")
+            os.write(master_fd, b"r")
             if not terminal.wait_for_fixture_event(process, master_fd, output, refreshed.requested, timeout=5):
                 raise AssertionError("refresh request did not reach fixture")
-            terminal.release_and_wait_for_frame(process, master_fd, output, refreshed,
-                                                b"Retained server observations")
-            if not refreshed.completed.is_set():
+            refreshed.release.set()
+            if not terminal.wait_for_fixture_event(process, master_fd, output, refreshed.completed, timeout=5):
                 raise AssertionError("refresh fixture did not complete")
             fixtures["/api/v1/lane-addons"] = inspect
             # Close the whole pane, revisit, then return to the regular TUI.

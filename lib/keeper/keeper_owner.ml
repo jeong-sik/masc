@@ -46,7 +46,7 @@ type interrupt_target =
 
 type run_next_result =
   | Run_next_paused
-  | Run_next_applied of { signalled : bool; resumed : bool; interrupt_error : string option }
+  | Run_next_applied of { signalled : bool; interrupt_error : string option }
 
 type interactive_outcome = Applied | Stale_control | Paused | Replayed
 type interactive_receipt =
@@ -1041,14 +1041,6 @@ let start
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn -> false, Some (Printexc.to_string exn))
         in
-        let commit_meta state command =
-          match !(t.store_error) with
-          | Some detail -> Error (state, Store_unavailable detail)
-          | None ->
-            match Keeper_owner_reducer.apply_meta state command with
-            | Error error -> Error (state, Reducer_rejected error)
-            | Ok transition -> apply_transition t store state transition
-        in
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
@@ -1216,30 +1208,17 @@ let start
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
            | Ok (interrupt, _) ->
-             let paused = match (Keeper_owner_reducer.projection state).meta with
-               | Some meta when meta.paused -> Ok state
-               | _ -> commit_meta state
-                   (Keeper_owner_reducer.Pause
-                      { reason = Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }
-                      ; updated_at = Time_codec.rfc3339_of_unix (t.now ()) }) in
-             (match paused with
-              | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
-              | Ok state ->
-                Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
-                let result = match interrupt with
-                  | None -> Pending_admission_paused
-                  | Some interrupt -> Interrupt_result
-                      (try interrupt (); Operation_interrupt_signalled with
-                       | Eio.Cancel.Cancelled _ as exn -> raise exn
-                       | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
-                Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
-                loop state shutdown_operation_id))
+             Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
+             let result = match interrupt with
+               | None -> Pending_admission_paused
+               | Some interrupt -> Interrupt_result
+                   (try interrupt (); Operation_interrupt_signalled with
+                    | Eio.Cancel.Cancelled _ as exn -> raise exn
+                    | exn -> Operation_interrupt_failed (Printexc.to_string exn)) in
+             Eio.Promise.resolve resolve (Ok (result, chat_control_token t));
+             loop state shutdown_operation_id)
         | Command (Run_next_operation { operation_id; observed }, resolve) ->
-          let can_resume = match (Keeper_owner_reducer.projection state).meta with
-            | Some { paused = true; latched_reason = Some (Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }); _ } -> true
-            | _ -> false in
-          let paused_elsewhere = not (turn_admission_open state) && not can_resume in
-          if paused_elsewhere then (
+          if not (turn_admission_open state) then (
             Eio.Promise.resolve resolve (Ok Run_next_paused);
             loop state shutdown_operation_id)
           else
@@ -1251,14 +1230,10 @@ let start
           (match prioritized with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
            | Ok () ->
-             let resumed = if can_resume then commit_meta state (Keeper_owner_reducer.Resume { updated_at = Time_codec.rfc3339_of_unix (t.now ()) }) else Ok state in
-             (match resumed with
-              | Error (state, error) -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id
-              | Ok state ->
-                let signalled, interrupt_error = signal_exact observed in
-                Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; resumed = can_resume; interrupt_error }));
-                start_child_if_needed state shutdown_operation_id;
-                loop state shutdown_operation_id))
+             let signalled, interrupt_error = signal_exact observed in
+             Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; interrupt_error }));
+             start_child_if_needed state shutdown_operation_id;
+             loop state shutdown_operation_id)
         | Command (Interrupt_running_operation expected, resolve) ->
           let response = match exact_interrupt (Direct_operation expected) with
             | Error _ as error -> error
@@ -1296,11 +1271,8 @@ let start
           start_child_if_needed state shutdown_operation_id;
           loop state shutdown_operation_id
         | Command (Submit_interactive_operation {operation_id; source; input; intent}, resolve) ->
-          let can_resume = match (Keeper_owner_reducer.projection state).meta with
-            | Some { paused = true; latched_reason = Some (Keeper_latched_reason.Operator_paused { operator_actor = Chat_interrupt }); _ } -> true
-            | _ -> false in
           let current = String.equal intent.control_token (chat_control_token t) in
-          let permitted = current && (turn_admission_open state || can_resume) in
+          let permitted = current && turn_admission_open state in
           let result = reject_if_shutdown shutdown_operation_id (fun () ->
             reject_if_stopping state (fun () ->
               run_operation_command t ~label:"admit interactive Keeper message" (fun () ->
@@ -1315,15 +1287,9 @@ let start
                | Existing operation -> operation, true in
              let acceptance = {operation; existing; queued_count = projection.queued_count} in
              let outcome = if existing then Replayed else if not current then Stale_control else if not permitted then Paused else Applied in
-             let resumed = if outcome = Applied && can_resume then
-                 commit_meta state (Keeper_owner_reducer.Resume {updated_at = Time_codec.rfc3339_of_unix (t.now ())})
-               else Ok state in
-             let state, resumed, resume_error = match resumed with
-               | Ok state -> state, outcome = Applied && can_resume, None
-               | Error (state, error) -> state, false, Some (error_to_string error) in
-             let signalled, interrupt_error = if outcome <> Applied || Option.is_some resume_error then false, resume_error
+             let signalled, interrupt_error = if outcome <> Applied then false, None
                else signal_exact intent.target in
-             let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed; interrupt_error} in
+             let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed = false; interrupt_error} in
              Eio.Promise.resolve resolve (Ok (acceptance, receipt));
              start_child_if_needed state shutdown_operation_id;
              loop state shutdown_operation_id)
@@ -1646,6 +1612,7 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
+let interrupt_turn = pause_and_interrupt
 let run_next_operation t ~operation_id ~observed = request t (Run_next_operation { operation_id; observed })
 
 let interrupt_running_operation t operation_id =

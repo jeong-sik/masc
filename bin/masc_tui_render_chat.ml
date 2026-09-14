@@ -2897,7 +2897,7 @@ let render_keeper_message (state : state) =
             | 0 -> "Enter:send update"
             | waiting ->
                 Printf.sprintf
-                  "Enter:send update (%d local)  Ctrl-K:cancel last  Ctrl-P:edit last"
+                  "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
                   waiting)
       in
       match disposition with
@@ -2951,10 +2951,10 @@ let render_keeper_message (state : state) =
        sheet still names it. *)
     let leave_hint =
       if state.keeper_message_focus = Right_pane
-         && Buffer.length state.msg_input = 0
+         && Option.is_some state.msg_live
          && Option.is_none state.msg_recall_replaces
          && Option.is_none state.voice_capture
-      then "  Q:leave"
+      then "  Ctrl-Q:leave"
       else ""
     in
     let switch_hint =
@@ -3028,7 +3028,7 @@ let render_keeper_message (state : state) =
               match state.msg_recall_replaces with
               | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
               | None ->
-                  Printf.sprintf "Enter:send update (%d local)  Ctrl-K:cancel  Ctrl-P:edit"
+                  Printf.sprintf "Enter:send (%d local)  Ctrl-T:queue  Ctrl-K:cancel"
                     pending_count)
           | Sends -> enter_hint
         in

@@ -606,6 +606,8 @@ let pause_observed_turn ~base_path ~keeper_name ~interrupt_token =
         (Keeper_owner.Observed_turn { current = entry.current_turn_switch; interrupt_token }))
 ;;
 
+let interrupt_observed_turn = pause_observed_turn
+
 let pause_running_operation ?expected_control_token ~base_path ~keeper_name operation_id =
   with_chat_admission_command ~base_path ~keeper_name (fun owner _ ->
     Keeper_owner.pause_and_interrupt ?expected_control_token owner (Keeper_owner.Direct_operation operation_id))

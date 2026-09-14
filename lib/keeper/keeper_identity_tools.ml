@@ -335,22 +335,35 @@ let rpc_rejects_before_execution code =
   | Some _ | None -> false
 ;;
 
-let effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_disposition
-  = function
-  | Precondition _ | Transient_precondition _ -> Tool_result.Proven_pre_effect
+type call_proof =
+  | Effect_never_began
+  | Outcome_unknown
+
+let call_proof_of_call_error : call_error -> call_proof = function
+  | Precondition _ | Transient_precondition _ -> Effect_never_began
   (* A session that never came up carries proof the call was not sent. *)
-  | Mcp { phase = Before_send; _ } -> Tool_result.Proven_pre_effect
+  | Mcp { phase = Before_send; _ } -> Effect_never_began
   (* The server refused the token; auth precedes the tool run. *)
-  | Mcp { phase = After_send; error = Mcp_client.Unauthorized _ } ->
-    Tool_result.Proven_pre_effect
+  | Mcp { phase = After_send; error = Mcp_client.Unauthorized _ } -> Effect_never_began
   | Mcp { phase = After_send; error = Mcp_client.Rpc { code; _ } }
-    when rpc_rejects_before_execution code -> Tool_result.Proven_pre_effect
+    when rpc_rejects_before_execution code -> Effect_never_began
+  (* After the call went to the transport, no failure proves anything: a
+     transport error here may be the connection step of the tools/call
+     itself, and an HTTP status, a JSON-RPC code the server sends after
+     running, or an answer that does not parse all follow a request the
+     service may have applied. *)
   | Mcp
       { phase = After_send
       ; error =
           Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
           | Mcp_client.Transport _
-      } -> Tool_result.Effect_outcome_unknown
+      } -> Outcome_unknown
+;;
+
+let effect_disposition_of_call_error call_error =
+  match call_proof_of_call_error call_error with
+  | Effect_never_began -> Tool_result.Proven_pre_effect
+  | Outcome_unknown -> Tool_result.Effect_outcome_unknown
 ;;
 
 let call_error_to_string = function
@@ -390,20 +403,19 @@ let tool_result_of_call ~read_only answer =
     (* "Recoverable" tells the model a second call is safe. It is safe when
        the provider said the tool only reads (its explicit word, as at the
        gate: silence is not that), or when the failure proves the effect
-       never began; the disposition is the same fact replay reads. A write
-       whose request reached the service and got no answer back may have
-       applied, and a model told to retry it would apply it twice. *)
-    (match read_only, effect_disposition_of_call_error call_error with
-     | Some true, _ | (Some false | None), Tool_result.Proven_pre_effect ->
+       never began; the proof is the same fact replay reads. A write the
+       transport took and did not answer for may have applied, and a model
+       told to retry it would apply it twice. *)
+    (match read_only, call_proof_of_call_error call_error with
+     | Some true, _ | (Some false | None), Effect_never_began ->
        failed ~recoverable:true ~error_class:(Some error_class) detail
-     | ( (Some false | None)
-       , (Tool_result.Effect_outcome_unknown | Tool_result.Proven_post_effect) ) ->
+     | (Some false | None), Outcome_unknown ->
        failed
          ~recoverable:false
          ~error_class:(Some Agent_core.Types.Unknown)
          (Printf.sprintf
-            "%s; the request had reached the service, so whether it applied is \
-             unknown: read the service's state before sending it again"
+            "%s; the request may have reached the service, so whether it applied \
+             is unknown: read the service's state before sending it again"
             detail))
 ;;
 

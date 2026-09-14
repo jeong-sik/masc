@@ -219,8 +219,10 @@ let json_answer body =
   Ok { Masc_http_client.status = 200; headers = [ "content-type", "application/json" ]; body }
 ;;
 
-let is_initialize body = Str.string_match (Str.regexp ".*\"initialize\"") body 0
-let is_tools_call body = Str.string_match (Str.regexp ".*\"tools/call\"") body 0
+(* The JSON-RPC method the client asked for, read from the request body. *)
+let rpc_method body =
+  Yojson.Safe.Util.(to_string_option (member "method" (Yojson.Safe.from_string body)))
+;;
 
 let initialize_answer =
   Printf.sprintf
@@ -231,14 +233,13 @@ let initialize_answer =
 (* The deadline passes on the first request: the session never came up. *)
 let transport_that_never_opens ~url:_ ~headers:_ ~body:_ = Error deadline_error
 
-(* The session comes up and the deadline passes on tools/call: the request
-   reached the service. *)
+(* The session comes up and the deadline passes on tools/call: the call
+   went to the transport, and nothing proves more than that. *)
 let transport_that_times_out_the_call ~url:_ ~headers:_ ~body =
-  if is_initialize body
-  then json_answer initialize_answer
-  else if is_tools_call body
-  then Error deadline_error
-  else json_answer "{}"
+  match rpc_method body with
+  | Some "initialize" -> json_answer initialize_answer
+  | Some "tools/call" -> Error deadline_error
+  | Some _ | None -> json_answer "{}"
 ;;
 
 let never_token_post ~url:_ ~headers:_ ~body:_ =
@@ -308,7 +309,7 @@ let test_a_deadline_on_the_call_itself_is_not_a_blind_retry () =
        call_error) as answer ->
     check
       effect_disposition
-      "the request reached the service"
+      "the outcome is unknown"
       Tool_result.Effect_outcome_unknown
       (Keeper_identity_tools.effect_disposition_of_call_error call_error);
     check

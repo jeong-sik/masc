@@ -273,8 +273,18 @@ let for_surface = function
       [ b Navigate "1 / 2" "Events / Logs"
           ~help:"Events, or the server's own log lines; l opens Logs as well"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
-      ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
-      ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      (* [Navigate], not [Act]: the group is documented as "doing something to
+         the thing under the cursor", and this key does nothing to the event
+         the cursor is on -- it chooses which events the list holds at all,
+         the way Planning spells its own filter. The group is also the
+         retention order, so in [Act] this key was given up before
+         [Home/End]. *)
+      ; b Navigate "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
+      (* "evidence", not "event evidence": every row on this surface is an
+         event, so the label was saying the surface's own subject back to the
+         reader. The six cells it gives back are what lets [f] stay on the row
+         beside it -- see the footer case in test_tui_keys. *)
+      ; b Act "Enter" "evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)

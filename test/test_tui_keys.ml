@@ -1205,6 +1205,24 @@ let test_the_voice_pane_offers_the_keeper_voice_key () =
   Alcotest.(check bool) "the voice pane names the key that opens it" true
     (footer_has_key "a" voice)
 
+(* Activity opens on the Turns scope, where [Enter] has no individual event
+   to open -- the two keys say so themselves ("Turns has no individual event
+   evidence", "Actions/Everything: exact selected event"). So a row offering
+   [Enter] without [f] offers a promise and hides the only key that makes it
+   true.
+
+   This went red when #36156 pinned [Enter] in [never_dropped_keys]: from
+   eighty to a hundred and ten columns the fitter gave up [f] and kept
+   [Enter]. Two things were wrong and neither alone was enough. [f] sat in
+   [Act], which the fitter gives up before [Navigate], so it went before
+   [Home/End] however short the row was; and [Enter:event evidence] spent six
+   cells saying "event" on a surface whose rows are events. Both moved, the
+   whole row fits from seventy-nine columns up -- measured, not reasoned: the
+   sweep below was run from sixty and the last failing width was seventy-eight.
+
+   The structural answer is still a binding that can say a key is its
+   prerequisite (#36282, #35834). Until then this case is the ratchet: a
+   label or a group that grows back past the budget turns it red here. *)
 let test_activity_footer_keeps_filter_before_evidence () =
   let hints = Masc_tui_keys.footer_hints Acting in
   for cols = 80 to 148 do

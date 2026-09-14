@@ -20,6 +20,9 @@
 - TUI: user input is auto-promoted to the next turn, and a shortcut inspects the input queue (#36123).
 - Keeper: pending inputs are organized into Librarian working contexts (#36142).
 - Browser Lane: the lane host follows the workspace connection port (#36133).
+- TUI: the transport list has a way in again (#36217).
+- TUI: the progress row opens with what the model is doing now and how long it has been silent (#36192).
+- Keeper: the prompt and the goal verifier name an unreadable goal store with its reason and file (RFC-0444) (#36126).
 
 ### Fixed
 
@@ -61,6 +64,13 @@
 - Streaming: the parser reads only the reasoning members the catalog declares (#36139).
 - Verification: unread image artifacts stay in the verdict record (#36127).
 - MSX: press fields are parsed at the boundary and the presser comes from actor auth (#36128).
+- Keeper chat: Enter queues the line to run next instead of interrupting the running turn (#36209), and the chat operation store waits out a concurrent writer instead of letting one SQLITE_BUSY fence chat for the rest of the process (#36218); an unavailable store is retried at the next command or meta commit, not only at a drain wake (#36187), and an idle wake reopens the store and clears the fence (#36165).
+- Keeper: an operator interrupt of the autonomous turn is a typed outcome instead of a keepalive fiber crash (#36172); a timed-out write is not offered for a blind retry (#36162); a reasoning delta counts as progress to the attempt watchdog (#36169); a reasoning block that chants one unit ends the stream (#36193); the provider-call no-progress threshold has a failsafe floor (#36181); and a call deadline bounds the wait for an admission permit, which the keeper sub-call uses (#36157).
+- Keeper: a Failing-phase keeper is a running keepalive rather than an offline one (#36207); the identity transports are built from a clock and the MCP session runs under the keeper threshold (#36141); and a program-defined native posture no longer reads a keeper declaration (#36147).
+- Runtime: the verify command's timeout reaches the HTTP arm (#36212); the two opt-in deadlines are read live and reject malformed values, and the probe CLI applies runtime.toml (#36164).
+- Notify: the mention notifier is one bounded process, found without a probe (#36176).
+- TUI: guided Lane operations are restored in the workspace (#35999); live replies are shown for promoted queue requests (#36159); a running turn always has a stop handle (#36030); and the chat header writes `gate: ` with the space its row uses (#36112).
+- TUI: the Keepers title says whether its reading is live (#36216); the Lanes failure row says what failed once (#36211); the empty-page note stops repeating the verdict above it (#36208); the diff pane draws the same failure note as every other page (#36201); the Schedules list names its six columns above them (#36191); the Attention panel's empty note starts where its rows do (#36171); Task Review draws its header and rows from one column set (#36168); the Clients title walks its path with one separator (#36163); and the footer keeps the key that opens a row, not only the ones that leave (#36156).
 - TUI: the active runtime row states its one timestamp once (#36155); the Context row stops opening with the word its label already said (#36152); the Activity legend stops naming a mark no row draws (#36148); the screen says its timezone once, not on five rows (#36143); and the Overview names each transport path once, marking the one in use (#36136).
 
 ### Documentation

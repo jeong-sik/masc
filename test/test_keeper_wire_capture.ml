@@ -755,6 +755,85 @@ let digest_cancelled_while_queued_does_not_publish () =
     Alcotest.(check bool) "worker recovery does not publish cancelled history"
       false !published)
 
+(* ── rejected reasoning ─────────────────────────────────────────── *)
+
+let thinking_only_response ~stop_reason content : Agent_core.Types.api_response =
+  { id = "resp-1"
+  ; model = "mock"
+  ; stop_reason
+  ; content = [ Agent_core.Types.Thinking { content; signature = None } ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let repeat n s = String.concat "" (List.init n (fun _ -> s))
+
+(* The window is the newest 64 KiB of the reasoning, and the periodic reading
+   is what the stream guard would compute on it: a 43-byte chant repeated
+   past the window reads as period 43 across the whole window. *)
+let rejected_reasoning_capture_writes_the_guard_window () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_rej_on" "" in
+    install_projected_secret ~base_path:base ~keeper_name:"alpha";
+    let chant = "Let me write.\n\nNow.\n\nGo.\n\nProducing.\n\nOK.\n\n" in
+    let reasoning = "prelude " ^ projected_secret ^ " " ^ repeat 2000 chant in
+    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+      ~turn_id:7 ~trace_id:"trace-1" ~runtime_id:"ollama_cloud.deepseek-v4-1-flash"
+      (thinking_only_response ~stop_reason:Agent_core.Types.MaxTokens reasoning);
+    let files = find_jsonl base in
+    Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+    let content = read_file (List.hd files) in
+    let json = parse_single_jsonl content in
+    check_json_string "kind" "kind" "rejected_reasoning" json;
+    check_json_string "runtime" "runtime_id" "ollama_cloud.deepseek-v4-1-flash" json;
+    check_json_string "stop reason" "stop_reason" "max_tokens" json;
+    check_json_int "turn_id" "turn_id" 7 json;
+    check_json_int "reasoning_chars is the whole block" "reasoning_chars"
+      (String.length reasoning) json;
+    check_json_int "window is the newest 64 KiB" "window_bytes" 65536 json;
+    Alcotest.(check int) "window text is 64 KiB" 65536
+      (String.length (json_string "reasoning_window" json));
+    Alcotest.(check bool) "the secret sits before the window and is absent" false
+      (contains ~needle:projected_secret content);
+    (match json_member "periodic_suffix" json with
+     | `Assoc fields ->
+       check_json_int "period is the chant" "period" 43 (`Assoc fields);
+       (match List.assoc_opt "span" fields with
+        | Some (`Int span) ->
+          Alcotest.(check bool) "the span covers the window" true (span > 65536 - 43)
+        | Some _ | None -> Alcotest.fail "span must be an int")
+     | other ->
+       Alcotest.failf "periodic_suffix must be recorded for a chanting window, got %s"
+         (Yojson.Safe.to_string other)))
+
+let rejected_reasoning_capture_ignores_other_shapes () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_rej_text" "" in
+    let response : Agent_core.Types.api_response =
+      { id = "resp-2"
+      ; model = "mock"
+      ; stop_reason = Agent_core.Types.EndTurn
+      ; content =
+          [ Agent_core.Types.Thinking { content = "some thought"; signature = None }
+          ; Agent_core.Types.Text "an answer"
+          ]
+      ; usage = None
+      ; telemetry = None
+      }
+    in
+    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+      ~runtime_id:"glm-coding.glm-5.3-flash" response;
+    Alcotest.(check (list string)) "a response with text writes nothing" []
+      (find_jsonl base))
+
+let rejected_reasoning_capture_disabled_is_noop () =
+  with_flag "" (fun () ->
+    let base = Filename.temp_dir "wirecap_rej_off" "" in
+    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+      ~runtime_id:"r"
+      (thinking_only_response ~stop_reason:Agent_core.Types.MaxTokens (repeat 100 "loop "));
+    Alcotest.(check (list string)) "no jsonl written when disabled" [] (find_jsonl base))
+
 let () =
   Alcotest.run "keeper_wire_capture"
     [
@@ -815,5 +894,13 @@ let () =
         [
           Alcotest.test_case "capture_response uses normalized response text"
             `Quick capture_response_uses_finalized_replay_text;
+        ] );
+      ( "rejected_reasoning"
+      , [ Alcotest.test_case "writes the guard window with its periodic reading" `Quick
+            rejected_reasoning_capture_writes_the_guard_window;
+          Alcotest.test_case "a response with text writes nothing" `Quick
+            rejected_reasoning_capture_ignores_other_shapes;
+          Alcotest.test_case "disabled is a no-op" `Quick
+            rejected_reasoning_capture_disabled_is_noop;
         ] );
     ]

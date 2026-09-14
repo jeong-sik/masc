@@ -79,18 +79,20 @@ let record_skip_reason_label = function
 type write_failure_site =
   | Request_capture
   | Response_capture
+  | Rejected_reasoning_capture
 
 let write_failure_site_label = function
   | Request_capture -> "request"
   | Response_capture -> "response"
+  | Rejected_reasoning_capture -> "rejected_reasoning"
 ;;
 
-let record_skip ~store ~keeper_name ~turn_id reason detail =
+let record_skip ~store ~keeper_name ~turn_label reason detail =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string WireCaptureRecordSkipped)
     ~labels:
       [ ("keeper", keeper_name)
-      ; ("turn_id", string_of_int turn_id)
+      ; ("turn_id", turn_label)
       ; ("reason", record_skip_reason_label reason)
       ]
     ();
@@ -107,7 +109,7 @@ let record_skip ~store ~keeper_name ~turn_id reason detail =
    once, collapsing the ring to a single file. *)
 let segments_per_byte_budget = 8
 
-let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
+let write_payload ~masc_root ~keeper_name ~turn_label (payload : Yojson.Safe.t) =
   let { store; max_bytes; _ } = store_for ~masc_root in
   let segment_bytes = Stdlib.Int.max 1 (max_bytes / segments_per_byte_budget) in
   match
@@ -126,16 +128,16 @@ let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
       segment
       (Dated_jsonl.base_dir store)
   | Dated_jsonl.Skipped_rotation_exhausted { sequence_limit } ->
-    record_skip ~store ~keeper_name ~turn_id Rotation_sequence_exhausted
+    record_skip ~store ~keeper_name ~turn_label Rotation_sequence_exhausted
       (Printf.sprintf
          "day already holds %d rotated segments of %d bytes"
          sequence_limit
          segment_bytes)
   | Dated_jsonl.Skipped_by_append_guard ->
-    record_skip ~store ~keeper_name ~turn_id Append_guard_refused
+    record_skip ~store ~keeper_name ~turn_label Append_guard_refused
       "append guard declined the write"
 
-let best_effort ~site ~masc_root ~keeper_name ~turn_id f =
+let best_effort ~site ~masc_root ~keeper_name ~turn_label f =
   let base_dir = wire_capture_dir masc_root in
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -144,7 +146,7 @@ let best_effort ~site ~masc_root ~keeper_name ~turn_id f =
       Keeper_metrics.(to_string WireCaptureWriteFailures)
       ~labels:
         [ ("keeper", keeper_name)
-        ; ("turn_id", string_of_int turn_id)
+        ; ("turn_id", turn_label)
         ; ("site", write_failure_site_label site)
         ]
       ();
@@ -176,7 +178,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
     ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
+    best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let raw_tools =
         List.map Agent_core.Tool.schema_to_json tools
@@ -244,13 +246,13 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
           ; ("history_messages_digest", `String history_messages_digest)
           ]
       in
-      write_payload ~masc_root ~keeper_name ~turn_id payload)
+      write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)
 
 let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
     ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_id (fun () ->
+    best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let payload : Yojson.Safe.t =
         `Assoc
@@ -266,4 +268,96 @@ let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_tur
           ; ("response_text", `String (redact redaction response_text))
           ]
       in
-      write_payload ~masc_root ~keeper_name ~turn_id payload)
+      write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)
+
+(* The stream guard ends a reasoning block whose newest 64 KiB is one unit
+   written verbatim over and over. A thinking-only response that still reached
+   the accept gate is a block the guard did not end: the rule saw the same
+   window and found no verbatim period it accepts. Raw traces withhold
+   reasoning bytes by contract, so without this record a miss has a size and
+   nothing else (2026-09-14 08:50Z, geek-scout, 601,318 chars, unexplained).
+   The record keeps exactly the window the guard read, redacted, with the
+   longest periodic suffix the guard's own reader finds in it, so the miss
+   can be re-run offline against the rule. Same store, budget and retention
+   as the request/response rows. *)
+let rejected_reasoning_window_bytes = 65536
+let rejected_reasoning_min_copies = 3
+
+let reasoning_text_of_response (response : Agent_core.Types.api_response) =
+  response.content
+  |> List.filter_map (function
+    | Agent_core.Types.Thinking { content; _ } -> Some content
+    | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+      Some (Agent_core.Types.reasoning_details_text ~reasoning_content ~details)
+    | Agent_core.Types.RedactedThinking _
+    | Agent_core.Types.Text _
+    | Agent_core.Types.ToolUse _
+    | Agent_core.Types.ToolResult _
+    | Agent_core.Types.Image _
+    | Agent_core.Types.Document _
+    | Agent_core.Types.Audio _ -> None)
+  |> String.concat ""
+
+let capture_rejected_reasoning ~base_path ~masc_root ~keeper_name ?turn_id ?trace_id
+    ~runtime_id (response : Agent_core.Types.api_response) =
+  if not (enabled ()) then ()
+  else
+    let summary = Agent_core.Response_shape.summarize response in
+    match Agent_core.Response_shape.content_shape response summary with
+    | Agent_core.Response_shape.Empty
+    | Agent_core.Response_shape.Blank_text_only
+    | Agent_core.Response_shape.Tool_result_only
+    | Agent_core.Response_shape.Media_only
+    | Agent_core.Response_shape.Mixed_without_deliverable_content
+    | Agent_core.Response_shape.Has_deliverable_content -> ()
+    | Agent_core.Response_shape.Thinking_only ->
+      let turn_label =
+        match turn_id with
+        | Some id -> string_of_int id
+        | None -> "-"
+      in
+      best_effort ~site:Rejected_reasoning_capture ~masc_root ~keeper_name ~turn_label
+        (fun () ->
+          let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+          let reasoning = reasoning_text_of_response response in
+          let length = String.length reasoning in
+          let window =
+            if length <= rejected_reasoning_window_bytes then reasoning
+            else
+              String.sub reasoning (length - rejected_reasoning_window_bytes)
+                rejected_reasoning_window_bytes
+          in
+          let periodic =
+            match
+              Agent_core.Llm_provider.Periodic_suffix.find window
+                ~max_period:(rejected_reasoning_window_bytes / rejected_reasoning_min_copies)
+                ~min_copies:rejected_reasoning_min_copies
+            with
+            | None -> `Null
+            | Some { Agent_core.Llm_provider.Periodic_suffix.span; period } ->
+              `Assoc
+                [ ("span", `Int span)
+                ; ("period", `Int period)
+                ; ("copies", `Int (span / period))
+                ]
+          in
+          let payload : Yojson.Safe.t =
+            `Assoc
+              [ ("ts", `String (Masc_domain.now_iso ()))
+              ; ("kind", `String "rejected_reasoning")
+              ; ("keeper", `String keeper_name)
+              ; ("runtime_id", `String runtime_id)
+              ; ( "turn_id"
+                , match turn_id with
+                  | Some id -> `Int id
+                  | None -> `Null )
+              ; ("trace_id", json_string_opt redaction trace_id)
+              ; ( "stop_reason"
+                , `String (Agent_core.Types.stop_reason_to_string response.stop_reason) )
+              ; ("reasoning_chars", `Int length)
+              ; ("window_bytes", `Int (String.length window))
+              ; ("periodic_suffix", periodic)
+              ; ("reasoning_window", `String (redact redaction window))
+              ]
+          in
+          write_payload ~masc_root ~keeper_name ~turn_label payload)

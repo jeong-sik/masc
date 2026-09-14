@@ -1789,7 +1789,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                  |> take claimable_task_newly_added_rows
                in
                Buffer.add_string ubuf "  Newly added (most recent):\n";
-               Buffer.add_string ubuf (String.concat "" (List.map row newly_added)));
+               Buffer.add_string ubuf (String.concat "" (List.map row newly_added))));
          if observation.unclaimed_task_count > 0 && claimable_task_count = 0
          then
            Buffer.add_string

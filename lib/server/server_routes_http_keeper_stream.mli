@@ -161,7 +161,8 @@ val handle_keeper_turns_list :
 (** Drives [GET /api/v1/keepers/turns].
 
     One row per registered keeper naming whether a turn is running right now
-    ([turn] is [null] or [{lane; started_at_unix}]). Live Owner projection,
+    ([turn] is [null] or [{lane; started_at_unix; interrupt_token; preview}]).
+    Live Owner projection,
     not a store read: the durable keeper meta cannot answer this, which is
     why the TUI keeper list polls this route for its "answering now" badge.
     A failed keeper-name census is a 500, never an empty fleet. *)

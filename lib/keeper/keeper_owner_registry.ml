@@ -724,6 +724,7 @@ let exact_operation ~base_path ~keeper_name operation_id =
 
 type interactive_target = Observed_turn_token of Keeper_interrupt_token.t | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
 let submit_interactive_operation ~base_path ~keeper_name ~operation_id ~source ~input ~control_token ~target =
+  let result =
   with_chat_admission_command ~base_path ~keeper_name (fun owner _entry ->
     let target = match target with
       | None -> None
@@ -732,11 +733,18 @@ let submit_interactive_operation ~base_path ~keeper_name ~operation_id ~source ~
         Some (Keeper_owner.Observed_turn { interrupt_token }) in
     Keeper_owner.submit_interactive_operation owner ~operation_id ~source ~input
       ~intent:{Keeper_owner.control_token; target})
+  in
+  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  result
 ;;
 
 let submit_operation ~base_path ~keeper_name ~operation_id ~source ~input =
+  let result =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.submit_operation owner ~operation_id ~source ~input)
+  in
+  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  result
 ;;
 
 let list_queued_operations ~base_path ~keeper_name ~after_sequence ~limit =
@@ -745,8 +753,12 @@ let list_queued_operations ~base_path ~keeper_name ~after_sequence ~limit =
 ;;
 
 let edit_queued_operation ~base_path ~keeper_name ~operation_id ~input =
+  let result =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.edit_queued_operation owner ~operation_id ~input)
+  in
+  (match result with Ok _ -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name | Error _ -> ());
+  result
 ;;
 
 let move_queued_operation_to_front ~base_path ~keeper_name operation_id =

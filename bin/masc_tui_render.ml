@@ -10623,11 +10623,19 @@ let render_runtime (state : state) =
           let lane_fact =
             match candidate.rcr_preferred_at_ts with
             | Some at ->
+                (* One timestamp, said once. [rcr_preferred_at_ts] carries
+                   [Runtime_lane_preference.preferred_of_lane]'s [noted_at],
+                   which {!Runtime_lane_preference.note_success} re-stamps on
+                   every successful attempt -- so it is when the candidate
+                   last answered, and never a point the stickiness has run
+                   from. The row said both, printing the same value twice,
+                   and the "sticky since" half was the one that was not true.
+
+                   It also cost the width that made the rest of this cell
+                   disappear: 53 columns of detail in the 18 a 100-column
+                   terminal leaves it (#36131). *)
                 [ (Theme.ok ())
-                  ^ "\xe2\x98\x85 active (sticky since "
-                  ^ Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds at)
-                  ^ ", last success "
+                  ^ "\xe2\x98\x85 active (last success "
                   ^ Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds at)
                   ^ ")"

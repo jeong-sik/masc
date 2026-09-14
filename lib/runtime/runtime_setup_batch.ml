@@ -3,7 +3,7 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Configuration_unavailable
   | Child_not_started of Process_eio.spawn_refusal
   | Validation_failed of { exit : Unix.process_status; stderr : string }
-  | Verification_failed of { runtime_id : string; code : string; detail : string option }
+  | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
 type readiness = Not_probed | Verified
@@ -108,9 +108,10 @@ let verification ~binary ~base id =
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> unreadable "a verified report with a failing exit")
   | Ok (Runtime_verification.Measured { Runtime_verification.failure = Some failure; _ }) ->
     Error (Verification_failed { runtime_id = id; code = Runtime_verification.failure_code failure;
+                                 message = Runtime_verification.failure_message failure;
                                  detail = Runtime_verification.failure_detail failure })
-  | Ok (Runtime_verification.Unmeasured { Runtime_verification.code; detail; runtime_id = _; message = _ }) ->
-    Error (Verification_failed { runtime_id = id; code; detail })
+  | Ok (Runtime_verification.Unmeasured { Runtime_verification.code; detail; message; runtime_id = _ }) ->
+    Error (Verification_failed { runtime_id = id; code; message; detail })
 let write path mode text =
   Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
     Unix.fchmod (Unix.descr_of_out_channel channel) mode;

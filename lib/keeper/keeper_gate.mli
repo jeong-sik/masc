@@ -102,7 +102,6 @@ type authorization_source =
           asked; the audit row names which box it was. A [Guest_local] failure
           is returned as a failed process result too, without whole-call
           replay: an arbitrary script may already have changed the tree. *)
-
 type authorization =
   { source : authorization_source
   ; audit_receipts : Keeper_approval.Audit.receipt list
@@ -184,9 +183,30 @@ type cycle_grant
 val cycle_grant_of_resolution :
   Keeper_event_queue.hitl_resolution -> cycle_grant option
 
+(** Why the box refused the observed attempt — the closed reading of the
+    shim's refusal. [Socket_denied] means the payload tried to reach the
+    network and the socket rule denied it: under [Network_none] that is the
+    exact route the keeper's own boundary forecloses, so the gate may
+    reconfirm isolation instead of asking the judge. [Write_denied] is a
+    filesystem-rule refusal (Landlock): a write could have reached a real
+    effect, so it always keeps the judge. [Unspecified] is every refusal the
+    receipt does not name; unreadable refuses towards the judge, never
+    towards the allow. This is a reading of the refusal's own record, not a
+    property the shim types on the wire yet — an empty or unrecognized
+    stderr classifies as [Unspecified], which errs to the judge. *)
+type refusal_kind =
+  | Socket_denied
+  | Write_denied
+  | Unspecified
+
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
-    decides when to ask, and what each answer means. *)
+    decides when to ask, and what each answer means. Since review
+    5192723206 no refusal answer allows on its own: the box's ack channel
+    can only report the box failing to apply, never the payload being
+    blocked after "A", so every {!Observed_refused} keeps the judge under
+    every network mode until a path can observe attempts (a separate
+    observation channel). *)
 type observation =
   | Observed_result of boxed_execution
       (** Any payload result with an acknowledged enforced box. The result
@@ -195,9 +215,13 @@ type observation =
   | Observed_refused of
       { status : Unix.process_status
       ; stderr : string
+      ; refusal_kind : refusal_kind
       }
       (** The shim's typed receipt reports setup failure or refusal. A
-          nonzero payload exit alone cannot construct this outcome. *)
+          nonzero payload exit alone cannot construct this outcome. The kind
+          splits the two boundary rules the box can refuse with: only the
+          socket rule may stand in for [Network_none]'s own foreclosed
+          route; a write refusal or an unreadable refusal keeps the judge. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so
@@ -230,8 +254,15 @@ val observed_refusal :
     never pays a box run and a Manual workspace still sees every request.
     [intent=Request_effect] bypasses static/Observe shortcuts in Auto Judge
     mode, but never bypasses permission or grants permission itself.
-    [Observed_result] is returned through source {!Observed_in_box}; the other two
-    answers defer to the judge as the request would have without the box. *)
+    [Observed_result] is returned through source {!Observed_in_box}.
+    [Observed_refused] always defers to the judge under every network mode
+    (review 5192723206): the box's ack channel can only report the box
+    failing to apply, never the payload being blocked after "A", so no
+    refusal kind stands in for the route the keeper's own boundary
+    forecloses — until a path can observe attempts, a shortcut here would
+    key on the box not applying. [Observation_unavailable] always defers —
+    no box could be built at all, which says nothing about what the request
+    would have reached, network isolation included. *)
 val decide :
   ?intent:Keeper_tool_execute_typed_input.intent ->
   ?cycle_grant:cycle_grant ->

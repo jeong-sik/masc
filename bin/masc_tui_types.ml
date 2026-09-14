@@ -7019,7 +7019,13 @@ let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
    spellings come from here so the words stay one. *)
 let field_unread = "not loaded"
 let title_unread = "(" ^ field_unread ^ ")"
-let title_failed = "(load failed)"
+(* The same pair one layer down. A title brackets its words because it has no
+   label to hang them on; a labelled field does not, and said so already for
+   the unread half. The failed half had no name here, so the Memory header
+   spelled the title's words itself, minus the brackets -- the one place in
+   the TUI that decided what a field says after a failed read. *)
+let field_failed = "load failed"
+let title_failed = "(" ^ field_failed ^ ")"
 
 let title_missing_reading ~error =
   if Option.is_some error then title_failed else title_unread

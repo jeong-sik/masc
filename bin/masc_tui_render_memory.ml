@@ -438,7 +438,7 @@ let render_memory_body ~cols ~budget (state : state)
      the same question on one screen -- and this one is on top, so it is the
      one that gets read. *)
   let missing_reading waiting =
-    if Option.is_some state.memory_health_error then "load failed" else waiting
+    if Option.is_some state.memory_health_error then field_failed else waiting
   in
   (match state.memory_health with
    | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")

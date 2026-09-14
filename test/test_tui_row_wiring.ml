@@ -594,6 +594,21 @@ let test_both_strips_mark_where_they_are_from_one_value () =
   Alcotest.(check bool) "the surface strip reads the same mark" true
     (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
 
+(* The Runtime row's active candidate carries one timestamp:
+   [Runtime_lane_preference] re-stamps [noted_at] on every successful attempt,
+   so it is when that candidate last answered. The row printed it twice, once
+   as "sticky since" -- a point the stickiness would have run from, which this
+   value is not, because it moves forward every time.
+
+   Counted rather than read as text, because the defect is the second reading
+   of the same value, not the words it was dressed in. TUI-GUIDE already said
+   the row says "last success"; the drawing had drifted from it. It also cost
+   35 of the columns this cell does not have (#36131). *)
+let test_the_active_lane_row_reads_its_timestamp_once () =
+  Alcotest.(check int) "one clock reading in the active fact" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"lane_fact" ~callee:"Terminal_text.clock_timestamp")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -644,5 +659,7 @@ let () =
             test_no_row_of_a_drawing_loop_walks_a_list
         ; Alcotest.test_case "both strips mark where they are from one value"
             `Quick test_both_strips_mark_where_they_are_from_one_value
+        ; Alcotest.test_case "the active lane row reads its timestamp once"
+            `Quick test_the_active_lane_row_reads_its_timestamp_once
         ] )
     ]

@@ -2776,13 +2776,18 @@ let tools_scrolled_for_lines state display_lines =
    between them. This used to appear on Themes alone, as a list of names with
    no mark on it: it said the key exists and not where pressing it lands, and
    a reader on runtime.toml was told neither. *)
+(* The two keys this row draws in front of its strip. Named here because the
+   row has to count them when it decides what is left for the file it is
+   reading, and a second copy of the spelling would drift from this one. *)
+let config_pane_keys = "9:Runtime  p:next  "
+
 let config_pane_strip ~cols ~before ~after (state : state) =
   let name pane label = (label, state.config_pane = pane) in
-  let keys = "9:Runtime  p:next  " in
-  Ansi.dim ^ keys ^ Ansi.reset
+  Ansi.dim ^ config_pane_keys ^ Ansi.reset
   ^ tab_strip
       ~width:
-        (tab_strip_width ~cols ~before:(before ^ tab_strip_gap ^ keys) ~after)
+        (tab_strip_width ~cols
+           ~before:(before ^ tab_strip_gap ^ config_pane_keys) ~after)
       (List.map (fun (pane, label) -> name pane label) config_panes)
 
 (* The whole title row a Config pane draws: its name, the strip, and the badge
@@ -2794,8 +2799,35 @@ let config_pane_strip ~cols ~before ~after (state : state) =
    half of "(load failed)" with it. Built once, the row knows both halves. *)
 let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
   let piece text = if text = "" then "" else "  " ^ text in
-  let after = piece note ^ piece clock ^ "  " ^ connection_badge state in
-  before ^ config_pane_strip ~cols ~before ~after state ^ after
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let tail = piece clock ^ "  " ^ connection_badge state in
+  (* The note is the one part of this row whose width a workspace chooses: it
+     is the path of the file the pane is reading. Everything else either
+     cannot give way or knows how to. The clock and the badge say whether the
+     screen is a live reading and have no way of saying they were shortened;
+     the strip drops tabs and marks the cut. The note could do neither, so at
+     eighty columns the row ran eighteen cells past the frame and the frame
+     took them off the end -- the badge.
+
+     It now takes what the row has left over the parts that cannot give way,
+     and is cut the way the workspace paths two rows below it are cut: a
+     path's deciding end is its tail, which [fit_middle] keeps. When nothing
+     is left it goes entirely, gap and all, and the strip and the badge have
+     the row. *)
+  let note =
+    if note = "" then ""
+    else
+      let room =
+        framed_inner_width cols - cells before - cells config_pane_keys
+        - cells tail - cells "  "
+      in
+      if room >= cells note then note
+      else Masc_tui_message_layout.fit_middle (max 0 room) note
+  in
+  before ^ config_pane_strip ~cols ~before ~after:(piece note ^ tail) state
+  ^ piece note ^ tail
 
 
 let config_metadata_summary (state : state) =

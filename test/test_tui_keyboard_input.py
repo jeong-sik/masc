@@ -11407,6 +11407,45 @@ def config_navigation_interaction() -> Interaction:
                 raise AssertionError(
                     f"Models pane omitted {needle!r}: {models_plain!r}"
                 )
+
+        # The title row's note is the path of the file the pane reads, and a
+        # workspace chooses how long that is; this fixture serves a thirty-cell
+        # one and a real base path is longer. At eighty columns it ran the row
+        # past the frame, and the frame takes its cells off the end, where
+        # the clock and the connection badge are. They are the only things on
+        # this surface that say the reading is live, and neither can say it
+        # was shortened; the note can, so the note is what gives way.
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=80,
+            needle=b"MASC Models",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        title_row = next(
+            (
+                text
+                for _, text in sorted(screen_rows(narrow).items())
+                if b"MASC Models" in text
+            ),
+            None,
+        )
+        if title_row is None:
+            raise AssertionError(
+                f"the pane drew no title row at eighty columns: {narrow!r}"
+            )
+        # The badge whole -- "HTTP [con" is what a cut row leaves, and a
+        # reader cannot tell that from a connection state -- and the path's
+        # deciding end, which is the half [fit_middle] keeps.
+        for needle in (b"HTTP [connected]", b".toml"):
+            if needle not in title_row:
+                raise AssertionError(
+                    f"the pane title row lost {needle!r} at eighty columns: "
+                    f"{title_row!r}"
+                )
         os.write(master_fd, b"q")
 
     return interact

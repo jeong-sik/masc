@@ -12,6 +12,10 @@
 - Lanes: the overview draws lanes as one header row and measured columns, so failure counts stay on screen beside the Activity pane (#36062).
 - TUI: the `:` palette reaches Runtime, Changes and every Config pane (#36095).
 - Lanes: the TUI guides subscribing a Keeper to retained output references and shows the output position each subscription has acknowledged (#36007).
+- Runtime and Lanes: both screens share one three-tab console of Keeper Lanes, All Runtimes and Standalone, matching the `p`-key cycle; lane rows draw their fallback tree with the sticky winner marked, keeper assignments and live telemetry lead the detail column, and the Keeper list and detail show the assigned runtime target, the model context and an inherited default (#36107).
+- TUI: the keeper runtime picker assigns a lane and a model (#36099).
+- Voice: the voice pane gives a keeper its own voice (#36109), and the setup wizard offers `say` and `whisper-cli` (#36115).
+- Dashboard: an unreadable goal store is parsed as its own type, shows as an alert and locks the creation form instead of rendering an empty list (RFC-0444) (#36089).
 
 ### Fixed
 
@@ -37,10 +41,18 @@
 - TUI: the Board read keys are on the footer instead of a second row inside the post, and Code and Resources put their gap row above the title the way every other screen does (#36088, #36076).
 - TUI: the Approvals title counts only the kinds that have rows; a verification request's Created uses the terminal clock and its reading note wraps; a keeper's Last 24h draws no zeros when no metrics rows were read; the Memory detail blocks start their values in one column (#36079, #36064, #36085, #36083).
 - TUI: the Overview names its cluster and project without padding, the Config paths row keeps the binary age and the tail of each path, and the acting pane stays off both Activity tabs (#36012, #36025, #36018).
+- Voice: each endpoint is asked for its own model, a provider model id for `elevenlabs_direct` and `openai_compat` and a ggml path for `whisper_cli`, so one workspace can mix local whisper with a remote endpoint; `voice-local-setup` no longer refuses the mixed setup, and the wizard no longer rewrites the model an existing endpoint was receiving (#36098).
+- Keeper: a provider sub-call runs under the keeper's no-progress threshold (#36094), and the Codex idle window stays off while a tool item is open (#36086).
+- Tool call log: a read index that cannot be opened is an error, not an empty list (#36091).
+- Browser: an unsubscribed BiDi event, a frame without its source context, and a first-tab guess are refused instead of accepted (#36052).
+- Dashboard: the stream protocol's error kinds are one list held equal to the backend's (#36026).
+- TUI: the Fusion title leaves a running count of zero out; the Schedules count and the next wake share one row; and Planning names the goals that left the list with no outcome (#36111, #36104, #36118).
+- TUI: Clients, Connectors and the Activity feed name their columns in capitals, and the Activity pane waits for a row that uses its column names before drawing them (#36103, #36100).
 
 ### Documentation
 
 - Browser skills route read-only public social pages through TUI scenes and keep live region composition free of site-specific instructions (#36022, #36041).
+- Keeper: the pre-dispatch profile load no longer promises empty defaults for a missing keeper declaration (#36078).
 
 ## [0.35.15] - 2026-09-13
 

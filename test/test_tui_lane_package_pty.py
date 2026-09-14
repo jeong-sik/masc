@@ -140,11 +140,26 @@ def main(executable: str) -> None:
             edit_text.write_text("# second draft retained")
             key(b"second.toml\r", b"TOML draft second.toml")
             key(b"q", b"MASC Overview")
-            key(b":go lane add-ons\r", b"TOML draft second.toml")
+            # The save is still gated here, so this reopen is refused with the
+            # pending note instead of fetching: the pane comes up from the
+            # cached view. That note is the only observable handle on the
+            # completion -- this pane renders the selected draft's summary,
+            # which the save does not touch, so nothing else in the frame
+            # changes when the held response lands.
+            refused = key(b":go lane add-ons\r", b"TOML draft second.toml")
+            if b"A Lane request is pending" not in terminal.CSI_RE.sub(b"", refused):
+                raise AssertionError("reopening during a pending save fetched instead of refusing")
             terminal.read_available(master_fd, output)
+            mark = len(output)
             release.set()
             if not terminal.wait_for_fixture_event(process, master_fd, output, finished, timeout=5):
                 raise AssertionError("delayed save did not finish")
+            # Processing the save clears the refusal, and every row under it
+            # moves up, printing the selected summary again. Until that
+            # reprint the pane is still loading and r would be refused the
+            # same way, so the refresh below waits for it.
+            terminal.wait_for_output(process, master_fd, output, b"TOML draft second.toml",
+                start=mark, timeout=5)
             state["delay"] = False
             # Inspect leaves the selected draft unchanged, so an incremental
             # frame need not print its title again. Join the new request and

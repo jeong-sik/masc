@@ -352,6 +352,8 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
+      ; b Act "Ctrl-T" "queue"
+          ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
@@ -368,9 +370,8 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
-      ; b Act "Q" "leave"
-          ~help:"leave with a turn running, without interrupting it \
-                 (empty draft, no capture or edit in flight)"
+      ; b Act "Ctrl-Q" "leave"
+          ~help:"leave with a turn running, without interrupting it"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->

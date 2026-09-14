@@ -12,7 +12,9 @@ load menu over the same directory. The directory starts empty; nothing in the
 install or the server fills it.
 
 The C-BIOS ROMs the machine boots from are separate: `MSX_ROMS` names their
-directory, or `.masc/msx/bios/` when it holds `cbios_main_msx2.rom`.
+directory, or `.masc/msx/bios/` when it holds `cbios_main_msx2.rom`. The
+directory must hold all three (`cbios_main_msx2.rom`, `cbios_logo_msx2.rom`,
+`cbios_sub.rom`); a load names the first one missing and refuses.
 
 ## What the machine accepts
 

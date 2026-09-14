@@ -81,12 +81,22 @@ val gaps : draft -> gap list
     asked for a voice rather than a model, and [Whisper_cli] needs the name and
     the model file it loads. *)
 
-val changes : draft -> (Voice_setup.change list, gap list) result
-(** The changes this draft describes, or what it is still missing.
+val changes
+  :  draft
+  -> alongside:Voice_config.endpoint_kind option list
+  -> (Voice_setup.change list, gap list) result
+(** The changes this draft describes, or what it is still missing. [alongside]
+    is the kinds already in the section this endpoint is going into, empty when
+    there is none yet.
 
     The model is written on the endpoint, not as the section's
     [default_model], so adding a provider leaves the model every other endpoint
-    in the section is asked for as it was. *)
+    in the section is asked for as it was.
+
+    The voice goes wherever {!Voice_setup.voice_placement} says, which is what
+    [alongside] is for: a voice name is provider vocabulary, so a section
+    default written over one another kind reads hands that endpoint a voice it
+    cannot resolve. *)
 
 type step =
   | Section
@@ -112,6 +122,7 @@ val step_gap : step -> gap option
 val save_request
   :  draft
   -> revision:string
+  -> alongside:Voice_config.endpoint_kind option list
   -> (Yojson.Safe.t, gap list) result
 (** The body for [POST /api/v1/voice/setup]: the revision this draft was written
     against, and the changes it describes.

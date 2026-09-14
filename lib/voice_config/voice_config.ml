@@ -229,6 +229,11 @@ let kind_needs_default_model = function
   | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
   | Macos_say -> false
 
+let endpoint_kind_of_name name =
+  match endpoint_kind_of_string name with
+  | Ok kind -> Some kind
+  | Error _ -> None
+
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"

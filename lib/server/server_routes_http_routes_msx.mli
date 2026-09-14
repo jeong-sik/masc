@@ -13,6 +13,21 @@ val press_result_json :
   ok:bool -> ?message:string -> Msx_lane.observation option -> Yojson.Safe.t
 (** The press response body. Exposed for the route test. *)
 
+val press_default_hold_frames : int
+(** Frames a [POST /api/v1/msx/press] holds its keys when the body names none. *)
+
+val press_default_step_frames : int
+(** Frames a [POST /api/v1/msx/press] advances in all when the body names none. *)
+
+val press_response :
+  who:string -> body:string ->
+  [ `OK | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
+(** Authenticated press body handling under [who], the actor the route's
+    [with_tool_actor_auth] resolved. [keys] must be an array of strings naming
+    at least one key; [hold_frames] and [frames] must be positive integers and
+    [sequence] a boolean when present, each defaulting when absent. A field of
+    the wrong type is a [`Bad_request] naming the field, and nothing is pressed. *)
+
 val carts_json : base_path:string -> Yojson.Safe.t
 (** The load menu's inventory: [{carts:[names], loaded, cartridge}], the file
     names under [<base_path>/.masc/msx/carts] and which one is plugged in now.

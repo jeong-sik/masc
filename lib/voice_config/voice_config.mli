@@ -23,6 +23,11 @@ type endpoint_kind =
   | Macos_say
   | Whisper_cli
 
+val endpoint_kind_of_name : string -> endpoint_kind option
+(** The kind this name stands for, or [None] when this binary has no kind by
+    that name. A reader that got the name from a running server and cannot name
+    it is looking at a newer one, so [None] means "unknown", never a default. *)
+
 val string_of_endpoint_kind : endpoint_kind -> string
 (** [string_of_endpoint_kind k] returns the canonical lowercase
     label: ["openai_compat"] / ["elevenlabs_direct"] /

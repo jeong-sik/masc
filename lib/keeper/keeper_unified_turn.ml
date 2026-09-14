@@ -158,7 +158,12 @@ let chat_yield_request ~base_path ~keeper_name =
     (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
      | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
      | Ok operations ->
-       if operations.Keeper_owner.queued_count > 0
+       if operations.Keeper_owner.store_unavailable
+       then (
+         Log.Keeper.warn ~keeper_name
+           "chat readiness unavailable; retaining current autonomous progress";
+         Ok None)
+       else if operations.has_claimable_queued
        then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
        else Ok None)
 ;;
@@ -171,11 +176,17 @@ let autonomous_yield_request ~base_path ~keeper_name =
     (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
      | Error _ as error -> error
      | Ok pending ->
-       if Keeper_event_queue.is_empty pending
+       let ready =
+         Keeper_event_queue.to_list pending
+         |> List.filter
+              (Keeper_heartbeat_stimulus_intake.stimulus_ready_for_intake ~base_path)
+         |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
+       in
+       if Keeper_event_queue.is_empty ready
        then Ok None
        else (
          let summary =
-           Keeper_agent_run.durable_stimulus_summary ~now:(Time_compat.now ()) pending
+           Keeper_agent_run.durable_stimulus_summary ~now:(Time_compat.now ()) ready
          in
          Log.Keeper.info
            ~keeper_name

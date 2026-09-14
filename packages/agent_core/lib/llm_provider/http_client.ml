@@ -2657,14 +2657,28 @@ type sse_line =
   | Sse_data of string
   | Sse_ignored_field
 
+(* What one dispatched event or line carried, as only the consumer's parser
+   can tell. The reader keeps the first-event budget armed until the consumer
+   reports the first [Output] and arms the inter-token idle budget after it.
+   A provider's opening frame is not output: Responses sends
+   [response.created] and Anthropic sends [message_start] before prefill and
+   before any reasoning, so a reader that switched budgets on the first data
+   line put a silent prefill under the short inter-token bound (gpt-5.6-luna,
+   2026-09-10: "stream_idle_timeout_s deadline exceeded while
+   awaiting_first_delta" 164 s into a turn). *)
+type dispatched_event =
+  | Prelude
+  | Output
+
 (* What the consumer wants after one dispatched event or line. A consumer that
    has stopped consuming must also stop the read, or the socket keeps
    delivering a body nobody reads until the provider finishes or a deadline
    fires — the caller pays for tokens it discards and the connection is held
    for the whole of it. Returned rather than asked for through a predicate so
-   no caller can omit the decision. *)
+   no caller can omit the decision; the same value carries what the event was,
+   so no caller can omit that either. *)
 type stream_continuation =
-  | Continue
+  | Continue of dispatched_event
   | Stop
 
 (* WHATWG HTML 9.2.6 joins multiple [data] fields of one event with a single
@@ -2823,26 +2837,27 @@ let resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
   | Unarmed -> None
 ;;
 
+(* Which budget the reader had armed when a deadline fired. The reader moves
+   from the first one to the second when the consumer reports its first
+   [Output]; the consumer that names the knob passes the phase it derived from
+   the same report, so the message cannot drift from the behaviour. *)
+type budget_phase =
+  | Before_first_output
+  | After_first_output
+
 (* Agent Core contract: name the knob whose value produced the deadline that fired, so
    an operator tunes the budget that actually governs. Derived from the SAME
    resolver as the armed bound — the precedence chain exists in exactly one
-   place, so the message can never drift from the behaviour. Only the
-   first-event phase can be governed by something other than the idle knob;
-   every later phase is inter-token idle by construction. *)
-let governing_timeout_knob ~state ~first_event_timeout ~body_timeout ~idle_timeout =
-  match state with
-  | Awaiting_first_event ->
+   place. Only the wait for the first output can be governed by something
+   other than the idle knob; after it every read is inter-token idle by
+   construction. *)
+let governing_timeout_knob ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
+  match phase with
+  | Before_first_output ->
     (match resolve_first_event_bound ~first_event_timeout ~body_timeout ~idle_timeout with
      | Bounded { knob; _ } -> knob
      | Unarmed -> Stream_idle_timeout)
-  | Awaiting_first_delta
-  | Streaming_answer
-  | Streaming_thinking
-  | Streaming_tool_call
-  | Streaming_heartbeat
-  | Streaming_substrate
-  | Streaming_done
-  | Streaming_unknown -> Stream_idle_timeout
+  | After_first_output -> Stream_idle_timeout
 ;;
 
 exception
@@ -2869,19 +2884,22 @@ let read_sse
      SAME [with_timeout_exn] window preserves the armed deadline so a
      provider that emits only keepalives still trips it when no real event
      arrives.
-     Agent Core contract: the wait for the FIRST meaningful line is the
-     time-to-first-event (TTFT / prefill) window; bound it with
+     Agent Core contract: the wait for the consumer's first [Output] is the
+     time-to-first-token (prefill) window; bound it with
      [first_event_timeout] (a separate, larger liveness budget) rather than
-     the short [idle_timeout], which arms only AFTER the first event for
-     inter-token idle. A silent prefill on a large context is slow-but-alive,
-     not a hang, so it must not be cut by the inter-token idle value. When
+     the short [idle_timeout], which arms only after that first output for
+     inter-token idle. Which event is output is the consumer's call, returned
+     from [on_data]: a provider's opening frame ([response.created],
+     [message_start]) arrives before prefill and keeps this window armed. A
+     silent prefill on a large context is slow-but-alive, not a hang, so it
+     must not be cut by the inter-token idle value. When
      [first_event_timeout] is [None] the first-event wait falls back to
      [body_timeout] (the total body budget already wired by the caller), then to [idle_timeout] — the
      pre-RFC bound, kept so callers that wired only an idle deadline keep
      exactly their previous behaviour (see [resolve_first_event_timeout]).
      With nothing wired the wait stays unarmed, as before. Inter-token idle
      still guards once the stream produces. *)
-  let first_event_seen = ref false in
+  let first_output_seen = ref false in
   (* The armed budget is anchored to the last PAYLOAD-bearing line, not to the
      last line read. Comments are consumed inside one window for exactly this
      reason; [id]/[retry]/unknown fields and bare dispatch delimiters carry no
@@ -2889,11 +2907,10 @@ let read_sse
      forever by emitting one ignorable line just under each budget. A blank
      delimiter cannot simply be swallowed inside the window — it must still
      reach [loop] to dispatch and to reset the event type — so the anchor, not
-     the filter, is what closes that shape. An [event] field selects a type but
-     carries nothing, so it re-anchors only where it ends the first-event wait:
-     there the governing budget itself switches from the first-event window to
-     inter-token idle, and an anchor left at stream start would fire a spurious
-     timeout. *)
+     the filter, is what closes that shape. A payload line renews whichever
+     budget is armed; the switch from the first-event budget to inter-token
+     idle happens at dispatch, when the consumer reports the first [Output],
+     and measures from the payload line that carried it. *)
   let budget_anchor = ref None in
   let first_line = ref true in
   let read_protocol_line () =
@@ -2912,7 +2929,7 @@ let read_sse
         parsed
     in
     let active_timeout =
-      if !first_event_seen
+      if !first_output_seen
       then idle_timeout
       else resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
     in
@@ -2941,18 +2958,14 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* P3a (Agent Core contract review): the transition to the inter-token idle budget
-       must fire on GENUINE first output — a data field — NOT on a bare event
-       type, blank dispatch delimiter, or other metadata. An [event] field
-       selects the dispatch type but carries no payload; counting it as the
-       first event would replace the caller's first-event bound with the
-       shorter inter-token bound before any provider data arrived.
+    (* Only a payload line renews the armed budget. The switch to the
+       inter-token idle budget is not made here: a data field is provider
+       bytes, not necessarily model output, and only the consumer can tell an
+       opening frame from a token. [dispatch_event] flips [first_output_seen]
+       when [on_data] reports [Output].
        [Sse_comment] is already filtered inside [inner]; the only non-field
        line [inner] can return is [Sse_blank]. *)
     (match parsed with
-     | Sse_data _ when not !first_event_seen ->
-       first_event_seen := true;
-       budget_anchor := None
      | Sse_data _ -> budget_anchor := None
      | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
      | Sse_comment -> () (* unreachable: filtered in [inner] *));
@@ -2970,8 +2983,11 @@ let read_sse
         in
         Buffer.clear data_buffer;
         data_seen := false;
+        (match continuation with
+         | Continue Output -> first_output_seen := true
+         | Continue Prelude | Stop -> ());
         continuation)
-      else Continue
+      else Continue Prelude
     in
     current_event_type := None;
     continuation
@@ -2987,7 +3003,7 @@ let read_sse
          consumer's decision and the socket's lifetime are the same event. *)
       (match dispatch_event () with
        | Stop -> ()
-       | Continue -> loop ())
+       | Continue _ -> loop ())
     | Sse_comment ->
       (* Filtered inside [read_meaningful_line]. *)
       loop ()
@@ -3039,7 +3055,9 @@ let read_sse
     (TTFT / prefill) window, bounded by [first_event_timeout] when set;
     otherwise it falls back to [body_timeout], then to [idle_timeout] (the
     pre-RFC bound), and stays unarmed when the caller wired none of them.
-    [idle_timeout] arms only AFTER the first line for inter-token idle. *)
+    [idle_timeout] arms only after the first line the consumer reports as
+    [Output]; a blank line or an opening frame does not switch budgets (SSE
+    parity). *)
 let read_ndjson
       ?clock
       ?idle_timeout
@@ -3052,10 +3070,10 @@ let read_ndjson
   let site = "read_ndjson" in
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
-  let first_event_seen = ref false in
+  let first_output_seen = ref false in
   let read_line () =
     let active_timeout =
-      if !first_event_seen
+      if !first_output_seen
       then idle_timeout
       else resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
     in
@@ -3068,11 +3086,6 @@ let read_ndjson
          best-effort rather than a loud failure here. *)
       | None, _ -> Eio.Buf_read.line reader
     in
-    (* P3a (Agent Core contract review): a bare blank line is a delimiter, not real
-       provider output — the [loop] below skips it. Flip to the inter-token
-       idle budget only on a non-empty line so a leading blank does not switch
-       budgets prematurely (SSE [Sse_blank] parity). *)
-    if String.length line > 0 then first_event_seen := true;
     line
   in
   let rec loop () =
@@ -3081,7 +3094,10 @@ let read_ndjson
     | line ->
       (match on_line line with
        | Stop -> ()
-       | Continue -> loop ())
+       | Continue Output ->
+         first_output_seen := true;
+         loop ()
+       | Continue Prelude -> loop ())
     | exception End_of_file -> ()
   in
   loop ()
@@ -3417,7 +3433,7 @@ let%test "read_ndjson: no clock/idle_timeout preserves default behaviour" =
     let lines = ref [] in
     read_ndjson ~reader ~on_line:(fun l ->
       lines := l :: !lines;
-      Continue) ();
+      Continue Output) ();
     List.rev !lines = [ "{\"a\":1}"; "{\"b\":2}" ])
 ;;
 
@@ -3433,7 +3449,7 @@ let%test "read_ndjson: idle_timeout fires when stream stalls mid-read" =
   Eio.Flow.copy_string "{\"a\":1}\n" sink;
   let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
   try
-    read_ndjson ~clock ~idle_timeout:0.05 ~reader ~on_line:(fun _ -> Continue) ();
+    read_ndjson ~clock ~idle_timeout:0.05 ~reader ~on_line:(fun _ -> Continue Output) ();
     false
   with
   | Eio.Time.Timeout -> true
@@ -3448,7 +3464,7 @@ let%test "read_sse: no clock/idle_timeout preserves default behaviour" =
     let payloads = ref [] in
     read_sse ~reader ~on_data:(fun ~event_type:_ d ->
       payloads := d :: !payloads;
-      Continue) ();
+      Continue Output) ();
     List.rev !payloads = [ "hello"; "world" ])
 ;;
 
@@ -3462,7 +3478,7 @@ let%test "read_sse: idle_timeout fires when stream stalls mid-read" =
   Eio.Flow.copy_string "data: hello\n" sink;
   let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
   try
-    read_sse ~clock ~idle_timeout:0.05 ~reader ~on_data:(fun ~event_type:_ _ -> Continue) ();
+    read_sse ~clock ~idle_timeout:0.05 ~reader ~on_data:(fun ~event_type:_ _ -> Continue Output) ();
     false
   with
   | Eio.Time.Timeout -> true
@@ -3499,7 +3515,7 @@ let%test "read_sse: first_event_timeout admits a silent prefill past idle" =
          ~reader
          ~on_data:(fun ~event_type:_ d ->
       payloads := d :: !payloads;
-      Continue)
+      Continue Output)
          ());
   List.rev !payloads = [ "hello" ]
 ;;
@@ -3524,7 +3540,7 @@ let%test "read_sse: first_event_timeout fires when no first event arrives" =
       ~idle_timeout:1.0
       ~first_event_timeout:0.05
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> Continue)
+      ~on_data:(fun ~event_type:_ _ -> Continue Output)
       ();
     false
   with
@@ -3542,8 +3558,9 @@ let%test "read_sse: idle_timeout still guards after the first event" =
   Eio.Switch.run
   @@ fun sw ->
   let source, sink = Eio_unix.pipe sw in
-  (* First event arrives immediately, then the stream goes silent. *)
-  Eio.Flow.copy_string "data: hello\n" sink;
+  (* The first output event arrives immediately and is dispatched, then the
+     stream goes silent. *)
+  Eio.Flow.copy_string "data: hello\n\n" sink;
   let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
   try
     read_sse
@@ -3551,11 +3568,111 @@ let%test "read_sse: idle_timeout still guards after the first event" =
       ~idle_timeout:0.05
       ~first_event_timeout:1.0
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> Continue)
+      ~on_data:(fun ~event_type:_ _ -> Continue Output)
       ();
     false
   with
   | Eio.Time.Timeout -> true
+;;
+
+(* The consumer, not the transport, says when the stream has produced. A
+   Responses stream opens with [response.created] and an Anthropic stream with
+   [message_start] before prefill; a reader that switched budgets on that
+   first data line put the silent prefill under the short inter-token idle
+   (gpt-5.6-luna, 2026-09-10, 164 s: "stream_idle_timeout_s deadline exceeded
+   while awaiting_first_delta"). Here the first event is reported as
+   [Prelude], the stream is then silent for 0.2 s (> idle 0.05, < first-event
+   1.0), and the output event that follows must still be delivered. *)
+let%test "read_sse: a prelude event does not end the first-event wait" =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let payloads = ref [] in
+  Eio.Fiber.both
+    (fun () ->
+       Eio.Flow.copy_string "data: created\n\n" sink;
+       Eio.Time.sleep clock 0.2;
+       Eio.Flow.copy_string "data: hello\n\n" sink;
+       Eio.Flow.close sink)
+    (fun () ->
+       read_sse
+         ~clock
+         ~idle_timeout:0.05
+         ~first_event_timeout:1.0
+         ~reader
+         ~on_data:(fun ~event_type:_ d ->
+           payloads := d :: !payloads;
+           Continue (if String.equal d "created" then Prelude else Output))
+         ());
+  List.rev !payloads = [ "created"; "hello" ]
+;;
+
+(* Control for the test above: the same stream with the same silence times
+   out when the consumer reports the opening frame as [Output], and it does so
+   under the inter-token idle budget, well before the first-event budget
+   would have fired. *)
+let%test "read_sse: the first output event ends the first-event wait" =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let started = Eio.Time.now clock in
+  Eio.Fiber.both
+    (fun () ->
+       Eio.Flow.copy_string "data: created\n\n" sink;
+       Eio.Time.sleep clock 0.2;
+       Eio.Flow.copy_string "data: hello\n\n" sink;
+       Eio.Flow.close sink)
+    (fun () ->
+       match
+         read_sse
+           ~clock
+           ~idle_timeout:0.05
+           ~first_event_timeout:1.0
+           ~reader
+           ~on_data:(fun ~event_type:_ _ -> Continue Output)
+           ()
+       with
+       | () -> failwith "the inter-token idle budget did not fire"
+       | exception Eio.Time.Timeout -> ());
+  Eio.Time.now clock -. started < 1.0
+;;
+
+(* NDJSON parity: the first line the consumer reports as [Prelude] keeps the
+   first-event budget armed, and the output line 0.2 s later is still read. *)
+let%test "read_ndjson: a prelude line does not end the first-event wait" =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run
+  @@ fun sw ->
+  let source, sink = Eio_unix.pipe sw in
+  let reader = Eio.Buf_read.of_flow ~max_size:1024 source in
+  let lines = ref [] in
+  Eio.Fiber.both
+    (fun () ->
+       Eio.Flow.copy_string "{\"created\":true}\n" sink;
+       Eio.Time.sleep clock 0.2;
+       Eio.Flow.copy_string "{\"a\":1}\n" sink;
+       Eio.Flow.close sink)
+    (fun () ->
+       read_ndjson
+         ~clock
+         ~idle_timeout:0.05
+         ~first_event_timeout:1.0
+         ~reader
+         ~on_line:(fun l ->
+           lines := l :: !lines;
+           Continue (if String.equal l "{\"created\":true}" then Prelude else Output))
+         ());
+  List.rev !lines = [ "{\"created\":true}"; "{\"a\":1}" ]
 ;;
 
 (* NDJSON parity for acceptance (a): the first-event budget must admit a silent
@@ -3583,7 +3700,7 @@ let%test "read_ndjson: first_event_timeout admits a silent prefill past idle" =
          ~reader
          ~on_line:(fun l ->
            lines := l :: !lines;
-           Continue)
+           Continue Output)
          ());
   List.rev !lines = [ "{\"a\":1}" ]
 ;;
@@ -3638,7 +3755,7 @@ let%test "resolve_first_event_timeout: all-None stays unarmed" =
    a regression to the old "always stream_idle_timeout_s" message fails here. *)
 let%test "governing_timeout_knob: first-event names its explicit knob" =
   governing_timeout_knob
-    ~state:Awaiting_first_event
+    ~phase:Before_first_output
     ~first_event_timeout:(Some 5.0)
     ~body_timeout:(Some 9.0)
     ~idle_timeout:(Some 0.5)
@@ -3647,7 +3764,7 @@ let%test "governing_timeout_knob: first-event names its explicit knob" =
 
 let%test "governing_timeout_knob: first-event names body when it supplied the bound" =
   governing_timeout_knob
-    ~state:Awaiting_first_event
+    ~phase:Before_first_output
     ~first_event_timeout:None
     ~body_timeout:(Some 9.0)
     ~idle_timeout:(Some 0.5)
@@ -3656,16 +3773,16 @@ let%test "governing_timeout_knob: first-event names body when it supplied the bo
 
 let%test "governing_timeout_knob: first-event names idle when idle supplied the bound" =
   governing_timeout_knob
-    ~state:Awaiting_first_event
+    ~phase:Before_first_output
     ~first_event_timeout:None
     ~body_timeout:None
     ~idle_timeout:(Some 0.5)
   = Stream_idle_timeout
 ;;
 
-let%test "governing_timeout_knob: inter-token phases stay attributed to idle" =
+let%test "governing_timeout_knob: after the first output the idle knob governs" =
   governing_timeout_knob
-    ~state:Streaming_answer
+    ~phase:After_first_output
     ~first_event_timeout:(Some 5.0)
     ~body_timeout:(Some 9.0)
     ~idle_timeout:(Some 0.5)
@@ -3697,7 +3814,7 @@ let%test "read_sse: body_timeout bounds the first-event wait when first_event is
       ~idle_timeout:1.0
       ~body_timeout:0.05
       ~reader
-      ~on_data:(fun ~event_type:_ _ -> Continue)
+      ~on_data:(fun ~event_type:_ _ -> Continue Output)
       ();
     false
   with
@@ -3718,7 +3835,7 @@ let%test "read_ndjson: body_timeout bounds the first-event wait when first_event
       ~idle_timeout:1.0
       ~body_timeout:0.05
       ~reader
-      ~on_line:(fun _ -> Continue)
+      ~on_line:(fun _ -> Continue Output)
       ();
     false
   with
@@ -3729,7 +3846,7 @@ let%test "read_ndjson: body_timeout bounds the first-event wait when first_event
    before real prefill. The blank is a dispatch delimiter, not first output, so
    it must NOT switch to the short inter-token idle budget. Then it is silent
    for 0.2s (> idle 0.05, < first-event 1.0) before the real event. Reverting
-   the fix (flipping [first_event_seen] on the blank) arms the 0.05 idle for the
+   the fix (switching budgets on the blank) arms the 0.05 idle for the
    second read and this times out at 0.05s instead of admitting the prefill. *)
 let%test "read_sse: a leading blank line does not end the first-event wait" =
   Eio_main.run
@@ -3754,7 +3871,7 @@ let%test "read_sse: a leading blank line does not end the first-event wait" =
          ~reader
          ~on_data:(fun ~event_type:_ d ->
       payloads := d :: !payloads;
-      Continue)
+      Continue Output)
          ());
   List.rev !payloads = [ "hello" ]
 ;;
@@ -3784,7 +3901,7 @@ let%test "read_ndjson: a leading blank line does not end the first-event wait" =
          ~reader
          ~on_line:(fun l ->
            lines := l :: !lines;
-           Continue)
+           Continue Output)
          ());
   List.rev !lines = [ "{\"a\":1}" ]
 ;;

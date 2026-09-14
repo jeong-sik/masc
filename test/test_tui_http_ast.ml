@@ -427,6 +427,30 @@ let test_http_get_uses_auth_headers () =
       n
 ;;
 
+(* Every time this TUI draws is the terminal's zone -- one helper makes them
+   all, and its own comment says so. Four rows out of the thirty-five spelled
+   "(local)" beside their time anyway, and the Fusion detail put it right
+   after the age, so that row ended in two brackets back to back:
+   "Started: 2026-08-24 16:47:49 (20d21h ago) (local)". A marker on four rows
+   reads as a distinction, which invites the next row to carry one too. The
+   guide states the zone once, for the whole screen. *)
+let test_no_row_marks_its_own_timestamp_with_a_zone () =
+  List.iter
+    (fun module_path ->
+      List.iter
+        (fun needle ->
+          check int
+            (Printf.sprintf "%s says %S about no row" module_path needle)
+            0
+            (Ast_grep.count_string_literals ~module_path ~needle))
+        [ "(local)"; "local date"; "local time"; "local timezone" ])
+    [ "bin/masc_tui_render.ml"
+    ; "bin/masc_tui_render_memory.ml"
+    ; "bin/masc_tui_render_chat.ml"
+    ; "bin/masc_tui_render_prim.ml"
+    ]
+;;
+
 let test_http_client_does_not_own_tui_env_contract () =
   let module_path = "bin/masc_tui_http.ml" in
   check int "no local TUI env literals" 0
@@ -2766,6 +2790,8 @@ let () =
           "http client does not own TUI env contract"
           `Quick
           test_http_client_does_not_own_tui_env_contract;
+        test_case "no row marks its own timestamp with a zone" `Quick
+          test_no_row_marks_its_own_timestamp_with_a_zone;
         test_case
           "keeper chat uses current async contract"
           `Quick

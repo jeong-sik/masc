@@ -5424,6 +5424,12 @@
  (libraries alcotest exec_shim unix eio eio_main fs_compat))
 
 (test
+ (name test_exec_shim_fdpass)
+ (modules test_exec_shim_fdpass)
+ (enabled_if (= %{system} linux))
+ (libraries alcotest shim_fdpass unix))
+
+(test
  (name test_shim_clock)
  (modules test_shim_clock)
  (libraries alcotest shim_clock unix))

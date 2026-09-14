@@ -932,13 +932,26 @@ let persist_binary_body ~base_path ?request_id ?index data =
     Some (Filename.concat (Filename.concat "evidence" request_id) file)
   | _ -> None
 
+(* Why a filed body did not come back as base64. Each case is a different
+   posture for the judge (RFC-0436 §4.4/§4.5): the item was never an image
+   block candidate, the body was never filed (decoded from persistence, not
+   captured), the file is gone or unreadable, or the body is above the
+   delivery ceiling and is judged on its recorded hash and size. A caller
+   that reads only a string cannot tell these apart, so the sum is closed
+   and carries the numbers the ceiling case is decided on. *)
+type read_binary_error =
+  | Not_binary
+  | Body_not_filed
+  | Body_unreadable of string
+  | Over_delivery_ceiling of { bytes : int; ceiling : int }
+
 (* Read the request-owned body back as base64, including after the snapshot
    was decoded from persistence. Missing bodies and bodies above the capture
    ceiling are not delivered as images; their recorded references remain in
    the review evidence. The runtime still owns model capability selection. *)
 let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   match item with
-  | Evidence_artifact_binary { reference; body = Some relative; _ } ->
+  | Evidence_artifact_binary { body = Some relative; _ } ->
     let path =
       Filename.concat
         (Workspace_utils.masc_dir_from_base_path ~base_path)
@@ -946,28 +959,20 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
     in
     (try
        let data = Fs_compat.load_file path in
-       if String.length data > verification_evidence_max_bytes
+       let bytes = String.length data in
+       if bytes > verification_evidence_max_bytes
        then
          Error
-           (Printf.sprintf
-              "binary evidence body %s of %s exceeds the judge delivery \
-               ceiling of %d bytes; judged on its recorded hash and size"
-              relative
-              reference
-              verification_evidence_max_bytes)
+           (Over_delivery_ceiling
+              { bytes; ceiling = verification_evidence_max_bytes })
        else Ok (Base64.encode_string data)
-     with Sys_error reason ->
-       Error
-         (Printf.sprintf
-            "binary evidence body %s of %s unreadable: %s"
-            relative reference reason))
-  | Evidence_artifact_binary { reference; body = None; _ } ->
-    Error (Printf.sprintf "binary evidence %s filed no body" reference)
-  | Evidence_collaboration _ -> Error "not a binary artifact"
-  | Evidence_note _ -> Error "not a binary artifact"
-  | Evidence_artifact _ -> Error "not a binary artifact"
-  | Evidence_invalid_reference -> Error "not a binary artifact"
-  | Evidence_artifact_unreadable _ -> Error "not a binary artifact"
+     with Sys_error reason -> Error (Body_unreadable reason))
+  | Evidence_artifact_binary { body = None; _ } -> Error Body_not_filed
+  | Evidence_collaboration _ -> Error Not_binary
+  | Evidence_note _ -> Error Not_binary
+  | Evidence_artifact _ -> Error Not_binary
+  | Evidence_invalid_reference -> Error Not_binary
+  | Evidence_artifact_unreadable _ -> Error Not_binary
 
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
     ~worker ~reference relative_path =

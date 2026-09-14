@@ -239,22 +239,19 @@ type voice_placement =
   | On_the_section
   | On_the_endpoint
 
-(* Whether a TTS endpoint answers to a voice name shaped for something other
-   than [say]. Named per kind rather than as "not macos_say" so a kind added to
-   {!Voice_config.endpoint_kind} has to decide here. Whisper_cli cannot be a
-   speech-out endpoint; it is counted as another provider so that an entry the
-   loader would refuse never causes a section default to be overwritten. *)
-let names_a_voice_say_cannot_read (endpoint : Voice_config.endpoint) =
-  match endpoint.Voice_config.kind with
-  | Voice_config.Macos_say -> false
-  | Voice_config.Openai_compat
-  | Voice_config.Elevenlabs_direct
-  | Voice_config.Voice_mcp
-  | Voice_config.Whisper_cli -> true
+(* The section default is readable by everyone that falls back to it only while
+   they all speak the same vocabulary, and the kind is what that vocabulary
+   belongs to: say takes a label, ElevenLabs a 20-character id, an OpenAI
+   voice a name. So the question is identity, not a list of kinds to keep in
+   step -- a kind added to {!Voice_config.endpoint_kind} needs no decision
+   here, because a kind that is not the one being written already answers it.
 
-let voice_placement = function
-  | None -> On_the_section
-  | Some (tts : Voice_config.tts_config) ->
-    if List.exists names_a_voice_say_cannot_read tts.Voice_config.endpoints
-    then On_the_endpoint
-    else On_the_section
+   [alongside] is the section as it is now and [adding] the endpoint about to
+   land in it. An endpoint of the same kind as every other one can take the
+   section default; anything else has to carry its own, and accepts that
+   per-keeper mappings do not reach it. A [None] alongside is an endpoint whose
+   kind this binary cannot name, which is not the same kind as anything. *)
+let voice_placement ~alongside ~adding =
+  if List.for_all (fun kind -> kind = Some adding) alongside
+  then On_the_section
+  else On_the_endpoint

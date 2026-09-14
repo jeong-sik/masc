@@ -7457,7 +7457,7 @@ let composable_output_probes =
     ; prepare = (fun ~config ~meta:_ ->
         (match Msx_lane.load
            ~ledger_dir:(Filename.concat config.Masc.Workspace.base_path "msx-probe")
-           ~roms_dir:"" ~cart_path:None ~disk_path:None with
+           ~roms_dir:None ~cart_path:None ~disk_path:None with
          | Ok _ -> ()
          | Error error -> fail (Msx_lane.error_to_string error));
         `Assoc [])

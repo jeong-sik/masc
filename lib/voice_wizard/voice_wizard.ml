@@ -146,7 +146,7 @@ let gaps draft =
 
 let optional value = if blank_text value then None else Some (String.trim value)
 
-let endpoint_of_draft draft : Voice_config.endpoint =
+let endpoint_of_draft ?voice draft : Voice_config.endpoint =
   let kind = kind_of_provider draft.provider in
   { Voice_config.id = String.trim draft.endpoint_id
   ; kind
@@ -162,7 +162,8 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; api_key_env = optional draft.credential_variable
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
-  ; default_voice = None
+  (* Set only where the section default is someone else's; see {!changes}. *)
+  ; default_voice = voice
   (* Left unset so the two command kinds run the name they are normally
      installed under, which the overlay supplies. Pointing an endpoint at a
      binary PATH does not carry is an edit to the file, not a question worth
@@ -174,19 +175,43 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   }
 ;;
 
-let changes draft =
+let changes draft ~alongside =
   match gaps draft with
   | _ :: _ as gaps -> Error gaps
   | [] ->
     (* The model travels on the endpoint ({!endpoint_of_draft}), so nothing
        is written to the section's default_model and the endpoints already
-       there keep the model they had. *)
+       there keep the model they had.
+
+       The voice is the same question asked of a different setting, and
+       {!Voice_setup.voice_placement} answers it: a voice name is provider
+       vocabulary, so writing one as the section default is only right while
+       everything that falls back to it shares this endpoint's kind. Where it
+       is not, the endpoint carries its own and the section keeps the default
+       the endpoints already there can read. *)
     let voice =
       match draft.section with
-      | Voice_setup.Tts -> [ Voice_setup.Set_tts_default_voice (String.trim draft.voice) ]
-      | Voice_setup.Stt -> []
+      | Voice_setup.Stt -> `None
+      | Voice_setup.Tts ->
+        let voice = String.trim draft.voice in
+        (match
+           Voice_setup.voice_placement ~alongside
+             ~adding:(kind_of_provider draft.provider)
+         with
+         | Voice_setup.On_the_section -> `Section voice
+         | Voice_setup.On_the_endpoint -> `Endpoint voice)
     in
-    Ok (voice @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
+    let section_change =
+      match voice with
+      | `Section voice -> [ Voice_setup.Set_tts_default_voice voice ]
+      | `Endpoint _ | `None -> []
+    in
+    let endpoint =
+      match voice with
+      | `Endpoint voice -> endpoint_of_draft ~voice draft
+      | `Section _ | `None -> endpoint_of_draft draft
+    in
+    Ok (section_change @ [ Voice_setup.Put_endpoint (draft.section, endpoint) ])
 ;;
 
 type step =
@@ -319,8 +344,8 @@ let change_json = function
           | None -> `Null )
       ]
 
-let save_request draft ~revision =
-  match changes draft with
+let save_request draft ~revision ~alongside =
+  match changes draft ~alongside with
   | Error gaps -> Error gaps
   | Ok changes ->
     Ok

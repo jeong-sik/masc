@@ -49,13 +49,15 @@ let discover_with ~get ~base_url =
     | Some next -> pages (next :: seen) (Some next) rows
   in pages [] None []
 
+let auth_headers ~credential_source =
+  Llm_provider.Provider_config.auth_headers_for ~kind:Gemini ~auth_scheme:Bearer_token
+    ~api_key:Llm_provider.Secret.empty ~credential_source
+
 let discover ~sw ~net ~base_url =
-  let source = Runtime_google_adc.credential_source () in
-  let config = Llm_provider.Provider_config.make ~kind:Gemini ~model_id:""
-    ~base_url ~auth_scheme:Bearer_token ~credential_source:source () in
+  let credential_source = Runtime_google_adc.credential_source () in
   let get ~url =
     let ( let* ) = Result.bind in
-    let* headers = Llm_provider.Provider_config.resolve_auth_headers config in
+    let* headers = auth_headers ~credential_source in
     match Llm_provider.Http_client.get_sync ~sw ~net ~url ~headers () with
     | Error _ -> Error "Vertex model discovery request failed"
     | Ok response when response.status >= 200 && response.status < 300 -> Ok response.body

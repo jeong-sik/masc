@@ -310,6 +310,10 @@ val planning_backlog_counts :
 (** The Backlog counts as [(key, count, label)], each label led by the progress
     mark its Task rows wear. *)
 
+val planning_goal_history_summary : unlisted:int -> ended:int -> string
+(** The retained-history count row: how many goals are no longer listed, and
+    how many of those left the list with no outcome recorded. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> cols:int -> tab:planning_tab -> window:string -> string
 

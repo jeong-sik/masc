@@ -131,6 +131,64 @@ let format_context_tokens tokens =
   else
     Printf.sprintf "%d" tokens
 
+let keepers_for_lane (state : state) (lane_id : string) : Tui_decode.keeper list =
+  let default_target =
+    match state.runtime_surface with
+    | Some s -> s.rss_resolved.rrs_default_runtime_id
+    | None -> None
+  in
+  state.keepers
+  |> List.filter (fun (k : Tui_decode.keeper) ->
+       match
+         List.find_opt
+           (fun (a : Tui_decode.runtime_assignment) ->
+              String.equal a.ra_keeper k.k_name)
+           state.runtime_assignments
+       with
+       | Some a ->
+           (match a.ra_target_id with
+            | Some target -> String.equal target lane_id
+            | None ->
+                match default_target with
+                | Some def -> String.equal def lane_id
+                | None -> false)
+       | None ->
+           match default_target with
+           | Some def -> String.equal def lane_id
+           | None -> false)
+
+let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keeper list =
+  let default_target =
+    match state.runtime_surface with
+    | Some s -> s.rss_resolved.rrs_default_runtime_id
+    | None -> None
+  in
+  state.keepers
+  |> List.filter (fun (k : Tui_decode.keeper) ->
+       match
+         List.find_opt
+           (fun (a : Tui_decode.runtime_assignment) ->
+              String.equal a.ra_keeper k.k_name)
+           state.runtime_assignments
+       with
+       | Some a ->
+           (match a.ra_target_id with
+            | Some target -> String.equal target runtime_id
+            | None ->
+                match default_target with
+                | Some def -> String.equal def runtime_id
+                | None -> false)
+       | None ->
+           match default_target with
+           | Some def -> String.equal def runtime_id
+           | None -> false)
+
+let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
+  let turns = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_turns) 0 keepers in
+  let tokens = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_tokens) 0 keepers in
+  let cost = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc +. k.k_total_cost_usd) 0.0 keepers in
+  turns, tokens, cost
+
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -2601,15 +2659,14 @@ let render_planning_list (state : state) =
      match planning.pl_goal_history with
      | [] -> ()
      | history ->
-       let closed =
+       let ended =
          List.length
            (List.filter
               (fun (row : planning_goal_history) -> Option.is_some row.pgh_closed_at)
               history)
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "  No longer listed: %d · reached an end: %d"
-            (List.length history) closed);
+         (planning_goal_history_summary ~unlisted:(List.length history) ~ended);
        let lifetime_label hours =
          if hours >= 48. then Printf.sprintf "%.1fd" (hours /. 24.)
          else Printf.sprintf "%.1fh" hours
@@ -3313,15 +3370,17 @@ let render_schedule_list (state : state) =
                Printf.sprintf "  Requests: %d" total
            | None -> "  Requests: ?"
          in
+         (* One row, not two. The count and the next wake are a phrase each,
+            and with nothing due the second row was drawn blank -- a row of
+            the list given up to say nothing. *)
          let next_due_text =
            match snapshot.scs_next_due_iso with
            | Some iso ->
-               Printf.sprintf "  Next due: %s"
-                 (Terminal_text.short_timestamp iso)
+               Printf.sprintf "%s  \xc2\xb7  Next due: %s%s" Ansi.dim
+                 (Terminal_text.short_timestamp iso) Ansi.reset
            | None -> ""
          in
-         c.push (Ansi.bold ^ count_text ^ Ansi.reset);
-         c.push (Ansi.dim ^ next_due_text ^ Ansi.reset);
+         c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text);
          c.push_divider ();
 
          let count = List.length snapshot.scs_rows in
@@ -4080,6 +4139,34 @@ let keeper_operations_preview (state : state) =
   | Some keeper ->
       (match state.lanes with
        | Some snapshot ->
+           let target_note =
+             match
+               List.find_opt
+                 (fun (a : Tui_decode.runtime_assignment) ->
+                    String.equal a.ra_keeper keeper.k_name)
+                 state.runtime_assignments
+             with
+             | Some a ->
+                 let is_l =
+                   match a.ra_target_id with
+                   | Some tid ->
+                       List.exists
+                         (fun (l : Tui_decode.runtime_resolved_lane) ->
+                            String.equal l.rrl_id tid)
+                         state.runtime_lanes
+                   | None -> false
+                 in
+                 Printf.sprintf " \xc2\xb7 target %s (%s)"
+                   (Terminal_text.single_line_or ~default:"-" a.ra_target_id)
+                   (if is_l then "lane" else "model")
+             | None ->
+                 match state.runtime_surface with
+                 | Some s ->
+                     (match s.rss_resolved.rrs_default_runtime_id with
+                      | Some def -> Printf.sprintf " \xc2\xb7 target %s (default)" def
+                      | None -> "")
+                 | None -> ""
+           in
            (match
               List.find_opt
                 (fun (lane : Tui_decode.keeper_lane) ->
@@ -4105,10 +4192,11 @@ let keeper_operations_preview (state : state) =
                   ; " · "
                   ; Terminal_text.single_line_or ~default:"no diagnosis"
                       lane.kl_diagnosis
+                  ; target_note
                   ]
             | None ->
                 Ansi.dim ^ "  OPERATIONS  no composite row for "
-                ^ Terminal_text.single_line keeper.k_name ^ Ansi.reset)
+                ^ Terminal_text.single_line keeper.k_name ^ target_note ^ Ansi.reset)
        | None ->
            (match state.lanes_error with
             | Some detail ->
@@ -4562,6 +4650,36 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
     | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
   in
+  let run_stats =
+    let total = lane.sl_retained_run_count in
+    if total > 0 then
+      let rate =
+        float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
+      in
+      let p50_str =
+        match lane.sl_p50_elapsed_s with
+        | Some s -> Printf.sprintf " · p50 latency %.2fs" s
+        | None -> ""
+      in
+      Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
+        total lane.sl_succeeded_count lane.sl_failed_count
+        lane.sl_cancelled_count rate p50_str
+    else "Runs: no runs retained yet"
+  in
+  let slot_distribution =
+    match lane.sl_selected_slots with
+    | [] -> []
+    | scs ->
+        let dist =
+          String.concat ", "
+            (List.map
+               (fun (sc : Tui_decode.standalone_lane_slot_count) ->
+                  Printf.sprintf "%s: %d"
+                    (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
+               scs)
+        in
+        wrap Ansi.reset ("Slot selection history: " ^ dist)
+  in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
@@ -4571,6 +4689,9 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
          (Terminal_text.single_line lane.sl_lane_id))
+  @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
+      run_stats
+  @ slot_distribution
   @ wrap Ansi.reset
       ("Catalog attempts (admitted order): " ^ ordered lane.sl_admitted_slots)
   @ wrap Ansi.reset
@@ -4606,16 +4727,39 @@ let render_lanes_overview (state : state) =
       now.Unix.tm_sec
   in
   let header =
+    let keeper_lane_count =
+      match state.runtime_surface with
+      | Some snapshot -> List.length snapshot.rss_resolved.rrs_lanes
+      | None -> 0
+    in
+    let all_count =
+      match state.runtime_surface with
+      | Some snapshot -> List.length snapshot.rss_resolved.rrs_runtimes
+      | None -> 0
+    in
+    let standalone_count =
+      match state.standalone_lanes with
+      | Some snapshot -> List.length snapshot.sls_lanes
+      | None -> 0
+    in
     match state.standalone_lanes with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Lanes · Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+          (screen_title " MASC Lanes \xc2\xb7 Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
-    | Some snapshot ->
-        Printf.sprintf "%s (%s)  %s  %s"
-          (screen_title " MASC Lanes · Standalone")
-          (Masc_tui_message_layout.count_noun (List.length snapshot.sls_lanes) "lane") timestamp
-          (connection_badge state)
+    | Some _ ->
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Lanes \xc2\xb7 Standalone")
+          (tab_strip
+             ~width:
+               (tab_strip_width ~cols
+                  ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap))
+             [ ( Printf.sprintf "Lanes (%d)" keeper_lane_count, false )
+             ; ( Printf.sprintf "All runtimes (%d)" all_count, false )
+             ; ( Printf.sprintf "Standalone (%s)"
+                   (Masc_tui_message_layout.count_noun standalone_count "lane"), true )
+             ])
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -5397,8 +5541,8 @@ let render_clients (state : state) =
     |> min 24
   in
   let col_hdr =
-    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "Status" name_width
-      "Name" "Type" "Keeper" "Task" "Last seen"
+    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "STATUS" name_width
+      "NAME" "TYPE" "KEEPER" "TASK" "LAST SEEN"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -5911,6 +6055,113 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Runtime section *)
     add_section "Runtime Stats";
+    let assignment =
+      List.find_opt
+        (fun (a : Tui_decode.runtime_assignment) ->
+           String.equal a.ra_keeper k.k_name)
+        state.runtime_assignments
+    in
+    let target_str, is_lane =
+      match assignment with
+      | Some a ->
+          let target = Terminal_text.single_line_or ~default:"-" a.ra_target_id in
+          let is_l =
+            match a.ra_target_id with
+            | Some tid ->
+                List.exists
+                  (fun (l : Tui_decode.runtime_resolved_lane) ->
+                     String.equal l.rrl_id tid)
+                  state.runtime_lanes
+            | None -> false
+          in
+          Printf.sprintf "%s (%s, %s)" target
+            (if is_l then "lane" else "model")
+            (Terminal_text.single_line a.ra_source),
+          is_l
+      | None ->
+          let def_name =
+            match state.runtime_surface with
+            | Some s ->
+                (match s.rss_resolved.rrs_default_runtime_id with
+                 | Some d -> Printf.sprintf "inherited: %s" d
+                 | None -> "inherited")
+            | None -> "inherited"
+          in
+          Printf.sprintf "default (%s)" def_name, false
+    in
+    add_row "Runtime Target:" target_str;
+    (match assignment with
+     | Some { ra_target_id = Some tid; _ } when is_lane ->
+         (match
+            List.find_opt
+              (fun (l : Tui_decode.runtime_resolved_lane) ->
+                 String.equal l.rrl_id tid)
+              state.runtime_lanes
+          with
+          | Some lane ->
+              let hops =
+                String.concat " \xe2\x86\x92 "
+                  (List.map
+                     (fun id ->
+                        match String.split_on_char '.' id with
+                        | [ _prov; m ] -> m
+                        | _ -> id)
+                     lane.rrl_runtime_ids)
+              in
+              add_row "Failover Chain:" hops;
+              (match lane.rrl_preferred_candidate with
+               | Some pref ->
+                   let short_p =
+                     match String.split_on_char '.' pref with
+                     | [ _prov; m ] -> m
+                     | _ -> pref
+                   in
+                   add_row "Active Candidate:"
+                     (Printf.sprintf "%s (sticky winner)" short_p)
+               | None ->
+                   match lane.rrl_runtime_ids with
+                   | first :: _ ->
+                       add_row "Active Candidate:"
+                         (Printf.sprintf "%s (head)" first)
+                   | [] -> ())
+          | None -> ())
+     | Some { ra_target_id = Some tid; _ } ->
+         (match state.runtime_surface with
+          | Some snap ->
+              (match
+                 List.find_opt
+                   (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id tid)
+                   snap.rss_resolved.rrs_runtimes
+               with
+               | Some ro ->
+                   add_row "Model Context:"
+                     (Printf.sprintf "%s \xc2\xb7 max output %s"
+                        (format_context_tokens ro.ro_effective_max_context)
+                        (match ro.ro_max_output_tokens with
+                         | Some t -> format_context_tokens t
+                         | None -> "default"))
+               | None -> ())
+          | None -> ())
+     | None | Some { ra_target_id = None; _ } ->
+         (match state.runtime_surface with
+          | Some snap ->
+              (match snap.rss_resolved.rrs_default_runtime_id with
+               | Some def_id ->
+                   (match
+                      List.find_opt
+                        (fun (ro : Tui_decode.runtime_option) -> String.equal ro.ro_id def_id)
+                        snap.rss_resolved.rrs_runtimes
+                    with
+                    | Some ro ->
+                        add_row "Default Context:"
+                          (Printf.sprintf "%s \xc2\xb7 max output %s"
+                             (format_context_tokens ro.ro_effective_max_context)
+                             (match ro.ro_max_output_tokens with
+                              | Some t -> format_context_tokens t
+                              | None -> "default"))
+                    | None -> ())
+               | None -> ())
+          | None -> ()));
     (match k.k_origin with
      | Tui_decode.Persisted_keeper -> ()
      | Declared_keeper requirements ->
@@ -7864,11 +8115,19 @@ let render_fusion_list (state : state) =
             0 runs
         in
         let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in
+        (* The running count is a state, not a second noun for the runs: with
+           nothing running the title read "2 runs \xc2\xb7 2 done \xc2\xb7 0 run",
+           where the last pair says nothing and reads as a third total. It is
+           left out when it is zero, the way the failures beside it already
+           are. *)
         let stats_note =
-          Printf.sprintf " (%s · %s%d done%s · %s%d run%s%s)"
+          Printf.sprintf " (%s · %s%d done%s%s%s)"
             (Masc_tui_message_layout.count_noun (List.length runs) "run")
             (Theme.ok ()) completed_count Ansi.reset
-            (Theme.info ()) running_count Ansi.reset
+            (if running_count > 0 then
+               Printf.sprintf " · %s%d running%s" (Theme.info ()) running_count
+                 Ansi.reset
+             else "")
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
         Printf.sprintf "%s%s  %s  %s"
@@ -9677,8 +9936,8 @@ let render_connectors (state : state) =
     ~hints:"B:Browser Lane  j/k:scroll  b:bind  u:unbind  r:refresh"
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector"
-           "Configured" "Reachable" "Status" "Channel");
+        (Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "CONNECTOR"
+           "CONFIGURED" "REACHABLE" "STATUS" "CHANNEL");
       c.push_divider ();
       (match state.connectors_error with
        | None -> ()
@@ -9976,7 +10235,34 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
-      fields @ candidate @ blocker @ sticky @ quota @ probe_lines
+      let keeper_lines =
+        let target_keepers =
+          match target with
+          | Runtime_lane_candidate { lane_id; runtime_id = _ } ->
+              keepers_for_lane state lane_id
+          | Runtime_catalog_entry { runtime_id } ->
+              let direct = keepers_for_runtime state runtime_id in
+              let via_lanes = List.concat_map (keepers_for_lane state) lanes in
+              List.fold_left
+                (fun acc (k : Tui_decode.keeper) ->
+                   if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
+                   else k :: acc)
+                direct via_lanes
+        in
+        match target_keepers with
+        | [] ->
+            runtime_detail_field ~width ~style:Ansi.dim "Bound keepers" "none"
+        | ks ->
+            let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
+            let turns, tokens, cost = aggregate_keeper_stats ks in
+            let activity_str =
+              Printf.sprintf "%d turns \xc2\xb7 %s tokens \xc2\xb7 $%.4f" turns
+                (format_context_tokens tokens) cost
+            in
+            runtime_detail_field ~width ~style:Ansi.reset "Bound keepers" names
+            @ runtime_detail_field ~width ~style:Ansi.reset "Keeper telemetry" activity_str
+      in
+      fields @ candidate @ blocker @ sticky @ quota @ keeper_lines @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -10068,6 +10354,11 @@ let render_runtime (state : state) =
         let all_count =
           List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
         in
+        let standalone_count =
+          match state.standalone_lanes with
+          | Some snapshot -> List.length snapshot.sls_lanes
+          | None -> 0
+        in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s%s  %s  %s"
           (screen_title " MASC Config / Runtime")
@@ -10079,6 +10370,7 @@ let render_runtime (state : state) =
                    (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
                , lanes_active )
              ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
+             ; (Printf.sprintf "Standalone (%d)" standalone_count, false)
              ])
           probe_status probe_read timestamp (connection_badge state)
   in
@@ -10113,9 +10405,17 @@ let render_runtime (state : state) =
           | 0 -> ""
           | count -> Printf.sprintf "  %d probe-only" count
         in
+        let fleet_note =
+          let total_keepers = List.length state.keepers in
+          if total_keepers > 0 then
+            let turns, tokens, cost = aggregate_keeper_stats state.keepers in
+            Printf.sprintf "  fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
+              total_keepers turns (format_context_tokens tokens) cost
+          else ""
+        in
         Printf.sprintf
-          "  SSOT: runtime.toml  projections: resolved + probe  %s  %s%s%s"
-          summary_text config probe_only_note probe_note
+          "  SSOT: runtime.toml  projections: resolved + probe  %s%s  %s%s%s"
+          summary_text fleet_note config probe_only_note probe_note
   in
   let chrome_rows = runtime_surface_listing_chrome state in
   let content_height = max 0 (rows - chrome_rows) in
@@ -10232,9 +10532,34 @@ let render_runtime (state : state) =
                  | [ one ] -> one
                  | many -> Printf.sprintf "%d lanes" (List.length many)
                in
+               let bound_keepers =
+                 let direct = keepers_for_runtime state runtime.ro_id in
+                 let via_lanes = List.concat_map (keepers_for_lane state) lanes in
+                 List.fold_left
+                   (fun acc (k : Tui_decode.keeper) ->
+                      if List.exists (fun (existing : Tui_decode.keeper) -> String.equal existing.k_name k.k_name) acc then acc
+                      else k :: acc)
+                   direct via_lanes
+               in
+               let default_fact =
+                 if runtime.ro_is_default then [ (Theme.ok ()) ^ "[DEFAULT]" ^ Ansi.reset ] else []
+               in
+               let assignment_fact =
+                 match bound_keepers with
+                 | [] -> [ (Theme.recede ()) ^ "[no keepers]" ^ Ansi.reset ]
+                 | [ one ] ->
+                     let turns, _, cost = aggregate_keeper_stats bound_keepers in
+                     let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                     [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
+                 | many ->
+                     let turns, _, cost = aggregate_keeper_stats bound_keepers in
+                     let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                     let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
+                     [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
+               in
                let detail =
                  String.concat " \xc2\xb7 "
-                   ((if runtime.ro_is_default then [ "default" ] else [])
+                   (default_fact @ assignment_fact
                     @ (match
                          Terminal_text.optional_single_line runtime.ro_blocked_reason
                        with
@@ -10267,8 +10592,23 @@ let render_runtime (state : state) =
       | Some candidate ->
           let open Masc.Tui_decode in
           let runtime = candidate.rcr_runtime in
+          let is_first = candidate.rcr_position = 1 in
+          let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
+          let is_active = Option.is_some candidate.rcr_preferred_at_ts in
+          let lane_col =
+            if candidate.rcr_candidate_count <= 1 then
+              Terminal_text.single_line candidate.rcr_lane_id
+            else if is_first then
+              Terminal_text.single_line candidate.rcr_lane_id
+            else if is_last then
+              Printf.sprintf "  \xe2\x94\x94\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+            else
+              Printf.sprintf "  \xe2\x94\x9c\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+          in
           let candidate_label =
-            Printf.sprintf "%d/%d %s" candidate.rcr_position
+            Printf.sprintf "%s%d/%d %s"
+              (if is_active then "\xe2\x98\x85 " else "")
+              candidate.rcr_position
               candidate.rcr_candidate_count
               (Terminal_text.single_line runtime.ro_id)
           in
@@ -10286,26 +10626,49 @@ let render_runtime (state : state) =
               | Some reason -> [ "blocked: " ^ reason ]
               | None -> []
           in
+          let lane_keepers = keepers_for_lane state candidate.rcr_lane_id in
+          let assignment_fact =
+            if is_first then
+              match lane_keepers with
+              | [] -> [ (Theme.recede ()) ^ "[unassigned]" ^ Ansi.reset ]
+              | [ one ] ->
+                  let turns, _, cost = aggregate_keeper_stats lane_keepers in
+                  let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                  [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" one.k_name stats ^ Ansi.reset ]
+              | many ->
+                  let turns, _, cost = aggregate_keeper_stats lane_keepers in
+                  let stats = if turns > 0 then Printf.sprintf " (%d turns, $%.2f)" turns cost else "" in
+                  let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
+                  [ (Theme.info ()) ^ Printf.sprintf "[assigned: %s%s]" names stats ^ Ansi.reset ]
+            else []
+          in
           let lane_fact =
             match candidate.rcr_preferred_at_ts with
             | Some at ->
-                [ "last success "
+                [ (Theme.ok ())
+                  ^ "\xe2\x98\x85 active (sticky since "
                   ^ Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds at)
+                  ^ ", last success "
+                  ^ Terminal_text.clock_timestamp
+                      (Masc_domain.iso8601_of_unix_seconds at)
+                  ^ ")"
+                  ^ Ansi.reset
                 ]
             | None when candidate.rcr_candidate_count = 1 -> [ "single candidate" ]
-            | None -> []
+            | None ->
+                if is_first then [ "head" ]
+                else [ Printf.sprintf "fallback #%d" (candidate.rcr_position - 1) ]
           in
-          let default_fact = if runtime.ro_is_default then [ "default" ] else [] in
+          let default_fact = if runtime.ro_is_default then [ (Theme.ok ()) ^ "[default]" ^ Ansi.reset ] else [] in
           let detail =
             String.concat " \xc2\xb7 "
-              (route_detail @ default_fact @ lane_fact
+              (assignment_fact @ lane_fact @ default_fact @ route_detail
                @ runtime_probe_detail candidate.rcr_probe)
           in
           let line =
             "  "
-            ^ runtime_name_column runtime_lane_width
-                (Terminal_text.single_line candidate.rcr_lane_id)
+            ^ runtime_name_column runtime_lane_width lane_col
             ^ " " ^ runtime_name_column runtime_candidate_width candidate_label
             ^ " " ^ runtime_column runtime_identity_width provider_model
             ^ " " ^ runtime_column runtime_status_width route_probe
@@ -10811,8 +11174,8 @@ let render_acting (state : state) =
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
-      "Detail"
+    Printf.sprintf "  %-8s %-16s %s %-16s %s" "TIME" "KEEPER" " " "EVENT"
+      "DETAIL"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -13183,10 +13546,65 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
 ;;
 
+(* Assigning a voice to a keeper: two lists, the keeper walking under up and
+   down and the voice under the arrows. Drawn instead of the pane rather than
+   over it, because both are lists and a list over a list is two cursors a
+   reader has to keep apart. *)
+let render_voice_agent (state : state) (session : voice_agent_session) =
+  let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
+  let buf = Buffer.create 2048 in
+  let list_block label items cursor draw =
+    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
+    let count = List.length items in
+    if count = 0
+    then box_line buf cols (Printf.sprintf "    %s\xe2\x80\x94%s" Ansi.dim Ansi.reset)
+    else (
+      (* Every entry is laid out; [finish_voice_surface] takes the window and
+         reports where it is, so a list longer than the screen is scrolled
+         rather than cut at the fold. *)
+      List.iteri
+        (fun index item ->
+          box_line buf cols
+            (if index = cursor
+             then
+               Printf.sprintf "    %s%s %s%s" Ansi.bold Masc_tui_theme.Glyph.current_entry
+                 (draw item)
+                 Ansi.reset
+             else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
+        items;
+      box_line buf cols
+        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  in
+  box_top head cols;
+  let before = screen_title " MASC Voice \xc2\xb7 keeper voices" ^ tab_strip_gap in
+  box_line head cols
+    (before ^ config_pane_strip ~cols ~before state ^ "  " ^ connection_badge state);
+  box_line buf cols "";
+  list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
+    Terminal_text.single_line agent);
+  box_line buf cols "";
+  list_block "voice  (left/right)" session.vas_voices session.vas_voice_cursor
+    (fun (voice_id, label) ->
+      if String.equal voice_id label
+      then Terminal_text.single_line voice_id
+      else Printf.sprintf "%s  %s%s%s" (Terminal_text.single_line label) Ansi.dim
+             (Terminal_text.single_line voice_id) Ansi.reset);
+  (match session.vas_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:(Masc_tui_keys.footer_hints_voice_agent ())
+;;
+
 let render_voice (state : state) =
-  match state.voice_wizard with
-  | Some session -> render_voice_wizard state session
-  | None ->
+  match state.voice_agent_voices, state.voice_wizard with
+  | Some session, _ -> render_voice_agent state session
+  | None, Some session -> render_voice_wizard state session
+  | None, None ->
   let terminal_rows, cols = get_terminal_size () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in

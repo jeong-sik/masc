@@ -3929,7 +3929,12 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
          Alcotest.(check string)
            "the body reads back as base64"
            (Base64.encode_string png_bytes) encoded
-       | Error detail -> Alcotest.failf "read failed: %s" detail);
+       | Error VS.Not_binary -> Alcotest.fail "a filed image is a binary item"
+       | Error VS.Body_not_filed -> Alcotest.fail "the body was filed"
+       | Error (VS.Body_unreadable reason) ->
+         Alcotest.failf "the filed body was unreadable: %s" reason
+       | Error (VS.Over_delivery_ceiling { bytes; ceiling }) ->
+         Alcotest.failf "%d bytes is not over the %d ceiling" bytes ceiling);
       (match
          VS.read_binary_body_base64 ~base_path
            (VS.Evidence_artifact_binary
@@ -3941,7 +3946,12 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
               })
        with
        | Ok _ -> Alcotest.fail "a bodyless item must not read back"
-       | Error _ -> ());
+       | Error VS.Body_not_filed -> ()
+       | Error VS.Not_binary -> Alcotest.fail "a bodyless binary is still binary"
+       | Error (VS.Body_unreadable reason) ->
+         Alcotest.failf "no body was filed, nothing to read: %s" reason
+       | Error (VS.Over_delivery_ceiling _) ->
+         Alcotest.fail "no body was filed, nothing to measure");
       (* A body above the capture ceiling is not delivered — the judge falls
          back to the reference-and-hash line (RFC-0436 §4.5). *)
       let oversized =
@@ -3962,10 +3972,20 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
               })
        with
        | Ok _ -> Alcotest.fail "an oversized body must not be delivered"
-       | Error detail ->
-         Alcotest.(check bool)
-           "the refusal names the ceiling" true
-           (Astring.String.is_infix ~affix:"delivery" detail));
+       | Error (VS.Over_delivery_ceiling { bytes; ceiling }) ->
+         (* Proves the refusal is the typed ceiling case carrying the
+            measured size and the ceiling it was judged against, not a
+            sentence a caller would have to search for the word
+            "delivery" in (F460). *)
+         Alcotest.(check int)
+           "the refusal carries the body size" (String.length oversized) bytes;
+         Alcotest.(check int)
+           "the refusal carries the ceiling it was judged against"
+           VS.verification_evidence_max_bytes ceiling
+       | Error VS.Not_binary -> Alcotest.fail "an oversized image is binary"
+       | Error VS.Body_not_filed -> Alcotest.fail "the oversized body was filed"
+       | Error (VS.Body_unreadable reason) ->
+         Alcotest.failf "the oversized body was unreadable: %s" reason);
       Alcotest.(check (option string))
         "png attaches as an image" (Some "image/png")
         (VS.image_media_type_of_binary_format "png");

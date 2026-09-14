@@ -313,7 +313,12 @@ let evidence_images_of_snapshot ~base_path
             | None -> None
             | Some media_type -> (
               match Store.read_binary_body_base64 ~base_path item with
-              | Error _reason -> None
+              (* Every refusal keeps the artifact out of the attached
+                 blocks; the prompt still carries its reference and hash. *)
+              | Error Store.Not_binary
+              | Error Store.Body_not_filed
+              | Error (Store.Body_unreadable _)
+              | Error (Store.Over_delivery_ceiling _) -> None
               | Ok body_base64 ->
                 Some
                   Task.Anti_rationalization.

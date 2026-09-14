@@ -417,8 +417,15 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a failover candidate to this lane's walk order"
+        (* The lane detail spent four rows on the file's shape and on this
+           key, the same two sentences under every lane. They are here, where
+           the key is. *)
       ; b Navigate "e" "lane config"
-          ~help:"open this lane's runtime.exact_output_lanes section"
+          ~help:
+            "open this lane's runtime.exact_output_lanes section in the \
+             preview-checked runtime.toml editor; slots is a required \
+             non-empty catalog-ref array and cli_slots an optional \
+             official-client runtime-id array"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "overview" ~help:"back to Overview"

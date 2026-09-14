@@ -278,9 +278,72 @@ let capture_failure failure state =
   | None -> { state with failure = Some failure }
 ;;
 
-(* Applied to text blocks only. A reasoning block that circles is a separate
-   question with its own ceiling, and stopping a provider mid-thought on a
-   repeated line would end turns that were about to answer. *)
+(* task-1570 (2026-09-14): a deepseek-v4.1-flash@ollama_cloud thinking block
+   cycled "Let me write./Now./Go./Producing./OK." to 447,360 bytes and ran to
+   MaxTokens; the paragraph rule above never saw it because the loop has no
+   40-byte newline-delimited paragraph. RFC-0419 §8 left thinking blocks
+   alone on the premise that interrupting reasoning mid-thought costs more
+   than a collapse — that premise holds for the short, legitimate repeats
+   real reasoning makes (calibrated over 1,364 captured thinking blocks: the
+   normal maximum periodic tail is 220 bytes) but not for a unit an order of
+   magnitude past that, still cycling within the last 8 KiB. The floor here
+   (1024B unit, 8192B tail) sits comfortably above that calibrated normal
+   ceiling and only ever looks at the block's tail, so an early legitimate
+   repeat in an otherwise-progressing long thought is out of the window by
+   the time the block grows past it. *)
+let thinking_repeat_tail_window_bytes = 8192
+let thinking_repeat_min_unit_bytes = 1024
+let thinking_repeat_threshold = 3
+
+let bytes_equal_at text i1 i2 len =
+  let rec loop k =
+    k >= len
+    || (Char.equal (String.unsafe_get text (i1 + k)) (String.unsafe_get text (i2 + k))
+        && loop (k + 1))
+  in
+  loop 0
+;;
+
+(* The smallest period p >= [thinking_repeat_min_unit_bytes] whose last three
+   copies, all inside the last [thinking_repeat_tail_window_bytes] of [text],
+   are byte-identical. Bounded to the tail so cost never grows with the
+   block's total size: at most tail_window/threshold candidate periods, each
+   an index comparison with no allocation until a match is confirmed. *)
+let repeating_thinking_tail text =
+  let n = String.length text in
+  if n < thinking_repeat_min_unit_bytes * thinking_repeat_threshold
+  then None
+  else begin
+    let window = min n thinking_repeat_tail_window_bytes in
+    let max_p = window / thinking_repeat_threshold in
+    let floor = n - window in
+    let rec extend p copies =
+      let further_start = n - ((copies + 1) * p) in
+      if further_start < floor
+      then copies
+      else if bytes_equal_at text further_start (n - (copies * p)) p
+      then extend p (copies + 1)
+      else copies
+    in
+    let rec search p =
+      if p > max_p
+      then None
+      else if bytes_equal_at text (n - p) (n - (2 * p)) p
+              && bytes_equal_at text (n - (2 * p)) (n - (3 * p)) p
+      then Some (String.sub text (n - p) p, extend p thinking_repeat_threshold)
+      else search (p + 1)
+    in
+    search thinking_repeat_min_unit_bytes
+  end
+;;
+
+(* Text blocks: any 40-byte-or-longer paragraph written three times. Thinking
+   blocks: a much larger unit (>= 1024B) cycling within the block's last
+   8192B — short repeated phrases are ordinary reasoning and are left alone,
+   per RFC-0419 §8's original reason, up to that floor. Every other block
+   kind is untouched; an unannounced block has no declared kind yet, and a
+   repeat there is indistinguishable from a provider that has not said what
+   it is sending. *)
 let guard_repeating_text ~index state =
   match Blocks.find_opt index state.blocks with
   | None -> state
@@ -295,11 +358,16 @@ let guard_repeating_text ~index state =
             (Types.Stream_repeating
                { paragraph; occurrences; bytes_seen = String.length text })
             state)
-     (* An unannounced block has no declared kind yet; a repeat there is
-        indistinguishable from a provider that has not said what it is
-        sending. *)
+     | Announced { kind = Thinking_block; _ } ->
+       let text = text_of_block block in
+       (match repeating_thinking_tail text with
+        | None -> state
+        | Some (paragraph, occurrences) ->
+          capture_failure
+            (Types.Stream_repeating
+               { paragraph; occurrences; bytes_seen = String.length text })
+            state)
      | Unannounced
-     | Announced { kind = Thinking_block; _ }
      | Announced { kind = Reasoning_details_block; _ }
      | Announced { kind = Redacted_thinking_block; _ }
      | Announced { kind = Tool_use_block; _ }

@@ -202,8 +202,11 @@ let test_short_repeated_lines_are_left_alone () =
   | Some _ -> Alcotest.fail "short repeated lines must not end a stream"
 ;;
 
-(* A reasoning block that circles is a separate question with its own ceiling;
-   stopping a provider mid-thought would end turns that were about to answer. *)
+(* A reasoning block that circles a short phrase is a separate question with
+   its own ceiling; stopping a provider mid-thought on ordinary reasoning
+   would end turns that were about to answer. This holds only below the
+   1024-byte floor task-1570 added below — see that group for the unit large
+   enough to be a real collapse. *)
 let test_thinking_repeats_are_not_guarded () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event
@@ -219,6 +222,88 @@ let test_thinking_repeats_are_not_guarded () =
   match Streaming.failure acc with
   | None -> ()
   | Some _ -> Alcotest.fail "a repeating thinking block is not this guard's business"
+;;
+
+(* ── accumulate: repeating thinking tail (task-1570) ─────────
+
+   deepseek-v4.1-flash@ollama_cloud cycled "Let me write./Now./Go./Producing./
+   OK." inside a thinking block to 447,360 bytes and ran to MaxTokens
+   (goo-yang-bong turn 5036, 2026-09-14). No 40-byte newline-delimited
+   paragraph existed for the rule above to see. Calibrated over 1,364
+   captured thinking blocks, the normal periodic tail tops out at 220 bytes;
+   these units sit an order of magnitude above that. *)
+
+let big_unit_of_length len =
+  let base = "collapse-unit-" in
+  let buf = Buffer.create len in
+  while Buffer.length buf < len do
+    Buffer.add_string buf base
+  done;
+  Buffer.sub buf 0 len
+;;
+
+let feed_thinking acc units =
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 0; content_type = "thinking"; tool_id = None; tool_name = None });
+  List.iter
+    (fun unit ->
+       Streaming.accumulate_event acc (ContentBlockDelta { index = 0; delta = ThinkingDelta unit }))
+    units
+;;
+
+let test_large_thinking_unit_ends_the_stream () =
+  let unit = big_unit_of_length 1024 in
+  let acc = Streaming.create_stream_acc () in
+  feed_thinking acc [ unit; unit; unit ];
+  match Streaming.failure acc with
+  | Some (Stream_repeating { paragraph; occurrences; bytes_seen }) ->
+    Alcotest.(check string) "the repeated unit" unit paragraph;
+    Alcotest.(check int) "stopped at the threshold" 3 occurrences;
+    if bytes_seen <= 0 then Alcotest.fail "bytes_seen must record what was read"
+  | Some _ -> Alcotest.fail "a repeat must not be reported as another failure"
+  | None -> Alcotest.fail "three identical 1024-byte thinking units must end the stream"
+;;
+
+let test_two_large_thinking_units_do_not_end_the_stream () =
+  let unit = big_unit_of_length 1024 in
+  let acc = Streaming.create_stream_acc () in
+  feed_thinking acc [ unit; unit ];
+  match Streaming.failure acc with
+  | None -> ()
+  | Some _ -> Alcotest.fail "two occurrences are repetition, not a collapse"
+;;
+
+(* One byte under the floor: the same three-copies-in-a-row shape as the test
+   above, but a unit this small is still ordinary reasoning, not a collapse. *)
+let test_thinking_repeat_below_the_floor_is_left_alone () =
+  let unit = big_unit_of_length 1023 in
+  let acc = Streaming.create_stream_acc () in
+  feed_thinking acc [ unit; unit; unit ];
+  match Streaming.failure acc with
+  | None -> ()
+  | Some _ -> Alcotest.fail "a unit one byte under the 1024B floor must not end the stream"
+;;
+
+(* Five copies arriving in one delta (the shape a snapshot or a slow poll
+   would produce) must report all five, not just the three that first cross
+   the threshold. *)
+let test_large_thinking_unit_reports_the_full_occurrence_count () =
+  let unit = big_unit_of_length 1024 in
+  let acc = Streaming.create_stream_acc () in
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 0; content_type = "thinking"; tool_id = None; tool_name = None });
+  Streaming.accumulate_event
+    acc
+    (ContentBlockDelta
+       { index = 0; delta = ThinkingDelta (unit ^ unit ^ unit ^ unit ^ unit) });
+  match Streaming.failure acc with
+  | Some (Stream_repeating { occurrences; _ }) ->
+    Alcotest.(check int) "extended past the minimum threshold" 5 occurrences
+  | _ -> Alcotest.fail "five identical 1024-byte thinking units must end the stream"
 ;;
 
 (* ── accumulate: ContentBlockDelta ────────────────────────── *)
@@ -1194,6 +1279,22 @@ let () =
             "thinking repeats are not guarded"
             `Quick
             test_thinking_repeats_are_not_guarded
+        ; Alcotest.test_case
+            "a large thinking unit ends the stream"
+            `Quick
+            test_large_thinking_unit_ends_the_stream
+        ; Alcotest.test_case
+            "two large thinking units do not"
+            `Quick
+            test_two_large_thinking_units_do_not_end_the_stream
+        ; Alcotest.test_case
+            "a thinking unit under the floor is left alone"
+            `Quick
+            test_thinking_repeat_below_the_floor_is_left_alone
+        ; Alcotest.test_case
+            "a large thinking unit reports the full occurrence count"
+            `Quick
+            test_large_thinking_unit_reports_the_full_occurrence_count
         ] )
     ; ( "accumulate"
       , [ Alcotest.test_case "message_start" `Quick test_accumulate_message_start

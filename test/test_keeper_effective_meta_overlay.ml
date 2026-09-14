@@ -893,13 +893,16 @@ let test_missing_profile_source_is_rejected () =
   let name = "nosource" in
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  (* #36066 (audit F386): the profile loader refuses a keeper with no
+     keepers/<name>.toml as [Declaration_not_found] before the manifest's
+     sandbox_profile is ever examined, so the refusal names the declaration. *)
   match Store.read_effective_meta config name with
   | Error err ->
     Alcotest.(check bool)
       "the refusal names the missing declaration"
       true
       (String_util.string_contains_substring
-         ~needle:"sandbox_profile is required"
+         ~needle:"has no declaration"
          err)
   | Ok None -> Alcotest.fail "seeded keeper meta disappeared"
   | Ok (Some _) -> Alcotest.fail "a keeper with no declared profile was admitted"

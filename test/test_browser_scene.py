@@ -35,8 +35,12 @@ def js(script,args=[]):
 def observe():return js(scene+'\nreturn browserScene(arguments[0]);',[{'mode':'read','maxChars':50000}])
 def control(s,label):return next(n for n in s['nodes'] if n['kind']=='control' and n['text']==label)
 def act(s,n,**kw):return js(scene+interaction,[{'documentId':s['documentId'],'nodeId':n['nodeId'],'expectedUrl':s['url'],**kw}])
-def check(name,condition):
- assert condition,name;checks.append(name)
+def check(name,condition,seen=None):
+ # A failure that says only its own sentence sends the next reader back to
+ # the browser to ask what the page actually returned. [seen] carries that
+ # answer into the message, so the run that fails is also the run that says
+ # why.
+ assert condition,(name if seen is None else f"{name} -- saw {seen!r}");checks.append(name)
 try:
  deadline=time.monotonic()+10
  while True:
@@ -160,7 +164,14 @@ try:
  check('scroll-area reference resolves to channel body',any(n['text']=='Channel body' for n in selected['nodes']))
  js("document.body.insertAdjacentHTML('afterbegin','<main>Semantic body</main>');")
  preferred=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
- check('landmarks do not suppress separate scroll scopes',len(preferred['nodes'])==2 and any(n['tag']=='main' for n in preferred['nodes']) and any(n['text']=='Messages' for n in preferred['nodes']))
+ # The landmark is added to the outline; neither scroll scope leaves it.
+ # browser_scene_script.ml says so where it collects them -- "Landmarks and
+ # scrollable panes are independent observed properties ... a header must not
+ # hide an unrelated message pane" -- and the inserted <main> contains
+ # neither pane, so the count is the landmark plus the two the check above
+ # just pinned. It read ==2 until CI first ran this probe (#36059), which is
+ # the one outcome the check's own name forbids.
+ check('landmarks do not suppress separate scroll scopes',len(preferred['nodes'])==3 and any(n['tag']=='main' for n in preferred['nodes']) and [n['text'] for n in preferred['nodes'] if n['tag']!='main']==['Messages','Vertical scroll area'],[(n['tag'],n['text']) for n in preferred['nodes']])
  js("document.body.innerHTML='<header>Site banner</header><div role=banner>ARIA banner</div><footer>Site footer</footer><div role=contentinfo>ARIA footer</div><search>Native search</search><div role=search>ARIA search</div><form aria-label=Filters>Form body</form><div role=form aria-label=Preferences>Preferences body</div>';")
  landmarks=js(scene+"\nreturn browserScene(arguments[0]);",[{'mode':'read','view':'regions','maxChars':5000}])
  check('outline includes native and ARIA standard landmarks',len(landmarks['nodes'])==8)

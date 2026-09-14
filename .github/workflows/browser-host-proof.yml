@@ -31,6 +31,12 @@ on:
       - 'test/test_browser_bidi_peer.ml'
       - 'test/stanzas/test_browser_bidi_peer.inc'
       - 'test/test_browser_activation.py'
+      - 'test/test_browser_scene.py'
+      # The two sources the scene probe reads out of the tree and runs in a
+      # real Gecko. Without them a change to the scene runtime reached the
+      # extension and the driver without this workflow ever starting.
+      - 'lib/browser_scene_script.ml'
+      - 'lib/browser_interaction.ml'
       - 'connectors/browser/extension/background.js'
       - 'connectors/browser/extension/manifest.json'
       - '.github/workflows/browser-host-proof.yml'
@@ -131,6 +137,20 @@ jobs:
             --driver "$(command -v geckodriver)" \
             --browser /Applications/Firefox.app/Contents/MacOS/firefox \
             --out proof/activation
+
+      # The scene contract is what the extension and the driver agree the page
+      # looks like, and the probe asserts it against a real Gecko -- 41 checks,
+      # including that background.js still starts with the scene runtime this
+      # repository builds. Nothing ran it: the pull-request gate skips it (no
+      # dune rule declares runtest-test_browser_scene), the nightly names it
+      # nowhere, and this workflow listed the other three probes only. It takes
+      # the same two binaries they take, and they are already installed above.
+      - name: Exercise the real Gecko scene contract
+        run: |
+          python3 test/test_browser_scene.py \
+            --driver "$(command -v geckodriver)" \
+            --browser /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/scene
 
       - name: Package verified executable and identity
         working-directory: proof

@@ -1094,6 +1094,31 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
+(* Tokens arrive several times a second while the model works. A pause past
+   this is where a reader starts asking whether it stopped, so it is where the
+   row starts stating the silence's age beside the phase. *)
+let quiet_after_s = 2.0
+
+(* The model side's phase as one clause, or [None] before the first byte,
+   where the named runtime is the subject instead. *)
+let model_phase_text ~now t =
+  match t.model_signal with
+  | None -> None
+  | Some signal ->
+    let word, since =
+      match signal with
+      | Model_started_at since -> "model started", since
+      | Reasoning_at since -> "reasoning", since
+      | Answering_at since -> "answering", since
+      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
+    in
+    if now -. since < quiet_after_s then Some word
+    else
+      match Masc_tui_message_layout.age_text ~now ~since with
+      | None -> Some word
+      | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
+;;
+
 let phase_text ~now t =
   match t.phase with
   | Waiting when awaiting_continuation t ->
@@ -1244,7 +1269,7 @@ let phase_text ~now t =
       let leading =
         if has_pending_activity then runtime_tag
         else
-          match phase_text ~now t with
+          match model_phase_text ~now t with
           | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
           | None -> (
             match t.current_runtime_id with
@@ -1316,31 +1341,6 @@ let elapsed_text ~now t =
       if ended < t.started_at then None
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
   | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
-
-(* Tokens arrive several times a second while the model works. A pause past
-   this is where a reader starts asking whether it stopped, so it is where the
-   row starts stating the silence's age beside the phase. *)
-let quiet_after_s = 2.0
-
-(* The model side's phase as one clause, or [None] before the first byte,
-   where the named runtime is the subject instead. *)
-let phase_text ~now t =
-  match t.model_signal with
-  | None -> None
-  | Some signal ->
-    let word, since =
-      match signal with
-      | Model_started_at since -> "model started", since
-      | Reasoning_at since -> "reasoning", since
-      | Answering_at since -> "answering", since
-      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
-    in
-    if now -. since < quiet_after_s then Some word
-    else
-      match Masc_tui_message_layout.age_text ~now ~since with
-      | None -> Some word
-      | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
-;;
 
 let progress_text ~now t =
   match elapsed_text ~now t with

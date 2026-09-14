@@ -17,22 +17,36 @@ type metrics_kpis = {
   held_approvals_count : int option;
 }
 
+(* Two ways a source can have no reading, and the difference is who wrote the
+   string. [Read_failed] carries the loader's own message, which names its
+   subject and its verdict -- "memory health load failed: HTTP 503: ..." --
+   and needs nothing in front of it. [Unavailable] carries the server's reason
+   for a source it will not serve, which is a reason and nothing else, so the
+   row says what state it is naming before it.
+
+   One constructor held both, and the row put "unavailable: " in front of
+   either. In front of a loader's message that was the subject and the verdict
+   a second time, and it pushed the row past the pane: at a hundred and fifty
+   columns beside the roster, three of the four Gate and Memory rows were cut
+   before their reason ended. *)
 type 'a observation =
   | Not_observed
   | Current of 'a
+  | Read_failed of string
   | Unavailable of string
   | Stale of string
 
 let observe_source ~observed ~error ?unavailable value =
   match error, unavailable, observed with
   | Some detail, _, true -> Stale detail
-  | Some detail, _, false | None, Some detail, _ -> Unavailable detail
+  | Some detail, _, false -> Read_failed detail
+  | None, Some detail, _ -> Unavailable detail
   | None, None, true -> Current value
   | None, None, false -> Not_observed
 
 let current_value = function
   | Current value -> Some value
-  | Not_observed | Unavailable _ | Stale _ -> None
+  | Not_observed | Read_failed _ | Unavailable _ | Stale _ -> None
 
 let gate_observation (state : state) =
   observe_source ~observed:state.gate_snapshot_observed ~error:state.gate_error
@@ -50,13 +64,16 @@ let held_observation (state : state) =
 let observation_name = function
   | Current _ -> ""
   | Not_observed -> "not observed"
-  | Unavailable _ -> "unavailable"
+  (* One word where a number goes: the cell has no room for the reason, and
+     both states are the same answer to "how many" -- none that was read. *)
+  | Read_failed _ | Unavailable _ -> "unavailable"
   | Stale _ -> "stale"
 
 let observation_count observation =
   match observation with
   | Current rows -> string_of_int (List.length rows)
-  | Not_observed | Unavailable _ | Stale _ -> observation_name observation
+  | Not_observed | Read_failed _ | Unavailable _ | Stale _ ->
+      observation_name observation
 
 (* The name, then the reason the source gave for it; [current] says what a
    current reading reads as. *)
@@ -64,6 +81,7 @@ let observation_detail_with ~current observation =
   match observation with
   | Current value -> current value
   | Not_observed -> observation_name observation
+  | Read_failed detail -> Terminal_text.single_line detail
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
@@ -500,7 +518,7 @@ let render_section_tools ~cols (state : state) : string list =
     match memory with
     | Current _ -> memory_rows
     | Stale _ -> memory_status :: memory_rows
-    | Unavailable _ | Not_observed -> [ memory_status ]
+    | Read_failed _ | Unavailable _ | Not_observed -> [ memory_status ]
   in
 
   let title_gate =
@@ -539,7 +557,7 @@ let render_section_tools ~cols (state : state) : string list =
     match yolo with
     | Current (_ :: _ as names) ->
       [ "    YOLO Execution: " ^ String.concat ", " (List.map Terminal_text.single_line names) ]
-    | Current [] | Not_observed | Unavailable _ | Stale _ -> []
+    | Current [] | Not_observed | Read_failed _ | Unavailable _ | Stale _ -> []
   in
 
   let tool_bars =

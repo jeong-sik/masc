@@ -222,6 +222,26 @@ val observe_supported : unit -> bool
     seccomp filtering, read through the syscalls themselves. Always [false]
     off Linux. *)
 
+val user_notif_supported : unit -> bool
+(** Whether this kernel accepts [SECCOMP_FILTER_FLAG_NEW_LISTENER] (Linux
+    >= 5.0). A capability probe only (task-1568, follow-up to PR #36032
+    review 5192723206): the observation path a refused-observe shortcut
+    would need — recording the payload's actual attempt after the "A"
+    acknowledgement, rather than only that the box applied — requires a
+    listener fd carried from the child to the parent (a new SCM_RIGHTS
+    stub; a plain pipe cannot carry a file descriptor) and a supervisor
+    loop that reads, decodes and responds to notifications. Neither exists
+    yet: {!probe} reports this as
+    {!Exec_ssh_protocol.user_notif_capability} so the value is read on the
+    wire, but nothing decodes a notify-fd attempt from it and
+    {!Keeper_gate.decide_after_observation} does not consult it. It probes
+    by forking a throwaway child that tries
+    to install an allow-all listener filter and exits without running a
+    payload; the calling thread's own seccomp state is never touched
+    (installing a filter can only add restrictions, so the flag cannot be
+    probed in-process without a side effect that outlives the probe).
+    Always [false] off Linux. *)
+
 type execution_plan =
   | Run_effect  (** unrestricted, as before v3 *)
   | Run_boxed of

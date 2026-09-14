@@ -1,0 +1,46 @@
+Testing `[1mexec shim[0m'.
+[2mThis run has ID `P93BTLV5'.
+
+[0m  [32m[OK][0m          [36menv[0m                  0   minimal base env.
+  [32m[OK][0m          [36menv[0m                  1   base env defaults.
+  [32m[OK][0m          [36menv[0m                  2   allowlist overlay survives.
+  [32m[OK][0m          [36menv[0m                  3   runtime identity env survives an emp...
+  [32m[OK][0m          [36menv[0m                  4   denylist beats allowlist.
+  [32m[OK][0m          [36menv[0m                  5   denylist names.
+  [32m[OK][0m          [36menv[0m                  6   denylist predicate.
+  [32m[OK][0m          [36mkill policy[0m          0   on eof.
+  [32m[OK][0m          [36mkill policy[0m          1   on timeout.
+  [32m[OK][0m          [36mkill policy[0m          2   on child exit.
+  [32m[OK][0m          [36mtrailer[0m              0   exit status.
+  [32m[OK][0m          [36mtrailer[0m              1   signal + timeout.
+  [32m[OK][0m          [36mtrailer[0m              2   host signal numbers.
+  [32m[OK][0m          [36mconfig[0m               0   ok.
+  [32m[OK][0m          [36mconfig[0m               1   requires remote_root.
+  [32m[OK][0m          [36mconfig[0m               2   rejects relative root.
+  [32m[OK][0m          [36mconfig[0m               3   rejects unknown key.
+  [32m[OK][0m          [36mconfig[0m               4   path entries.
+  [32m[OK][0m          [36mconfig[0m               5   rejects a bad path.
+  [32m[OK][0m          [36mconfig[0m               6   synthesize_env takes the config path.
+  [32m[OK][0m          [36mjail[0m                 0   allows root itself.
+  [32m[OK][0m          [36mjail[0m                 1   allows descendant.
+  [32m[OK][0m          [36mjail[0m                 2   rejects escape.
+  [32m[OK][0m          [36mjail[0m                 3   rejects dotdot escape.
+  [32m[OK][0m          [36mjail[0m                 4   request root inside the host root is...
+  [32m[OK][0m          [36mjail[0m                 5   a sibling endpoint root is not an es...
+  [32m[OK][0m          [36mjail[0m                 6   request root outside the host root i...
+  [32m[OK][0m          [36mjail[0m                 7   dispatch uses the request root.
+  [32m[OK][0m          [36mjail[0m                 8   dispatch rejects a cwd outside the r...
+  [32m[OK][0m          [36mjail[0m                 9   dispatch rejects a request root outs...
+  [32m[OK][0m          [36mjail[0m                10   rejects missing cwd.
+  [32m[OK][0m          [36mio[0m                   0   drain_fd.
+  [32m[OK][0m          [36mprobe[0m                0   identity.
+  [32m[OK][0m          [36mbox[0m                  0   child-owned boundary acknowledgement.
+  [32m[OK][0m          [36mbox[0m                  1   refusal rule emission mapping.
+  [32m[OK][0m          [36mbox[0m                  2   plan for mode.
+  [32m[OK][0m          [36mbox[0m                  3   scratch env.
+  [32m[OK][0m          [36mbox[0m                  4   scratch_root config.
+  [32m[OK][0m          [36mbox[0m                  5   support is consistent.
+  [32m[OK][0m          [36mbox[0m                  6   user_notif support is consistent.
+
+Full test results in `[36m/masc-work/goo-yang-bong/masc/_build/_tests/exec shim[0m'.
+[32mTest Successful[0m in 0.040s. 40 tests run.

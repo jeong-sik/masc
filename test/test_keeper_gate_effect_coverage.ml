@@ -1013,6 +1013,41 @@ let test_observation_unavailable_always_defers () =
   | Keeper_gate.Unavailable _ -> fail "the queue was unavailable"
 ;;
 
+(* Task-1568 (#36032 follow-up, review 5192723206): [Exec_shim] now carries
+   a capability probe for the observation path a shortcut would eventually
+   need ([Exec_shim.user_notif_supported]). Nothing wires that probe's
+   result into this gate yet — that link is deferred to the PR that also
+   adds the listener-fd plumbing and the supervisor loop. This test proves
+   the two additions are inert together: calling the probe, in the same
+   process that then runs [decide_after_observation] on a refused observe,
+   still cannot make the decision skip the judge. It fails loudly if a
+   future edit ever makes [Keeper_gate] read [Exec_shim]'s capability
+   result as an allow condition without updating this pin. *)
+let test_user_notif_capability_does_not_change_observed_refused_decision () =
+  with_clean_gate_runtime @@ fun () ->
+  with_network_probe_workspace @@ fun base_path ->
+  let request = network_probe_request base_path in
+  let (_ : bool) = Exec_shim.user_notif_supported () in
+  match
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () -> observed_refused_once ~refusal_kind:Keeper_gate.Socket_denied)
+      request
+  with
+  | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
+  | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
+  | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
+    fail "a refused observe went to the human queue under auto_judge"
+  | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
+    fail ("refused observe: mode_state_invalid: " ^ detail)
+  | Keeper_gate.Allow { source; _ } ->
+    failf
+      "a refused observe bypassed the judge via %s once Exec_shim.user_notif_supported \
+       was called in-process — the capability probe must stay unread by decide_after_observation"
+      (Keeper_gate.authorization_source_to_string source)
+  | Keeper_gate.Unavailable _ -> fail "the queue was unavailable"
+;;
+
 let () =
   run
     "keeper_gate_effect_coverage"
@@ -1107,6 +1142,10 @@ let () =
             "Observation_unavailable always defers"
             `Quick
             test_observation_unavailable_always_defers
+        ; test_case
+            "task-1568: user_notif capability probe does not change the decision"
+            `Quick
+            test_user_notif_capability_does_not_change_observed_refused_decision
         ] )
     ]
 ;;

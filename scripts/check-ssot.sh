@@ -417,18 +417,26 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
   'bin/masc_tui_types\.ml:' \
   bin
 
-# The failure note the body draws under an empty page. Thirteen sites draw it,
-# and all thirteen now read it from one place. The pattern matches the shape
-# rather than the one wording, because the drift that got through was not a
-# second copy of the sentence: the system-log listing wrote a different
-# sentence for the same state, one that named a count the header does not draw
-# when there is no snapshot to count.
-r16_pattern='load failed; [^)]*reading'
+# The failure note the body draws under an empty page. Every site that draws it
+# reads it from one place. The pattern matches the shape rather than the one
+# wording, because the drift that got through was not a second copy of the
+# sentence: the system-log listing wrote a different sentence for the same
+# state, one that named a count the header does not draw when there is no
+# snapshot to count.
+#
+# The head is part of the shape too. The pattern used to pin "load failed;"
+# and let the tail vary, and the Code surface's diff pane re-spelled the head
+# instead -- "the read failed; nothing here is a reading" -- so one screen
+# disagreed with the eighteen others and with its own title, which says
+# "(load failed)". Either half re-spelled is the same drift.
+r16_pattern='fail(ed|ure)?; [^)]*reading'
 r16_self_test_failed=0
 for fixture in \
   '  (load failed; nothing here is a reading)' \
   '  (load failed; the count above is not a reading)' \
-  '  (load failed; these rows are not a reading)'; do
+  '  (load failed; these rows are not a reading)' \
+  '  (the read failed; nothing here is a reading)' \
+  '  (refresh failed; nothing here is a reading)'; do
   if ! printf '%s\n' "$fixture" | rg -q "$r16_pattern"; then
     echo "ERROR[R16-pattern-self-test]: did not match $fixture" >&2
     r16_self_test_failed=1

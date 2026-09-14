@@ -153,52 +153,63 @@ type permit_wait =
   | Waiting_for_permit
   | Wait_settled_at of float
 
-(* [acquire] whose wait for a slot ends at [deadline_at] on [clock]. A wait
-   that happens is written to the caller's [wait] cell as it begins and as
-   it ends, however it ends, with the instant it ended on [clock]; a slot
-   granted at once is no wait and writes nothing. An [Atomic.set] neither
-   raises nor blocks, so the caller's cell cannot cost the wait its slot or
-   its place in the queue. *)
+(* [acquire] whose wait for a slot ends at [deadline_at] on [clock]; a
+   deadline already passed asks for no slot. A wait that happens is written
+   to the caller's [wait] cell as it begins and as it ends, however it ends,
+   with the instant it ended on [clock]; a slot granted at once is no wait
+   and writes nothing. An [Atomic.set] neither raises nor blocks, so the
+   caller's cell cannot cost the wait its slot or its place in the queue. *)
 let acquire_until ?wait ~clock ~deadline_at t =
-  match request_slot t with
-  | `Got_slot -> Ok ()
-  | `Wait (promise, waiter) ->
-    let note state = Option.iter (fun cell -> Atomic.set cell state) wait in
-    note Waiting_for_permit;
-    Fun.protect
-      ~finally:(fun () -> note (Wait_settled_at (Eio.Time.now clock)))
-      (fun () ->
-         let remaining = Float.max 0.0 (deadline_at -. Eio.Time.now clock) in
-         match
-           Eio.Time.with_timeout clock remaining (fun () -> Ok (Eio.Promise.await promise))
-         with
-         | Ok () -> Ok ()
-         | Error `Timeout ->
-           (match leave_or_own t waiter with
-            | `Left_queue -> Error `Permit_wait_expired
-            | `Owns_slot ->
-              (* Granted as the deadline passed: the wait this deadline bounded
-                 is over and the slot is this caller's. *)
-              Ok ())
-         | exception exn ->
-           (match leave_or_own t waiter with
-            | `Left_queue -> ()
-            | `Owns_slot -> Eio.Cancel.protect (fun () -> release_slot t));
-           raise exn)
+  let remaining = deadline_at -. Eio.Time.now clock in
+  if Float.compare remaining 0.0 <= 0
+  then Error `Permit_wait_expired
+  else (
+    match request_slot t with
+    | `Got_slot -> Ok ()
+    | `Wait (promise, waiter) ->
+      let note state = Option.iter (fun cell -> Atomic.set cell state) wait in
+      note Waiting_for_permit;
+      Fun.protect
+        ~finally:(fun () -> note (Wait_settled_at (Eio.Time.now clock)))
+        (fun () ->
+           match
+             Eio.Time.with_timeout clock remaining (fun () -> Ok (Eio.Promise.await promise))
+           with
+           | Ok () -> Ok ()
+           | Error `Timeout ->
+             (match leave_or_own t waiter with
+              | `Left_queue -> Error `Permit_wait_expired
+              | `Owns_slot ->
+                (* Granted as the deadline passed: the wait this deadline bounded
+                   is over and the slot is this caller's. *)
+                Ok ())
+           | exception exn ->
+             (match leave_or_own t waiter with
+              | `Left_queue -> ()
+              | `Owns_slot -> Eio.Cancel.protect (fun () -> release_slot t));
+             raise exn))
+;;
+
+(* The slot goes back whether [f] returned, raised or was cancelled. Under
+   cancellation the release must not itself be cancellable: [release_slot]
+   takes the scheduler's mutex, and a fiber whose cancellation is already
+   requested would raise out of that wait if another domain held the mutex
+   at that instant, leaving the slot counted as active with nobody to return
+   it. The protected release is the same one [acquire_until] makes on its
+   exception arm. *)
+let release_after t f =
+  Fun.protect f ~finally:(fun () -> Eio.Cancel.protect (fun () -> release_slot t))
 ;;
 
 let with_permit t f =
   acquire t;
-  Fun.protect f ~finally:(fun () -> release_slot t)
+  release_after t f
 ;;
 
 let with_permit_until ?wait ~clock ~deadline_at t f =
-  if Float.compare (deadline_at -. Eio.Time.now clock) 0.0 <= 0
-  then Error `Permit_wait_expired
-  else (
-    match acquire_until ?wait ~clock ~deadline_at t with
-    | Error `Permit_wait_expired as expired -> expired
-    | Ok () -> Ok (Fun.protect f ~finally:(fun () -> release_slot t)))
+  match acquire_until ?wait ~clock ~deadline_at t with
+  | Error `Permit_wait_expired as expired -> expired
+  | Ok () -> Ok (release_after t f)
 ;;
 
 let queue_length t = Eio.Mutex.use_ro t.mutex (fun () -> t.waiters.length)

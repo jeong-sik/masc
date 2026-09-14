@@ -474,6 +474,31 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  // Attempt failures carry no quarantined occurrence: the attempt ended and
+  // the next one follows in the same bubble, so the frame must decode.
+  it.each(['sse_timeout', 'sse_stream_repeating'])(
+    'accepts the %s attempt-failure kind without a quarantined occurrence',
+    kind => {
+      const r = SSEMessageSchema.safeParse(
+        customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+          kind,
+          reason: 'the attempt ended; the next one follows',
+        }),
+      )
+      expect(r.success).toBe(true)
+    },
+  )
+
+  it('rejects a stream protocol error kind outside the contract list', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+        kind: 'sse_not_a_kind',
+        reason: 'never emitted by the backend',
+      }),
+    )
+    expect(r.success).toBe(false)
+  })
+
   it('accepts a tool approval request with the fields the server sends', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {

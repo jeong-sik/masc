@@ -12,7 +12,10 @@ import type {
   SSEEvent,
   SSEEventType,
 } from '../types/sse'
-import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
+import {
+  KEEPER_CHAT_CUSTOM_EVENT_NAMES,
+  KEEPER_STREAM_PROTOCOL_ERROR_KINDS,
+} from '../lib/keeper-chat-stream-contract'
 import type { KeeperChatCustomEventName } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
@@ -261,31 +264,9 @@ function fail<T = never>(path: string | undefined, message: string): SafeParseRe
   return { success: false, error: { issues: [{ path, message }] } }
 }
 
-const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = new Set([
-  'tool_start_duplicate_index',
-  'tool_start_missing_identity',
-  'tool_args_without_start',
-  'tool_stop_without_start',
-  'tool_replay_mismatch',
-  'tool_delta_invalid_kind',
-  'tool_attempt_superseded',
-  'tool_message_start_conflict',
-  'stream_event_after_terminal',
-  'tool_occurrence_mapping_invalid',
-  'media_delta_invalid_block',
-  'media_source_unsupported',
-  'media_decode_failed',
-  'media_payload_too_large',
-  'media_persist_failed',
-  'sse_error',
-  'ndjson_error',
-  'sse_parse_failed',
-  'ndjson_parse_failed',
-  'sse_unknown_event_type',
-  'sse_unsupported_part',
-  'sse_unsupported_response',
-  'sse_stream_incomplete',
-])
+const KEEPER_STREAM_PROTOCOL_ERROR_KIND_SET: ReadonlySet<string> = new Set<string>(
+  KEEPER_STREAM_PROTOCOL_ERROR_KINDS,
+)
 const KEEPER_TURN_OUTCOMES = new Set([
   'visible_reply',
   'continuation_checkpoint',
@@ -641,7 +622,7 @@ function validateKeeperCustomPayload(
         : fail('ag_ui_event.value.source_type', 'Expected typed media source')
     }
     case 'KEEPER_STREAM_PROTOCOL_ERROR': {
-      if (typeof value.kind !== 'string' || !KEEPER_STREAM_PROTOCOL_ERROR_KINDS.has(value.kind)) {
+      if (typeof value.kind !== 'string' || !KEEPER_STREAM_PROTOCOL_ERROR_KIND_SET.has(value.kind)) {
         return fail('ag_ui_event.value.kind', 'Expected typed stream protocol error kind')
       }
       for (const field of ['tool_call_id', 'event_type', 'reason']) {

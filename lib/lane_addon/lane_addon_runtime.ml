@@ -32,7 +32,11 @@ let skill_source_id = function
   | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
 let skill_export_handler = ref None
 let register_skill_export_handler handler = skill_export_handler := Some handler
-type observation_request = Idle | Refresh_sources | Observe_now
+(* [Run_actions] serves the action queue only. An action commits the
+   package's own result output; it does not stand in for an observation
+   request, so a wake raised for an action never schedules a second capture
+   of the same state. *)
+type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable phase : phase; mutable seq : int; mutable output : output;
@@ -81,7 +85,8 @@ let entry_json e =
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json e.phase;
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
-    "observation_pending", `Bool (e.pending<>Idle); "coalesced_wakes", `Int e.coalesced_wakes;
+    "observation_pending", `Bool (match e.pending with
+      | Observe_now | Refresh_sources -> true | Run_actions | Idle -> false); "coalesced_wakes", `Int e.coalesced_wakes;
     "unchanged_source_refreshes", `Int e.unchanged_source_refreshes;
     "binding", e.binding; "package", package_to_json e.package;
     "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
@@ -96,6 +101,7 @@ let wake ?(request=Observe_now) e =
   e.pending <- (match previous,request with
     | Observe_now,_ | _,Observe_now -> Observe_now
     | Refresh_sources,_ | _,Refresh_sources -> Refresh_sources
+    | Run_actions,_ | _,Run_actions -> Run_actions
     | Idle,Idle -> Idle);
   if previous<>Idle then e.coalesced_wakes <- e.coalesced_wakes + 1
   else if e.pending<>Idle then Eio.Promise.resolve e.resolver ()
@@ -330,9 +336,19 @@ let run ~sw backend m e =
                   if not (Queue.is_empty e.action_queue) then (
                     let queued = Queue.take e.action_queue in
                     perform_action m e c queued;
-                    (* The pending observation and remaining actions continue
-                       on this worker; no Keeper turn waits on this queue. *)
-                    wake e)
+                    (* The package result is committed with its own output.
+                       Carry forward only what this wake still owes: the next
+                       queued action, or an observation request that arrived
+                       beside the action. No Keeper turn waits on this queue. *)
+                    let follow_up = match request, Queue.is_empty e.action_queue with
+                      | (Observe_now | Refresh_sources), _ -> Some request
+                      | (Run_actions | Idle), false -> Some Run_actions
+                      | (Run_actions | Idle), true -> None in
+                    Option.iter (fun request -> wake ~request e) follow_up)
+                  else if request = Run_actions then
+                    (* The queue was drained before this wake was served
+                       (finalize on stop); nothing is owed. *)
+                    ()
                   else (
                     let previous_phase = e.phase in
                     if request=Observe_now then e.phase <- Observing;
@@ -749,7 +765,7 @@ let enqueue_action ?caller m args =
           let* () = runtime_result (save_action_unlocked m receipt) in Ok (Lane_addon_action.to_json receipt))
         else (
           Queue.add receipt e.action_queue;
-          wake e;
+          wake ~request:Run_actions e;
           Ok (Lane_addon_action.to_json receipt)))
 
 let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->

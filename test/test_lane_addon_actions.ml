@@ -31,14 +31,14 @@ let output : Types.output = {rows=[{id="state";lane_id="state";kind=Types.Event;
   title="Observed state";observed_at=1.;subject_id="owned-fixture";clock=None;
   actor=None;fields=[];evidence=[];related_ids=[]}];coverage=[]}
 type outcome = Confirm | Refuse | Unknown | Lost_reply
-type fixture = {config:Workspace.config; root:string; calls:int ref;
+type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
   start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~on_created ->
     let connection : Runtime.For_testing.connection = {
       container_id=Store.digest instance_id;
       action_schema=(fun () -> Option.map (fun _ -> schema) package.action_tool);
-      observe=(fun ~binding:_ ~sources:_ -> Ok output);
+      observe=(fun ~binding:_ ~sources:_ -> incr fixture.observes; Ok output);
       act=(fun ~arguments ->
         incr fixture.calls;
         Option.iter Eio.Promise.await !(fixture.barrier);
@@ -112,7 +112,7 @@ let with_fixture f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock
             ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
-              let fixture = {config=Workspace.default_config root;root;calls=ref 0;
+              let fixture = {config=Workspace.default_config root;root;calls=ref 0;observes=ref 0;
                 outcome=ref Confirm;barrier=ref None} in
               Runtime.For_testing.with_backend (backend fixture) (fun () -> f clock fixture))))))
 let rejects label = function Error _ -> () | Ok value -> failf "%s accepted: %s" label (Yojson.Safe.to_string value)
@@ -179,6 +179,49 @@ let test_outcomes_are_not_inferred () = with_fixture (fun clock fixture ->
     ["refused",Refuse,"failed_before_effect";
      "unknown",Unknown,"outcome_unknown";"lost-reply",Lost_reply,"outcome_unknown"];
   check int "ambiguous replies are never automatically retried" 3 !(fixture.calls);
+  detach clock fixture id)
+
+(* An action's package result carries its own output. Before this test the
+   worker loop re-woke itself with an observation request after every action,
+   so a confirmed DOS increment committed the same capture twice and a derived
+   value-difference layer reported "0 · unchanged" right after the +1. *)
+let test_action_commits_its_output_once () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  check int "attach observed once" 1 (number "observation_seq" (inspect fixture id));
+  let observed = !(fixture.observes) in
+  ignore (act fixture id "once" (`Int 1) |> unwrap);
+  ignore (await_state clock fixture id "once" "confirmed");
+  await clock (fun () -> number "observation_seq" (inspect fixture id) = 2);
+  (* A forced follow-up observation would run on the same worker loop
+     right after the receipt; give it the chance and then require its absence. *)
+  Eio.Time.sleep clock 0.05;
+  let after = inspect fixture id in
+  check int "the action output is the only new commit" 2 (number "observation_seq" after);
+  check int "no observation ran for the action" observed !(fixture.observes);
+  check bool "nothing is pending after the action" false
+    (member "observation_pending" after |> Yojson.Safe.Util.to_bool);
+  detach clock fixture id)
+
+(* An observation requested while actions are queued is carried past every
+   queued action and served once after the last one; it is neither dropped
+   nor repeated per action. *)
+let test_observation_requested_beside_queued_actions_runs_once_after_them () = with_fixture (fun clock fixture ->
+  let id = attach clock fixture ~acting:true in
+  let barrier, release = Eio.Promise.create () in fixture.barrier := Some barrier;
+  ignore (act fixture id "held" (`Int 1) |> unwrap);
+  await clock (fun () -> !(fixture.calls) = 1);
+  ignore (act fixture id "queued-behind" (`Int 1) |> unwrap);
+  let observed = !(fixture.observes) in
+  ignore (dispatch fixture Runtime.Observe ["instance_id",str id] |> unwrap);
+  check int "the held action still owns the loop" 1 (number "observation_seq" (inspect fixture id));
+  Eio.Promise.resolve release ();
+  ignore (await_state clock fixture id "held" "confirmed");
+  ignore (await_state clock fixture id "queued-behind" "confirmed");
+  await clock (fun () -> number "observation_seq" (inspect fixture id) = 4);
+  Eio.Time.sleep clock 0.05;
+  check int "two action outputs then one observation" 4 (number "observation_seq" (inspect fixture id));
+  check int "exactly one observation served the request" (observed + 1) !(fixture.observes);
+  check int "each action ran once" 2 !(fixture.calls);
   detach clock fixture id)
 
 let test_orphan_receipts_are_not_replayed () = with_fixture (fun clock fixture ->
@@ -281,5 +324,7 @@ let () = run "Lane action workflow" ["optional world actions",[
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;
   test_case "held action preserves another observer and Slice" `Quick test_held_action_preserves_other_activity;
   test_case "package outcomes and lost replies stay distinct" `Quick test_outcomes_are_not_inferred;
+  test_case "an action commits its output once" `Quick test_action_commits_its_output_once;
+  test_case "an observation beside queued actions runs once after them" `Quick test_observation_requested_beside_queued_actions_runs_once_after_them;
   test_case "orphan receipts recover without replay" `Quick test_orphan_receipts_are_not_replayed;
   test_case "post-rename sync failure preserves observed result" `Quick test_result_survives_failed_parent_sync]]

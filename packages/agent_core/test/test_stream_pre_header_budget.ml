@@ -14,10 +14,10 @@ module Http_client = Llm_provider.Http_client
 
 let outer_budget_s = 10.0
 
-(* On the gate (run 34824991296, 2026-09-14) each case ended within 10 ms
-   of its budget; the slack is for a loaded runner's scheduling, and stays
-   well under the guard so the window still separates "the budget ended it"
-   from "the guard ended it". *)
+(* On the gate (run 34824991296, 2026-09-14) the four cases of that run
+   took 1.711 s together against 1.7 s of budgets; the slack is for a loaded
+   runner's scheduling, and stays well under the guard so the window still
+   separates "the budget ended it" from "the guard ended it". *)
 let slack_s = 2.5
 
 (* Accepts one connection and never writes a byte: the TCP handshake

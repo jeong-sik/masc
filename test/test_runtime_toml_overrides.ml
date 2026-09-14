@@ -592,12 +592,56 @@ let test_settings_projection_uses_typed_effective_values () =
     (snapshot |> member "effective_error" = `Null);
   let deadline = find "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" in
   let expected_deadline =
-    match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override with
+    match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
     | Some value -> Printf.sprintf "%g" value
     | None -> "(none)"
   in
   check string "deadline projection uses typed runtime value" expected_deadline
     (deadline |> member "effective_value" |> to_string)
+;;
+
+(* The provider-call threshold is the keeper's only bound on a sub-call
+   made from inside a tool and the attempt watchdog's threshold. A value that
+   is not a finite positive number of seconds must not read as unset (which
+   would switch both off) or pass as NaN (which every comparison against it
+   answers false, so the watchdog would never fire and every sub-call would be
+   refused). It is a configuration error, as it already is for the two
+   streaming timeouts. *)
+let test_a_malformed_provider_call_deadline_is_a_configuration_error () =
+  with_clean_boot_overrides @@ fun () ->
+  List.iter
+    (fun raw ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" raw;
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%S names the setting" raw)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" message)
+       | Some seconds -> failf "%S read as %g seconds" raw seconds
+       | None -> failf "%S read as unset" raw);
+      Config_boot_overrides.reset_for_tests ())
+    [ "nan"; "inf"; "9OO"; "0"; "-30" ]
+;;
+
+let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nprovider_call_deadline_sec = 45\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  check (option (float 0.0001))
+    "the reader sees the value applied at boot, clamped where it is read"
+    (Some 45.0)
+    (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "and the frozen snapshot carries it"
+    (Some 45.0) runtime.provider_call_deadline_sec.value;
+  check string "sourced from toml"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
 ;;
 
 (* #28413. Adding a registry row gets a setting listed, but the effective-value
@@ -712,6 +756,10 @@ let () =
             test_removed_toml_overlay_is_pending_restart
         ; test_case "settings projection uses typed effective values" `Quick
             test_settings_projection_uses_typed_effective_values
+        ; test_case "a malformed provider call deadline is a configuration error" `Quick
+            test_a_malformed_provider_call_deadline_is_a_configuration_error
+        ; test_case "the provider call deadline applied from toml is read live" `Quick
+            test_the_provider_call_deadline_applied_from_toml_is_read_live
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init

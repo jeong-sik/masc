@@ -492,9 +492,10 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
               Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)
        | "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" ->
          display_float_option
-           Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override
+           (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ())
        | "MASC_KEEPER_BODY_TIMEOUT_SEC" ->
-         display_float_option Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
+         display_float_option
+           (Env_config_keeper.KeeperKeepalive.body_timeout_sec_override ())
        | "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC" ->
          display_float Env_config_keeper.KeeperPollIntervals.crash_persistence_drain_sec
        | "MASC_KEEPER_STAGE_TIMING_RING_SIZE" ->

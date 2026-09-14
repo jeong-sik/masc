@@ -603,10 +603,11 @@ when chat opened from detail.
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading
 as the Keepers table. It also always names the chat approval stance
-(`AUTO` or `YOLO`) and the effective durable Gate mode (`gate:auto_judge`,
-`gate:manual`, or `gate:always_allow`). A Keeper that inherits `workspace`
-shows the observed workspace mode rather than the word `workspace`; an unread
-Gate observation stays `gate:?`. It never derives a model by parsing the id.
+(`AUTO` or `YOLO`) and the effective durable Gate mode in the words the [w]
+chooser uses (`gate: manual`, `gate: Auto Judge`, or `gate: allow-all`). A
+Keeper that inherits `workspace` shows the observed workspace mode rather than
+the word `workspace`; an unread Gate observation reads `gate: (not loaded)`.
+It never derives a model by parsing the id.
 When there is room, the Context item includes percentage, current/maximum token
 counts, and `^X`; narrower panes progressively keep the percentage before
 dropping the whole item. In a narrow split pane, only the displayed runtime id

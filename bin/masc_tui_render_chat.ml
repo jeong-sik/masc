@@ -542,7 +542,10 @@ let keeper_message_identity ~max_cells state keeper_name =
             ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
             ~workspace_gate_mode
         in
-        Printf.sprintf " %s%s%s %s\xc2\xb7 gate:%s%s"
+        (* "gate: " with the space every other label on this header uses.
+           Written tight, the stance ran into its value -- "gate:Auto Judge"
+           -- beside "configured: <runtime>" on the same row. *)
+        Printf.sprintf " %s%s%s %s\xc2\xb7 gate: %s%s"
           (if yolo then (Theme.bad ()) else (Theme.info ()))
           chat_mode Ansi.reset Ansi.dim
           (* Nothing observed is said in the words every other surface uses

@@ -114,6 +114,22 @@ val verify
   -> Runtime.t
   -> result
 
+(** {!verify} the way the [runtime-verify] command runs it: installs the
+    process env and clock a provider request reads
+    ({!Eio_context.set_env}, {!Eio_context.set_clock},
+    {!Time_compat.set_clock}) and verifies with the env's network, entropy
+    and file system, working in [private_dir]; children start through
+    {!Posix_spawn_process_mgr.mgr}, the manager the server starts them with.
+    The command and the suite that stands in for it both call this, so the
+    suite runs the command's shape rather than a copy of it. *)
+val verify_as_command
+  :  env:Eio_unix.Stdenv.base
+  -> sw:Eio.Switch.t
+  -> private_dir:string
+  -> timeout_s:float
+  -> Runtime.t
+  -> result
+
 module For_testing : sig
   val measure
     :  runtime_id:string

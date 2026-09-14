@@ -361,6 +361,31 @@ let test_invalid_tool_start_poisons_the_provider_scope () =
   check (list tool_call) "invalid scope persists no tool rows" [] (A.to_tool_calls t)
 ;;
 
+(* A liveness timeout ends the attempt it interrupts. The tool rows of that
+   scope leave the projection, while a scope sealed before it keeps its rows. *)
+let test_timeout_invalidates_only_the_current_scope () =
+  let call_ids t =
+    A.to_tool_calls t
+    |> List.map (fun (call : Masc.Keeper_chat_store.tool_call) -> call.call_id)
+  in
+  let t = A.create () in
+  start_runtime_attempt t;
+  A.on_event t (start ~index:0 ~tool_id:(Some "call-kept") ~tool_name:(Some "Read"));
+  A.on_event t (json_snapshot ~index:0 {|{"path":"kept.ml"}|});
+  A.on_event t (stop ~index:0);
+  seal_turn ~turn:0 t [ 0 ];
+  start_runtime_attempt t;
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some "call-timed-out") ~tool_name:(Some "WebSearch"));
+  A.on_event t (json_delta ~index:0 {|{"query":"masc"}|});
+  A.on_event t (stop ~index:0);
+  check (list string) "both scopes project their rows before the timeout"
+    [ "call-kept"; "call-timed-out" ] (call_ids t);
+  A.on_event t (Agent_core.Types.Timeout "idle timeout after 120.0s");
+  check (list string) "the timed-out scope persists no tool rows; the sealed scope keeps its row"
+    [ "call-kept" ] (call_ids t)
+;;
+
 let test_open_message_start_replay_keeps_scope_and_fragments () =
   let t = A.create () in
   A.on_event t (message_start "message-replay-open");
@@ -1223,6 +1248,8 @@ let () =
             test_blank_provider_message_ids_open_distinct_scopes
         ; test_case "invalid tool start poisons provider scope" `Quick
             test_invalid_tool_start_poisons_the_provider_scope
+        ; test_case "liveness timeout invalidates only the current scope" `Quick
+            test_timeout_invalidates_only_the_current_scope
         ; test_case "open MessageStart replay keeps scope" `Quick
             test_open_message_start_replay_keeps_scope_and_fragments
         ; test_case "full message replay is quarantined" `Quick

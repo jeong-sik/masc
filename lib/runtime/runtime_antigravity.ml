@@ -74,10 +74,23 @@ let default_config ~cwd ~model =
   }
 ;;
 
-let timeout_s_for_phase config ~turn_admitted =
-  if turn_admitted
-  then config.timeout_s
-  else Some config.admission_timeout_s
+(* Which liveness bound the next read runs under, decided by what the CLI
+   said last. agy narrates a trajectory one step at a time and writes nothing
+   while a tool step runs: the step's output arrives in its DONE (or ERROR)
+   update. Silence inside a tool step is the protocol, not a client that has
+   gone away, and an idle deadline there would measure how long the tool took,
+   which [timeout_s] must not cap. The wall-clock ceiling still bounds that
+   phase: [Runtime_wall_clock.cap_window] turns [None] into the remaining
+   budget. *)
+type read_phase =
+  | Awaiting_admission
+  | Model_turn
+  | Tool_step_running
+
+let timeout_s_for_phase config = function
+  | Awaiting_admission -> Some config.admission_timeout_s
+  | Model_turn -> config.timeout_s
+  | Tool_step_running -> None
 ;;
 
 type conversation_mode =
@@ -299,12 +312,14 @@ let parse_step_state stage value =
     value
 ;;
 
-(* [step_type] decides one thing: whether this step is a tool step, for the two
-   tool counters. Every non-[Tool] value is behaviourally identical, so a value
-   we have not seen carries no decision we could get wrong -- but rejecting it
-   ends the turn and parks the session, which blocks every later turn for that
-   Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
-   the affected Keeper stopped (#28027).
+(* [step_type] decides two things: whether this step is a tool step, for the
+   two tool counters, and whether the next read runs without an idle window
+   ([read_phase]). Every non-[Tool] value is behaviourally identical, and a
+   value we have not seen takes that same path: no count, idle window armed,
+   which is what every step got before the tool-step exemption. Rejecting it
+   instead ends the turn and parks the session, which blocks every later turn
+   for that Keeper. Live 2026-08-10: Antigravity began emitting
+   "system_message" and the affected Keeper stopped (#28027).
 
    #28029 opened this with [Unrecognized]; #28037 closed it again and named
    [System_message] instead. Naming the member that stalled a keeper leaves the
@@ -604,10 +619,34 @@ type protocol_state =
   ; result : (result_status * string * string option * int * usage) option
   ; tool_steps : int
   ; tool_errors : int
+  ; last_step : (step_type * step_state) option
+    (* The step the CLI reported last; [read_phase] is its only reader. *)
   }
 
 let initial_protocol_state =
-  { init = None; result = None; tool_steps = 0; tool_errors = 0 }
+  { init = None; result = None; tool_steps = 0; tool_errors = 0; last_step = None }
+;;
+
+(* Only a tool step's ACTIVE update opens the exemption. Every other step
+   type, seen or unseen (agy's subagent steps carry a step_type the docs do
+   not name), keeps the idle window armed, which is what every step got
+   before, and a later step update of any type re-arms it. *)
+let read_phase state =
+  match state.init with
+  | None -> Awaiting_admission
+  | Some _ ->
+    (match state.last_step with
+     | Some (Tool, Active) -> Tool_step_running
+     | None
+     | Some (Tool, (Done | Step_error))
+     | Some
+         ( ( Agent_response
+           | System_message
+           | User_input
+           | Internal
+           | Checkpoint
+           | Unrecognized _ )
+         , (Active | Done | Step_error) ) -> Model_turn)
 ;;
 
 let expected_conversation_id = function
@@ -720,6 +759,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
            ; tool_errors =
                state.tool_errors
                + if is_tool && step_state = Step_error then 1 else 0
+           ; last_step = Some (step_type, step_state)
            })
   | Result { conversation_id; status; response; error; num_turns; usage } ->
     let stage = "result event" in
@@ -790,7 +830,14 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
          release handler closes [stdin_w]. *)
       Eio.Flow.close stdin_w;
       Option.iter (fun callback -> callback ()) on_prompt_sent);
-    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    (* Diagnostics only, so a daemon: the switch cancels it once the body
+       returns. A grandchild the CLI leaves behind (an MCP server orphaned
+       when the CLI is reaped) inherits this pipe's write end, so EOF may
+       never come, and a joined fiber would hold the switch open after the
+       turn was served. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      drain_stderr stderr_r stderr_tail;
+      `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_settled = ref false in
     let settle_failed_process () =
@@ -825,19 +872,31 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
              (Timeout
                 (Option.value config.wall_clock_ceiling_s
                    ~default:Runtime_wall_clock.default_ceiling_s));
-         let timeout_s =
-           timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
+         let phase = read_phase !state in
+         let read_timeout_s =
+           timeout_s_for_phase config phase
+           |> Runtime_wall_clock.cap_window wall_clock
+         in
+         (* Applying an event runs MASC's own callbacks (admission, stream
+            observers). The tool-step exemption is about the CLI's silence,
+            not about them, so they keep the model-turn bound. *)
+         let callback_timeout_s =
+           timeout_s_for_phase
+             config
+             (match phase with
+              | Awaiting_admission -> Awaiting_admission
+              | Model_turn | Tool_step_running -> Model_turn)
            |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =
-           with_optional_timeout clock timeout_s (fun () ->
+           with_optional_timeout clock read_timeout_s (fun () ->
              Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              with_optional_timeout clock timeout_s (fun () ->
+              with_optional_timeout clock callback_timeout_s (fun () ->
                 apply_event
                   config
                   ~conversation_mode

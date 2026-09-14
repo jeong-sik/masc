@@ -60,6 +60,7 @@ type continuation_checkpoint =
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
@@ -196,11 +197,12 @@ type t =
    the journal hook has already recorded each of them. *)
 let bus_capacity = 512
 
-let create ?(now = Time_compat.now) ?on_publish () =
+let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
+  if first_seq < 0 then invalid_arg "Keeper_chat_events.create: negative journal sequence";
   { stream = Eio.Stream.create bus_capacity
   ; on_publish
   ; now
-  ; next_seq = 0
+  ; next_seq = first_seq
   ; closed = false
   ; drained = false
   }
@@ -249,8 +251,12 @@ let publish t event =
 let close t =
   if not t.closed
   then (
-    t.closed <- true;
-    Eio.Stream.add t.stream End_of_turn)
+    (* The flag follows the sentinel. A close cancelled while the bus is full
+       has delivered nothing, so a later close must still add the sentinel;
+       a flag set first would make that retry a no-op and leave the reader
+       parked in [take] with nothing left to wake it. *)
+    Eio.Stream.add t.stream End_of_turn;
+    t.closed <- true)
 ;;
 
 let subscribe_published t =

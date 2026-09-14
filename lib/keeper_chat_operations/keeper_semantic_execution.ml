@@ -173,6 +173,7 @@ type recovery_origin =
   | Unconfirmed_sources
   | Confirmed_undispatched
   | Checkpointed of Keeper_checkpoint_ref.t
+  | Official_checkpointed of official_client_checkpoint
   | Interrupted_execution
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
@@ -207,9 +208,11 @@ type action =
   | Begin_execution
   | Recheck_sources of source_projection list
   | Resume_checkpoint of Keeper_checkpoint_ref.t
+  | Resume_official_checkpoint of official_client_checkpoint
   | Record_observation of Snapshot.observation
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
+  | Suspend_official_checkpoint of official_client_checkpoint
   | Suspend_runtime_retry of runtime_retry
   | Resume_runtime_retry of runtime_retry
   | Suspend_gate_reconciliation of gate_binding * string
@@ -313,8 +316,19 @@ let apply ~now action current =
                (match recovery.origin with
                 | Unconfirmed_sources -> recheck Preparing
                 | Confirmed_undispatched -> recheck Ready
-                | Checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
+                | Checkpointed _ | Official_checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
+      | Resume_official_checkpoint checkpoint ->
+          (match current.phase with
+           | Recovering recovery ->
+             (match recovery.origin with
+              | Official_checkpointed expected ->
+                if equal_gate_checkpoint (Official_client expected) (Official_client checkpoint)
+                then unchanged Running else reject ()
+              | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+              | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+           | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
           let resume expected =
             if Keeper_checkpoint_ref.equal expected checkpoint then unchanged Running
@@ -325,7 +339,7 @@ let apply ~now action current =
            | Recovering recovery ->
                (match recovery.origin with
                 | Checkpointed expected -> resume expected
-                | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
+                | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Settled _ -> reject ())
       | Record_observation observation ->
           (match current.phase with
@@ -334,10 +348,17 @@ let apply ~now action current =
                |> Result.map (fun frame -> current.phase, frame, current.current_sources)
                |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error))
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Suspend_official_checkpoint checkpoint ->
+          (match current.phase, validate_official_client_checkpoint checkpoint with
+           | (Running | Resuming_runtime_retry _ | Resuming_gate _), Ok ()
+             when gate_checkpoint_owns (Official_client checkpoint) (scope current) ->
+               unchanged (Recovering { origin = Official_checkpointed checkpoint;
+                 diagnostic = "official client retained unfinished direct conversation" })
+           | (Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+             | Recovering _ | Suspended _ | Settled _), (Ok () | Error _) -> reject ())
       | Suspend checkpoint ->
           (match current.phase with
-           | Running -> unchanged (Suspended checkpoint)
-           | Resuming_runtime_retry _ | Resuming_gate _ -> reject ()
+           | Running | Resuming_runtime_retry _ | Resuming_gate _ -> unchanged (Suspended checkpoint)
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_runtime_retry retry ->
           (match current.phase with
@@ -348,7 +369,7 @@ let apply ~now action current =
           (match current.phase with
            | Recovering {origin = Runtime_retry expected; _} ->
              if equal_runtime_retry expected observed then unchanged (Resuming_runtime_retry expected) else reject ()
-           | Recovering {origin = (Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin = (Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Suspend_gate_reconciliation (binding, diagnostic) ->
@@ -373,7 +394,7 @@ let apply ~now action current =
                 unchanged (Recovering {origin=Gate_wait {waiting; resolution=None};
                   diagnostic="original exact Gate source is durably retained"})
               | Ok _ | Error _ -> reject ())
-           | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+           | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
                | Interrupted_execution | Runtime_retry _ | Gate_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
            | Suspended _ | Settled _ -> reject ())
@@ -386,7 +407,7 @@ let apply ~now action current =
              else reject ()
            | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
              unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="Gate admission requires reconciliation"})
-           | Recovering {origin=(Gate_binding _ | Gate_wait _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Gate_wait _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Suspended _ | Settled _ -> reject ())
       | Resolve_gate resolution ->
@@ -399,7 +420,7 @@ let apply ~now action current =
                | Some current when current <> resolution -> reject ()
                | Some _ | None -> unchanged (Recovering {origin=Gate_wait {state with resolution=Some resolution};
                    diagnostic="durable Gate resolution is ready for the original operation"}))
-           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_gate (waiting, resolution) ->
@@ -407,7 +428,7 @@ let apply ~now action current =
            | Recovering {origin=Gate_wait state; _} ->
              if equal_gate_wait waiting state.waiting && state.resolution = Some resolution
              then unchanged (Resuming_gate (waiting, resolution)) else reject ()
-           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Discharge_gate obligation ->
@@ -441,6 +462,7 @@ let apply ~now action current =
       | Discharge_gate obligation -> List.filter (fun current -> current <> obligation) current.gate_obligations
       | Settle _ -> []
       | Confirm_sources | Begin_execution | Recheck_sources _ | Resume_checkpoint _
+      | Resume_official_checkpoint _ | Suspend_official_checkpoint _
       | Record_observation _ | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && Snapshot.equal frame current.frame && current_sources = current.current_sources
@@ -506,6 +528,8 @@ let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json valu
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
     | Gate_denied detail -> `Assoc ["kind", `String "denied"; "detail", `String detail])]
 let recovery_origin_json = function
+  | Official_checkpointed checkpoint -> `Assoc ["kind", `String "official_checkpointed";
+      "official_client", official_client_checkpoint_json checkpoint]
   | Gate_binding binding -> `Assoc ["kind", `String "gate_binding"; "binding", gate_binding_json binding]
   | Unconfirmed_sources -> `Assoc ["kind", `String "unconfirmed_sources"]
   | Confirmed_undispatched -> `Assoc ["kind", `String "confirmed_undispatched"]
@@ -746,6 +770,10 @@ let recovery_origin_of_json json =
   | "runtime_retry" ->
       runtime_retry_of_json json
       |> Result.map (fun retry -> Runtime_retry retry)
+  | "official_checkpointed" ->
+      let* fields = exact ["kind";"official_client"] json in
+      official_client_checkpoint_of_json (field "official_client" fields)
+      |> Result.map (fun checkpoint -> Official_checkpointed checkpoint)
   | "checkpointed" ->
       let* fields = exact ["kind";"checkpoint"] json in
       checkpoint_of_json (field "checkpoint" fields) |> Result.map (fun checkpoint -> Checkpointed checkpoint)
@@ -769,7 +797,7 @@ let phase_of_json json =
       let* origin = recovery_origin_of_json (field "origin" fields) in
       (match origin with
        | Runtime_retry retry -> Ok (Resuming_runtime_retry retry)
-       | Checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ ->
+       | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ ->
          Error "resuming runtime requires its frozen continuation")
   | "recovering" ->
       let* fields = exact ["kind";"origin";"detail"] json in
@@ -830,6 +858,9 @@ let of_json json =
       | Resuming_gate (waiting, _) ->
         if gate_checkpoint_owns waiting.checkpoint expected && List.for_all (fun obligation -> List.mem obligation waiting.obligations) gate_obligations then Ok ()
         else Error "resumed Gate obligations changed identity"
+      | Recovering { origin = Official_checkpointed checkpoint; _ } ->
+        if gate_checkpoint_owns (Official_client checkpoint) expected then Ok ()
+        else Error "official continuation changed execution scope"
       | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Settled _
       | Recovering {origin=(Runtime_retry _ | Checkpointed _ | Interrupted_execution
           | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok () in
@@ -859,7 +890,7 @@ let of_json json =
       | Recovering recovery ->
           (match recovery.origin with
            | Unconfirmed_sources | Confirmed_undispatched -> revision >= 1L && observations = []
-           | Checkpointed _ | Interrupted_execution -> revision >= 2L
+           | Checkpointed _ | Official_checkpointed _ | Interrupted_execution -> revision >= 2L
            | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> revision >= 3L)
       | Settled _ -> revision >= 1L in
     let* () = if coherent then Ok ()

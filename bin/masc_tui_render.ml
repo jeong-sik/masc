@@ -7761,23 +7761,27 @@ let fusion_run_stage_compact = function
   | Fusion_stage_completed -> "completed"
   | Fusion_stage_failed -> "failed"
 
+(* What became of the selected run, in one row under the list. It opened
+   with "Flow: Question → Panel → Judge → Evidence" on every run: the four
+   stops are the same for every run and say nothing about this one, the
+   detail's Pipeline row draws them with the run's state and its own arrow,
+   and beside the roster pane they pushed the part that is this run's --
+   its progress, its failure, or that its evidence is retained -- off the
+   row. Enter is the footer's to name. *)
 let fusion_run_summary run =
-  let flow = "Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence" in
   match run.fur_status with
   | Fusion_running ->
-      ((Masc_tui_theme.tone Masc_tui_theme.Accent), flow ^ " \xc2\xb7 " ^ fusion_run_progress_text run.fur_stage)
+      ((Masc_tui_theme.tone Masc_tui_theme.Accent), fusion_run_progress_text run.fur_stage)
   | Fusion_completed ->
       (match run.fur_decision, run.fur_summary with
        | Some decision, Some summary ->
            ( (Theme.ok ())
            , Terminal_text.single_line decision ^ " \xc2\xb7 "
              ^ Terminal_text.single_line summary )
-       | (Some _ | None), (Some _ | None) ->
-           ( (Theme.ok ())
-           , flow ^ " \xc2\xb7 evidence retained; Enter opens panel and judge" ))
+       | (Some _ | None), (Some _ | None) -> ((Theme.ok ()), "evidence retained"))
   | Fusion_failed failure ->
       ( (Theme.bad ())
-      , Printf.sprintf "%s \xc2\xb7 failed [%s]: %s" flow
+      , Printf.sprintf "failed [%s]: %s"
           (Terminal_text.single_line failure.frs_failure_code)
           (Terminal_text.single_line failure.frs_error) )
 
@@ -8382,11 +8386,9 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let run_lines =
     [ Ansi.bold, "  RUN"
     ; Ansi.reset, "  Pipeline: " ^ pipeline
-    ; ( Ansi.reset
-      , Printf.sprintf "  Actions: K Keeper · B Board · %s[Y]%s Copy Link   %s[PgUp/PgDn]%s Page   %s[Esc]%s Back to Runs"
-          (Theme.info ()) Ansi.reset
-          (Theme.info ()) Ansi.reset
-          (Theme.info ()) Ansi.reset )
+      (* No Actions row: every key it named is on the footer, drawn from the
+         key table, and this row spelled them three ways ("K Keeper",
+         "[Y] Copy Link", "[PgUp/PgDn] Page"). *)
     ; ( Ansi.dim
       , "  Link: "
         ^ Link.reference Fusion_run
@@ -9405,9 +9407,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          let article_hint = match view.scene with
-            | Some scene when scene.content.view = Browser_lane.Regions -> "N/P:article  "
-            | Some _ | None -> "" in
+          let article_hint =
+            if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
           action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
           "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
@@ -9450,10 +9451,17 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                  let summary = match Browser_lane_view.scene_summary scene with
                    | None -> ""
                    | Some text -> " • " ^ text in
+                 let delta = match view.scene_delta with
+                   | None -> ""
+                   | Some {added; removed; unchanged; changed} ->
+                       let changed_text = if changed = 0 then ""
+                         else Printf.sprintf " · %d changed" changed in
+                       Printf.sprintf " • Δ +%d new · -%d out · =%d same%s"
+                         added removed unchanged changed_text in
                  let truncation = if scene.content.truncated then " • truncated" else "" in
-                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s" scene.elapsed_ms
+                 Printf.sprintf "Scene %.1f ms • %d nodes%s%s%s" scene.elapsed_ms
                    (List.length scene.content.nodes)
-                   truncation summary, Theme.ok ()
+                   truncation summary delta, Theme.ok ()
              | None -> "Not read yet", Theme.recede ())
         | Idle -> (match view.reading with
             | None -> "Not read yet", Theme.recede ()
@@ -9515,7 +9523,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       c.push_styled ~style:(Theme.info ())
         (match selected with
          | None -> "  No open tabs • Open a page in the selected browser connection"
-         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab"
+         | Some tab -> Printf.sprintf "  [%d/%d] %s%s  [ / ]:select tab · 1-9:jump"
              (index + 1) tab_count (Terminal_text.single_line tab.title)
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
@@ -9531,7 +9539,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                             (max 8 (cols - 32))
                     | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
-             "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
+             let viewport = Printf.sprintf "page scroll x=%.0f y=%.0f"
+                 scene.content.scroll_x scene.content.scroll_y in
+             "  " ^ scope ^ " · " ^ viewport ^ " · " ^
+             Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
          | None, Some page -> Printf.sprintf "  %s • %s%s%s"
              (Terminal_text.single_line page.url) (Masc_tui_message_layout.count_noun page.chars "char")

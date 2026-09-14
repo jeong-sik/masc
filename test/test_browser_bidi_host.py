@@ -189,6 +189,15 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             deadline = time.monotonic() + 5
             while True:
                 scrolled = call("page.capture", {"tabId": first})
+                # A wheel can still be committing when the first capture
+                # compares its before/after viewport. Keep capture's
+                # fail-closed result, but re-observe this one readiness state
+                # inside the existing bounded scroll proof; other failures
+                # remain immediate test failures.
+                if (not scrolled["ok"]
+                        and scrolled.get("error") == "viewport_changed_during_capture"):
+                    assert time.monotonic() < deadline, scrolled
+                    continue
                 assert scrolled["ok"], scrolled
                 if scrolled["data"]["viewport"]["scrollY"] > 0:
                     break

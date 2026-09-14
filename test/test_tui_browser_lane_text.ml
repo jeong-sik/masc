@@ -36,6 +36,8 @@ let () =
     "kind", `String "text"; "nodeId", `String "heading";
     "tag", `String "span"; "text", `String "Nested title";
     "headingLevel", `Int 3;
+    "ancestorRegion", `Assoc ["nodeId", `String "article";
+      "role", `String "article"; "label", `String "Post A"];
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 100; "height", `Int 20]];
     "color", `String "rgb(0,0,0)"; "fontSize", `Int 14;
     "fontWeight", `String "400"; "whiteSpace", `String "normal" ] in
@@ -47,7 +49,9 @@ let () =
     "nodes", `List [heading_json]; "truncated", `Bool false;
     "view", `String "content"; "scope", `Null ] in
   (match Masc.Browser_scene.of_json heading_scene_json with
-   | Ok {nodes=[{heading_level=Some 3;_}];_} -> ()
+   | Ok {nodes=[{heading_level=Some 3;
+                ancestor_region=Some {node_id="article"; role=Masc.Browser_scene.Article;
+                                      label="Post A"}}];_} -> ()
    | Ok _ | Error _ -> failwith "scene parser dropped the observed heading level");
   print_endline "PASS semantic region roles are typed at the scene boundary"
 
@@ -108,6 +112,7 @@ let () =
   let node : Masc.Browser_scene.node = {
     node_id="n1";kind=Text;tag="p";text=String.make 152 'x' ^ "한글🙂";
     heading_level=None;
+    ancestor_region=None;
     rects=[{x=0.;y=0.;width=800.;height=20.}];color="rgb(0,0,0)";
     font_size=16.;font_weight="400";white_space="normal";source_context=Masc.Browser_source_context.Unmapped } in
   let content : Masc.Browser_scene.t = {
@@ -135,6 +140,14 @@ let () =
   assert (region_input |> member "expectedUrl" = `String content.url);
   assert (Masc.Browser_scene.scope_of_json (region_input |> member "scope") =
     Ok {Browser_lane.document_id=content.document_id;node_id=region.node_id});
+  let article = {node with node_id="article-body";
+    ancestor_region=Some {Masc.Browser_scene.node_id="article";
+      role=Masc.Browser_scene.Article; label="Post A"}} in
+  let article_context = copied_target Automation None article in
+  assert (article_context |> member "ancestorRegion" =
+    `Assoc ["documentId", `String content.document_id;
+      "nodeId", `String "article"; "role", `String "article";
+      "label", `String "Post A"]);
   let control = {node with kind=Control {clickable=true;editable=false;disabled=false;href=None};tag="button"} in
   let control_context = copied_target Automation None control in
   let control_action = control_context |> member "defaultAction" in
@@ -191,6 +204,76 @@ let () =
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
     {view with scene=Some heading_scene; scene_cursor=0}) in
   assert (heading_lines = ["[>1] ## Post title"; "Post body"]);
+  let paragraph = {node with node_id="paragraph"; tag="p"; text="Hello "} in
+  let emphasis = {node with node_id="emphasis"; tag="span"; text="world"} in
+  let paragraph_tail = {node with node_id="paragraph"; tag="p"; text="!"} in
+  let inline_scene = {scene with content={content with
+    nodes=[paragraph; emphasis; paragraph_tail]}} in
+  let inline_lines, inline_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some inline_scene; scene_cursor=0} in
+  assert (inline_lines = ["[>1] Hello world!"] && inline_selected = Some 0);
+  let inline_selected_lines, inline_selected_row = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some inline_scene; scene_cursor=1} in
+  assert (inline_selected_lines = ["[>2] Hello world!"] && inline_selected_row = Some 0);
+  let separate_paragraphs = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="paragraph-b-inline"; text="B"}]}} in
+  let separate_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some separate_paragraphs; scene_cursor=0} in
+  assert (separate_lines = ["[>1] A"; "B"]);
+  let trailing_inline = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="paragraph-a-inline"; text="B"};
+    {paragraph with node_id="paragraph-a"; text="C"};
+    {emphasis with node_id="paragraph-b-inline"; text="D"}]}} in
+  let trailing_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some trailing_inline; scene_cursor=0} in
+  assert (trailing_lines = ["[>1] ABC"; "D"]);
+  (* One paragraph with two inline elements arrives as five fragments, the
+     paragraph's own id between them: "a " <b>b</b> " c " <i>d</i> " e". *)
+  let two_inlines = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="a "};
+    {emphasis with node_id="bold"; text="b"};
+    {paragraph with node_id="paragraph-a"; text=" c "};
+    {emphasis with node_id="italic"; text="d"};
+    {paragraph with node_id="paragraph-a"; text=" e"}]}} in
+  let two_inline_lines, two_inline_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some two_inlines; scene_cursor=2} in
+  assert (two_inline_lines = ["[>3] a b c d e"] && two_inline_selected = Some 0);
+  let two_inlines_then_trailing = {scene with content={content with nodes=[
+    {paragraph with node_id="paragraph-a"; text="A"};
+    {emphasis with node_id="bold"; text="B"};
+    {paragraph with node_id="paragraph-a"; text="C"};
+    {emphasis with node_id="italic"; text="D"};
+    {paragraph with node_id="paragraph-a"; text="E"};
+    {emphasis with node_id="paragraph-b-inline"; text="F"}]}} in
+  let two_inline_trailing_lines, _ = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some two_inlines_then_trailing; scene_cursor=0} in
+  assert (two_inline_trailing_lines = ["[>1] ABCDE"; "F"]);
+  let article : Masc.Browser_scene.region_ref =
+    {node_id="article"; role=Masc.Browser_scene.Article; label="Post A"} in
+  let article_heading = {heading with ancestor_region=Some article} in
+  let article_body = {body with ancestor_region=Some article} in
+  let article_scene = {scene with content={content with nodes=[article_heading;article_body]}} in
+  let article_lines, article_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some article_scene; scene_cursor=0} in
+  assert (article_lines = ["[article] Post A"; "[>1] ## Post title"; "Post body"]
+    && article_selected = Some 1);
+  let scoped_article = {article_scene with content={article_scene.content with
+    scope=Some {Browser_lane.document_id="document"; node_id="article"}}} in
+  let scoped_article_lines, scoped_article_selected = Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some scoped_article; scene_cursor=0} in
+  assert (scoped_article_lines = ["[>1] ## Post title"; "Post body"]
+    && scoped_article_selected = Some 0);
+  let article_b = {node with node_id="article-b-body"; text="Second post";
+    ancestor_region=Some {node_id="article-b"; role=Masc.Browser_scene.Article;
+      label="Post B"}} in
+  let multiple_article_scene = {scene with content={content with
+    nodes=[article_heading; article_body; article_b]}} in
+  let multiple_article_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some multiple_article_scene; scene_cursor=0}) in
+  assert (multiple_article_lines = ["[article 1/2] Post A"; "[>1] ## Post title";
+    "Post body"; "[article 2/2] Post B"; "Second post"]);
   let spaced_heading = {heading with rects=[{x=0.;y=0.;width=800.;height=20.}]} in
   let spaced_body = {body with rects=[{x=0.;y=40.;width=800.;height=20.}]} in
   let spaced_scene = {scene with content={content with nodes=[spaced_heading;spaced_body]}} in
@@ -285,6 +368,7 @@ let () =
   let node node_id text : Masc.Browser_scene.node =
     { node_id; kind = Text; tag = "p"; text;
       heading_level = None;
+      ancestor_region = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped } in
@@ -307,9 +391,47 @@ let () =
   print_endline "PASS repeated scene node ids keep one number each"
 
 let () =
+  let node node_id text : Masc.Browser_scene.node =
+    { node_id; kind = Text; tag = "p"; text; heading_level = None;
+      ancestor_region = None;
+      rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
+      color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
+      white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
+  in
+  let content : Masc.Browser_scene.t = {
+    document_id = "doc"; url = "https://example.org/feed"; title = "Feed";
+    width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0.; truncated = false;
+    view = Content; scope = None;
+    nodes = [node "a" "first"; node "a" "inline fragment"; node "b" "second"] }
+  in
+  let first : Lane.scene = {source = Live; client_id = None; tab_id = 2;
+    content; elapsed_ms = 1.} in
+  let first_view = {(Lane.create ()) with selected_tab = Some 2; scene = Some first} in
+  let second_content = {content with scroll_y = 600.;
+    nodes = [node "a" "first"; node "a" "inline changed"; node "c" "new"]} in
+  let second = {first with content = second_content} in
+  (match Lane.scene_delta first second with
+   | {added = 1; removed = 1; unchanged = 0; changed = 1} -> ()
+   | _ -> failwith "scene delta must deduplicate IDs and separate changed nodes");
+  let published = Lane.publish_scene second first_view in
+  (match published.scene_delta with
+   | Some {added = 1; removed = 1; unchanged = 0; changed = 1} -> ()
+   | _ -> failwith "same observed document must publish its scene delta");
+  let scroll_only = Lane.publish_scene {first with content = {content with scroll_y = 600.}}
+    first_view in
+  (match scroll_only.scene_delta with
+   | Some {added = 0; removed = 0; unchanged = 2; changed = 0} -> ()
+   | _ -> failwith "scroll-only observation must retain node identities");
+  let other_document = Lane.publish_scene {second with content = {second_content with document_id = "other"}}
+    first_view in
+  assert (other_document.scene_delta = None);
+  print_endline "PASS scene delta is identity-guarded and scroll-aware"
+
+let () =
   let region node_id role text : Masc.Browser_scene.node =
     { node_id; kind = Region (Masc.Browser_scene.region_role_of_string role); tag = role; text;
       heading_level = None;
+      ancestor_region = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
@@ -389,6 +511,7 @@ let () =
   let region node_id role text : Masc.Browser_scene.node =
     { node_id; kind = Masc.Browser_scene.Region role; tag = "article"; text;
       heading_level = None;
+      ancestor_region = None;
       rects = [{ x = 0.; y = 0.; width = 10.; height = 10. }];
       color = "rgb(0, 0, 0)"; font_size = 14.; font_weight = "400";
       white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped }
@@ -418,7 +541,32 @@ let () =
   let no_articles = {view with scene = Some {scene with content =
     {content with nodes = [region "main" Masc.Browser_scene.Main "Timeline"]}}} in
   assert ((Lane.move_scene_article ~backwards:false no_articles).scene_cursor = no_articles.scene_cursor);
+  let article_a : Masc.Browser_scene.region_ref =
+    {node_id = "post-a"; role = Masc.Browser_scene.Article; label = "Post A"} in
+  let article_b : Masc.Browser_scene.region_ref =
+    {node_id = "post-b"; role = Masc.Browser_scene.Article; label = "Post B"} in
+  let content_node node_id text ancestor_region : Masc.Browser_scene.node =
+    {node_id; kind = Text; tag = "p"; text; heading_level = None;
+     ancestor_region;
+     rects = [{x = 0.; y = 0.; width = 10.; height = 10.}];
+     color = "rgb(0,0,0)"; font_size = 14.; font_weight = "400";
+     white_space = "normal"; source_context = Masc.Browser_source_context.Unmapped}
+  in
   let content_scene = {view with scene = Some {scene with content =
-    {content with view = Content; nodes = [region "post-a" Masc.Browser_scene.Article "Post A"]}}} in
-  assert ((Lane.move_scene_article ~backwards:false content_scene).scene_cursor = content_scene.scene_cursor);
-  print_endline "PASS article navigation uses typed regions and skips non-article landmarks"
+    {content with view = Content; nodes = [
+      content_node "a-title" "Post A" (Some article_a);
+      content_node "a-body" "A body" (Some article_a);
+      content_node "navigation" "Suggestions" None;
+      content_node "b-title" "Post B" (Some article_b)]}}} in
+  assert (Lane.scene_has_articles content_scene);
+  let content_next = Lane.move_scene_article ~backwards:false
+    {content_scene with scene_cursor = 0} in
+  assert (content_next.scene_cursor = 3);
+  let content_previous = Lane.move_scene_article ~backwards:true content_next in
+  assert (content_previous.scene_cursor = 0);
+  let content_without_articles = {view with scene = Some {scene with content =
+    {content with view = Content; nodes = [content_node "plain" "Plain" None]}}} in
+  assert (not (Lane.scene_has_articles content_without_articles));
+  assert ((Lane.move_scene_article ~backwards:false content_without_articles).scene_cursor =
+    content_without_articles.scene_cursor);
+  print_endline "PASS article navigation uses typed regions and article ancestors"

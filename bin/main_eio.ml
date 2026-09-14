@@ -3160,7 +3160,7 @@ let setup_validate_runtime base_path =
         if code = 0 then print_endline "Model response and harmless tool roundtrip verified."
         else (
           (match result.failure, runtime.provider.credentials with
-           | Some (Runtime_verification.Unavailable Missing_credential), Some (Runtime_schema.Env key) ->
+           | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | _ -> ());
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");

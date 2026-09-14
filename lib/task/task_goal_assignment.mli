@@ -11,7 +11,8 @@
     the domain-boundary ratchet rejects. *)
 
 type set_task_goal_error =
-  | Goal_source_unavailable of string
+  | Goal_source_unavailable of Goal_store.unavailable
+  | Goal_lock_failed of Masc_domain.masc_error
   | Backlog_read_failed of string
   | Unknown_task of string
   | Unknown_goal of string
@@ -34,7 +35,10 @@ val set_task_goal :
     - [Error (Unknown_task _)] — no task with [task_id] in the backlog.
     - [Error (Backlog_read_failed _)] — the authoritative backlog cannot be
       read; a recovery snapshot is never used to authorize this mutation.
-    - [Error (Goal_source_unavailable _)] — the primary Goal store cannot be read.
+    - [Error (Goal_source_unavailable _)] — the primary Goal store cannot be
+      read; the value is the store's own (RFC-0444) for the envelope.
+    - [Error (Goal_lock_failed _)] — the Goal file lock was not taken; nothing
+      was read.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the primary Goal store.
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which

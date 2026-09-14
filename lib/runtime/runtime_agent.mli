@@ -337,12 +337,12 @@ module For_testing : sig
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
   (** Fail closed when a streaming deadline (inter-line idle or first-event,
-      RFC-AC-037) is configured but no clock resolves. *)
+      RFC-AC-037) is configured but [clock] is [None]. The runtime passes the
+      clock in {!Eio_context}, the one the keeper driver's watchdog reads. *)
   val decide_clock_for_idle :
     stream_idle_timeout_s:float option ->
     first_event_timeout_s:float option ->
-    process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
-    ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+    clock:float Eio.Time.clock_ty Eio.Resource.t option ->
     (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result
 
   val required_modalities_of_content_blocks :

@@ -523,18 +523,16 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     (Agent_core.Tool.ignoring_execution_env handler)
                 ]
               in
-              (* [timeout_s] is the command's deadline for this measurement,
-                 the one the CLI arms below install as their wall-clock
-                 ceiling. Here it bounds the whole readiness run on the clock
-                 the command was given: the wait for the binding's admission
-                 permit, both provider round trips and the tool call between
-                 them. It is held here, on [clock], as one window over the
-                 run, not as per-request deadlines on the config: a
-                 per-request deadline restarts at each request, so two round
-                 trips and a permit wait could take several of them, and
-                 without any bound this arm held `masc runtime-verify` and
-                 `masc setup` for as long as a silent endpoint or a held
-                 permit lasted. *)
+              (* No per-request deadline on the config: [measure] below runs
+                 every arm, this one included, under the command's
+                 [timeout_s] as one window on the command's [clock], over
+                 the wait for the binding's admission permit, both provider
+                 round trips and the tool call between them. A per-request
+                 deadline would restart at each request, so two round trips
+                 and a permit wait could take several of them. The two steps
+                 no window ends mid-way, the name lookup and the process's
+                 first trust-store load, are noted at
+                 [Llm_provider.Http_client.pre_header_deadline]. *)
               let config =
                 Runtime_agent.default_config
                   ~name:"runtime-verification"
@@ -542,17 +540,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                   ~system_prompt:prompt
                   ~tools
               in
-              (match
-                 Eio.Time.with_timeout_exn clock timeout_s (fun () ->
-                   Runtime_agent.run ~sw ~net ~config prompt)
-               with
-               | exception Eio.Time.Timeout -> Error Timed_out
+              (match Runtime_agent.run ~sw ~net ~config prompt with
                | Error
                    ( Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
                    | Agent_core.Error.Api (Agent_core.Retry.Timeout _) ) ->
-                 (* A budget the provider binding declares for itself, such as
-                    its connect budget, or a timeout the provider reports: the
-                    same verdict. *)
+                 (* Nothing on this path declares a deadline of its own, so
+                    this arm is the mapping's completeness, not a producer
+                    seen here. *)
                  Error Timed_out
                | Error error ->
                  Error (Provider_rejected (Agent_core.Error.to_string error))
@@ -656,6 +650,32 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
       | Eio.Time.Timeout -> Error Timed_out
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
         Error (Provider_rejected (Printexc.to_string exn)))
+;;
+
+(* The process globals a provider request reads -- the env, and the clock
+   the runtime agent derives every declared deadline from (Agent Core refuses
+   a declared deadline it cannot enforce rather than dropping it) -- and the
+   verification, in one place. The CLI arm and the suite that stands in for
+   it used to install these by hand, each its own copy, and four pull
+   requests on 2026-09-14 went to keeping the two copies alike; a suite
+   that calls this proves the command's shape by running it. Children start
+   through the posix_spawn manager the server itself uses, so a runtime that
+   verifies here is started the way the server will start it. *)
+let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.set_env env;
+  Eio_context.set_clock clock;
+  Time_compat.set_clock clock;
+  verify
+    ~secure_random:(Eio.Stdenv.secure_random env)
+    ~sw
+    ~net:(Eio.Stdenv.net env)
+    ~mgr:Posix_spawn_process_mgr.mgr
+    ~clock
+    ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
+    ~cwd_path:private_dir
+    ~timeout_s
+    runtime
 ;;
 
 module For_testing = struct

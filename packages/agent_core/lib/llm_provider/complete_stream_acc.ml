@@ -14,6 +14,8 @@ let resolve_event acc event =
   resolution
 ;;
 
+let block_kind_at acc index = Complete_stream_state.block_kind_at !(acc.state) index
+
 let accumulate_event acc event =
   let (_ : Types.stream_event_resolution) = resolve_event acc event in
   ()

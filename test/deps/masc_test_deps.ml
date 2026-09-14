@@ -22,6 +22,25 @@ let init_eio_clock ?sw env =
   Eio_context.set_clock clock;
   Option.iter Eio_context.set_switch sw
 
+(* [Unix] has no unsetenv, and an empty value is not an absent one: the
+   timeout readers reject "" as malformed. The stub removes the variable. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+(* Runs [f] with [key] set to [value] ([None]: absent) in the process
+   environment -- the channel an operator declares a keeper setting through,
+   and the one that outranks a boot override -- then puts back what the
+   shell running the suite had exported. A case declares its value over an
+   inherited one instead of skipping under it. *)
+let with_process_env key value f =
+  let inherited = Sys.getenv_opt key in
+  let install = function
+    | Some value -> Unix.putenv key value
+    | None -> unsetenv key
+  in
+  install value;
+  Fun.protect ~finally:(fun () -> install inherited) f
+;;
+
 let init_unified_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
     (Masc.Unified_tool_registry.register_all ();

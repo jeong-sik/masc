@@ -117,12 +117,24 @@ let validate_timeout_sec = function
          "Process_eio: explicit timeout_sec must be finite and greater than zero (got %g)"
          timeout_sec)
 
+(* A child whose output was drained and whose exit was read as the timeout
+   passed is a finished run, not a timeout: [Eio.Time.with_timeout_exn]
+   keeps whichever arm finished first and would have reported the run as
+   timed out with its output in hand. The run's result stands whenever it
+   has one; the timeout ends only a run that has not finished. *)
 let with_explicit_timeout_exn clock timeout_sec f =
   match timeout_sec with
   | None -> f ()
   | Some timeout_sec ->
-    (try Eio.Time.with_timeout_exn clock timeout_sec f with
-     | Eio.Time.Timeout -> raise (Explicit_process_timeout timeout_sec))
+    (match
+       Watched_work.run
+         (fun () -> `Finished (f ()))
+         ~watcher:(fun () ->
+           Eio.Time.sleep clock timeout_sec;
+           `Expired)
+     with
+     | `Finished result -> result
+     | `Expired -> raise (Explicit_process_timeout timeout_sec))
 
 let get_proc_mgr () =
   match Atomic.get runtime_state with
@@ -699,12 +711,13 @@ let reap_proc_with_clock ~sw clock proc =
         (Printexc.to_string exn)
   in
   let await_within_grace () =
-    match
-      Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
-        Ok (Eio.Process.await proc))
-    with
-    | Ok (`Exited _ | `Signaled _) -> `Exited
-    | Error `Timeout -> `Still_running
+    Watched_work.run
+      (fun () ->
+        match Eio.Process.await proc with
+        | `Exited _ | `Signaled _ -> `Exited)
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock child_exit_grace_seconds;
+        `Still_running)
   in
   let escalate_to_sigkill () =
     signal_best_effort Sys.sigkill;

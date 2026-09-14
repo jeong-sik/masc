@@ -25,6 +25,11 @@ let rec remove path =
   | _ -> Unix.unlink path
 ;;
 
+(* [Unix] has no unsetenv, and an empty value is not an absent one: the
+   timeout readers reject "" as malformed. The stub removes the variable, so
+   the case leaves the process environment as it found it. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 (* The shortest override the setting admits; paid once. *)
 let declared_body_timeout_s = Env_config_keeper.KeeperKeepalive.body_timeout_min_sec
 
@@ -64,10 +69,14 @@ let test_the_declared_body_timeout_reaches_a_turn_that_named_none () =
   let base_path = Filename.temp_dir "keeper-body-timeout-override-" "" in
   Config_boot_overrides.reset_for_tests ();
   Keeper_runtime_resolved.reset_for_tests ();
+  let inherited_body_timeout = Sys.getenv_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" in
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime_snapshot;
     Config_boot_overrides.reset_for_tests ();
     Keeper_runtime_resolved.reset_for_tests ();
+    (match inherited_body_timeout with
+     | Some value -> Unix.putenv "MASC_KEEPER_BODY_TIMEOUT_SEC" value
+     | None -> unsetenv "MASC_KEEPER_BODY_TIMEOUT_SEC");
     remove base_path);
   let port, accepted = start_silent_listener ~sw ~net:env#net in
   let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
@@ -89,9 +98,11 @@ max-context = 8192
   (match Runtime.init_default ~config_path with
    | Ok () -> ()
    | Error detail -> fail detail);
-  (* The override is declared the way the operator declares it: in the
-     environment the boot applies, read by the resolved layer. *)
-  Config_boot_overrides.set "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" declared_body_timeout_s);
+  (* The override is declared the way the operator declares it: the setting
+     has no runtime.toml key, so the boot never writes it as an override and
+     the process environment is its only channel. Setting it there also
+     covers whatever the shell running this suite inherited. *)
+  Unix.putenv "MASC_KEEPER_BODY_TIMEOUT_SEC" (Printf.sprintf "%g" declared_body_timeout_s);
   Keeper_runtime_resolved.reset_for_tests ();
   check
     (option (float 0.0001))

@@ -978,6 +978,54 @@ let test_one_dispatch_http_1_0_and_upgrade_semantics () =
   Alcotest.(check int) "101 never parks" 0 switch_stats.total_idle
 ;;
 
+(* A refusing status line whose body never arrives: the status and its
+   Retry-After are the provider's answer, so the total deadline ends the wait
+   for the body with that answer and an empty body, not with a timeout that
+   says the provider was silent. The connection, with the unread body on it,
+   is released and never parked. *)
+let refusal_retry_after_s = 60
+
+let test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal () =
+  let body_timeout_s = 0.3 in
+  let (outcome, stats, elapsed), posts =
+    with_raw_one_dispatch_server
+      ~status:"429 Too Many Requests"
+      ~response_headers:(fun _ ->
+        [ "Content-Length: 64"; Printf.sprintf "Retry-After: %d" refusal_retry_after_s ])
+      ~keep_connection:true
+      ~response_body:""
+    @@ fun ~sw ~net ~clock ~url ->
+    let cache = Http_client.create_cache ~sw () in
+    let started = Eio.Time.now clock in
+    let outcome =
+      Http_client.post_sync_once
+        ~cache
+        ~clock
+        ~net
+        ~url
+        ~headers:[ "Content-Type", "application/json"; "Content-Length", "2" ]
+        ~body:"{}"
+        ~body_timeout_s
+        ()
+    in
+    outcome, Http_client.cache_stats cache, Eio.Time.now clock -. started
+  in
+  (match outcome with
+   | Ok (response : Http_client.raw_sync_response) ->
+     Alcotest.(check int) "the status the peer sent" 429 response.status;
+     Alcotest.(check string) "no body arrived, none is reported" "" response.body;
+     Alcotest.(check (option (float 0.001)))
+       "the Retry-After the peer sent is kept"
+       (Some (float_of_int refusal_retry_after_s))
+       response.retry_after_header
+   | Error _ -> Alcotest.fail "a refusal whose body never came was reported as something else");
+  if elapsed < body_timeout_s
+  then Alcotest.failf "returned at %.2fs, before the %.1fs body deadline" elapsed body_timeout_s;
+  Alcotest.(check int) "refusal POSTs" 1 posts;
+  Alcotest.(check int) "refusal creates once" 1 stats.create_count_total;
+  Alcotest.(check int) "refusal never parks" 0 stats.total_idle
+;;
+
 let test_one_dispatch_body_timeout_covers_response_headers () =
   let (outcome, stats), posts =
     with_raw_one_dispatch_server
@@ -1164,6 +1212,10 @@ let () =
             "body timeout covers response headers"
             `Quick
             test_one_dispatch_body_timeout_covers_response_headers
+        ; Alcotest.test_case
+            "a refusal whose body never arrives is still the refusal"
+            `Quick
+            test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal
         ; Alcotest.test_case
             "caller cancellation identity and cache"
             `Quick

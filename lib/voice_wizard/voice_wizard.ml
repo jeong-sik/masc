@@ -140,6 +140,9 @@ let endpoint_of_draft draft : Voice_config.endpoint =
      executable belongs to the two command kinds, which it does not offer yet,
      and each of those knows the name it is normally installed under. *)
   ; command = None
+  (* On the endpoint, not the section: a second provider added to the same
+     section would otherwise change the model the first one is asked for. *)
+  ; model = optional draft.model
   }
 ;;
 
@@ -147,18 +150,15 @@ let changes draft =
   match gaps draft with
   | _ :: _ as gaps -> Error gaps
   | [] ->
-    let model = String.trim draft.model in
-    (* The section's default_model is set alongside the endpoint, not after it:
-       a section that exists must name one, so an endpoint written on its own
-       would leave a file the loader refuses. *)
+    (* The model travels on the endpoint ({!endpoint_of_draft}), so nothing
+       is written to the section's default_model and the endpoints already
+       there keep the model they had. *)
     let voice =
       match draft.section with
       | Voice_setup.Tts -> [ Voice_setup.Set_tts_default_voice (String.trim draft.voice) ]
       | Voice_setup.Stt -> []
     in
-    Ok
-      ((Voice_setup.Set_default_model (draft.section, model) :: voice)
-       @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
+    Ok (voice @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
 ;;
 
 type step =
@@ -241,6 +241,7 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
+     @ text "model" endpoint.Voice_config.model
      @
      match endpoint.Voice_config.timeout_seconds with
      | Some seconds -> [ "timeout_seconds", `Float seconds ]

@@ -21,6 +21,7 @@ let endpoint command =
   ; timeout_seconds = None
   ; default_voice = None
   ; command = Some command
+  ; model = None
   }
 
 let with_temp_dir f =

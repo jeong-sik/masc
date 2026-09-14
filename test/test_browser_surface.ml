@@ -102,11 +102,14 @@ let with_browser tabs f =
 let request tab_id : Surface.request = { source = Automation; tab_id; client_id=None }
 let read_ok request = match Surface.read request with
   | Ok data -> data | Error detail -> fail detail
+let selection data = Yojson.Safe.Util.member "selection" data
 let test_any_website_selection () =
   with_browser [tab 41 "https://docs.example.org/guide" false;
                 tab 73 "https://app.example.org/dashboard" true] (fun reads ->
-    ignore (read_ok (request None));
-    ignore (read_ok (request (Some 41)));
+    check bool "active tab answer names the selection" true
+      (selection (read_ok (request None)) = `String "active");
+    check bool "requested tab answer names the selection" true
+      (selection (read_ok (request (Some 41))) = `String "requested");
     check (list int) "active tab then explicit tab, independent of website" [41; 73] !reads;
     check bool "closed selected tab fails" true
       (Result.is_error (Surface.read (request (Some 99))));
@@ -116,8 +119,48 @@ let test_empty_browser () =
     let data = read_ok (request None) in
     check bool "empty tabs are a successful empty observation" true
       (Yojson.Safe.Util.member "tabs" data = `List []
-       && Yojson.Safe.Util.member "page" data = `Null);
+       && Yojson.Safe.Util.member "page" data = `Null
+       && selection data = `String "none_active");
     check (list int) "empty browser does not read an arbitrary page" [] !reads)
+
+(* Proves F410: with no requested tab and no active tab the read does not
+   guess the first listed tab. The answer keeps the tab list, says
+   selection = none_active and page = null, and issues no page read. On
+   origin/main this returns tab 41's page and reads it. *)
+let test_no_active_tab_is_not_guessed () =
+  with_browser [tab 41 "https://docs.example.org/guide" false;
+                tab 42 "https://docs.example.org/other" false] (fun reads ->
+    let data = read_ok (request None) in
+    check bool "tab list is still reported" true
+      (Yojson.Safe.Util.(data |> member "tabs" |> to_list |> List.length) = 2);
+    check bool "no active tab yields none_active with a null page" true
+      (selection data = `String "none_active" && Yojson.Safe.Util.member "page" data = `Null);
+    check (list int) "no page read happens for an unmade choice" [] !reads;
+    check bool "requesting one of the inactive tabs still reads it" true
+      (selection (read_ok (request (Some 42))) = `String "requested");
+    check (list int) "only the requested tab was read" [42] !reads)
+
+(* Proves F296: a scene node record without a sourceContext key is a
+   producer defect and fails the scene decode. On origin/main the missing
+   key folds into Browser_source_context.Unmapped and the scene decodes. *)
+let test_scene_node_requires_source_context () =
+  let node fields = `Assoc (["nodeId",`String "n";"kind",`String "text";"tag",`String "p";
+    "text",`String "Body";"color",`String "black";"fontSize",`Int 16;"fontWeight",`String "400";
+    "whiteSpace",`String "normal";
+    "rects",`List [`Assoc ["x",`Int 0;"y",`Int 0;"width",`Int 10;"height",`Int 10]]] @ fields) in
+  let scene node = `Assoc ["schema",`String "masc.browser.scene.v1";"documentId",`String "doc";
+    "url",`String "https://example.org";"title",`String "Page";
+    "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+    "nodes",`List [node];"truncated",`Bool false;"view",`String "content";"scope",`Null] in
+  (match Masc.Browser_scene.of_json (scene (node [])) with
+   | Ok _ -> fail "scene node without sourceContext decoded as unmapped"
+   | Error detail -> check string "missing key is named" "scene missing sourceContext" detail);
+  (match Masc.Browser_scene.of_json (scene (node ["sourceContext",`Null])) with
+   | Ok (scene : Masc.Browser_scene.t) ->
+     check bool "explicit null is the unmapped element" true
+       (List.map (fun (n : Masc.Browser_scene.node) -> n.source_context) scene.nodes
+        = [Masc.Browser_source_context.Unmapped])
+   | Error detail -> fail detail)
 
 let test_capture_identity () =
   check bool "capture requires an explicit tab" true
@@ -285,6 +328,8 @@ let () = run "browser surface" ["behavior",[
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;
+  test_case "no active tab is not guessed" `Quick test_no_active_tab_is_not_guessed;
+  test_case "scene node requires sourceContext" `Quick test_scene_node_requires_source_context;
   test_case "invalid input is refused" `Quick test_strict_input;
   test_case "backend failure is visible" `Quick test_remote_failure;
   test_case "capture target and image identity" `Quick test_capture_identity;

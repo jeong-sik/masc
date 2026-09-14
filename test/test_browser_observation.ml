@@ -16,6 +16,7 @@ let data document text = `Assoc [
   "nodes", `List [`Assoc ["nodeId", `String "message"; "kind", `String "text";
     "tag", `String "p"; "text", `String text; "color", `String "rgb(0,0,0)";
     "fontSize", `Int 16; "fontWeight", `String "400"; "whiteSpace", `String "normal";
+    "sourceContext", `Null;
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 600; "height", `Int 20]]]]]
 let routed json = match json with
   | `Assoc fields -> `Assoc (fields @ ["source",`String "automation";"clientId",`Null])

@@ -14266,7 +14266,8 @@ def run_browser_scene_regression(executable: str) -> None:
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
             "text": text, "rects": [{"x": 0, "y": 0, "width": 100, "height": 20}],
-            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal"}
+            "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400", "whiteSpace": "normal",
+            "sourceContext": None}
         if kind == "control":
             result.update(clickable=True, editable=False, disabled=False)
         return result
@@ -15024,12 +15025,18 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+        for wanted in ("put_endpoint", "set_tts_default_voice"):
             if wanted not in changes:
                 raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        # The model rides on the endpoint. Sent as the section's default it
+        # became the model every other endpoint in the section was asked for.
+        if "set_default_model" in changes:
+            raise AssertionError(f"the save rewrote the section's model: {body!r}")
         endpoint = changes["put_endpoint"].get("endpoint", {})
         if endpoint.get("id") != "pty-endpoint":
             raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
+        if endpoint.get("model") != "eleven_multilingual_v2":
+            raise AssertionError(f"the endpoint lost its model: {endpoint!r}")
         if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":
             raise AssertionError(f"the credential variable was lost: {endpoint!r}")
         # The name of the variable, never its value: runtime.toml is committed.

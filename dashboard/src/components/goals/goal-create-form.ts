@@ -7,6 +7,8 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TextInput } from '../common/input'
 import { ActionButton } from '../common/button'
+import { goalStoreUnavailable } from '../../goal-tree-state'
+import { goalStoreUnavailableSummary } from '../../lib/goal-store-unavailable-labels'
 import {
   showGoalCreate,
   goalCreating,
@@ -73,7 +75,11 @@ export function GoalCreateForm() {
   const isTitleEmpty = !titleSignal.value.trim()
   const isMetricEmpty = !metricSignal.value.trim()
   const isTargetEmpty = !targetSignal.value.trim()
+  // RFC-0444 §2.2: every Goal write is refused while the store cannot be read,
+  // so the form does not offer a submit that the server would reject.
+  const sourceUnavailable = goalStoreUnavailable.value
   const isSubmitDisabled = goalCreating.value || isTitleEmpty || isMetricEmpty || isTargetEmpty
+    || sourceUnavailable !== null
 
   return html`
     <aside
@@ -176,6 +182,14 @@ export function GoalCreateForm() {
             onInput=${(e: Event) => { prioritySignal.value = Number((e.target as HTMLInputElement).value) }}
           />
         </div>
+
+        ${sourceUnavailable ? html`
+          <div class="wk-goal-create-sec">
+            <p class="wk-goal-create-err" role="alert" data-testid="goal-create-source-unavailable">
+              ${goalStoreUnavailableSummary(sourceUnavailable)}
+            </p>
+          </div>
+        ` : null}
 
         ${goalCreateError.value?.kind === 'submit' ? html`
           <div class="wk-goal-create-sec">

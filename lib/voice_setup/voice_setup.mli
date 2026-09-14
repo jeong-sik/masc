@@ -133,10 +133,10 @@ val apply
     actually observed.
 
     All of them or none. Changes are taken as a list rather than one call each
-    because they depend on one another: a first endpoint and the
-    [default_model] its section requires have to land together, and applying
-    them one at a time would refuse the first half and leave the file in a
-    state the loader rejects. *)
+    because they depend on one another: a tts endpoint and the [default_voice]
+    its section requires have to land together, and applying them one at a time
+    would refuse the first half and leave the file in a state the loader
+    rejects. *)
 
 type voice_placement =
   | On_the_section (** the section's default is say's to set: the voice becomes it *)

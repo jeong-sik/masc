@@ -12,8 +12,19 @@ import test_tui_keyboard_input as h
 
 def run(executable):
     fixtures = h.overview_event_http_fixtures()
-    cause = 'goals.json: criterion_revision missing'
-    failure = {'ok': False, 'error_code': 'goal_store_unavailable', 'error': cause}
+    # The RFC-0444 envelope Goal_unavailable_envelope.to_yojson sends (PR-2/PR-3).
+    # The TUI folds it into one line that opens with the reason token; the needle
+    # is one word so neither the header's width cut nor the detail pane's word
+    # wrap can split it.
+    cause = 'reason=schema_rejected'
+    goal_file = '/srv/masc/.masc/goals.json'
+    failure = {
+        'ok': False, 'error_code': 'goal_store_unavailable',
+        'reason': 'schema_rejected', 'field': 'criterion_revision',
+        'file': goal_file,
+        'mirror': {'status': 'mirror_decodes', 'goal_count': 1},
+        'reset_step': 'repair_field',
+    }
     current = [200, failure]
     reads = []
 
@@ -52,6 +63,8 @@ def run(executable):
                 assert b'approval queue store is unreadable' not in screen, screen
                 if scenario == 'source-unavailable':
                     assert b'(no goals)' not in screen, screen
+                if scenario == 'detail-unavailable':
+                    assert ('file=' + goal_file).encode() in screen, screen
             print('GOAL_SOURCE_PTY_EVIDENCE ' + json.dumps({
                 'scenario': scenario, 'http_reads': list(reads), 'rows': 40, 'columns': columns,
                 'binary_sha256': hashlib.sha256(Path(executable).read_bytes()).hexdigest(),

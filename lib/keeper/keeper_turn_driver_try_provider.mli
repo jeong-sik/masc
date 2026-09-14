@@ -37,8 +37,8 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; recovery_view : Keeper_recovery_transmission.t option
-  ; stream_idle_timeout_s : float option
-  ; first_event_timeout_s : float option
+  ; stream_idle_timeout_s : float
+  ; first_event_timeout_s : float
   ; body_timeout_s : float option
   ; provider_call_deadline_sec : float
         (** Seconds a provider attempt may go WITHOUT a progress signal

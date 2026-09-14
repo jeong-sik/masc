@@ -125,8 +125,13 @@ let record_vision_analyze_result ~result ~reason =
 
 (* #35456: candidate start/termination rows join the parent tool call.
    The parent's [tool_use_id] (and trace id when known) is carried down
-   from the dispatch context; the row names the runtime and the outcome
-   only -- never image bytes, prompt text, or credentials. *)
+   from the dispatch context; each row names the runtime and its event
+   only -- never image bytes, prompt text, or credentials. The start row
+   is written when a candidate arm begins, the attempt row when it
+   terminates (ok/error/skipped), and the cancelled row when the parent
+   kills the in-flight provider call -- so the repro's exact shape
+   (start, then a parent cancel minutes later) still leaves the
+   joinable pair. *)
 let record_vision_candidate_attempt
       ?tool_use_id
       ?trace_id
@@ -151,6 +156,61 @@ let record_vision_candidate_attempt
     ~output_text:""
     ~success
     ~duration_ms
+    ?tool_use_id
+    ?trace_id
+    ()
+;;
+
+(* The start row is written when a candidate arm begins, before any provider
+   work, so a parent cancellation that kills the in-flight call still leaves
+   the arm's opening event joined to the parent call. *)
+let record_vision_candidate_start
+      ?tool_use_id
+      ?trace_id
+      ~runtime_id
+      ~attempt_index
+      ~candidate_count
+      () =
+  Keeper_tool_call_log.log_call
+    ~keeper_name:"system"
+    ~tool_name:"vision_candidate"
+    ~input:(`Assoc
+              [ "runtime_id", `String runtime_id
+              ; "result", `String "started"
+              ; "attempt_index", `Int attempt_index
+              ; "candidate_count", `Int candidate_count
+              ])
+    ~output_text:""
+    ~success:true
+    ~duration_ms:0.0
+    ?tool_use_id
+    ?trace_id
+    ()
+;;
+
+(* The cancelled row terminates a candidate whose provider call the parent
+   killed. Without it the walk's cancellation left no row at all: the start
+   row said the candidate began and nothing ever said how it ended. *)
+let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionCandidateAttempts)
+    ~labels:
+      [ "runtime_id", runtime_id
+      ; "result", "cancelled"
+      ; "reason", "parent_cancelled"
+      ]
+    ();
+  Keeper_tool_call_log.log_call
+    ~keeper_name:"system"
+    ~tool_name:"vision_candidate"
+    ~input:(`Assoc
+              [ "runtime_id", `String runtime_id
+              ; "result", `String "cancelled"
+              ; "reason", `String "parent_cancelled"
+              ])
+    ~output_text:""
+    ~success:false
+    ~duration_ms:0.0
     ?tool_use_id
     ?trace_id
     ()
@@ -580,6 +640,7 @@ let run_candidates_outcome
     candidates
   =
   let cache = Hashtbl.create 4 in
+  let candidate_count = List.length candidates in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
       (* The walk's outcome is the last candidate's: what ended it. A verdict
@@ -599,20 +660,29 @@ let run_candidates_outcome
            ; detail = Provider_http_error.to_message err
            })
     | (runtime_id, rt, Official_client) :: rest ->
+      record_vision_candidate_start
+        ?tool_use_id ?trace_id ~runtime_id ~attempt_index
+        ~candidate_count ();
       let result = match base_path with
         | None -> Error (Fusion_official_client.Setup_failure (Fusion_types.Provider_error
             "official-client image analysis requires the workspace base path"))
         | Some base_dir ->
-          Fusion_official_client.run_with_images ~base_dir ~runtime:rt
-            ~system_prompt:vision_output_instruction
-            ~prompt:(prompt_of_request req)
-            ~images:[{ Fusion_official_client.media_type = req.image_media_type;
-                       base64_data = Base64.encode_string req.image_bytes }]
-            ~output_schema:(`Assoc [
-              "type", `String "object";
-              "properties", `Assoc ["text", `Assoc ["type", `String "string"]];
-              "required", `List [`String "text"];
-              "additionalProperties", `Bool false]) () in
+          (try
+             Fusion_official_client.run_with_images ~base_dir ~runtime:rt
+               ~system_prompt:vision_output_instruction
+               ~prompt:(prompt_of_request req)
+               ~images:[{ Fusion_official_client.media_type = req.image_media_type;
+                          base64_data = Base64.encode_string req.image_bytes }]
+               ~output_schema:(`Assoc [
+                 "type", `String "object";
+                 "properties", `Assoc ["text", `Assoc ["type", `String "string"]];
+                 "required", `List [`String "text"];
+                 "additionalProperties", `Bool false]) ()
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             record_vision_candidate_cancelled
+               ?tool_use_id ?trace_id ~runtime_id ();
+             raise exn) in
       (match result with
        | Error failure ->
          record_vision_candidate_attempt
@@ -646,6 +716,9 @@ let run_candidates_outcome
               (Printf.sprintf "%s: %s" runtime_id detail)))
               ~attempt_index:(attempt_index + 1) rest))
     | (runtime_id, rt, Api provider_config) :: rest ->
+      record_vision_candidate_start
+        ?tool_use_id ?trace_id ~runtime_id ~attempt_index
+        ~candidate_count ();
       let continue_with last_error =
         (if not (List.is_empty rest)
          then sleep_before_next_candidate ~clock ~attempt_index);
@@ -681,8 +754,14 @@ let run_candidates_outcome
              rest
          | Ok fitted ->
         (match
-           Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-             ~config ~messages:[ message_of_request fitted ] ()
+           (try
+              Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
+                ~config ~messages:[ message_of_request fitted ] ()
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+              record_vision_candidate_cancelled
+                ?tool_use_id ?trace_id ~runtime_id ();
+              raise exn)
          with
        | Error (Llm_provider.Http_client.TimeoutError _) ->
             record_vision_candidate_attempt

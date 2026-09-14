@@ -73,8 +73,10 @@ type options =
   ; first_event_timeout_s : float option
     (** Agent Core contract: dedicated bound for the time-to-first-event
         (TTFT / prefill) wait, distinct from [stream_idle_timeout_s].
-        This is one window from the first body read to the first
-        token-bearing event; [stream_idle_timeout_s] arms only after it
+        This is one window from the request to the first token-bearing
+        event, connection and response headers included; the phase before
+        the headers runs under it (or under a narrower connect budget) and
+        the reader arms what it leaves; [stream_idle_timeout_s] arms only after it
         (inter-token idle). A provider's opening frame, such as Responses
         [response.created] or Anthropic [message_start], neither ends the
         window nor extends it. A silent prefill on a large context is a

@@ -126,7 +126,7 @@ let run_client ~clock ~net ~port =
             ~url:(Printf.sprintf "http://127.0.0.1:%d/v1/chat/completions" port)
             ~headers:[ "content-type", "application/json" ]
             ~body:"{}"
-            ~f:(fun reader ->
+            ~f:(fun ~pre_header_elapsed_s:_ reader ->
               Http_client.read_sse
                 ~clock
                 ~idle_timeout:idle_timeout_s
@@ -241,7 +241,7 @@ let test_close_before_response_is_typed_eof () =
             ~url:(Printf.sprintf "http://127.0.0.1:%d/v1/chat/completions" port)
             ~headers:[ "content-type", "application/json" ]
             ~body:"{}"
-            ~f:(fun _reader -> ())
+            ~f:(fun ~pre_header_elapsed_s:_ _reader -> ())
             ())
       with
       | Eio.Time.Timeout -> Alcotest.fail "with_post_stream hung on a closed peer"

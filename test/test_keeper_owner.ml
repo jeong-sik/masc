@@ -2304,7 +2304,7 @@ let run_observed_control_with_request_owned_stalled_http ~interactive =
       try
         ignore (Llm_provider.Http_client.with_post_stream ~net:env#net
           ~url:(Printf.sprintf "http://127.0.0.1:%d/stream" port)
-          ~headers:[] ~body:"" ~f:(fun reader ->
+          ~headers:[] ~body:"" ~f:(fun ~pre_header_elapsed_s:_ reader ->
             Eio.Promise.resolve mark_body_started ();
             ignore (Eio.Buf_read.line reader)) ())
       with Eio.Cancel.Cancelled _ as exn ->

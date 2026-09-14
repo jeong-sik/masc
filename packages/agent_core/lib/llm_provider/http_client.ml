@@ -2499,9 +2499,10 @@ type pre_header_budget =
    request and the wait for the status line -- runs under the narrower of
    the connect budget and the first-event budget. The first-event budget is
    the operator's word on how long a provider may stay silent before its
-   first token, and silence before the headers is that silence; the
-   reader's own first-event window is anchored at the first body read, which
-   a server that accepts the request and never answers never reaches. DNS
+   first token, and silence before the headers is that silence: what this
+   phase spends of it is handed to the reader, which arms the rest, so the
+   budget is one window from the request to the first token. A server that
+   accepts the request and never answers never reaches the reader. DNS
    is the one step the window cannot end: [getaddrinfo] runs in a systhread
    with no cancellation, so a closed window is observed once the lookup
    returns, and the resolver's own timeout is the bound until then. *)
@@ -2571,6 +2572,13 @@ let with_post_stream
   let deadline, pre_header_budget =
     pre_header_deadline ~connect:connect_deadline ~first_event:first_event_deadline
   in
+  (* When the request's window opens, on the clock the budgets are counted
+     on. What the pre-header phase spends of the first-event budget is
+     handed to [f], so the reader arms the rest of that budget and not a
+     second full one: the budget is one window from here to the first
+     token. Without a clock no budget is armed anywhere and the elapsed time
+     is not read. *)
+  let opened_at = Option.map Eio.Time.now clock in
   Eio.Switch.run
   @@ fun sw ->
   (* When a cache is active, bind the transport to the cache's long-lived
@@ -2736,8 +2744,13 @@ let with_post_stream
      The connection is parked back into the cache only after [f] returns
      successfully, ensuring the reader is no longer using the flow. *)
   let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
+  let pre_header_elapsed_s =
+    match clock, opened_at with
+    | Some clock, Some opened_at -> Eio.Time.now clock -. opened_at
+    | None, _ | _, None -> 0.0
+  in
   let body_result =
-    try Ok (f reader) with
+    try Ok (f ~pre_header_elapsed_s reader) with
     | Eio.Time.Timeout ->
       (* Body-phase timeout. Stream-state-aware callers ([Complete_stream])
            catch this inside [f] and emit the precise [First_token] /

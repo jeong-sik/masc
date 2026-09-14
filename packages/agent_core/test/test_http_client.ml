@@ -626,7 +626,7 @@ let test_http_deadlines_without_clock_are_rejected () =
        ~url:"http://"
        ~headers:[]
        ~body:"{}"
-       ~f:(fun _reader -> ())
+       ~f:(fun ~pre_header_elapsed_s:_ _reader -> ())
        ())
 ;;
 

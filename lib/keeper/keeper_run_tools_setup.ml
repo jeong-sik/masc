@@ -500,7 +500,34 @@ let prepare_agent_setup
   in
   let* historical_tool_calls =
     match repetition_execution with
-    | None -> Ok (initial_tool_calls ~history_messages)
+    | None ->
+      (* The autonomous lane, seeded from the whole checkpoint history --
+         less what a previous repetition yield already judged
+         ([Keeper_repetition_judged]). The previous stop is the cycle's own
+         record: a [Repeated_tool_call] checkpoint moves the boundary to the
+         history as it stands now, and any other stop leaves it. *)
+      let source = Keeper_context_core.agent_core_context_of_context ctx_work in
+      let* judged =
+        Keeper_repetition_judged.restore ~source ~target:shared_context
+        |> Result.map_error (fun error ->
+             Agent_core.Error.Internal (Keeper_repetition_judged.error_to_string error))
+      in
+      let pairs = initial_tool_calls ~history_messages in
+      let judged =
+        match
+          Keeper_last_turn_stop.get ~base_path:config.Workspace.base_path ~keeper:meta.name
+        with
+        | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call _) ->
+          let total = List.length pairs in
+          Keeper_repetition_judged.record shared_context total;
+          total
+        | Some
+            ( Keeper_turn_checkpoint_reason.Repeated_assistant_text _
+            | Keeper_turn_checkpoint_reason.Operation_queued
+            | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived )
+        | None -> judged
+      in
+      Ok (Keeper_repetition_judged.seed_beyond ~judged pairs)
     | Some execution ->
       Keeper_repetition_scope.Execution.prepare execution
         ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)

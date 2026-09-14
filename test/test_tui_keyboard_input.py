@@ -10250,7 +10250,14 @@ def keeper_lanes_ia_interaction(
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
-            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
+            # The two sentences that used to sit here said the same thing on
+            # every lane -- the file's shape, and that [e] opens it -- so
+            # #36370 moved them under [?] beside the key that acts on them and
+            # left this pane the rows only this lane can fill. That this pane
+            # no longer repeats them is pinned by
+            # test_tui_lane_detail_says_what_the_lane_answers, which is the
+            # suite an edit to the lane detail selects; this walk asks for the
+            # rows that stayed.
             "Output meaning: the accepted candidate judgment JSON.",
             "Evidence: structured-output generation, not a MASC tool loop;",
         ):

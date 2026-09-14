@@ -10,6 +10,7 @@
   test_config_coverage
   test_progress_coverage
   test_mcp_protocol_coverage
+  test_notify_coverage
   test_mcp_session_coverage
   test_sse_coverage
   test_workspace_utils_coverage
@@ -48,6 +49,7 @@
   test_config_coverage
   test_progress_coverage
   test_mcp_protocol_coverage
+  test_notify_coverage
   test_mcp_session_coverage
   test_sse_coverage
   test_workspace_utils_coverage

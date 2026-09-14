@@ -1014,7 +1014,7 @@ let test_a_yield_records_the_pairs_it_judged () =
   let live = [ tool_call "Read"; tool_call "Grep"; tool_call "Read" ] in
   check int "setup pairs plus the run's fingerprinted calls" 44
     (judged ~history_pairs_at_setup:41 live);
-  check int "a call without an output fingerprint is not a pair" 43
+  check int "a call without an output fingerprint is not a pair" 44
     (judged ~history_pairs_at_setup:41 (tool_call ~output:None "Execute" :: live));
   check int "a run with no calls records what it was set up over" 41
     (judged ~history_pairs_at_setup:41 []);

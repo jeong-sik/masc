@@ -137,6 +137,19 @@ let with_permit t f =
   Fun.protect f ~finally:(fun () -> release_slot t)
 ;;
 
+let with_permit_until ~clock ~deadline_at t f =
+  let remaining = deadline_at -. Eio.Time.now clock in
+  if Float.compare remaining 0.0 <= 0
+  then Error `Permit_wait_expired
+  else (
+    (* [acquire] is cancel-safe: a waiter cancelled by the timer leaves the
+       queue, and one granted in the same instant returns its slot, so
+       nothing leaks when the wait ends here. *)
+    match Eio.Time.with_timeout clock remaining (fun () -> Ok (acquire t)) with
+    | Error `Timeout -> Error `Permit_wait_expired
+    | Ok () -> Ok (Fun.protect f ~finally:(fun () -> release_slot t)))
+;;
+
 let queue_length t = Eio.Mutex.use_ro t.mutex (fun () -> t.waiters.length)
 
 (* ── Capacity Query ───────────────────────────── *)

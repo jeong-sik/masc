@@ -75,6 +75,7 @@ let complete_prepared_sync
       ?(connection_cache : Http_client.cache option)
       ?(metrics : Metrics.t option)
       ?body_timeout_s
+      ?call_timeout_s
       ?request_wire_observer
       ?admitted_body
       ()
@@ -98,15 +99,26 @@ let complete_prepared_sync
     match validation with
     | Error err -> Error err
     | Ok () ->
-      Http_client.resolve_explicit_deadline
-        ~operation:"Complete.complete"
-        ~parameter:"body_timeout_s"
-        ~clock
-        ~timeout_s:body_timeout_s
+      (match
+         Http_client.resolve_explicit_deadline
+           ~operation:"Complete.complete"
+           ~parameter:"body_timeout_s"
+           ~clock
+           ~timeout_s:body_timeout_s
+       with
+       | Error err -> Error err
+       | Ok body_deadline ->
+         Result.map
+           (fun call_deadline -> body_deadline, call_deadline)
+           (Http_client.resolve_explicit_deadline
+              ~operation:"Complete.complete"
+              ~parameter:"call_timeout_s"
+              ~clock
+              ~timeout_s:call_timeout_s))
   in
   match preflight with
   | Error err -> Error err
-  | Ok body_deadline ->
+  | Ok (body_deadline, call_deadline) ->
     let m =
       match metrics with
       | Some m -> m
@@ -190,8 +202,58 @@ let complete_prepared_sync
        let { Llm_transport.response = result; latency_ms } =
          (* The permit spans the full provider round-trip; cache hits above
             never take one. Waiting for a permit is queueing, not part of the
-            provider interaction, so body_timeout_s does not cover it. *)
-         Provider_admission.with_admission ~config:request_config dispatch
+            provider interaction, so body_timeout_s does not cover it.
+            call_timeout_s is the caller's bound on the whole call: it ends a
+            wait for the permit as [Queue], and bounds the round trip with
+            what the wait left, as [Non_streaming_body]. A declared
+            body_timeout_s still arms inside it, so the narrower bound fires
+            and names its own knob. *)
+         match call_deadline with
+         | Http_client.Unbounded ->
+           Provider_admission.with_admission ~config:request_config dispatch
+         | Http_client.Bounded (call_clock, call_timeout_s) ->
+           let call_deadline_exceeded ~phase ~stage =
+             { Llm_transport.response =
+                 Error
+                   (Http_client.TimeoutError
+                      { message =
+                          Printf.sprintf
+                            "call_timeout_s deadline exceeded after %.17gs %s                              (Complete.complete)"
+                            call_timeout_s
+                            stage
+                      ; phase
+                      })
+             ; latency_ms = None
+             }
+           in
+           let queue_expired () =
+             call_deadline_exceeded
+               ~phase:Http_client.Queue
+               ~stage:"before a provider admission permit was granted"
+           in
+           let deadline_at = Eio.Time.now call_clock +. call_timeout_s in
+           (match
+              Provider_admission.with_admission_until
+                ~clock:call_clock
+                ~deadline_at
+                ~config:request_config
+                (fun () ->
+                   let remaining = deadline_at -. Eio.Time.now call_clock in
+                   if Float.compare remaining 0.0 <= 0
+                   then queue_expired ()
+                   else (
+                     match
+                       Eio.Time.with_timeout call_clock remaining (fun () ->
+                         Ok (dispatch ()))
+                     with
+                     | Ok transport_result -> transport_result
+                     | Error `Timeout ->
+                       call_deadline_exceeded
+                         ~phase:Http_client.Non_streaming_body
+                         ~stage:"during the provider round trip"))
+            with
+            | Ok transport_result -> transport_result
+            | Error `Permit_wait_expired -> queue_expired ())
        in
        (* HTTP-backed transports bypass complete_http, so emit the status
          here using the transport result. Non-HTTP CLI transports must
@@ -282,6 +344,7 @@ let complete
       ?connection_cache
       ?metrics
       ?body_timeout_s
+      ?call_timeout_s
       ?capture_id
       ?request_wire_observer
       ()
@@ -297,6 +360,7 @@ let complete
     ?connection_cache
     ?metrics
     ?body_timeout_s
+    ?call_timeout_s
     ?request_wire_observer
     ()
 ;;
@@ -311,6 +375,7 @@ let complete_admitted
       ?connection_cache
       ?metrics
       ?body_timeout_s
+      ?call_timeout_s
       ?request_wire_observer
       ()
   =
@@ -326,6 +391,7 @@ let complete_admitted
     ?connection_cache
     ?metrics
     ?body_timeout_s
+    ?call_timeout_s
     ?request_wire_observer
     ()
 ;;
@@ -340,6 +406,7 @@ let complete_serialized
       ?connection_cache
       ?metrics
       ?body_timeout_s
+      ?call_timeout_s
       ?request_wire_observer
       ()
   =
@@ -354,6 +421,7 @@ let complete_serialized
     ?connection_cache
     ?metrics
     ?body_timeout_s
+    ?call_timeout_s
     ?request_wire_observer
     ()
 ;;

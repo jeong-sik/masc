@@ -192,6 +192,7 @@ val complete
   -> ?connection_cache:Http_client.cache
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
+  -> ?call_timeout_s:float
   -> ?capture_id:string
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
@@ -210,6 +211,7 @@ val complete_admitted
   -> ?connection_cache:Http_client.cache
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
+  -> ?call_timeout_s:float
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
@@ -227,6 +229,7 @@ val complete_serialized
   -> ?connection_cache:Http_client.cache
   -> ?metrics:Metrics.t
   -> ?body_timeout_s:float
+  -> ?call_timeout_s:float
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
   -> (Types.api_response, Http_client.http_error) result
@@ -238,9 +241,19 @@ val complete_serialized
     is called. When [config.max_concurrent_requests] is declared and the
     endpoint is saturated, the wait for a permit is FIFO queueing and is
     unbounded by this value, so a caller that sets 30 seconds can still wait
-    longer than that in total. There is no parameter that bounds the queueing
-    as well; a caller needing a wall-clock ceiling over both has to impose it
-    itself (#27888). The contract is validated before
+    longer than that in total.
+
+    [call_timeout_s] bounds both, in seconds from the call: the wait for the
+    admission permit and the round trip after it. It must be finite and
+    greater than zero and requires [clock]. When the permit is not granted in
+    time the result is [Error (TimeoutError { phase = Queue; _ })], no request
+    was sent, and the waiter has left the FIFO. After the permit the round
+    trip runs under what the wait left and ends as
+    [Error (TimeoutError { phase = Non_streaming_body; _ })]. A declared
+    [body_timeout_s] still arms inside it, so whichever bound is narrower
+    fires and its message names that parameter (#27888).
+
+    Both contracts are validated before
     cache lookup, so an invalid value or missing clock is rejected as [Error
     (AcceptRejected _)] even when a cached response exists.
 

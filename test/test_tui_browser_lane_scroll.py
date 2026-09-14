@@ -11,6 +11,18 @@ import sys
 import time
 import test_tui_keyboard_input as h
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# The palette row this types ("go Browser Lane") is masc_tui_types.ml's.
+# masc_tui_render.ml is named for the surface rather than for a word: what
+# this walk measures is where the lane's rows land, which render_browser_lane
+# decides.
+SOURCE_MODULES = (
+    "bin/masc_tui_types.ml",
+    "bin/masc_tui_render.ml",
+)
+
 CLIENT = "11111111-1111-4111-8111-111111111111"
 URL = "https://example.org/scene"
 NODE_COUNT = 200

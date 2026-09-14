@@ -14,6 +14,16 @@ import zlib
 
 import test_tui_keyboard_input as h
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# The surface title is masc_tui_render.ml's; the section it reads
+# ("Gate Governance") masc_tui_render_metrics.ml's.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_metrics.ml",
+)
+
 
 def run(executable: str) -> None:
     fixtures = h.blocked_gate_detail_http_fixtures()

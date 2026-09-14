@@ -12,6 +12,18 @@ from pathlib import Path
 
 import test_tui_keyboard_input as terminal
 
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
+# a suite when a pull request changes a path the suite names, so without
+# this a change to the drawn text below reaches main with no scenario run.
+# Three surface titles are masc_tui_render.ml's, the "PARTIAL" badge
+# masc_tui_lane_addons.ml's, and the palette row this types
+# ("go Lane Add-ons") masc_tui_types.ml's.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+    "bin/masc_tui_lane_addons.ml",
+    "bin/masc_tui_types.ml",
+)
+
 
 def snapshot() -> dict:
     owner = "35e30f7a-66d1-4e44-a4ed-762be081ee91"

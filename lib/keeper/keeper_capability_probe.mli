@@ -163,7 +163,7 @@ val invocation_error_to_string : invocation_error -> string
 val probe_invocation
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> now:(unit -> float)
   -> runtime_id:string
   -> tool:string

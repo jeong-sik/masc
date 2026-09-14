@@ -66,7 +66,7 @@ let test_keeper_capture () =
       ignore (Msx_lane.eject ());
       check bool "no machine fails" true
         (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false);
-      (match Msx_lane.load ~ledger_dir:(Filename.concat base "ledger") ~roms_dir:""
+      (match Msx_lane.load ~ledger_dir:(Filename.concat base "ledger") ~roms_dir:None
          ~cart_path:None ~disk_path:None with Ok _ -> () | Error e -> fail (Msx_lane.error_to_string e));
       let before = match Msx_lane.capture () with Ok value -> value | Error _ -> fail "no capture" in
       let result = screen () in

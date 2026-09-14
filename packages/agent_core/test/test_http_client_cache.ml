@@ -569,7 +569,7 @@ let test_stream_connection_close_does_not_park () =
          ~f:(fun reader ->
            Http_client.read_sse ~reader ~on_data:(fun ~event_type:_ _ ->
              incr seen;
-             Http_client.Continue) ();
+             Http_client.Continue Http_client.Output) ();
            Ok ())
          ()
      with

@@ -13,6 +13,12 @@ seed_gh_hosts() {
   local keeper="$1"
   [[ -n "${GH_TOKEN:-}" ]] || return 0
   install -d -m 0700 "/root/${keeper}/.config/gh"
+  # Canonical gh hosts.yml shape (measured 2026-09-14): a `github.com:` root
+  # with nested user/oauth_token/git_protocol parses cleanly, while a
+  # template littered with `[REDACTED]` literals makes gh itself die with
+  # "invalid config file ... invalid format" — which remote_ssh preflight
+  # (gh auth status) treats as remote_github_identity_missing. Keep this
+  # shape invariant when touching the template.
   printf 'github.com:\n    user: %s\n    oauth_token: %s\n    git_protocol: https\n' \
     "bench-${keeper}" "${GH_TOKEN}" > "/root/${keeper}/.config/gh/hosts.yml"
   chmod 600 "/root/${keeper}/.config/gh/hosts.yml"

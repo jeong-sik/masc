@@ -135,6 +135,8 @@ if [[ -d "$tool_log_dir" ]]; then
   # output blobs, and `jq -s` materializes all of them just to take a length.
   # Equivalent under the same guard: verified on a synthetic store — clean
   # N, malformed-mixed and empty all agree, pipefail keeps the 0-degrade.
+  # Invariant (measured 2026-09-14): the count must stay a stream — swapping
+  # in `jq -s 'length'` re-materializes every multi-KB blob per episode.
   tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -c . | wc -l | tr -d ' ')" \
     || tool_calls=0
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \

@@ -222,7 +222,7 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
       }
     in
     let body =
-      match Voice_wizard.save_request draft ~revision:(revision ~base_path) with
+      match Voice_wizard.save_request draft ~revision:(revision ~base_path) ~alongside:[] with
       | Ok body -> body
       | Error gaps ->
         Alcotest.failf "the draft should be complete: %s"

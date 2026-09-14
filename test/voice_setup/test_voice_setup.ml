@@ -425,19 +425,42 @@ default_model = "eleven_multilingual_v2"
 default_voice = "SAz9YHcvj6GT2YYXdXww"
 |}
 
+(* Annotated: several record types in Voice_config carry [endpoints], and
+   without this the field resolves to the last one declared. *)
+let kinds_of (section : Voice_config.tts_config) =
+  List.map
+    (fun (endpoint : Voice_config.endpoint) -> Some endpoint.Voice_config.kind)
+    section.Voice_config.endpoints
+
 let test_a_local_voice_goes_where_its_default_is_not_someone_elses () =
-  let placed section =
-    Voice_setup.voice_placement section = Voice_setup.On_the_section
+  let placed ?(adding = Voice_config.Macos_say) alongside =
+    Voice_setup.voice_placement ~alongside ~adding = Voice_setup.On_the_section
   in
-  Alcotest.(check bool) "no section yet: the section default" true (placed None);
+  Alcotest.(check bool) "no section yet: the section default" true (placed []);
   Alcotest.(check bool)
     "a section only say is in -- including one an earlier run wrote: the section default"
     true
-    (placed (Some (tts_section_of say_only_section)));
+    (placed (kinds_of (tts_section_of say_only_section)));
   Alcotest.(check bool)
     "a section another provider shares: on the endpoint"
     false
-    (placed (Some (tts_section_of say_beside_another_provider)))
+    (placed (kinds_of (tts_section_of say_beside_another_provider)));
+  (* The mirror. The rule is whether the section default is this endpoint's
+     vocabulary, not whether say is involved: a section of ElevenLabs
+     endpoints owns its default the same way, and a say endpoint arriving in
+     it must not overwrite a 20-character id with a label. *)
+  Alcotest.(check bool)
+    "a section of one other provider, and one more of it: the section default"
+    true
+    (placed ~adding:Voice_config.Elevenlabs_direct
+       [ Some Voice_config.Elevenlabs_direct ]);
+  Alcotest.(check bool)
+    "say arriving beside another provider: on the endpoint"
+    false
+    (placed [ Some Voice_config.Elevenlabs_direct ]);
+  (* A kind this binary cannot name is not a kind it can claim shares a
+     vocabulary. *)
+  Alcotest.(check bool) "an unreadable kind: on the endpoint" false (placed [ None ])
 ;;
 
 (* The loader reads the standalone JSON when runtime.toml has no [voice]

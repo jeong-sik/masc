@@ -24,12 +24,13 @@ let slack_s = 2.5
 (* Accepts one connection and never writes a byte: the TCP handshake
    completes, whatever the peer sends is read and dropped, and no status
    line ever follows. Returns when the peer goes away, which is what the
-   client's budget does. *)
+   client's budget does. A daemon, so a case in which nothing dials it does
+   not hold the switch open on the accept. *)
 let start_silent_server ~sw ~net =
   let listening =
     Eio.Net.listen ~sw ~backlog:5 ~reuse_addr:true net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
   in
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
       let buf = Cstruct.create 4096 in
       try
@@ -37,7 +38,8 @@ let start_silent_server ~sw ~net =
           ignore (Eio.Flow.single_read flow buf)
         done
       with
-      | End_of_file | Eio.Io _ -> ()));
+      | End_of_file | Eio.Io _ -> ());
+    `Stop_daemon);
   match Eio.Net.listening_addr listening with
   | `Tcp (_, port) -> port
   | `Unix _ -> invalid_arg "expected a TCP listening socket"
@@ -127,12 +129,14 @@ let test_a_silent_server_ends_the_sync_call_at_the_connect_budget () =
 ;;
 
 (* A budget the caller cannot enforce is refused before any byte is sent,
-   as the streaming path refuses it, rather than dropped. *)
+   as the streaming path refuses it, rather than dropped. Nothing listens on
+   the port: had the client dialled, the result would be a NetworkError. *)
+let closed_port = 9
+
 let test_a_connect_budget_without_a_clock_is_refused_before_dispatch () =
   with_env
   @@ fun ~sw ~clock:_ ~net ->
-  let port = start_silent_server ~sw ~net in
-  let config = config_for ~port ~connect_timeout_s:(Some connect_budget_s) in
+  let config = config_for ~port:closed_port ~connect_timeout_s:(Some connect_budget_s) in
   match complete ~sw ~net ~config () with
   | Error (Http_client.AcceptRejected { reason }) ->
     Alcotest.(check string)

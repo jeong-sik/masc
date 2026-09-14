@@ -9,6 +9,7 @@
 - Browser Lane TUI: `J`/`K` scroll the page from the text reader with URL and document identity checks, an observed tab can be opened directly instead of cycling, and a refreshed scene shows its scroll offset and what changed since the previous observation (#36016, #36069, #36070, #36071).
 - Browser Lane TUI: the scene text renders observed heading levels, keeps block spacing, joins inline fragments of one block into one row, keeps the selected region's role and label through scroll, click and copied context, and the status line counts articles, other regions, links, controls and images instead of raw nodes (#36040, #36042, #36044, #36061, #36036, #36038).
 - Goals: `masc_goal_list`, `masc_goal_transition`, `masc_goal_upsert` and the goal HTTP routes answer an unreadable goal store with a typed `goal_store_unavailable` error instead of an empty list, `not_found` or an internal error (#36060).
+- Lanes: the overview draws lanes as one header row and measured columns, so failure counts stay on screen beside the Activity pane (#36062).
 - Lanes: the TUI guides subscribing a Keeper to retained output references and shows the output position each subscription has acknowledged (#36007).
 
 ### Fixed
@@ -21,6 +22,7 @@
 - Keeper: a failed stream is reported once. A stream timeout quarantines its open tool block like every other attempt failure, an incomplete or repeating stream no longer adds a second diagnostic, and a close cancelled while the event bus is full leaves the bus closable (#36027, #36048, #36024).
 - Keeper: a keeper with no `keepers/<name>.toml` fails to load with `Declaration_not_found` instead of booting on empty defaults, and a `tools.deny` entry that names no model-visible tool refuses the load instead of logging a warning at turn setup (#36066).
 - Runtime: a Gemini or Vertex Gemini provider's capabilities are looked up only under its declared provider id. An operator's own catalog row is no longer hidden by the bare `gemini` row, and a Gemini provider with no row of its own now stops at the boot capability check like every other API format instead of borrowing that row (#36080).
+- Anthropic: a model with no thinking policy in the catalog or manifest is sent as having none, instead of being given the adaptive default policy (#36081).
 - Runtime: setup reads `masc runtime-verify` output through the verification type instead of comparing string fields, and keeps the reason a verification child process failed (#36065).
 - Sandbox: a declaration error says whether `imp.toml` could not be read or is invalid, with the underlying reason, instead of one of two fixed sentences; a microVM profile that names no backend is refused rather than given `Apple_container` because of the host (#36053).
 - Keeper: a lifecycle reservation that is gone when a removal releases it is reported as a removal conflict rather than as removed (#36033).
@@ -30,6 +32,7 @@
 - TUI: the Board draft footers come from the key table and its pane row stays on the draft; the Task Review title states a full page's count once; the Planning rollup counts only phases that have goals (#36049, #36047, #36015).
 - TUI: the Fusion detail footer names `K` and `B`, which the detail already answered, and the run list row states only the run's own progress, failure or retained evidence (#36055).
 - Browser Lane TUI: a paragraph with two or more inline elements reads as one row again (#36077).
+- TUI: the Approvals title counts only the kinds that have rows; a verification request's Created uses the terminal clock and its reading note wraps; a keeper's Last 24h draws no zeros when no metrics rows were read; the Memory detail blocks start their values in one column (#36079, #36064, #36085, #36083).
 - TUI: the Overview names its cluster and project without padding, the Config paths row keeps the binary age and the tail of each path, and the acting pane stays off both Activity tabs (#36012, #36025, #36018).
 
 ### Documentation

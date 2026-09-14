@@ -35,10 +35,20 @@ let clear name =
 let reset_for_tests () =
   Atomic.set table StringMap.empty
 
+type source =
+  | Env
+  | Boot_override
+  | Default
+
 let source name =
   match Sys.getenv_opt name with
-  | Some _ -> "env"
+  | Some _ -> Env
   | None ->
       (match get_opt name with
-       | Some _ -> "boot_override"
-       | None -> "default")
+       | Some _ -> Boot_override
+       | None -> Default)
+
+let source_to_string = function
+  | Env -> "env"
+  | Boot_override -> "boot_override"
+  | Default -> "default"

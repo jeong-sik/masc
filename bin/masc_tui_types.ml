@@ -2618,6 +2618,20 @@ type config_pane =
           fails to parse looks identical to one that was never written. That
           distinction cost six days once. *)
 
+(* The panes in the order the Config title lists them, with the names it
+   gives them. One list for the two places a pane is named: the strip on the
+   Config title, and the palette, which offered only "settings" and so could
+   not reach runtime.toml, models, prompts, presets, themes or voice at all. *)
+let config_panes =
+  [ (Config_runtime, "runtime.toml")
+  ; (Config_models, "models")
+  ; (Config_params, "params")
+  ; (Config_prompts, "prompts")
+  ; (Config_presets, "presets")
+  ; (Config_themes, "themes")
+  ; (Config_voice, "voice")
+  ]
+
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
    surface, which is one row per tool. At ninety-five tools that list ran to
@@ -8884,6 +8898,12 @@ let palette_entries (state : state) =
   @ [ "go Code", Palette_goto Code ]
   @ [ "go Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
+  (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
+     under Keepers behind [f], and the palette is where a destination is
+     reached by name when the key path to it is not known. Changes follows the
+     keeper selected on Keepers and says so when there is none. *)
+  @ [ "go Runtime", Palette_goto Runtime ]
+  @ [ "go Changes", Palette_goto Changes ]
   @ (match browser_lane_on_screen state with
       | None -> []
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
@@ -8895,6 +8915,12 @@ let palette_entries (state : state) =
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
+  (* After the ring, so "go config" still leads with the Config surface: the
+     ranks tie on a label that starts with the query, and a tie keeps entry
+     order. *)
+  @ List.map
+      (fun (pane, label) -> ("go Config / " ^ label, Palette_config pane))
+      config_panes
   @ List.map
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))

@@ -383,9 +383,16 @@ self_test() {
         esac
       done
       # The shared dispatcher is not a reason to launch the entire keyboard
-      # suite. Only explicitly attributed focused PTY scenarios belong here.
-      case " ${got} " in
-        *" test/test_tui_keyboard_input.py "*) matches=false ;;
+      # suite. Only explicitly attributed focused PTY scenarios belong here --
+      # and a source the walk itself names is that attribution, so a check that
+      # asks for the walk is asking about the attribution and keeps it.
+      case " ${want} " in
+        *" test/test_tui_keyboard_input.py "*) ;;
+        *)
+          case " ${got} " in
+            *" test/test_tui_keyboard_input.py "*) matches=false ;;
+          esac
+          ;;
       esac
     elif [ "${got}" = "${want}" ]; then
       matches=true
@@ -449,6 +456,13 @@ self_test() {
   check_required "a watched source reaches the guard that declares it" \
     "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
+  # The regression the walk's own declaration exists for: #36290 changed the
+  # tab strip in this module and ran no scenario that draws one, because the
+  # walk that reads a tab name off the row named no source. It merged green
+  # and main was red on test_tui_keyboard_input until #36327.
+  check_required "the shared chrome selects the screen walk" \
+    "test/test_tui_keyboard_input.py" \
+    "bin/masc_tui_ansi.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list
   # out of this file and compares it to the dashboard mirror; the name mapping

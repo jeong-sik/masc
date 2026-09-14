@@ -529,7 +529,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                  the wait for the binding's admission permit, both provider
                  round trips and the tool call between them. A per-request
                  deadline would restart at each request, so two round trips
-                 and a permit wait could take several of them. *)
+                 and a permit wait could take several of them. The two steps
+                 no window ends mid-way, the name lookup and the process's
+                 first trust-store load, are noted at
+                 [Llm_provider.Http_client.pre_header_deadline]. *)
               let config =
                 Runtime_agent.default_config
                   ~name:"runtime-verification"

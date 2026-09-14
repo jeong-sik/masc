@@ -7087,24 +7087,16 @@ let resources_empty_note (list : Masc_tui_mcp.resource list option) =
   | Some [] -> Some " (no resources)"
   | Some (_ :: _) -> None
 
-let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
-    ~queued_request_ids =
-  let not_promoted row =
-    not
-      (Option.exists
-         (String.equal row.me_request_id)
-         promoted_request_id)
-  in
+let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded =
     match state.msg_loaded_keeper with
     | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-        List.filter not_promoted state.msg_loaded
+        state.msg_loaded
     | Some _ | None -> []
   in
   let session =
     List.filter
-      (fun entry ->
-        String.equal entry.me_keeper_name keeper_name && not_promoted entry)
+      (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
   let held =
@@ -7123,11 +7115,10 @@ let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
    on every key, every two-second tick and every async message, whether or
    not the conversation had changed. Its inputs are the loaded page, the
    loaded keeper, the session rows, the settled logs (whose held turns leave
-   the timeline), and two small readings of the queue and the inflight list:
-   which request was promoted out of the queue and which requests still
-   wait. The lists are replaced rather than mutated in place
-   when the conversation changes, so physical equality on them says whether
-   the last answer still holds; the two readings are compared by value, so a
+   the timeline), and which requests still wait in the queue. The lists are
+   replaced rather than mutated in place when the conversation changes, so
+   physical equality on them says whether
+   the last answer still holds; the queue reading is compared by value, so a
    queue or an inflight turn that changed in a way the rows do not depend on
    (a live turn streaming, another keeper's line) keeps the answer.
 
@@ -7140,7 +7131,6 @@ type chat_rows_memo = {
   crm_loaded : msg_entry list;
   crm_history : msg_entry list;
   crm_settled_logs : turn_log list;
-  crm_promoted_request_id : string option;
   crm_queued_request_ids : string list;
   crm_rows : msg_entry list;
 }
@@ -7148,11 +7138,6 @@ type chat_rows_memo = {
 let chat_rows_memo : chat_rows_memo option ref = ref None
 
 let chat_rows_for (state : state) keeper_name =
-  let promoted_request_id =
-    Option.map
-      (fun entry -> entry.sent_request.request_id)
-      (promoted_inflight_for_keeper state keeper_name)
-  in
   let queued_request_ids =
     Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
     |> List.map (fun item -> item.Masc_tui_keeper_chat_queue.request.request_id)
@@ -7165,15 +7150,12 @@ let chat_rows_for (state : state) keeper_name =
          && memo.crm_loaded == state.msg_loaded
          && memo.crm_history == state.msg_history
          && memo.crm_settled_logs == state.msg_settled_logs
-         && Option.equal String.equal memo.crm_promoted_request_id
-              promoted_request_id
          && List.equal String.equal memo.crm_queued_request_ids
               queued_request_ids ->
       memo.crm_rows
   | Some _ | None ->
       let rows =
-        compute_chat_rows_for state keeper_name ~promoted_request_id
-          ~queued_request_ids
+        compute_chat_rows_for state keeper_name ~queued_request_ids
       in
       chat_rows_memo :=
         Some
@@ -7182,7 +7164,6 @@ let chat_rows_for (state : state) keeper_name =
             crm_loaded = state.msg_loaded;
             crm_history = state.msg_history;
             crm_settled_logs = state.msg_settled_logs;
-            crm_promoted_request_id = promoted_request_id;
             crm_queued_request_ids = queued_request_ids;
             crm_rows = rows;
           };

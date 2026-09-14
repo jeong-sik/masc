@@ -467,12 +467,12 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
     fail "applied connector replay selected the wrong yield boundary"
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
+let tool_call ?(input = Some "input") ?(output = Some "output") ?typed_outcome tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
   ; provider = "test"
   ; execution_outcome = Tool_result.Ok
-  ; typed_outcome = None
+  ; typed_outcome
   ; latency_ms = 1.
   ; task_id = None
   ; route_evidence = None
@@ -535,7 +535,60 @@ let test_repeated_tool_call_input_boundary () =
     (option (pair string int))
     "missing fingerprints never guess"
     None
-    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")))
+    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")));
+  (* The emulator step has a clock's shape on this axis -- identical input,
+     a different frame every time -- and is the opposite thing: the frames
+     ran. Its handler declares [Progress] beside the observation, and the
+     declaration ends the streak. One keeper's every game turn ended in this
+     yield after five [masc_msx_step {frames: 300}] on 2026-09-14. *)
+  let step i =
+    tool_call
+      ~output:(Some (Printf.sprintf "frame %d" (336775 + (300 * i))))
+      ~typed_outcome:Keeper_tool_outcome.Progress
+      "masc_msx_step"
+  in
+  check
+    (option (pair string int))
+    "five steps that declared progress are play, not a loop"
+    None
+    (detect (List.init 5 step));
+  (* step_until_change declares progress only when the screen changed. Five
+     asks on a key-wait scene are a loop; one changed screen in the middle of
+     them is the game moving, and it ends the streak on both sides. *)
+  let wait ?(changed = false) () =
+    tool_call
+      ~output:(Some (if changed then "changed" else "settled"))
+      ?typed_outcome:(if changed then Some Keeper_tool_outcome.Progress else None)
+      "masc_msx_step_until_change"
+  in
+  check
+    (option (pair string int))
+    "a declared progress inside the streak ends it"
+    None
+    (detect [ wait (); wait (); wait ~changed:true (); wait (); wait () ]);
+  check
+    (option (pair string int))
+    "five asks on a key-wait scene are still a loop"
+    (Some ("masc_msx_step_until_change", 5))
+    (detect (List.init 5 (fun _ -> wait ())));
+  check
+    (option (pair string int))
+    "five reads that declared nothing still yield"
+    (Some ("masc_msx_screen", 5))
+    (detect
+       (List.init 5 (fun i ->
+          tool_call ~output:(Some (Printf.sprintf "screen %d" i)) "masc_msx_screen")));
+  check
+    (option (pair string int))
+    "a declared no-progress is no shelter"
+    (Some ("keeper_tasks_list", 5))
+    (detect
+       (List.init 5 (fun _ ->
+          tool_call
+            ~typed_outcome:
+              (Keeper_tool_outcome.No_progress
+                 { reason = Keeper_tool_outcome.No_work_available })
+            "keeper_tasks_list")))
 ;;
 
 let test_repeated_exact_tool_call_boundary () =

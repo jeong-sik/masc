@@ -1652,8 +1652,17 @@ let render_approvals (state : state) =
     match List.nth_opt approvals state.approval_cursor with
     | None -> "", ""
     | Some (Operator_row approval) ->
+        (* The same clock as [created] beside it. This one kept the server's
+           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
+           the local reading next to it -- so a row could show a decision
+           created at 09:03 expiring at 00:03 and read as already gone. It is
+           also the longer of the two spellings, on the row this surface cuts
+           first (#36333). A decision with no deadline still draws "-": that
+           is not a time. *)
         let expires =
-          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
+          match Terminal_text.optional_single_line approval.ap_expires_at with
+          | None -> "-"
+          | Some at -> Terminal_text.short_timestamp at
         in
         let payload =
           Masc_tui_operator_projection.approval_payload_for_terminal

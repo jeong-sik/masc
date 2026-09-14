@@ -6,6 +6,7 @@ type tick_counts =
   ; dispatch_failed : int
   ; dispatch_unsupported : int
   ; dispatch_start_rejected : int
+  ; dispatch_deferred : int
   ; wake_enqueued : int
   ; wake_skipped_no_keeper : int
   ; wake_skipped_missing_schedule : int
@@ -57,6 +58,7 @@ let zero_counts : tick_counts =
   ; dispatch_failed = 0
   ; dispatch_unsupported = 0
   ; dispatch_start_rejected = 0
+  ; dispatch_deferred = 0
   ; wake_enqueued = 0
   ; wake_skipped_no_keeper = 0
   ; wake_skipped_missing_schedule = 0
@@ -75,6 +77,7 @@ let add_counts (left : tick_counts) (right : tick_counts) : tick_counts =
   ; dispatch_unsupported = left.dispatch_unsupported + right.dispatch_unsupported
   ; dispatch_start_rejected =
       left.dispatch_start_rejected + right.dispatch_start_rejected
+  ; dispatch_deferred = left.dispatch_deferred + right.dispatch_deferred
   ; wake_enqueued = left.wake_enqueued + right.wake_enqueued
   ; wake_skipped_no_keeper = left.wake_skipped_no_keeper + right.wake_skipped_no_keeper
   ; wake_skipped_missing_schedule =
@@ -123,16 +126,25 @@ let tick_counts_of_result
       ~(wake_enqueue_counts : wake_enqueue_counts)
       (result : Schedule_runner.tick_result)
   =
-  let dispatch_succeeded, dispatch_failed, dispatch_unsupported, dispatch_start_rejected =
+  let ( dispatch_succeeded
+      , dispatch_failed
+      , dispatch_unsupported
+      , dispatch_start_rejected
+      , dispatch_deferred )
+    =
     List.fold_left
-      (fun (succeeded, failed, unsupported, start_rejected)
+      (fun (succeeded, failed, unsupported, start_rejected, deferred)
         (dispatch : Schedule_runner.dispatch_result) ->
          match dispatch.status with
-         | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected
-         | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected
-         | Dispatch_unsupported -> succeeded, failed, unsupported + 1, start_rejected
-         | Dispatch_start_rejected -> succeeded, failed, unsupported, start_rejected + 1)
-      (0, 0, 0, 0)
+         | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected, deferred
+         | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected, deferred
+         | Dispatch_unsupported ->
+           succeeded, failed, unsupported + 1, start_rejected, deferred
+         | Dispatch_start_rejected ->
+           succeeded, failed, unsupported, start_rejected + 1, deferred
+         | Dispatch_deferred ->
+           succeeded, failed, unsupported, start_rejected, deferred + 1)
+      (0, 0, 0, 0, 0)
       result.dispatches
   in
   { due_changed = result.due_changed
@@ -142,6 +154,7 @@ let tick_counts_of_result
   ; dispatch_failed
   ; dispatch_unsupported
   ; dispatch_start_rejected
+  ; dispatch_deferred
   ; wake_enqueued = wake_enqueue_counts.wake_enqueued
   ; wake_skipped_no_keeper = wake_enqueue_counts.wake_skipped_no_keeper
   ; wake_skipped_missing_schedule =
@@ -212,6 +225,7 @@ let counts_json (counts : tick_counts) =
       ; "dispatch_failed", `Int counts.dispatch_failed
       ; "dispatch_unsupported", `Int counts.dispatch_unsupported
       ; "dispatch_start_rejected", `Int counts.dispatch_start_rejected
+      ; "dispatch_deferred", `Int counts.dispatch_deferred
       ; "wake_enqueued", `Int counts.wake_enqueued
       ; "wake_skipped_no_keeper", `Int counts.wake_skipped_no_keeper
       ; "wake_skipped_missing_schedule", `Int counts.wake_skipped_missing_schedule

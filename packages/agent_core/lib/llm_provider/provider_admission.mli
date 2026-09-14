@@ -40,14 +40,6 @@
     declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
-(** [with_admission] whose wait for a permit ends at [deadline_at] on
-    [clock]. [Error `Permit_wait_expired] means the endpoint stayed saturated
-    until the deadline and [f] never ran; the waiter has left the FIFO. A
-    permit granted in the same instant the deadline passed is the caller's
-    and [f] runs with it. Without a declaration there is no wait and [f]
-    runs at once. [f] itself
-    runs without this deadline, so a caller that bounds the whole call arms
-    what is left of it around [f]. *)
 (** {!Slot_scheduler.wait_state}: told to [on_wait] by the bounded waits
     below as a wait begins and ends. An unbounded [with_admission] tells
     nothing, so a caller that stands its own watchdog down while
@@ -56,6 +48,13 @@ type wait_state = Slot_scheduler.wait_state =
   | Waiting_for_permit
   | Not_waiting
 
+(** [with_admission] whose wait for a permit ends at [deadline_at] on
+    [clock]. [Error `Permit_wait_expired] means the endpoint stayed saturated
+    until the deadline and [f] never ran; the waiter has left the FIFO. A
+    permit granted in the same instant the deadline passed is the caller's
+    and [f] runs with it. Without a declaration there is no wait and [f]
+    runs at once. [f] itself runs without this deadline, so a caller that
+    bounds the whole call arms what is left of it around [f]. *)
 val with_admission_until
   :  ?on_wait:(wait_state -> unit)
   -> clock:_ Eio.Time.clock

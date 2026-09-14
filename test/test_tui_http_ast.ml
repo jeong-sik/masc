@@ -434,6 +434,22 @@ let test_http_get_uses_auth_headers () =
    "Started: 2026-08-24 16:47:49 (20d21h ago) (local)". A marker on four rows
    reads as a distinction, which invites the next row to carry one too. The
    guide states the zone once, for the whole screen. *)
+(* Config, Runtime and Clients are three surfaces -- [Masc_tui_types.surface]
+   names all three -- and the Clients title walked from one to the next twice,
+   spelling the first step "/" and the second the middle dot: "MASC Config /
+   Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
+   string. Every other title that walks surfaces uses "/" (Config / Runtime,
+   Config / Resources, Workspace / Code). *)
+let test_the_clients_path_spells_its_steps_alike () =
+  let module_path = "bin/masc_tui_render.ml" in
+  check int "no step spelled with the middle dot" 0
+    (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
+  check bool "the path reads with one separator" true
+    (Ast_grep.count_string_literals ~module_path
+       ~needle:"Config / Runtime / Clients"
+     > 0)
+;;
+
 let test_no_row_marks_its_own_timestamp_with_a_zone () =
   List.iter
     (fun module_path ->
@@ -2792,6 +2808,8 @@ let () =
           test_http_client_does_not_own_tui_env_contract;
         test_case "no row marks its own timestamp with a zone" `Quick
           test_no_row_marks_its_own_timestamp_with_a_zone;
+        test_case "the clients path spells its steps alike" `Quick
+          test_the_clients_path_spells_its_steps_alike;
         test_case
           "keeper chat uses current async contract"
           `Quick

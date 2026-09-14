@@ -438,7 +438,7 @@ with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
 `go Clients`. `/` jumps the cursor to a matching name.
 
 ```
- MASC Runtime · Clients (12 attached)  17:02:53  [connected]
+ MASC Config / Runtime / Clients (12 attached)  17:02:53  [connected]
   STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
  >active   codex-mcp-client      codex       -                -         17:02:41
   busy     analyst-agent         keeper      analyst          task-845  17:02:50

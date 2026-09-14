@@ -41,15 +41,15 @@ type post =
   body:string ->
   (Masc_http_client.response, string) result
 
-(* The one production transport. Every request of a session -- initialize,
+(* The one production transport. Each request of a session -- initialize,
    the initialized notification, tools/list, tools/call -- runs under
-   [deadline_s] on [clock]; [None] is the operator's declared choice of no
-   bound. Building one takes a clock, so a caller without one cannot open a
-   session. Before this the default was the shared client's unbounded arm,
-   and a server that accepted the connection and never answered held the
-   keeper turn that called it until the turn's wall-clock ceiling: the
-   attempt watchdog does not watch a tool in flight, so the transport's
-   deadline is the only liveness the call has. *)
+   [deadline_s] on [clock], one window per request; [None] leaves the
+   requests unbounded. Building one takes a clock, so a caller without one
+   cannot open a session. Before this the default was the shared client's
+   unbounded arm, and a server that accepted the connection and never
+   answered held the keeper turn that called it for as long as the socket
+   stayed open: the attempt watchdog does not watch a tool in flight, so
+   the transport's deadline is the only liveness the call has. *)
 let http_post ~clock ~deadline_s : post =
   fun ~url ~headers ~body ->
     Masc_http_client.post_response_sync

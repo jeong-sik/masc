@@ -66,12 +66,13 @@ val http_post
   :  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> deadline_s:float option
   -> post
-(** The production transport: every request of a session runs under
-    [deadline_s] on [clock], and [None] is the operator's declared choice of
-    no bound. It is the only way to reach a server outside a test, and it
-    cannot be built without a clock: a tools/call is work a keeper turn is
-    waiting on with the attempt watchdog off, so a server that accepts the
-    connection and never answers is ended by this deadline or not at all. *)
+(** The production transport: each request of a session runs under
+    [deadline_s] on [clock], one window per request, and [None] leaves the
+    requests unbounded. It is the only way to reach a server outside a test,
+    and it cannot be built without a clock: a tools/call is work a keeper
+    turn is waiting on with the attempt watchdog off, so a server that
+    accepts the connection and never answers is ended by this deadline or
+    not at all. *)
 
 type t
 

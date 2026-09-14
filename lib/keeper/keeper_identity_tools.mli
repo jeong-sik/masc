@@ -53,17 +53,23 @@ type transports = {
 }
 
 val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> transports
-(** The production transports, bounded by construction. The MCP session runs
-    under {!Keeper_runtime_resolved.provider_call_deadline_sec}, the keeper's
+(** The production transports, every request bounded on the clock. Each
+    request of the MCP session runs under
+    {!Keeper_runtime_resolved.provider_call_deadline_sec}, the keeper's
     no-progress threshold: a tools/call is work the model waits on and the
     attempt watchdog does not watch a tool in flight, so this deadline is the
-    only liveness the call has ([None] is the operator's declared choice of
-    no bound). Discovery and the token endpoint are short JSON round trips of
-    the same class as the Slack and Discord REST calls and run under
-    {!Masc_http_client.default_request_timeout_sec}. A caller without a clock
-    cannot build these, which is the point: the shared HTTP client's default
-    arm is unbounded, and a server that accepts and never answers used to
-    hold the keeper turn until its wall-clock ceiling. *)
+    only liveness the call has. The bound is per request: a call ends within
+    one threshold of its last completed request, so a server that answers
+    each request inside the threshold runs a call to its end (at most ten
+    MCP requests in one {!run_call}, counting a 401 refresh and retry). When
+    the threshold is not declared the MCP requests have no bound. Discovery
+    and the token endpoint are short JSON round trips of the same class as
+    the Slack and Discord REST calls and run under
+    {!Masc_http_client.default_request_timeout_sec}; a catalog refresh is an
+    MCP request and runs under the threshold, not that timeout. A caller
+    without a clock cannot build these, which is the point: the shared HTTP
+    client's default arm is unbounded, and a server that accepted and never
+    answered held the keeper turn for as long as the socket stayed open. *)
 
 val refresh :
   mcp_post:Mcp_client.post ->
@@ -163,13 +169,31 @@ val run_call :
     mutable cell two fibers share, and that is the part to get right
     deliberately rather than on the way past. *)
 
+val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_disposition
+(** What a failed call proves about the requested effect. A precondition
+    failure, a session that never came up, a refused token and a JSON-RPC
+    rejection the server sends before running any tool prove the effect
+    never began; every other failure after the request was sent leaves the
+    outcome unknown. Replay reads this as the execution's disposition and
+    {!tool_result_of_call} reads it as whether a retry is safe, so the two
+    cannot disagree. *)
+
+val call_error_to_string : call_error -> string
+
 val tool_result_of_call :
+  read_only:bool option ->
   (Mcp_client.tool_result, call_error) result ->
   Agent_core.Types.tool_result
 (** The model's view of one call: a tool that ran and said no is a
-    recoverable answer, a refused credential is not, transport is transient.
-    Kept beside {!run_call} so the phases and the model vocabulary cannot
-    drift apart in two files. *)
+    recoverable answer, a refused credential is not, and a transport or
+    server failure is recoverable when a second call is safe: the provider
+    said the tool only reads ([read_only = Some true], the offered tool's
+    own word; silence is not that), or the failure proves the effect never
+    began
+    ({!effect_disposition_of_call_error}). A write whose request reached the
+    service and got no answer is not recoverable; the message tells the
+    model to read the service's state first. Kept beside {!run_call} so the
+    phases and the model vocabulary cannot drift apart in two files. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

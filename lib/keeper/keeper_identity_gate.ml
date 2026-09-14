@@ -179,7 +179,11 @@ let agent_tool
       ~arguments
       ()
   in
-  let run_raw arguments = Keeper_identity_tools.tool_result_of_call (send arguments) in
+  let run_raw arguments =
+    Keeper_identity_tools.tool_result_of_call
+      ~read_only:offered.Keeper_identity_tools.read_only
+      (send arguments)
+  in
   let gated arguments =
     match offered.Keeper_identity_tools.read_only with
     (* The provider's own word, written down at attach time. Only an
@@ -254,20 +258,6 @@ let resolve_provider provider_id =
     (Keeper_oauth_declarations.all ())
 ;;
 
-(* JSON-RPC error codes the server sends before it runs any tool: the
-   request never became a tool execution, so no effect happened. Every other
-   post-send failure keeps the honest answer, which is "unknown". Decided
-   over the typed code sum, not bare literals — the same numbers written
-   out here were the exact "magic number repetition" the
-   [Mcp_error_code.t] sum was introduced to close. *)
-let rpc_rejects_before_execution code =
-  match Mcp_error_code.of_wire_code code with
-  | Some
-      ( Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
-      | Mcp_error_code.Invalid_params ) -> true
-  | Some _ | None -> false
-;;
-
 let execution_of_call_result result =
   match result with
   | Ok (answer : Mcp_client.tool_result) ->
@@ -282,48 +272,14 @@ let execution_of_call_result result =
         ~effect_disposition:Tool_result.Proven_pre_effect
         answer.Mcp_client.text
     else Keeper_tool_execution.success answer.Mcp_client.text
-  | Error (Keeper_identity_tools.Precondition message) ->
+  | Error call_error ->
+    (* The disposition is the call's own statement of what it proves; the
+       model-facing result reads the same one for retry safety. *)
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      message
-  | Error (Keeper_identity_tools.Transient_precondition message) ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      message
-  | Error (Keeper_identity_tools.Mcp { phase = Keeper_identity_tools.Before_send; error }) ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      (Mcp_client.error_to_string error)
-  | Error
-      (Keeper_identity_tools.Mcp
-         { phase = Keeper_identity_tools.After_send
-         ; error = Mcp_client.Unauthorized _ as error
-         }) ->
-    (* The server refused the token; auth precedes the tool run. *)
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      (Mcp_client.error_to_string error)
-  | Error
-      (Keeper_identity_tools.Mcp
-         { phase = Keeper_identity_tools.After_send
-         ; error = Mcp_client.Rpc { code; _ } as error
-         })
-    when rpc_rejects_before_execution code ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      (Mcp_client.error_to_string error)
-  | Error
-      (Keeper_identity_tools.Mcp
-         { phase = Keeper_identity_tools.After_send; error }) ->
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Effect_outcome_unknown
-      (Mcp_client.error_to_string error)
+      ~effect_disposition:
+        (Keeper_identity_tools.effect_disposition_of_call_error call_error)
+      (Keeper_identity_tools.call_error_to_string call_error)
 ;;
 
 let replay_call_with_outcome

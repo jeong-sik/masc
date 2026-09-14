@@ -425,7 +425,9 @@ default_model = "eleven_multilingual_v2"
 default_voice = "SAz9YHcvj6GT2YYXdXww"
 |}
 
-let kinds_of section =
+(* Annotated: several record types in Voice_config carry [endpoints], and
+   without this the field resolves to the last one declared. *)
+let kinds_of (section : Voice_config.tts_config) =
   List.map
     (fun (endpoint : Voice_config.endpoint) -> Some endpoint.Voice_config.kind)
     section.Voice_config.endpoints

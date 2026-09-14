@@ -77,6 +77,10 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.MessageStart _ -> Some "sse_message_start"
   | Agent_core.Types.ContentBlockStart _ when agent_core_stream_event_is_deliverable event ->
       Some "sse_tool_block_start"
+  | Agent_core.Types.ContentBlockStart _ when agent_core_stream_event_is_first_token event ->
+      (* A redacted thinking block arrives whole in its block start; it is
+         the only block start that is production. *)
+      Some "sse_redacted_thinking"
   | Agent_core.Types.ContentBlockStart _ -> Some "sse_content_block_start"
   | Agent_core.Types.ContentBlockDelta
       { delta = Agent_core.Types.TextDelta _ | Agent_core.Types.TextSnapshot _; _ }
@@ -98,10 +102,15 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.MediaDelta _; _ }
     when agent_core_stream_event_is_deliverable event ->
       Some "sse_media_delta"
+  | Agent_core.Types.ContentBlockDelta
+      { delta = Agent_core.Types.RedactedThinkingSnapshot _; _ }
+    when agent_core_stream_event_is_first_token event ->
+      Some "sse_redacted_thinking"
   | Agent_core.Types.ContentBlockDelta _ ->
-      (* Future AGENT_CORE carrier deltas, such as provider-private reasoning signatures,
-         are diagnostic stream evidence only. They must not be promoted to
-         text/tool progress, keeper-visible output, or watchdog progress. *)
+      (* Empty deltas and carrier deltas, such as provider-private reasoning
+         signatures, are diagnostic stream evidence only: not text/tool
+         progress, not keeper-visible output, and not watchdog progress,
+         which the two predicates above keep them out of. *)
       Some "sse_content_delta"
   | Agent_core.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
   | Agent_core.Types.MessageDelta _ -> Some "sse_message_delta"
@@ -131,8 +140,8 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
    thinks. Carrier frames (empty deltas, signatures, block stops, message
    frames, pings) are not production and still refresh nothing.
 
-   Measured 2026-09-14 (system log): 48 attempts on the two reasoning models
-   ended as "provider call made no progress for 900s" while the 120 s
+   Measured 2026-09-14 (system log): 14 attempt terminals on reasoning
+   models read "provider call made no progress for 900s" while the 120 s
    inter-line idle budget never fired on any of them, so each stream was
    delivering lines the whole time; a rondo turn's last progress stamp was
    the before_turn hook 901 s before the cut. A live capture of the same

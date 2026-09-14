@@ -13,8 +13,9 @@ val sse_event_watchdog_progress_kind :
   Agent_core.Types.sse_event -> string option
 (** The label when the event shows the provider still producing, which is
     what the attempt watchdog measures progress by: a non-empty text,
-    reasoning, tool-argument, media or redacted-thinking delta, or a tool
-    block opening. Carrier and control frames give [None]. Whether the
+    reasoning, tool-argument, media or redacted-thinking delta, a redacted
+    thinking block delivered whole in its block start, or a tool block
+    opening. Carrier and control frames give [None]. Whether the
     production is deliverable is judged by the accept gate when the stream
     ends, not here. *)
 

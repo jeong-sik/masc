@@ -1924,6 +1924,31 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     None
     (watchdog_kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "" }));
   Alcotest.(check (option string))
+    "a redacted thinking delta is named for what it is and is watchdog progress"
+    (Some "sse_redacted_thinking")
+    (watchdog_kind
+       (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "opaque" }));
+  Alcotest.(check (option string))
+    "a redacted thinking block delivered whole in its start is watchdog progress"
+    (Some "sse_redacted_thinking")
+    (watchdog_kind
+       (ContentBlockStart
+          { index = 0
+          ; content_type = "redacted_thinking"
+          ; tool_id = Some "opaque"
+          ; tool_name = None
+          }));
+  Alcotest.(check (option string))
+    "an empty redacted thinking delta is a carrier frame, not progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "" }));
+  Alcotest.(check (option string))
+    "a text block start is a control frame, not progress"
+    None
+    (watchdog_kind
+       (ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None }));
+  Alcotest.(check (option string))
     "a reasoning signature is a carrier frame, not progress"
     None
     (watchdog_kind
@@ -2260,7 +2285,7 @@ let () =
           Alcotest.test_case "sse progress classifies known deltas" `Quick
             test_sse_event_progress_kind_classifies_known_deltas;
           Alcotest.test_case
-            "sse watchdog progress records deliverable events only"
+            "sse watchdog progress records production and not carrier frames"
             `Quick
             test_registry_progress_on_event_records_only_watchdog_progress;
           Alcotest.test_case

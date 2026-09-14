@@ -5849,41 +5849,48 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Recent activity, folded from the metrics rows already read for this
        Keeper. The window is bounded by row count, so it can fall short of the
-       span; when it does, say what it reached instead of implying a full day. *)
-    let activity =
-      Keeper_activity.summarize
-        ~since:
-          (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
-        state.log_entries
-    in
+       span; when it does, say what it reached instead of implying a full day.
+       With no rows there is nothing to total, so the section says why and
+       draws no zeros: the same sentence the Logs tab gives for the same
+       read. *)
     add_section "Last 24h";
-    if not activity.Keeper_activity.aw_covered then
-      add_row "Window:"
-        (match activity.Keeper_activity.aw_oldest_ts with
-         | Some oldest ->
-           Printf.sprintf "partial, reaches %s"
-             (Terminal_text.short_timestamp oldest)
-         | None -> "no metrics rows read");
-    add_row "Turns / Heartbeats:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
-         activity.Keeper_activity.aw_heartbeats);
-    add_row "Tokens In / Out:"
-      (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
-         activity.Keeper_activity.aw_output_tokens);
-    add_row "Cost:"
-      (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
-    add_row "Tool Calls:"
-      (string_of_int activity.Keeper_activity.aw_tool_calls);
-    add_row "Top Tools:"
-      (match activity.Keeper_activity.aw_top_tools with
-       | [] -> "-"
-       | tools ->
-         tools
-         |> List.map (fun (tool : Keeper_activity.tool_use) ->
-                Printf.sprintf "%s x%d"
-                  (Terminal_text.single_line tool.Keeper_activity.tu_name)
-                  tool.Keeper_activity.tu_calls)
-         |> String.concat "  ");
+    (match
+       Keeper_activity.read
+         ~since:
+           (Keeper_activity.cutoff_of ~now:(Unix.gettimeofday ()) ~hours:24)
+         state.log_entries
+     with
+     | Keeper_activity.No_rows ->
+       add_row "Window:"
+         (Ansi.dim ^ Metrics_tail.empty_message state.log_error ^ Ansi.reset)
+     | Keeper_activity.Rows activity ->
+       if not activity.Keeper_activity.aw_covered then
+         add_row "Window:"
+           (match activity.Keeper_activity.aw_oldest_ts with
+            | Some oldest ->
+              Printf.sprintf "partial, reaches %s"
+                (Terminal_text.short_timestamp oldest)
+            | None -> "partial");
+       add_row "Turns / Heartbeats:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
+            activity.Keeper_activity.aw_heartbeats);
+       add_row "Tokens In / Out:"
+         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
+            activity.Keeper_activity.aw_output_tokens);
+       add_row "Cost:"
+         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+       add_row "Tool Calls:"
+         (string_of_int activity.Keeper_activity.aw_tool_calls);
+       add_row "Top Tools:"
+         (match activity.Keeper_activity.aw_top_tools with
+          | [] -> "-"
+          | tools ->
+            tools
+            |> List.map (fun (tool : Keeper_activity.tool_use) ->
+                   Printf.sprintf "%s x%d"
+                     (Terminal_text.single_line tool.Keeper_activity.tu_name)
+                     tool.Keeper_activity.tu_calls)
+            |> String.concat "  "));
     add_empty ();
 
     add_section "Autonomy";

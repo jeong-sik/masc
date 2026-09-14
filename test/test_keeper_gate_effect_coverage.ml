@@ -858,7 +858,6 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
     ; task_id = None
     ; continuation_channel = None
     ; sandbox_profile = None
-    ; network_mode = None
     }
   in
   (match
@@ -899,13 +898,17 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
 (* Task-635 (#26058) narrow gap, owner-conditioned, then owner-narrowed:
    review 5192723206 — until a path can observe attempts AFTER "A"
    (SECCOMP_RET_USER_NOTIF / audit logs), every [Observed_refused] keeps
-   the judge under every network mode: the setup channel can only report
-   the box failing to apply, never the payload being blocked, so no
-   refusal kind stands in for the route the boundary forecloses.
-   [Observation_unavailable] also always defers regardless of
-   [network_mode]: silence about what a box would have reached says
-   nothing about network reachability (a plain filesystem write inside the
-   keeper's own tree is untouched by network isolation). *)
+   the judge: the setup channel can only report the box failing to apply,
+   never the payload being blocked, so no refusal kind stands in for the
+   route the boundary forecloses. [Observation_unavailable] also always
+   defers: silence about what a box would have reached says nothing about
+   what it would have touched (a plain filesystem write inside the
+   keeper's own tree is as unproven as a network route). Review
+   5192723206 also closed the narrower shortcut this PR tried first (an
+   [Observed_refused] bypass keyed on the keeper's own [network_mode]):
+   that field and its allow-source were never built after the narrowing,
+   so removed rather than left as an unreachable promise (review
+   5195604213). *)
 let observed_refused_once ~refusal_kind =
   let stderr =
     match refusal_kind with
@@ -920,7 +923,7 @@ let observation_unavailable_once () =
   Keeper_gate.Observation_unavailable "no box could be built for this profile"
 ;;
 
-let network_probe_request ~network_mode base_path =
+let network_probe_request base_path =
   { Keeper_gate.keeper_name = "network-gate-keeper"
   ; operation = Keeper_gate.tool_execute_gate_operation
   ; input =
@@ -937,7 +940,6 @@ let network_probe_request ~network_mode base_path =
   ; task_id = None
   ; continuation_channel = None
   ; sandbox_profile = Some Keeper_types_profile_sandbox.Docker
-  ; network_mode
   }
 ;;
 
@@ -956,52 +958,41 @@ let test_observed_refused_still_defers_without_network_isolation () =
      only report the box failing to apply — even a socket-rule refusal
      says "the filter never engaged", so no refusal kind may stand in
      for the route the boundary forecloses. Every refusal keeps the
-     judge under every mode until a path can observe attempts after
-     "A" (SECCOMP_RET_USER_NOTIF / audit logs, separate PR). *)
+     judge until a path can observe attempts after "A"
+     (SECCOMP_RET_USER_NOTIF / audit logs, separate PR). *)
   List.iter
     (fun refusal_kind ->
-       List.iter
-         (fun network_mode ->
-            with_clean_gate_runtime @@ fun () ->
-            with_network_probe_workspace @@ fun base_path ->
-            let request = network_probe_request ~network_mode base_path in
-            match
-              Keeper_gate.decide
-                ~keeper_always_allow:false
-                ~observe:(fun () -> observed_refused_once ~refusal_kind)
-                request
-            with
-            | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
-            | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
-            | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
-              fail "a refused observe went to the human queue under auto_judge"
-            | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
-              fail ("refused observe: mode_state_invalid: " ^ detail)
-            | Keeper_gate.Allow { source; _ } ->
-              failf
-                "a refused observe bypassed the judge via %s — no refusal \
-                 kind proves the payload was blocked"
-                (Keeper_gate.authorization_source_to_string source)
-            | Keeper_gate.Unavailable _ -> fail "the queue was unavailable")
-         [ None
-         ; Some Keeper_types_profile_sandbox.Network_none
-         ; Some Keeper_types_profile_sandbox.Network_inherit
-         ; Some Keeper_types_profile_sandbox.Network_policy
-         ])
+       with_clean_gate_runtime @@ fun () ->
+       with_network_probe_workspace @@ fun base_path ->
+       let request = network_probe_request base_path in
+       match
+         Keeper_gate.decide
+           ~keeper_always_allow:false
+           ~observe:(fun () -> observed_refused_once ~refusal_kind)
+           request
+       with
+       | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()
+       | Keeper_gate.Deferred { reason = Keeper_gate.Auto_judge_unavailable _; _ } -> ()
+       | Keeper_gate.Deferred { reason = Keeper_gate.Human_requested; _ } ->
+         fail "a refused observe went to the human queue under auto_judge"
+       | Keeper_gate.Deferred { reason = Keeper_gate.Mode_state_invalid detail; _ } ->
+         fail ("refused observe: mode_state_invalid: " ^ detail)
+       | Keeper_gate.Allow { source; _ } ->
+         failf
+           "a refused observe bypassed the judge via %s — no refusal \
+            kind proves the payload was blocked"
+           (Keeper_gate.authorization_source_to_string source)
+       | Keeper_gate.Unavailable _ -> fail "the queue was unavailable")
     [ Keeper_gate.Socket_denied
     ; Keeper_gate.Write_denied
     ; Keeper_gate.Unspecified
     ]
 ;;
 
-let test_observation_unavailable_always_defers_even_with_network_none () =
+let test_observation_unavailable_always_defers () =
   with_clean_gate_runtime @@ fun () ->
   with_network_probe_workspace @@ fun base_path ->
-  let request =
-    network_probe_request
-      ~network_mode:(Some Keeper_types_profile_sandbox.Network_none)
-      base_path
-  in
+  let request = network_probe_request base_path in
   match
     Keeper_gate.decide
       ~keeper_always_allow:false
@@ -1016,8 +1007,8 @@ let test_observation_unavailable_always_defers_even_with_network_none () =
     fail ("observation_unavailable: mode_state_invalid: " ^ detail)
   | Keeper_gate.Allow { source; _ } ->
     failf
-      "an unbuildable box was allowed through %s — network_mode=none proves \
-       nothing about what a box would have reached"
+      "an unbuildable box was allowed through %s — no box means no proof \
+       of what the request would have reached"
       (Keeper_gate.authorization_source_to_string source)
   | Keeper_gate.Unavailable _ -> fail "the queue was unavailable"
 ;;
@@ -1107,15 +1098,15 @@ let () =
             `Quick
             test_auto_judge_allows_speak_as_local_output_without_a_judge
         ] )
-    ; ( "network_isolation (task-635, #26058)"
+    ; ( "narrow gap (task-635, #26058)"
       , [ test_case
-            "Observed_refused always keeps the judge under every network mode"
+            "Observed_refused always keeps the judge, no shortcut by refusal kind"
             `Quick
             test_observed_refused_still_defers_without_network_isolation
         ; test_case
-            "Observation_unavailable always defers, even with network_mode=none"
+            "Observation_unavailable always defers"
             `Quick
-            test_observation_unavailable_always_defers_even_with_network_none
+            test_observation_unavailable_always_defers
         ] )
     ]
 ;;

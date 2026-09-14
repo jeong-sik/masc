@@ -13,7 +13,6 @@ type request =
   ; task_id : string option
   ; continuation_channel : Keeper_continuation_channel.t option
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option
-  ; network_mode : Keeper_types_profile_sandbox.network_mode option
   }
 
 (* Gate operation vocabulary — the strings the approval store keys on and
@@ -77,10 +76,6 @@ type authorization_source =
   | Readonly_sandbox
   | Local_output
   | Observed_in_box of boxed_execution
-  | Network_isolated of
-      { status : Unix.process_status
-      ; stderr : string
-      }
 
 type refusal_kind =
   | Socket_denied
@@ -313,7 +308,6 @@ let authorization_source_to_string = function
   | Readonly_sandbox -> "readonly_sandbox"
   | Local_output -> "local_output"
   | Observed_in_box _ -> "observed_in_box"
-  | Network_isolated _ -> "network_isolated"
 ;;
 
 let deferred_reason_to_string = function
@@ -358,11 +352,6 @@ let source_fields = function
     ; ( "observation_run"
       , `String (Keeper_types_profile_sandbox.observation_run_to_string run) )
     ]
-  | Network_isolated { status; stderr } ->
-    [ "authorization_source", `String "network_isolated"
-    ; "refused_status", `String (status_label status)
-    ; "refused_stderr", `String stderr
-    ]
 ;;
 
 let request_turn_id request =
@@ -382,8 +371,7 @@ let authorization_subject_id = function
   | Workspace_always_allow
   | Readonly_sandbox
   | Local_output
-  | Observed_in_box _
-  | Network_isolated _ ->
+  | Observed_in_box _ ->
     None
 ;;
 
@@ -515,7 +503,6 @@ let audit_authorization_source
   | Readonly_sandbox -> Keeper_approval_queue_rules_types.Readonly_sandbox
   | Local_output -> Keeper_approval_queue_rules_types.Local_output
   | Observed_in_box _ -> Keeper_approval_queue_rules_types.Observed_in_box
-  | Network_isolated _ -> Keeper_approval_queue_rules_types.Network_isolated
 ;;
 
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
@@ -531,8 +518,7 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
        | Workspace_always_allow
        | Readonly_sandbox
        | Local_output
-       | Observed_in_box _
-       | Network_isolated _ ->
+       | Observed_in_box _ ->
          Keeper_approval_queue.generate_id ())
     ~keeper_name:request.keeper_name
     ~tool_name:request.operation
@@ -2101,10 +2087,10 @@ let decide_after_observation request ~observe =
        (* Unlike Observed_refused, no box could be built at all here — a
           missing shim, an unadvertised box, a dispatch the typed gate
           itself refused. That silence says nothing about what the request
-          would have reached: network_mode=none rules out one route, not
-          every one (a plain filesystem write inside the keeper's own tree
-          is untouched by network isolation), so this keeps the judge
-          exactly as before this stage existed regardless of network_mode. *)
+          would have reached (a missing box does not distinguish a network
+          route from a plain filesystem write inside the keeper's own
+          tree), so this keeps the judge exactly as before this stage
+          existed. *)
        Log.Keeper.info
          ~keeper_name:request.keeper_name
          "observe run unavailable operation=%s reason=%s; the judge decides"

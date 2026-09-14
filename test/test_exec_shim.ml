@@ -471,7 +471,19 @@ let test_child_boundary_acknowledgements () =
 (* Review 5192723206: the "N"/"W" path once went dead because the raw
    8-byte buffer never equalled the bare tag. Pin the emission mapping
    itself -- the C stub's fixed-size buffer with NUL padding -- so the
-   path cannot go dead again without a red test. *)
+   path cannot go dead again without a red test.
+
+   Review 5195604213 (bonus, non-blocking): nothing ties this decoder's
+   "socket"/"write" literals to the C stub that writes them
+   ("lib/exec_shim/observe_stub.c", where [refusing_rule] is assigned).
+   If the C side's spelling ever drifts, this test still passes on its
+   own OCaml-side literals while the real mismatch only shows up as a
+   [Failure] on whatever host first hits the machine's actual refusal --
+   loud, but in production, not in CI. Quoting the C file's path here
+   (the repo's edited-test-file selector matches on the quoted string)
+   at least routes an edit to that file through this suite, so a
+   reviewer sees these two spellings side by side instead of trusting
+   they still agree. *)
 let test_refusal_of_rule_bytes () =
   let padded s =
     let b = Bytes.make 8 '\000' in

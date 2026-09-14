@@ -3556,7 +3556,6 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
                ]
          ; base_path = config.base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -3637,7 +3636,6 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          ; input = `Assoc [ "message", `String exact_tail ]
          ; base_path = config.base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -7883,7 +7881,7 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
         ; operation = Masc.Keeper_gate.filesystem_write_gate_operation
         ; input = `Assoc ["path", `String outside]
         ; call_summary = Some "test external filesystem authorization"
-        ; sandbox_profile = None; base_path = config.base_path; network_mode = None
+        ; sandbox_profile = None; base_path = config.base_path
         ; causal_context = None; task_id = None; continuation_channel = None } with
       | Masc.Keeper_gate.Deferred { approval_id; _ } ->
           check bool "durable approval identity exists" true (String.length approval_id > 0)
@@ -8044,7 +8042,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let one_shot_request : Masc.Keeper_gate.request =
         {keeper_name; operation="unreplayed_operation"; call_summary=None;
          input=`Assoc ["message", `String "Exact one-shot input"];
-         base_path; sandbox_profile=None; network_mode=None; causal_context=None; task_id=None;
+         base_path; sandbox_profile=None; causal_context=None; task_id=None;
          continuation_channel=None} in
       let deferred = if one_shot then (
         let decision = Masc.Keeper_gate.decide ~keeper_always_allow:false one_shot_request in
@@ -8665,7 +8663,7 @@ let test_binary_write_reference_survives_replay () =
      | Ok _ -> () | Error detail -> fail detail);
     let approval_id = match Masc.Keeper_gate.decide ~keeper_always_allow:false
         {keeper_name=meta.name; operation=Masc.Keeper_gate.filesystem_write_gate_operation;
-         input; call_summary=Some "binary artifact replay"; sandbox_profile=None; network_mode=None;
+         input; call_summary=Some "binary artifact replay"; sandbox_profile=None;
          base_path=config.base_path; causal_context=None; task_id=None; continuation_channel=None} with
       | Masc.Keeper_gate.Deferred {approval_id; _} -> approval_id
       | Masc.Keeper_gate.Allow _ -> fail "binary approval unexpectedly allowed"

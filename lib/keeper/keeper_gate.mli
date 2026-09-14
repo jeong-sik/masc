@@ -34,16 +34,6 @@ type request =
           observation-only classification ({!Keeper_gate_readonly}). [None]
           for every non-execute operation. The sandbox labels inside [input]
           are display/audit data; no decision reads them. *)
-  ; network_mode : Keeper_types_profile_sandbox.network_mode option
-      (** The requesting keeper's own [network_mode] (TOML-declared,
-          {!Keeper_meta_contract.keeper_meta.network_mode}), not a fact about
-          this one call. [decide] reads it only on {!Observed_refused}: a
-          [Network_none] keeper's sandbox boundary already forecloses every
-          route this call could have taken out, independent of what the
-          box's own write/socket policy refused, so that fact — not the
-          refused attempt — is what {!Network_isolated} allows on. [None]
-          when the caller has no keeper profile in scope (tests, or an
-          operation the box never observes). *)
   }
 
 (** Gate operation vocabulary — the strings the approval store keys on and
@@ -112,19 +102,6 @@ type authorization_source =
           asked; the audit row names which box it was. A [Guest_local] failure
           is returned as a failed process result too, without whole-call
           replay: an arbitrary script may already have changed the tree. *)
-  | Network_isolated of
-      { status : Unix.process_status
-      ; stderr : string
-      }
-      (** The box's observation attempt came back {!Observed_refused}, but
-          [request.network_mode] is [Network_none]: the sandbox has no
-          network route out regardless of what the refused attempt would
-          have done, so that boundary is the proof and the judge is not
-          asked (RFC-0415). Unlike {!Observed_in_box} the call itself never
-          ran — the refused status and stderr travel here only as the audit
-          record of what the box said, and the caller still dispatches the
-          request for real, the same as {!Readonly_sandbox}. *)
-
 type authorization =
   { source : authorization_source
   ; audit_receipts : Keeper_approval.Audit.receipt list

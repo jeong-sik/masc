@@ -1946,7 +1946,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; input
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context =
              Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
          ; task_id
@@ -1975,8 +1974,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
         | Gate.Local_output
-        | Gate.Observed_in_box _
-        | Gate.Network_isolated _ ->
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "different exact input consumed the grant");
        (match
           Gate.decide
@@ -1995,8 +1993,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
         | Gate.Local_output
-        | Gate.Observed_in_box _
-        | Gate.Network_isolated _ ->
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "exact effect did not consume its one-shot grant");
        (match
           Gate.decide
@@ -2011,8 +2008,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
         | Gate.Workspace_always_allow
         | Gate.Readonly_sandbox
         | Gate.Local_output
-        | Gate.Observed_in_box _
-        | Gate.Network_isolated _ ->
+        | Gate.Observed_in_box _ ->
           Alcotest.fail "one-shot grant was consumed more than once");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
@@ -4640,7 +4636,6 @@ let test_default_auto_judge_defers_without_blocking () =
          ; input = `Assoc [ "target", `String "auto-judge" ]
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context =
              Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
@@ -4715,7 +4710,6 @@ let test_unavailable_cycle_grant_never_falls_through () =
          ; input
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -4944,7 +4938,6 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
          ; input = `Assoc [ "target", `String "store-create" ]
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -5085,7 +5078,6 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          ; input
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None
@@ -5199,7 +5191,6 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          ; input = `Assoc [ "target", `String "cancelled-observer" ]
          ; base_path
          ; sandbox_profile = None
-         ; network_mode = None
          ; causal_context = None
          ; task_id = None
          ; continuation_channel = None

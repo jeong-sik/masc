@@ -159,9 +159,13 @@ let test_system_logs_footer_names_browser_controls () =
 
 let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
-    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, o, e, p)
-       precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  o:Lane Add-ons  e:lane config  A:add-ons  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, o / A, e, p)
+       precedes Act (Right/Enter, Esc) regardless of declaration order.
+
+       One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
+       and "A:add-ons" as separate items reading as separate destinations,
+       and the dispatch had always been one arm. *)
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =

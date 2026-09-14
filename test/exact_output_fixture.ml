@@ -23,6 +23,10 @@ type server_behavior =
   | Replies of string list
   | Abort_after_request
   | Delay_then_reply of float * string
+  | Stream_then_stall of string
+    (** Answer [200 text/event-stream], write the given bytes once, then keep
+        the connection open and silent until the server's switch is released.
+        Stands in for a provider whose stream stops mid-answer. *)
 
 type test_server =
   { base_url : string
@@ -36,6 +40,33 @@ type target_fixture =
   { id : string
   ; base_url : string
   }
+
+(* A body source for [Stream_then_stall]: the first read hands over the
+   bytes, every later read blocks until the fiber is cancelled. Blocking here
+   (instead of returning 0 or [End_of_file]) is what keeps the response open
+   with no further bytes, which is the shape of a stalled stream. *)
+module Stalling_source = struct
+  type t = { mutable pending : string option }
+
+  let read_methods = []
+
+  let single_read t dst =
+    match t.pending with
+    | Some bytes ->
+      t.pending <- None;
+      let len = min (String.length bytes) (Cstruct.length dst) in
+      Cstruct.blit_from_string bytes 0 dst 0 len;
+      if len < String.length bytes
+      then t.pending <- Some (String.sub bytes len (String.length bytes - len));
+      len
+    | None -> Eio.Fiber.await_cancel ()
+  ;;
+end
+
+let stalling_source bytes =
+  Eio.Resource.T
+    ({ Stalling_source.pending = Some bytes }, Eio.Flow.Pi.source (module Stalling_source))
+;;
 
 let add_request requests body =
   let rec loop () =
@@ -68,6 +99,12 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
     | Delay_then_reply (delay_s, response) ->
       Eio.Time.sleep clock delay_s;
       Cohttp_eio.Server.respond_string ~status:`OK ~body:response ()
+    | Stream_then_stall first_bytes ->
+      Cohttp_eio.Server.respond
+        ~headers:(Cohttp.Header.init_with "content-type" "text/event-stream")
+        ~status:`OK
+        ~body:(stalling_source first_bytes)
+        ()
   in
   let socket =
     Eio.Net.listen

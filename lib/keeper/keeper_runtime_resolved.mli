@@ -8,9 +8,11 @@
     late env drift cannot change keeper execution behaviour.
 
     [stream_idle_timeout_sec] additionally substitutes a fail-safe liveness floor
-    ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128), and
+    ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128),
     [first_event_timeout_sec] substitutes {!first_event_failsafe_floor_sec}
-    (RFC-AC-037); an explicit value still overrides either. *)
+    (RFC-AC-037) and [provider_call_deadline_sec] substitutes
+    {!provider_call_deadline_failsafe_floor_sec}; an explicit value still
+    overrides each. *)
 
 type source =
   | Env
@@ -19,7 +21,8 @@ type source =
   | Failsafe_floor
       (** The compiled default was [None] (unset) and a fail-safe liveness
           floor was substituted. Applies to [stream_idle_timeout_sec]
-          (RFC-0345) and [first_event_timeout_sec] (RFC-AC-037). *)
+          (RFC-0345), [first_event_timeout_sec] (RFC-AC-037) and
+          [provider_call_deadline_sec]. *)
 
 type 'a field = {
   value : 'a;
@@ -93,9 +96,9 @@ val first_event_timeout_sec : unit -> float
 (** Non-streaming HTTP body-consumption deadline override.
     [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is
     forwarded through [Runtime_agent_context.body_timeout_s] for AGENT_CORE sync
-    completion paths. Streaming paths ignore this knob and rely on an
-    explicitly configured [stream_idle_timeout_sec] plus the attempt liveness
-    observer.
+    completion paths. Streaming paths ignore this knob and rely on
+    [stream_idle_timeout_sec] (always set: the operator's value or the floor)
+    plus the attempt watchdog.
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
 val body_timeout_override_sec : unit -> float option

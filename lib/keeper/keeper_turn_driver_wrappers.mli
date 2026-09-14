@@ -25,7 +25,6 @@ val run_named_with_masc_tools :
   ?on_selected_runtime:(string -> unit) ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->

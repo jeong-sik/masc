@@ -712,6 +712,7 @@ let run () =
       , [ persistence_ml, "project_transition_outbox_result" ] )
     ; ( "project_event_queue_transition_outbox_result"
       , [ recovery_ml, "project_open_owner"
+        ; registry_event_queue_ml, "commit_and_project_accepted_cancellation"
         ; registry_event_queue_ml, "project_source_ack_receipt"
         ; schedule_consumers_ml, "accept_terminal"
         ] )

@@ -32,7 +32,6 @@ let run_named_with_masc_tools
     ?on_selected_runtime
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?stream_idle_timeout_s
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
@@ -72,7 +71,6 @@ let run_named_with_masc_tools
       ?tool_requirement
       ?required_native_posture
       ?temperature
-      ?stream_idle_timeout_s
       ?hooks
       ~accept
       ?raw_trace

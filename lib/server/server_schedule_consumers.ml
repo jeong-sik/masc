@@ -1445,4 +1445,59 @@ let cancel_keeper_schedules config ~keeper_name =
   Result.bind withdrawal (fun () -> Schedule_store.cancel_matching config ~should_cancel)
 ;;
 
-let consumer : Schedule_runner.consumer = { accepts; dispatch }
+(* Self-clock heartbeat schedules (#36213). A [result_delivery = None] interval
+   schedule tracks no per-occurrence deliverable — it only wakes the keeper — so
+   firing a fresh occurrence while the previous one is still unconsumed just
+   piles the keeper's queue: emission runs on the wall clock, consumption on the
+   keeper's turn cadence, and a keeper that cannot keep up accumulates one
+   occurrence per period without bound (msx-retro-mania reached 30 on
+   2026-09-14). Holding the schedule at its current due until the keeper drains
+   the pending occurrence makes emission track consumption: at most one pending
+   occurrence per instance, and [next_due_after ~now] then skips missed ticks to
+   a single catch-up rather than backfilling them.
+
+   Only heartbeat interval schedules self-clock. A schedule that delivers a
+   result, and every non-interval kind, keeps firing on each due — each of their
+   occurrences is distinct work whose accumulation is intended. The pending
+   check reads the keeper's own event queue (the authoritative unconsumed
+   signal), so it does not depend on the reaction-ledger ack transition. A queue
+   read failure is fail-open (fire as before) so a transient read never starves
+   the schedule. *)
+let defer_wake config (request : Schedule_domain.schedule_request) =
+  match request.Schedule_domain.recurrence with
+  | Schedule_domain.Interval _ ->
+    (match Schedule_payload_projection.result_delivery request with
+     | Ok None ->
+       (match Schedule_payload_projection.wake_keeper_name request with
+        | None -> false
+        | Some keeper_name ->
+          let base_path = config.Workspace_utils.base_path in
+          (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+           | Error _ -> false
+           | Ok queue ->
+             List.exists
+               (fun (stimulus : Keeper_event_queue.stimulus) ->
+                  match stimulus.Keeper_event_queue.payload with
+                  | Keeper_event_queue.Schedule_due wake ->
+                    String.equal
+                      wake.Keeper_event_queue.schedule_instance_id
+                      request.Schedule_domain.schedule_instance_id
+                  | Keeper_event_queue.Board_signal _
+                  | Keeper_event_queue.Board_attention _
+                  | Keeper_event_queue.Bootstrap
+                  | Keeper_event_queue.Fusion_completed _
+                  | Keeper_event_queue.Connector_attention _
+                  | Keeper_event_queue.Hitl_resolved _
+                  | Keeper_event_queue.Ask_answered _
+                  | Keeper_event_queue.Completion_authority_rejected _
+                  | Keeper_event_queue.Task_outcome _
+                  | Keeper_event_queue.Task_cancelled _
+                  | Keeper_event_queue.Workspace_message _
+                  | Keeper_event_queue.Delegate_completed _
+                  | Keeper_event_queue.Composition_completed _ -> false)
+               (Keeper_event_queue.to_list queue)))
+     | Ok (Some _) | Error _ -> false)
+  | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ -> false
+;;
+
+let consumer : Schedule_runner.consumer = { accepts; dispatch; defer_wake }

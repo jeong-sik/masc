@@ -153,17 +153,36 @@ let resolve_config ~base_path ~server ~token_file =
       | Some path -> Env_config_core.normalize_masc_base_path_input path
       | None -> Env_config_core.base_path ()
     in
-    let server =
+    (* Workspace_connection reads the connection file through an ownership
+       chain that rejects a relative root. The browser spawns this host with
+       the launcher's absolute base; a manually invoked relative base keeps
+       working by anchoring it to the working directory. *)
+    let base =
+      if Filename.is_relative base then
+        match Sys.getcwd () with
+        | directory -> Filename.concat directory base
+        | exception Sys_error _ -> base
+      else base
+    in
+    (* The workspace connection.toml owns the server port for the CLI and the
+       TUI; the lane host follows the same file instead of a port baked at
+       install time. A port that fails to resolve is reported, never silently
+       replaced by a default the server may not be listening on. *)
+    let* server =
       match server with
-      | Some url -> url
+      | Some url -> Ok url
       | None ->
           (match Env_config_core.masc_http_base_url_opt () with
-           | Some url -> url
+           | Some url -> Ok url
            | None ->
-               Uri.make ~scheme:"http"
-                 ~host:(Masc_network_defaults.normalize_advertised_host (Env_config_core.masc_host ()))
-                 ~port:(Env_config_core.masc_http_port_int ()) ()
-               |> Uri.to_string)
+               (match Workspace_connection.resolve ~base_path:(Some base)
+                       ~cli:None ~environment:(Env_config_core.masc_http_port_opt ()) with
+                | Error error -> Error (Workspace_connection.error_message error)
+                | Ok port ->
+                    Ok (Uri.make ~scheme:"http"
+                          ~host:(Masc_network_defaults.normalize_advertised_host (Env_config_core.masc_host ()))
+                          ~port:(Workspace_connection.to_int port) ()
+                        |> Uri.to_string)))
     in
     let server = Uri.of_string server in
     let loopback =

@@ -1897,21 +1897,6 @@ let execution_trust_keeper_row_keys =
   ; "trust"
   ]
 
-(* #36066 refuses a keeper nothing declares (audit F386): the profile loader
-   answers [Declaration_not_found] and both dashboard projections row it as
-   [invalid_profile_dashboard_row], which carries no [trace_id]. A meta
-   snapshot alone therefore no longer reaches the enrich path; a fixture
-   keeper is declared the way a real one is, with keepers/<name>.toml. *)
-let declare_fixture_keeper config name =
-  let path =
-    Config_dir_resolver.keeper_toml_path_for_base_path
-      ~base_path:config.Workspace.base_path
-      name
-  in
-  mkdir_p (Filename.dirname path);
-  write_file path
-    (Printf.sprintf "[keeper]\ninstructions = \"%s fixture instructions\"\n" name)
-
 let test_execution_trust_uses_narrow_keeper_projection () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1932,7 +1917,10 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
-  declare_fixture_keeper config name;
+  (* #36066: both dashboard projections row an undeclared keeper as
+     [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> failf "write meta: %s" error);
@@ -2248,7 +2236,10 @@ let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
       (match Runtime.init_default ~config_path:runtime_path with
        | Ok () -> ()
        | Error error -> fail ("runtime init: " ^ error));
-      declare_fixture_keeper config name;
+      (* #36066: both dashboard projections row an undeclared keeper as
+         [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error error -> fail ("write meta: " ^ error));
@@ -5465,7 +5456,10 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
             | Ok meta -> meta
             | Error error -> fail ("meta fixture: " ^ error)
           in
-          declare_fixture_keeper config name;
+          (* #36066: both dashboard projections row an undeclared keeper as
+             [invalid_profile_dashboard_row], which carries no [trace_id]. *)
+          Masc_test_deps.declare_fixture_keeper
+            ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
           (match Masc.Keeper_meta_store.replace_snapshot config meta with
            | Ok () -> ()
            | Error error -> fail ("write meta: " ^ error));

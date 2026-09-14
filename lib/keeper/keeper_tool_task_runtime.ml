@@ -420,7 +420,7 @@ let handle_keeper_task_tool_with_outcome
           (#29101); this section names the newest visible rows beside it so a
           fresh task is never invisible on the first call. *)
        let new_task_window = 10 in
-       let newest_first (left : Masc_domain.task) right =
+       let newest_first (left : Masc_domain.task) (right : Masc_domain.task) =
          match String.compare right.created_at left.created_at with
          | 0 -> String.compare right.id left.id
          | order -> order

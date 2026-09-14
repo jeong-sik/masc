@@ -217,7 +217,7 @@ let claim_next_r
            observable through [created_at], but never rewrites that priority. *)
         let sorted =
           List.sort
-            (fun a b ->
+            (fun (a : Masc_domain.task) (b : Masc_domain.task) ->
                let priority_cmp = compare a.priority b.priority in
                if priority_cmp <> 0
                then priority_cmp

@@ -215,7 +215,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
             (priority, then created_at, then id). The frame's "next to claim"
             rows are the head of this list, so what the keeper reads first is
             what the scheduler would claim first (#29101). *)
-         |> List.sort (fun (left : claimable_task_identity) right ->
+         |> List.sort (fun (left : claimable_task_identity) (right : claimable_task_identity) ->
               match Int.compare left.priority right.priority with
               | 0 ->
                 (match String.compare left.created_at right.created_at with

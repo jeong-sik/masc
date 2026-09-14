@@ -1774,7 +1774,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
              then (
                let newest_first
                      (left : Keeper_world_observation_inputs.claimable_task_identity)
-                     right
+                     (right : Keeper_world_observation_inputs.claimable_task_identity)
                  =
                  match String.compare right.created_at left.created_at with
                  | 0 ->

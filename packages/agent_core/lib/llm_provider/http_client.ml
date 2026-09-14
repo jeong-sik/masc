@@ -2615,11 +2615,23 @@ let with_post_stream
               origin.uri
           with
           | resp, resp_body -> Ok (conn, transport_eof_seen, resp, resp_body)
-          | exception exn ->
-            (* The window closing arrives here as cancellation; the socket
-               must not outlive the request on the cache's switch. *)
+          | exception (Eio.Cancel.Cancelled _ as exn) ->
+            (* The window closing arrives here as cancellation, and so does
+               an outer cancel; either way the socket must not outlive the
+               request on the cache's switch, and the cancellation itself
+               is not something to classify. *)
             Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
-            raise exn)
+            raise exn
+          | exception exn ->
+            (* A peer that closes during the request or the status line
+               reads as End_of_file through the tracked connection; an
+               exception the classifier does not know is that EOF when the
+               tracker saw one, and escapes otherwise. *)
+            Eio.Resource.close conn;
+            (match classify_network_exn exn with
+             | Some e -> Error e
+             | None when !transport_eof_seen -> Error (eof_error exn)
+             | None -> raise exn))
       in
       try
         let status = Cohttp.Response.status resp in

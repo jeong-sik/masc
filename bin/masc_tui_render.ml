@@ -468,34 +468,10 @@ let render_overview (state : state) =
             that is not listening reads "off" instead of zero sessions, and
             dropped events are called out because a steady queue that drops is
             not a healthy transport. *)
-         let transport_summary =
+         let transport_tail =
            match state.transport with
            | None -> ""
-           | Some t ->
-             let websocket =
-               match t.th_websocket_sessions with
-               | Some sessions -> Printf.sprintf "ws %d" sessions
-               | None -> "ws off"
-             in
-             let grpc =
-               match t.th_grpc_port with
-               | Some port -> Printf.sprintf "grpc :%d" port
-               | None -> "grpc off"
-             in
-             let dropped =
-               if t.th_events_dropped = 0 then ""
-               else Printf.sprintf "  dropped %d" t.th_events_dropped
-             in
-             (* No padding here: this rides the tail of the row, so a long
-                value trims itself against the border instead of pushing the
-                cluster and project columns around. *)
-             Printf.sprintf "  %s/%s  sse %d  %s  %s%s"
-               (* Both come off a closed type now, so there is no arbitrary
-                  text to sanitize here. *)
-               (Masc.Transport_metrics.primary_path_kind_to_string t.th_primary_path)
-               (Masc.Transport_metrics.queue_pressure_kind_to_string
-                  t.th_queue_pressure)
-               t.th_sse_sessions websocket grpc dropped
+           | Some t -> transport_summary t
          in
          (* The runtime event feed rides the same tail. "live N" counts the
             frames this stream has delivered; a closed feed keeps its count
@@ -522,7 +498,7 @@ let render_overview (state : state) =
              (Terminal_text.single_line o.ov_cluster)
              Ansi.reset
              (Terminal_text.single_line o.ov_project)
-             transport_summary observer_summary
+             transport_tail observer_summary
        in
        box_line buf cols cluster_line);
 
@@ -8704,7 +8680,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     @ [ ( Ansi.reset
     , "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, "  Started: " ^ started_text ^ " (local)"
+    ; Ansi.dim, "  Started: " ^ started_text
     ; Ansi.reset, "  Duration: " ^ fusion_run_duration ~now run
     ]
     @ (match detail.fud_evidence with
@@ -8927,7 +8903,7 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code";
-          c.push "  DATE (local)      KEEPER             TASK             FILE";
+          c.push "  DATE              KEEPER             TASK             FILE";
           c.push_divider ();
           let room = max 1 (budget - 7) in
           let first = max 0 (cursor - room + 1) in
@@ -9183,7 +9159,7 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s · %s · %d need memory · read %s (local)  %s"
+        Printf.sprintf "%s · %s · %d need memory · read %s  %s"
           (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper") s.mhs_starving_keepers
           (let tm = Unix.localtime s.mhs_generated_at in
            Printf.sprintf "%04d-%02d-%02d %02d:%02d"
@@ -10647,11 +10623,19 @@ let render_runtime (state : state) =
           let lane_fact =
             match candidate.rcr_preferred_at_ts with
             | Some at ->
+                (* One timestamp, said once. [rcr_preferred_at_ts] carries
+                   [Runtime_lane_preference.preferred_of_lane]'s [noted_at],
+                   which {!Runtime_lane_preference.note_success} re-stamps on
+                   every successful attempt -- so it is when the candidate
+                   last answered, and never a point the stickiness has run
+                   from. The row said both, printing the same value twice,
+                   and the "sticky since" half was the one that was not true.
+
+                   It also cost the width that made the rest of this cell
+                   disappear: 53 columns of detail in the 18 a 100-column
+                   terminal leaves it (#36131). *)
                 [ (Theme.ok ())
-                  ^ "\xe2\x98\x85 active (sticky since "
-                  ^ Terminal_text.clock_timestamp
-                      (Masc_domain.iso8601_of_unix_seconds at)
-                  ^ ", last success "
+                  ^ "\xe2\x98\x85 active (last success "
                   ^ Terminal_text.clock_timestamp
                       (Masc_domain.iso8601_of_unix_seconds at)
                   ^ ")"

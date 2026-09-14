@@ -397,6 +397,14 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_working_context_recall_artifact ->
+    Some (Keeper_librarian_context_recall.path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_name)
+  | Keeper_working_context_artifact ->
+    Some (Keeper_librarian_context.path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name)
   | Keeper_memory_journal_artifact ->
     Some
       (Keeper_memory_os_current.journal_path_for_keepers_dir
@@ -532,6 +540,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_memory_source_current_artifact
+            | Keeper_working_context_recall_artifact
+            | Keeper_working_context_artifact
             | Keeper_playground_bundles_artifact
             | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
@@ -553,6 +563,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
                | Keeper_memory_source_current_artifact
+               | Keeper_working_context_recall_artifact
+               | Keeper_working_context_artifact
                | Keeper_memory_journal_artifact
                | Keeper_playground_bundles_artifact
                | Keeper_runtime_configuration_artifact

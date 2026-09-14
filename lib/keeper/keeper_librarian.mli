@@ -46,6 +46,7 @@ type input =
         importance through this identity; [""] renders as an explicit
         [no keeper instructions] marker. *)
   ; current : current_selection option
+  ; working_context : Keeper_librarian_context.input
   ; messages : Agent_core.Types.message list
   ; tool_observations : tool_observation list
   ; counterpart_observations : Keeper_counterpart_observation.t list
@@ -72,6 +73,7 @@ type selection =
         so [Missing_disposition] replaces silent forgetting. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
+  ; working_contexts : Keeper_librarian_context.pocket list
   }
 
 val wire_field_retained_memory_ids : string
@@ -92,6 +94,7 @@ val prompt_variables : input -> (string * string) list
 
 type parse_error =
   | Top_level_not_object
+  | Working_context_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields

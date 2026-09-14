@@ -182,10 +182,10 @@ let parse_sse_event event_type data_str =
     Some (SSEParseFailed { raw = data_str; reason = "json_error: " ^ msg })
 ;;
 
-(* Agent Core contract: TTFT classification — distinguishes Anthropic prelude
-   events ([MessageStart], [ContentBlockStart], [Ping]) from the
-   first generated token. Capture point in [Complete] uses this
-   to fill [Streaming_summary.ttft_ms]. *)
+(* Agent Core contract: TTFT classification — distinguishes prelude events
+   ([MessageStart], a [ContentBlockStart] that carries no content, [Ping])
+   from the first generated content. Capture point in [Complete] uses this
+   to fill [Streaming_summary.ttft_ms] and to end the first-event budget. *)
 let sse_event_is_first_token_signal (e : sse_event) : bool =
   let non_empty s = String.length s > 0 in
   match e with
@@ -198,8 +198,14 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
      | Some _ | None -> details <> [])
   | ContentBlockDelta { delta = InputJsonDelta s | InputJsonSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = MediaDelta { data; _ }; _ } -> non_empty data
-  | ContentBlockDelta
-      { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _; _ } -> false
+  (* A redacted thinking block is generated content the caller receives
+     ([Types.RedactedThinking]): the model has produced, so the first-event
+     wait is over and TTFT is measured to it. Anthropic delivers the whole
+     block in its [content_block_start], with the payload in [tool_id]. *)
+  | ContentBlockStart { content_type = "redacted_thinking"; tool_id = Some data; _ } ->
+    not (Api_common.string_is_blank data)
+  | ContentBlockDelta { delta = RedactedThinkingSnapshot data; _ } -> non_empty data
+  | ContentBlockDelta { delta = ThinkingSignatureDelta _; _ } -> false
   | MessageStart _
   | ContentBlockStart _
   | ContentBlockStop _

@@ -1408,10 +1408,14 @@ let test_interactive_admission_wire_roundtrip () =
   let body intent = Chat.request_body ~admission_intent:intent ~since_seq:Position.Whole_turn request in
   let parse intent = match Stream.parse_keeper_chat_stream_request (body intent) with
     | Ok request -> request.Stream.admission_intent | Error detail -> fail detail in
-  (match parse (Chat.Interactive {control_token = "owner-control"; target = Some (Observed_turn_token "turn-token")}) with
+  (* The server side parses the token with Keeper_interrupt_token.of_string,
+     which rejects non-UUID text, so the roundtrip needs a real token's wire
+     form and compares through its canonical text. *)
+  let token_wire = "6ef5f10c-9d24-4d59-86bd-9ec92015e9a3" in
+  (match parse (Chat.Interactive {control_token = "owner-control"; target = Some (Observed_turn_token token_wire)}) with
    | Stream.Interactive {control_token; target = Some (Masc.Keeper_owner_registry.Observed_turn_token token)} ->
      check string "control token survives" "owner-control" control_token;
-     check string "exact turn survives" "turn-token" token
+     check string "exact turn survives" token_wire (Masc.Keeper_interrupt_token.to_string token)
    | _ -> fail "interactive intent was lost");
   (match parse Chat.Queue_only with Stream.Queue_only -> () | _ -> fail "queue-only changed meaning");
   let malformed = Yojson.Safe.from_string (body (Chat.Interactive {control_token = "owner-control"; target = None})) in

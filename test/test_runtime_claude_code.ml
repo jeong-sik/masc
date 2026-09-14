@@ -1950,7 +1950,7 @@ let native_argv ~native ~dynamic_tools =
     { (Runtime_claude_code.default_config ~cwd:"/tmp") with native }
   in
   match
-    Runtime_claude_code.command
+    Runtime_claude_code.command ~system_prompt_file:None
       config
       ~dynamic_tools
       ~reasoning_effort:None
@@ -1985,7 +1985,7 @@ let test_setting_sources_render_in_argv () =
       }
     in
     match
-      Runtime_claude_code.command
+      Runtime_claude_code.command ~system_prompt_file:None
         config
         ~dynamic_tools:[]
         ~reasoning_effort:None
@@ -2011,36 +2011,42 @@ let test_setting_sources_render_in_argv () =
           (argv [ Runtime_native_tools.Settings_local ])))
 ;;
 
-(* Passing [--system-prompt] replaces the CLI's built-in prompt, so the flag's
-   absence is what selects that prompt. claude 2.1.260 reads any string as the
-   prompt — "" included — which is why an unset prompt has to drop the flag
-   rather than send an empty value. Its --help states the same coupling:
-   "Only applies with the default system prompt (ignored with
-   --system-prompt)". *)
 let test_system_prompt_flag_is_omitted_when_unset () =
   let argv system_prompt =
-    let config =
-      { (Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt }
-    in
-    match
-      Runtime_claude_code.command
-        config
-        ~dynamic_tools:[]
-        ~reasoning_effort:None
-        ~session_mode:Runtime_claude_code.Start
-        ~session_id:"11111111-1111-4111-8111-111111111111"
-    with
+    let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt} in
+    match Runtime_claude_code.command
+      ~system_prompt_file:(Option.map (fun _ -> "/tmp/private-system.txt") system_prompt)
+      config ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Runtime_claude_code.Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
     | Ok argv -> argv
     | Error error -> fail (Runtime_claude_code.error_to_string error)
   in
-  check bool "an unset prompt sends no --system-prompt" false
-    (List.mem "--system-prompt" (argv None));
-  check (option string) "so the flag carries no value" None
-    (flag_value (argv None) "--system-prompt");
-  check bool "a declared prompt sends the flag" true
-    (List.mem "--system-prompt" (argv (Some "keeper instructions")));
-  check (option string) "with its text verbatim" (Some "keeper instructions")
-    (flag_value (argv (Some "keeper instructions")) "--system-prompt")
+  check (option string) "unset prompt has no replacement file" None
+    (flag_value (argv None) "--system-prompt-file");
+  check (option string) "configured prompt uses its prepared file"
+    (Some "/tmp/private-system.txt")
+    (flag_value (argv (Some "keeper instructions")) "--system-prompt-file")
+;;
+
+let test_system_file_keeps_large_context_off_argv () =
+  let prompt = String.make (256 * 1024) 'x' in
+  let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt=Some prompt} in
+  (match Runtime_claude_code.command ~system_prompt_file:None config
+      ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+   | Error (Invalid_config _) -> ()
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "configured context silently fell back to inline argv");
+  match Runtime_claude_code.command ~system_prompt_file:(Some "/tmp/private-system.txt")
+      config ~dynamic_tools:[] ~reasoning_effort:None ~session_mode:Start
+      ~session_id:"11111111-1111-4111-8111-111111111111" with
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok argv ->
+    check (option string) "replacement file flag" (Some "/tmp/private-system.txt")
+      (flag_value argv "--system-prompt-file");
+    check (option string) "prompt bytes are absent from argv" None
+      (flag_value argv "--system-prompt");
+    check bool "no argument contains the large context" false (List.mem prompt argv)
 ;;
 
 let test_native_posture_selects_tools_flag () =
@@ -2088,6 +2094,7 @@ let () =
             "setting sources render in argv"
             `Quick
             test_setting_sources_render_in_argv
+        ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
         ; test_case
             "an unset system prompt omits the flag"
             `Quick

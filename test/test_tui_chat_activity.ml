@@ -13,16 +13,18 @@ let state () =
   state
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
-  { ktr_keeper_name = keeper_name
+  { ktr_chat_control_token = None; ktr_keeper_name = keeper_name
   ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = None; preview = None }
   }
 
-let live ?(keeper_name = "alpha") state admission =
-  let live = Tui.turn_log_create ~keeper_name ~request_id:"request-1" ~started_at:2. in
+let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
+  let live = Tui.turn_log_create ~keeper_name ~request_id ~started_at:2. in
   Option.iter (fun admission ->
     Tui.turn_log_add ~now:3. live ~seq:None
-      (Live.Accepted { admission; queue_length = 3 })) admission;
+      (Live.Accepted { admission; queue_length = 3; interactive = None })) admission;
   state.Tui.msg_live <- Some live;
+  state.msg_inflight <- [{ Tui.sent_request = { Chat.request_id; keeper_name; message = "request"; attachments = []; references = [] };
+    submitted_at = 2.; sent_at = 2.; control_generation = 0; origin = Tui.Direct_submission; phase = Tui.Turn_streaming; log = live }];
   live
 
 let last rows = match List.rev rows with
@@ -55,8 +57,8 @@ let test_queue_does_not_invent_a_blocking_turn () =
     ; [running ~keeper_name:"beta" Turn_lane_autonomous], None
     ; [running Turn_lane_chat_operation], None
     ; [running Turn_lane_autonomous], Some "timeout"
-    ; [{ Decode.ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
-    ; [{ Decode.ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
+    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
+    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
     ];
   let state = state () in
   state.keeper_turns <- [running Turn_lane_maintenance];
@@ -70,7 +72,8 @@ let test_started_and_finished_requests_stop_waiting () =
   let log = live state (Some Live.Queued) in
   state.keeper_turns <- [running Turn_lane_chat_operation];
   Tui.turn_log_add ~now:4. log ~seq:(Some 1) Live.Run_started;
-  check (list string) "run started supersedes its old queued acceptance" []
+  check (list string) "run started supersedes its old queued acceptance"
+    ["Current direct conversation · request-1 · in progress"]
     (Tui.keeper_message_activity_rows state);
   state.keeper_turns <- [];
   Tui.turn_log_add ~now:5. log ~seq:(Some 2) Live.Run_finished;
@@ -97,10 +100,28 @@ let test_local_queue_is_not_server_admission () =
   check (list string) "no target has no attributed activity" []
     (Tui.keeper_message_activity_rows state)
 
+let test_working_request_survives_newer_queued_view () =
+  let state = state () in
+  state.keeper_turns <- [running Turn_lane_autonomous];
+  let working = live state (Some Live.Running) in
+  Tui.turn_log_add ~now:4. working ~seq:(Some 1) Live.Run_started;
+  Tui.turn_log_add ~now:4. working ~seq:(Some 2)
+    (Live.Batch_bound {operation_id = "request-1"; execution_id = "shared-execution"});
+  let active = List.hd state.msg_inflight in
+  ignore (live ~request_id:"queued-2" state (Some Live.Queued));
+  state.msg_inflight <- state.msg_inflight @ [active];
+  check (list string) "active execution and independent queue stay visible"
+    ["Current direct conversation · shared-execution · in progress";
+     "Your message is queued behind this Keeper's current turn; start time unknown"]
+    (Tui.keeper_message_activity_rows state);
+  check (list string) "stale autonomous interrupt rows are suppressed" []
+    (Tui.keeper_observed_interrupt_rows state)
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "admission distinguishes Waiting states" `Quick
+      [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
+      ; test_case "admission distinguishes Waiting states" `Quick
           test_admission_is_not_inferred_from_waiting_phase
       ; test_case "queue does not invent its blocker" `Quick
           test_queue_does_not_invent_a_blocking_turn

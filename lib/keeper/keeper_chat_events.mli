@@ -81,6 +81,7 @@ type continuation_checkpoint =
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
@@ -234,14 +235,17 @@ type published =
   ; event : keeper_chat_event
   }
 
-(** [create ?now ?on_publish ()] returns a new bounded event stream. Each turn
-    should create its own stream instance. [now] is the clock read once per
+(** [create ?first_seq ?now ?on_publish ()] returns a new bounded event stream. Each turn
+    should create its own stream instance. [first_seq] defaults to zero for a
+    fresh operation; a continuation supplies the next durable journal sequence.
+    [now] is the clock read once per
     [publish] (default [Time_compat.now]; injectable for deterministic tests).
     [on_publish], when given, is invoked synchronously with that seq and ts
     BEFORE the event enters the bus; hook exceptions are logged and swallowed
     (except cancellation, which is re-raised) so a journal failure can never
     break the live turn. *)
 val create :
+  ?first_seq:int ->
   ?now:(unit -> float) ->
   ?on_publish:(seq:int -> ts:float -> keeper_chat_event -> unit) ->
   unit ->

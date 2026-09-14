@@ -18,6 +18,13 @@ open Llm_provider
 
 let call_deadline_s = 1.0
 
+(* Ahead of a stream, the first-event budget; the admission budget is longer,
+   as the keeper declares them (its no-progress threshold, which is the
+   stream's admission budget, is refused when shorter than a stream budget),
+   so a silent round trip meets the first-event budget first. *)
+let first_event_budget_s = call_deadline_s
+let admission_budget_s = 2.0
+
 (* Where one window ends. A deadline restarted after the count-tokens round
    trip would end at [count_tokens_delay_s +. call_deadline_s]; the slack
    keeps the window below that total so the case tells them apart. *)
@@ -25,10 +32,11 @@ let slack_s = 0.5
 let count_tokens_delay_s = 0.6
 let two_windows_total_s = count_tokens_delay_s +. call_deadline_s
 
-(* A permit released this late leaves the round trip less of the window
-   than the listener's delay: [late_grant_s +. count_tokens_delay_s] is past
-   [call_deadline_s]. *)
-let late_grant_s = 0.9
+(* What a permit released late leaves of the admission budget: less than the
+   listener's delay, so the round trip cannot finish inside it, and less than
+   the first-event budget, so the admission budget is the one that ends it. *)
+let admission_left_after_late_grant_s = 0.2
+let late_grant_s = admission_budget_s -. admission_left_after_late_grant_s
 
 (* What a loopback count-tokens round trip adds beyond the listener's own
    delay: connecting, the request, the answer. A budget handed on below
@@ -37,7 +45,7 @@ let round_trip_overhead_s = 0.3
 let provider_takes_s = 5.0
 let outer_budget_s = 10.0
 
-let within_one_window elapsed = elapsed >= call_deadline_s && elapsed < call_deadline_s +. slack_s
+let within_one_window ~window_s elapsed = elapsed >= window_s && elapsed < window_s +. slack_s
 
 type count_tokens_behaviour =
   | Answers_at_once
@@ -130,8 +138,8 @@ type bounds =
   | Call_deadline
     (** the non-streaming route under [call_deadline_s] *)
   | Stream_budgets
-    (** the streaming route with [call_deadline_s] as both the admission
-        and the first-event budget *)
+    (** the streaming route under [admission_budget_s] and
+        [first_event_budget_s] *)
 
 (* Records the dispatch. The completion then takes longer than any call
    here has left; the stream records the first-event budget it was handed
@@ -165,8 +173,8 @@ let build_agent ~net ~provider_config ~transport ~bounds =
    | Call_deadline -> Agent_core.Builder.with_call_timeout call_deadline_s builder
    | Stream_budgets ->
      builder
-     |> Agent_core.Builder.with_admission_timeout call_deadline_s
-     |> Agent_core.Builder.with_first_event_timeout call_deadline_s)
+     |> Agent_core.Builder.with_admission_timeout admission_budget_s
+     |> Agent_core.Builder.with_first_event_timeout first_event_budget_s)
   |> Agent_core.Builder.build_safe
   |> function
   | Ok agent -> agent
@@ -258,15 +266,15 @@ let check_timeout ~expected ~stage outcome elapsed =
       elapsed
 ;;
 
-let check_one_window elapsed =
-  if not (within_one_window elapsed)
+let check_one_window ?(window_s = call_deadline_s) elapsed =
+  if not (within_one_window ~window_s elapsed)
   then
     failf
       "ended at %.2fs; one %.1fs window from the call should have ended it inside [%.1f, %.1f)"
       elapsed
-      call_deadline_s
-      call_deadline_s
-      (call_deadline_s +. slack_s)
+      window_s
+      window_s
+      (window_s +. slack_s)
 ;;
 
 (* The permit is held before the case starts. The measurement is first in
@@ -335,7 +343,7 @@ let test_ahead_of_a_stream_the_measurements_permit_wait_ends_at_the_admission_bu
   run_case ~bounds:Stream_budgets ~behaviour:Answers_at_once ~holder:From_the_start
   @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
   check_timeout ~expected:Http_client.Queue ~stage:"count-tokens request" outcome elapsed;
-  check_one_window elapsed;
+  check_one_window ~window_s:admission_budget_s elapsed;
   check int "nothing was measured" 0 count_posts;
   check bool "the stream was never dispatched" false dispatched
 ;;
@@ -365,7 +373,7 @@ let test_the_stream_arms_what_the_count_round_trip_left_of_the_first_event_budge
   @@ fun ~outcome:_ ~elapsed:_ ~dispatched ~count_posts ~stream_first_event_s ->
   check int "the request was measured once" 1 count_posts;
   check bool "the stream was dispatched" true dispatched;
-  let left_s = call_deadline_s -. count_tokens_delay_s in
+  let left_s = first_event_budget_s -. count_tokens_delay_s in
   match stream_first_event_s with
   | Some handed_s ->
     (* The round trip took at least the listener's delay, so the remainder
@@ -376,7 +384,7 @@ let test_the_stream_arms_what_the_count_round_trip_left_of_the_first_event_budge
         "the stream was handed a %.2fs first-event budget; a %.1fs budget less the %.1fs \
          round trip is %.1fs, less at most %.1fs of overhead"
         handed_s
-        call_deadline_s
+        first_event_budget_s
         count_tokens_delay_s
         left_s
         round_trip_overhead_s
@@ -398,7 +406,7 @@ let test_a_late_permit_leaves_the_round_trip_what_the_admission_budget_has_left 
     ~stage:"during the count-tokens round trip, which the admission budget spans"
     outcome
     elapsed;
-  check_one_window elapsed;
+  check_one_window ~window_s:admission_budget_s elapsed;
   if elapsed >= late_grant_s +. count_tokens_delay_s
   then failf "ended at %.2fs: the round trip ran past the admission budget" elapsed;
   check int "the measurement was sent" 1 count_posts;
@@ -415,8 +423,8 @@ let test_the_streams_permit_wait_runs_under_what_the_admission_budget_has_left (
     ~holder:Once_the_measurement_is_in_flight
   @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
   check_timeout ~expected:Http_client.Queue ~stage:"(Complete.complete_stream)" outcome elapsed;
-  check_one_window elapsed;
-  if elapsed >= two_windows_total_s
+  check_one_window ~window_s:admission_budget_s elapsed;
+  if elapsed >= count_tokens_delay_s +. admission_budget_s
   then failf "ended at %.2fs: the stream was given a second admission budget" elapsed;
   check int "the request was measured once" 1 count_posts;
   check bool "the stream was never dispatched" false dispatched

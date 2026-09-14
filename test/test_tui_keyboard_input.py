@@ -7720,11 +7720,26 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
-            # The skill row names an outcome now, not a chain of receipts.
+            # The skill row names an outcome, not a chain of receipts.
             # "DELIVERED · USED" was the evidence path; the label says what
             # came of it, and the mark above already carries the state.
+            #
+            # The phrase itself was rewritten in #36268: a skill's life is
+            # three steps the model takes (reads it, the delivery is
+            # recorded, it then uses a tool), and the earlier wording named
+            # those steps from the server's side, so "받아서 씀" left an
+            # operator asking who received what. Skill_used reads
+            # "전달됨, 도구 씀" now. Same TOOLS-lane token colouring as the
+            # needles above, so the words are matched across SGR runs rather
+            # than as one literal. The gap class is ASCII only, which is what
+            # keeps this off the neighbouring "전달됨, 도구 안 씀": the "안"
+            # between its two halves is not a byte the gap can cross.
             re.compile(
-                "받아서".encode() + rb"[\x1b\x20-\x7e]*?" + "씀".encode()
+                "전달됨".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "도구".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "씀".encode()
             ),
             re.compile(
                 rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"

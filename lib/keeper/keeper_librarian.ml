@@ -35,6 +35,7 @@ type input =
   ; goal_context : goal_context
   ; keeper_instructions : string
   ; current : current_selection option
+  ; working_context : Keeper_librarian_context.input
   ; messages : Agent_core.Types.message list
   ; tool_observations : tool_observation list
   ; counterpart_observations : Keeper_counterpart_observation.t list
@@ -54,6 +55,7 @@ type selection =
   ; dropped : dropped_statement list
   ; facts : fact list
   ; revisions : revision list
+  ; working_contexts : Keeper_librarian_context.pocket list
   }
 
 let wire_field_retained_memory_ids = "retained_memory_ids"
@@ -67,7 +69,7 @@ let wire_field_supersedes = Keeper_memory_os_types.wire_field_supersedes
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
 let wire_current_fields =
-  [ wire_field_retained_memory_ids; wire_field_new_claims; wire_field_dropped ]
+  [ wire_field_retained_memory_ids; wire_field_new_claims; wire_field_dropped; "working_contexts" ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -207,6 +209,7 @@ let goal_context_to_json = function
 let prompt_variables (inp : input) : (string * string) list =
   [ ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
   ; ( "conversation_history"
@@ -260,6 +263,7 @@ let first_object_field_error ~allowed fields =
 
 type parse_error =
   | Top_level_not_object
+  | Working_context_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields
@@ -277,6 +281,7 @@ type parse_error =
 
 let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
+  | Working_context_invalid detail -> "working_context_invalid: " ^ detail
   | Unexpected_field field -> "unexpected_field: " ^ field
   | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
@@ -548,6 +553,13 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
      | Some (Unexpected_object_field field) -> Error (Unexpected_field field)
      | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
+       let open Result.Syntax in
+       let* working_contexts =
+         match List.assoc_opt "working_contexts" fields with
+         | None -> Error Missing_required_fields
+         | Some json -> Keeper_librarian_context.select inp.working_context json
+             |> Result.map_error (fun detail -> Working_context_invalid detail)
+       in
        (match
           string_list_field wire_field_retained_memory_ids fields
           , List.assoc_opt wire_field_new_claims fields
@@ -600,6 +612,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                              ; dropped
                              ; facts
                              ; revisions
+                             ; working_contexts
                              }
                          | Error _ as error -> error)
                     | Error _ as error -> error)

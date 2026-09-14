@@ -54,6 +54,7 @@ let input () : Librarian.input =
         ; outcome = Librarian.Unknown
         }
       ]
+  ; working_context = Masc.Keeper_librarian_context.empty
   ; counterpart_observations = []
   }
 ;;
@@ -100,7 +101,8 @@ let selection_json
       ()
   =
   `Assoc
-    [ Librarian.wire_field_retained_memory_ids
+    [ "working_contexts", `List []
+    ; Librarian.wire_field_retained_memory_ids
     , `List (List.map (fun id -> `String id) retained)
     ; Librarian.wire_field_new_claims, `List new_claims
     ; Librarian.wire_field_dropped, `List dropped
@@ -402,7 +404,8 @@ let test_totality_rejects_unaccounted_current_id () =
   match
     parse
       (`Assoc
-         [ Librarian.wire_field_retained_memory_ids
+         [ "working_contexts", `List []
+    ; Librarian.wire_field_retained_memory_ids
          , `List [ `String "m1" ]
          ; Librarian.wire_field_new_claims, `List []
          ])

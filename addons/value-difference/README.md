@@ -17,6 +17,10 @@ host, dispatcher, TUI and Dashboard need no package-specific changes.
 `binding.unit` names its unit. Neither is inferred from a title, substring or
 clock. Nested selectors, implicit unit conversion and string-to-number coercion
 are not supported. Each configured source needs exactly one supplied value row.
+`lane.toml` declares this binding as an `[interface] binding_schema`: `field`,
+`unit` and `lane_output` sources only. A declaration that omits `field` or adds
+a key the package does not read is rejected when it is saved or attached, before
+a worker starts.
 Multiple sources have independent baselines and output Lanes. Boolean, null,
 string and nonfinite values are unknown input. Integers keep exact subtraction;
 floating-point operands retain their normal floating-point arithmetic.

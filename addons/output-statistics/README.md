@@ -5,6 +5,9 @@ installations in the same run. Each supplied producer output contributes a value
 row with `observed_row_count` and `observed_by_kind` (`event`, `value`, `relation`).
 These count the rows supplied in that output, not total world events or game
 progress. Reading the same producer cursor again does not accumulate a total.
+`lane.toml` declares the binding as an `[interface] binding_schema` whose
+`sources` are `lane_output` ports only; any other source kind is rejected when
+the declaration is saved or attached.
 
 `input_complete` and coverage remain separate from the known row count. Partial
 input still has a factual supplied-row count. Missing or unrecognized input

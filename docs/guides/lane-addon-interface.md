@@ -25,6 +25,10 @@ available in technical detail. Display metadata grants no action authority.
 
 The common package JSON includes both contracts. A display-only package can omit
 `binding_schema`; a package without display metadata uses the generic row view.
+The shipped `dos-world`, `value-difference` and `output-statistics` packages
+declare one, so their checked-in declarations are validated by
+`test_lane_addon_config` and a guided installer can build their bindings from
+the schema instead of a hand-written TOML file.
 The current contract does not claim that an image is installed or that a source
 has supplied complete observations. Those remain separate installation and
 coverage states.

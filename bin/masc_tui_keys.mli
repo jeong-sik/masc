@@ -131,6 +131,12 @@ val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
+val footer_hints_board_read : focus_posts:bool -> split:bool -> string
+(** The Board read footer. [focus_posts] is whether j/k moves the post list
+    beside the open post rather than scrolling it; [split] is whether that
+    list is on screen, which is when h/l and Ctrl-W have a pane to reach. The
+    vote, reply and copy keys are the Board surface list's own bindings. *)
+
 val footer_hints_fusion_detail : position:string -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
     the window the renderer drew, which the static per-surface table cannot

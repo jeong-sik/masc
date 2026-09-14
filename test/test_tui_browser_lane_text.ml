@@ -21,7 +21,11 @@ let () =
     "tag", `String "main"; "text", `String "Reading surface";
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 100; "height", `Int 40]];
     "color", `String "rgb(0,0,0)"; "fontSize", `Int 14;
-    "fontWeight", `String "400"; "whiteSpace", `String "normal" ] in
+    "fontWeight", `String "400"; "whiteSpace", `String "normal";
+    (* #36052 made this key required: a node with no mapping says so
+       with a null, and leaving it out is "scene missing sourceContext"
+       (test_browser_surface pins both answers). *)
+    "sourceContext", `Null ] in
   let json = `Assoc [
     "schema", `String "masc.browser.scene.v1"; "documentId", `String "doc";
     "url", `String "https://example.org"; "title", `String "Example";
@@ -40,7 +44,8 @@ let () =
       "role", `String "article"; "label", `String "Post A"];
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 100; "height", `Int 20]];
     "color", `String "rgb(0,0,0)"; "fontSize", `Int 14;
-    "fontWeight", `String "400"; "whiteSpace", `String "normal" ] in
+    "fontWeight", `String "400"; "whiteSpace", `String "normal";
+    "sourceContext", `Null ] in
   let heading_scene_json = `Assoc [
     "schema", `String "masc.browser.scene.v1"; "documentId", `String "doc";
     "url", `String "https://example.org"; "title", `String "Example";

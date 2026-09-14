@@ -223,12 +223,19 @@ module KeeperKeepalive : sig
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
 
+  val provider_call_deadline_failsafe_floor_sec : float
+  (** Resolved runtime fallback for the provider-call no-progress threshold
+      when neither env nor runtime.toml declares one. Kept beside the two
+      stream floors so runtime execution and operator projection share one
+      value. *)
+
   val provider_call_deadline_sec_override : unit -> float option
   (** The keeper's no-progress threshold for a provider call attempt
       (#27349, #28417), read on every call (env, then the runtime.toml boot
-      override). [None] (unset) means no MASC-side enforcement and no
-      failsafe floor. A declared value that is not a finite positive number
-      of seconds raises {!Env_config_core.Config_error}.
+      override). [None] (unset) means no explicit value; the resolved layer
+      substitutes {!provider_call_deadline_failsafe_floor_sec}. A declared
+      value that is not a finite positive number of seconds raises
+      {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Clamp range: [30, 3600] s. *)
 

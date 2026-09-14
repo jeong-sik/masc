@@ -35,14 +35,13 @@ let source_to_string = function
   | Default -> "default"
   | Failsafe_floor -> "failsafe_floor"
 
-(* The parse and the clamp of the two opt-in deadlines belong to
-   Env_config_keeper; a second copy here read the same variables and would
-   drift on any change to either. AGENT_CORE applies the body override only
-   to non-streaming sync body reads. The provider-call threshold is opt-in
-   with no failsafe floor. Durable channel (#27416): runtime.toml
-   [turn.provider_call_deadline_sec] reaches the reader through the
-   boot-override layer behind [Env_config_core.raw_value_opt]; a set process
-   env var still wins. *)
+(* The parse and the clamp of the two deadlines belong to Env_config_keeper;
+   a second copy here read the same variables and would drift on any change
+   to either. AGENT_CORE applies the body override only to non-streaming
+   sync body reads and it stays opt-in. Durable channel (#27416):
+   runtime.toml [turn.provider_call_deadline_sec] reaches the reader through
+   the boot-override layer behind [Env_config_core.raw_value_opt]; a set
+   process env var still wins. *)
 
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
    (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
@@ -70,6 +69,19 @@ let stream_idle_failsafe_floor_sec =
    (RFC-AC-037 §3). An explicit env/toml value overrides it verbatim. *)
 let first_event_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec
+;;
+
+(* Fail-safe no-progress threshold for a provider call attempt (seconds).
+   When neither [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] nor runtime.toml
+   [turn.provider_call_deadline_sec] is set, the resolved value was [None]:
+   the attempt watchdog stayed off and a tool's provider sub-call ran with
+   no bound, so an attempt that never produced a token held the keeper until
+   an operator interrupted it. Same magnitude and same rule as the two
+   stream floors: a universal liveness ceiling above the longest legitimate
+   no-progress gap (see [Env_config_keeper] for the measurement), not a
+   per-provider tuning. An explicit env/toml value overrides it. *)
+let provider_call_deadline_failsafe_floor_sec =
+  Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec
 ;;
 
 let freeze_from_current () =
@@ -117,10 +129,21 @@ let freeze_from_current () =
     }
   in
   let provider_call_deadline_sec =
-    {
-      value = Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ();
-      source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
-    }
+    match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+    | Some seconds ->
+      (* Explicit env or runtime.toml value: honoured verbatim. *)
+      {
+        value = Some seconds;
+        source = source_of_env_name "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
+      }
+    | None ->
+      (* Unset: substitute the no-progress floor so a default install has an
+         attempt watchdog and a bounded sub-call. Sourced as [Failsafe_floor]
+         so telemetry and the boot log distinguish it from an operator value. *)
+      {
+        value = Some provider_call_deadline_failsafe_floor_sec;
+        source = Failsafe_floor;
+      }
   in
   {
     stream_idle_timeout_sec;

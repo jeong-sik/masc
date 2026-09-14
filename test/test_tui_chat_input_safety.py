@@ -234,11 +234,12 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # Focus the composer row while Overview is the surface. The row says
-        # which state it is in: unfocused it offers "(i to write)", focused it
-        # names the voice keys.
-        h.send_and_wait(process, fd, output, b"i", b"Ctrl-Y to speak")
-        h.drain_until_quiet(process, fd, output)
+        # Focus the composer row while Overview is the surface, and prove the
+        # focus by what the row does with a letter. The voice-key hint would
+        # say the same thing, but it is drawn only once a reachable target has
+        # been read, so waiting for it races the roster load.
+        os.write(fd, b"i")
+        h.send_and_wait(process, fd, output, b"zqx", b"zqx")
         os.write(fd, b"\x11")
         h.drain_until_quiet(process, fd, output)
         frame = h.screen_text(bytes(output))
@@ -246,6 +247,12 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
             raise AssertionError(
                 f"Ctrl-Q on the composer row left the surface: {frame[-600:]!r}"
             )
+        if b"zqx" not in frame:
+            raise AssertionError(
+                f"Ctrl-Q emptied the row it was typed into: {frame[-600:]!r}"
+            )
+        os.write(fd, b"\x15")
+        h.drain_until_quiet(process, fd, output)
         # Release the row before quitting: a focused composer takes "q" as a
         # letter. The harness supplies the second q that confirms the exit.
         os.write(fd, b"\x1b")

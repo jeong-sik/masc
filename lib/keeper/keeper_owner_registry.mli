@@ -170,14 +170,17 @@ val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.runtime_retry ->
   (unit, command_error) result
 
-val pause_observed_turn : base_path:string -> keeper_name:string -> interrupt_token:string ->
+val pause_observed_turn : base_path:string -> keeper_name:string ->
+  interrupt_token:Keeper_interrupt_token.t ->
   (Keeper_owner.pause_result * string, command_error) result
-val interrupt_observed_turn : base_path:string -> keeper_name:string -> interrupt_token:string ->
+val interrupt_observed_turn : base_path:string -> keeper_name:string ->
+  interrupt_token:Keeper_interrupt_token.t ->
   (Keeper_owner.pause_result * string, command_error) result
 val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
   Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
 val run_next_operation : base_path:string -> keeper_name:string ->
-  operation_id:Keeper_chat_operation.Operation_id.t -> interrupt_token:string option ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  interrupt_token:Keeper_interrupt_token.t option ->
   (Keeper_owner.run_next_result, command_error) result
 
 val interrupt_running_operation
@@ -188,7 +191,9 @@ val interrupt_running_operation
 (** Mailbox-linearized exact-operation interrupt. A request naming an older
     operation cannot cancel a newer child for the same Keeper. *)
 
-type interactive_target = Observed_turn_token of string | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
+type interactive_target =
+  | Observed_turn_token of Keeper_interrupt_token.t
+  | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
 val submit_interactive_operation : base_path:string -> keeper_name:string -> operation_id:Keeper_owner.Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> control_token:string -> target:interactive_target option -> (Keeper_owner.operation_acceptance * Keeper_owner.interactive_receipt, command_error) result
 
 val submit_operation

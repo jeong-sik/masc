@@ -40,6 +40,11 @@ val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
     from a validated empty queue. Callers authorizing lifecycle changes must
     exclude the sole writer and its creation for the whole enclosing commit. *)
 
+val inspect_pending_inputs : path:string -> (Operation.t list option, error) result
+(** Read-only, schema-checked transaction over queued/running inputs only.
+    Does not scan terminal history or run a whole-database integrity audit.
+    [None] means no database, distinct from an empty validated snapshot. *)
+
 val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string

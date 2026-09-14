@@ -976,8 +976,14 @@ let complete_stream_http
                        ~actual_bytes:None
                        ~limit_bytes:Api_common.max_response_body)
                 | Eio.Time.Timeout ->
+                  (* The phase and the knob below come from one fact: until
+                     the consumer has reported an [Output] the budget that
+                     fired was the first-event one, whatever structural frame
+                     or ping last moved [stream_idle_state]. *)
                   let phase =
-                    Http_client.timeout_phase_of_stream_idle_state !stream_idle_state
+                    if !first_output_seen
+                    then Http_client.timeout_phase_of_stream_idle_state !stream_idle_state
+                    else Http_client.First_token
                   in
                   (* Agent Core contract: name the knob that actually armed this
                      deadline. Before the TTFT split every phase was governed

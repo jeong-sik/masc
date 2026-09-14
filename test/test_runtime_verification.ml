@@ -392,9 +392,10 @@ let with_silent_endpoint_runtime ~binding_keys f =
    entry (`verify_runtime_execution`) and hands the command's [clock] to
    [verify]: the harness installs exactly that pair, no more, so a bound the
    CLI would refuse or miss is refused or missed here too. *)
+(* The command's own entry, so these cases run the shape `masc
+   runtime-verify` runs -- env and clock installed inside it -- and not a
+   copy kept alike by hand. *)
 let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
-  Eio_context.set_env env;
-  Masc_test_deps.init_eio_clock env;
   let directory = Filename.temp_dir "runtime-verification-silent-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
   let clock = env#clock in
@@ -403,16 +404,7 @@ let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
     try
       Some
         (Eio.Time.with_timeout_exn clock guard_s (fun () ->
-           Verify.verify
-             ~secure_random:env#secure_random
-             ~sw
-             ~net:env#net
-             ~mgr:env#process_mgr
-             ~clock
-             ~cwd:Eio.Path.(env#fs / directory)
-             ~cwd_path:directory
-             ~timeout_s
-             runtime))
+           Verify.verify_as_command ~env ~sw ~private_dir:directory ~timeout_s runtime))
     with
     | Eio.Time.Timeout -> None
   in

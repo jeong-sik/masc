@@ -1487,7 +1487,7 @@ let test_settled_logs_are_read_per_keeper () =
      |> List.map Tui_types.turn_log_request_id)
 ;;
 
-let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
+let test_promoted_queue_request_keeps_its_user_in_transcript () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
@@ -1517,7 +1517,7 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
       ; phase = Tui_types.Turn_streaming
       ; log
       } ];
-  check (list string) "promoted USER is withheld from settled transcript" []
+  check (list string) "promoted USER stays in the conversation" [ "queued input" ]
     (Tui_types.chat_rows_for state "alpha"
      |> List.map (fun row -> row.Tui_types.me_text));
   match Tui_types.promoted_inflight_for_keeper state "alpha" with
@@ -1526,6 +1526,86 @@ let test_promoted_queue_request_owns_a_typed_slot_outside_transcript () =
       check string "slot keeps exact request identity" request.request_id
         entry.sent_request.request_id;
       check (float 0.001) "slot keeps first submitted_at" 42.0 entry.submitted_at
+;;
+
+(* Exercise the actual frame, not only the delta fold: a promoted request
+   used to collect every delta correctly while the renderer hid its block. *)
+let test_promoted_live_output_survives_settlement_and_replay () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (70, 120);
+    List.iter (fun failure ->
+      let state =
+        Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      in
+      let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:42. [] in
+      let entry =
+        { entry with
+          origin = Tui_types.Promoted_queue
+            { submission_seq = 7; intent = Masc_tui_keeper_chat_queue.Next;
+              causal_parent_request_id = None } }
+      in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_hidden <- true;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_live <- Some entry.log;
+      state.msg_inflight <- [entry];
+      state.msg_history <-
+        [chat_entry ~request_id:entry.sent_request.request_id
+           ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+           ~text:"PROMOTED_QUESTION" ~at:42. ()];
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=1; provider_message_id=None;
+         tool_call_id=Some "read-1"}
+      in
+      let deltas =
+        [ Live.Run_started; Live.Text "EARLY_ANSWER";
+          Live.Tool_started {occurrence; tool_name="read_file"};
+          Live.Tool_ended {occurrence}; Live.Text "LATER_ANSWER" ]
+      in
+      List.iteri (fun seq delta ->
+        Tui_types.turn_log_add ~now:(43. +. float_of_int seq)
+          entry.log ~seq:(Some seq) delta) deltas;
+      let count needle text =
+        Astring.String.cuts ~sep:needle text |> List.length |> fun n -> n - 1
+      in
+      let frame () =
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        String.concat "\n" frame.Masc_tui_frame_presenter.lines
+      in
+      let check_output stage =
+        let screen = frame () in
+        List.iter (fun marker -> check int (stage ^ ": " ^ marker) 1
+          (count marker screen))
+          ["PROMOTED_QUESTION"; "EARLY_ANSWER"; "LATER_ANSWER"];
+        check bool (stage ^ ": tool remains visible") true
+          (count "read_file" screen > 0)
+      in
+      check_output "still running";
+      let terminal = match failure with
+        | None -> Live.Run_finished
+        | Some message -> Live.Run_failed {message}
+      in
+      Tui_types.turn_log_add ~now:49. entry.log ~seq:(Some 5) terminal;
+      Tui_types.settle_turn_log state entry;
+      state.msg_inflight <- [];
+      check_output "settled";
+      (* A durable page overlaps already streamed text. The frame must keep
+         each source once, including after cancellation or a failed run. *)
+      let replay : Masc.Keeper_chat_event_log.journaled_event list =
+        [ {seq=1; ts=44.; event=Masc.Keeper_chat_events.Text_delta "EARLY_ANSWER"};
+          {seq=4; ts=47.; event=Masc.Keeper_chat_events.Text_delta "LATER_ANSWER"} ]
+      in
+      Tui_types.turn_log_add_journaled entry.log replay;
+      Tui_types.turn_log_add_journaled entry.log replay;
+      check_output "overlapping replay")
+      [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -2596,8 +2676,10 @@ let () =
             test_a_journal_built_log_holds_its_turn_in_the_timeline
         ; test_case "the reload rebuilds loaded turns from their journals" `Quick
             test_the_reload_rebuilds_loaded_turns_from_their_journals
+        ; test_case "promoted live output survives settlement and replay" `Quick
+            test_promoted_live_output_survives_settlement_and_replay
         ; test_case "promoted queue request owns a typed slot" `Quick
-            test_promoted_queue_request_owns_a_typed_slot_outside_transcript
+            test_promoted_queue_request_keeps_its_user_in_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick
             test_message_scroll_accepts_the_rendered_clamp
         ; test_case "resource scroll accepts the rendered clamp" `Quick

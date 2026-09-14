@@ -28,6 +28,7 @@
   str
   re.pcre
   masc.markup_document
+  masc.watched_work
   masc.keeper_sandbox_image
   masc.build_commit
   mirage-crypto

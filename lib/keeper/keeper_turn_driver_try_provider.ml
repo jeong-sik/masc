@@ -1236,12 +1236,16 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
       | None ->
-        (* A process with no clock cannot count the threshold down, and an
-           attempt with no bound is the hang this deadline exists to end.
-           The server installs its clock at boot before any turn, so a turn
-           that gets here is a wiring fault; it is refused the way
-           [Keeper_identity_gate] refuses a call it cannot bound: typed, and
-           nothing was sent. *)
+        (* A process with no clock in [Eio_context] cannot count the
+           threshold down. It could not run the attempt either:
+           [Runtime_agent.build] reads the same [Eio_context.get_clock_opt]
+           and refuses a stream-idle budget it has no clock to arm, and the
+           driver always declares one. This arm refuses that condition one
+           layer earlier, in the name of the deadline it could not set; the
+           two read one clock source, so neither can run what the other
+           refuses. The server installs its clock at boot before any turn,
+           so a turn that gets here is a wiring fault; typed, and nothing
+           was sent. *)
         Error
           (Agent_core.Error.Config
              (Agent_core.Error.InvalidConfig

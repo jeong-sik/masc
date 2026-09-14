@@ -289,7 +289,7 @@ let test_a_deadline_before_the_session_opened_is_a_safe_retry () =
   match run_with transport_that_never_opens with
   | Error
       (Keeper_identity_tools.Mcp
-         { phase = Keeper_identity_tools.Before_send; error = Mcp_client.Transport _ } as
+         { phase = Keeper_identity_tools.Session_open; error = Mcp_client.Transport _ } as
        call_error) as answer ->
     check
       effect_disposition
@@ -309,7 +309,7 @@ let test_a_deadline_on_the_call_itself_is_not_a_blind_retry () =
   match run_with transport_that_times_out_the_call with
   | Error
       (Keeper_identity_tools.Mcp
-         { phase = Keeper_identity_tools.After_send; error = Mcp_client.Transport _ } as
+         { phase = Keeper_identity_tools.Tool_call; error = Mcp_client.Transport _ } as
        call_error) as answer ->
     check
       effect_disposition
@@ -335,17 +335,22 @@ let test_a_deadline_on_the_call_itself_is_not_a_blind_retry () =
      | Error err ->
        check
          bool
+         "the model is told the request may have reached the service"
+         true
+         (contains ~needle:"may have reached the service" err.Agent_core.Types.message);
+       check
+         bool
          "the model is told to read the service's state first"
          true
          (contains ~needle:"read the service's state" err.Agent_core.Types.message)
      | Ok _ -> fail "the call did not fail")
   | Error (Keeper_identity_tools.Mcp { phase; error }) ->
     failf
-      "not a transport fault after send: %s (%s)"
+      "not a transport fault on the tool call: %s (%s)"
       (Mcp_client.error_to_string error)
       (match phase with
-       | Keeper_identity_tools.Before_send -> "before send"
-       | Keeper_identity_tools.After_send -> "after send")
+       | Keeper_identity_tools.Session_open -> "opening the session"
+       | Keeper_identity_tools.Tool_call -> "the tool call")
   | Error (Keeper_identity_tools.Precondition message)
   | Error (Keeper_identity_tools.Transient_precondition message) ->
     failf "the call never reached the transport: %s" message

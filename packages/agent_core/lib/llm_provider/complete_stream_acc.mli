@@ -19,6 +19,10 @@ val failure : stream_acc -> Types.stream_error option
     decision for live/durable consumers. *)
 val resolve_event : stream_acc -> Types.sse_event -> Types.stream_event_resolution
 
+(** The kind announced for the block at [index] in the current snapshot;
+    see {!Complete_stream_state.block_kind_at}. *)
+val block_kind_at : stream_acc -> int -> Complete_stream_state.block_kind option
+
 (** Assembly-only compatibility API. Resolve one event into a new immutable
     snapshot and install it as the shell's current state. Live projection must
     use {!resolve_event}. *)

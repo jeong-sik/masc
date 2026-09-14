@@ -2939,7 +2939,20 @@ let help_lines ~width (state : state) =
     header_line
     :: List.concat_map
          (fun (key, action) ->
-           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           (* Padded in cells, not bytes. [%-*s] counts bytes, and the five
+              legend sections put a glyph in this column, and a glyph is one
+              cell in three bytes -- so its word started two columns left of
+              the word beside a one-byte "?" a row down, and every mark row
+              in the sheet sat at its own indent. The wrap column below already measured this
+              cell with [display_width], which is why only the padding
+              drifted. *)
+           let key = String.trim key in
+           let key_cell =
+             key
+             ^ String.make
+                 (max 0 (help_key_cells - Message_layout.display_width key))
+                 ' '
+           in
            help_entry_rows ~width
              ~lead:
                (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)

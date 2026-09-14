@@ -492,6 +492,35 @@ let test_fusion_detail_footer_names_the_caller_and_board_keys () =
   Alcotest.(check bool) "spelled as the list spells them" true
     (holds "K:calling Keeper  B:Board evidence" (Masc_tui_keys.footer_hints Fusion))
 
+(* The Board read pane drew its keys twice: a row above the post listed
+   reply, vote, copy and back, and the footer listed reply, copy and back
+   again -- with no vote key, so that row was the only place v was drawn.
+   The row is gone; the footer carries the three post keys, spelled as the
+   Board list spells them, in both layouts. *)
+let test_board_read_footer_carries_the_post_keys () =
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  let list = Masc_tui_keys.footer_hints Board in
+  List.iter
+    (fun split ->
+      let read = Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split in
+      List.iter
+        (fun key ->
+          Alcotest.(check bool) (Printf.sprintf "read footer (split=%b) names %s" split key) true
+            (holds key read);
+          Alcotest.(check bool) (Printf.sprintf "the Board list spells %s the same" key) true
+            (holds key list))
+        [ "v / V:vote"; "c:reply"; "Y:copy link" ];
+      Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
+        (holds "Ctrl-W:switch" read))
+    [ false; true ];
+  Alcotest.(check bool) "j/k names what it moves" true
+    (holds "j/k:posts"
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~split:true))
+
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let response = `Assoc
@@ -2127,6 +2156,8 @@ let () =
             test_fusion_detail_footer_names_the_caller_and_board_keys
         ; Alcotest.test_case "Fusion history is selectable without a retained run" `Quick
             test_fusion_historical_evidence_is_a_selectable_board_reference
+        ; Alcotest.test_case "Board read footer carries the post keys" `Quick
+            test_board_read_footer_carries_the_post_keys
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick

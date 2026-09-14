@@ -2126,12 +2126,6 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
 
   box_top buf cols;
   box_line buf cols header;
-  box_line buf cols
-    (Printf.sprintf "  Actions:  %s[c]%s Reply   %s[v/V]%s Vote (+/-)   %s[Y]%s Copy Link   %s[Esc]%s Back"
-       (Theme.ok ()) Ansi.reset
-       (Theme.warn ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.recede ()) Ansi.reset);
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
@@ -2404,17 +2398,12 @@ let render_board_read (state : state) (list_post : board_post) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let footer =
-    let pane_hint =
-      if cols >= keeper_split_threshold_cols && not state.board_detail_wide then
-        "  h/l:pane  Ctrl-W:switch"
-      else ""
-    in
     footer_line state ~max_cells:cols
       ~hints:
-        (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
-           (if state.board_focus = Left_pane then "posts" else "scroll")
-           pane_hint)
+        (Masc_tui_keys.footer_hints_board_read
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~split:
+             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
   in
   if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in

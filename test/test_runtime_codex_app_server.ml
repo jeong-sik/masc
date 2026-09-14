@@ -2410,6 +2410,32 @@ let fixture_tool ?(parameters = []) ~name ~description () =
     (fun _ -> Ok { Agent_core.Types.content = "fixture"; content_blocks = None; _meta = None })
 ;;
 
+(* A keeper nothing declares is not configured (#36066): the profile loader
+   refuses it before the turn runs. A fixture declares the keeper it is about
+   to run under the base path the turn reads, with the instructions the turn
+   is given. *)
+(* The declaration's instructions are the keeper's profile text, which the
+   turn does not read as its system prompt; the fixtures pass that prompt
+   explicitly, blank ones included, so the declaration keeps a fixed
+   non-blank text of its own. *)
+let fixture_keeper_instructions = "fixture keeper"
+
+let declare_keeper ~base_path ~keeper_name =
+  let path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun output ->
+    output_string
+      output
+      (Otoml.Printer.to_string
+         (Otoml.TomlTable
+            [ ( "keeper"
+              , Otoml.TomlTable
+                  [ "instructions", Otoml.TomlString fixture_keeper_instructions ] )
+            ])))
+;;
+
 let production_keeper_meta ~base_path ~trace_id =
   let name = "codex-production-fixture" in
   match
@@ -2502,32 +2528,6 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
-(* A keeper nothing declares is not configured (#36066): the profile loader
-   refuses it before the turn runs. A fixture declares the keeper it is about
-   to run under the base path the turn reads, with the instructions the turn
-   is given. *)
-(* The declaration's instructions are the keeper's profile text, which the
-   turn does not read as its system prompt; the fixtures pass that prompt
-   explicitly, blank ones included, so the declaration keeps a fixed
-   non-blank text of its own. *)
-let fixture_keeper_instructions = "fixture keeper"
-
-let declare_keeper ~base_path ~keeper_name =
-  let path =
-    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path keeper_name
-  in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Out_channel.with_open_bin path (fun output ->
-    output_string
-      output
-      (Otoml.Printer.to_string
-         (Otoml.TomlTable
-            [ ( "keeper"
-              , Otoml.TomlTable
-                  [ "instructions", Otoml.TomlString fixture_keeper_instructions ] )
-            ])))
-;;
-
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")

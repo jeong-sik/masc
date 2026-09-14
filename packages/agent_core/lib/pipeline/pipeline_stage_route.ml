@@ -189,6 +189,70 @@ let provider_config_for_turn ?on_provider_failure ~turn_config agent =
     Error detailed.error
 ;;
 
+(* The call deadline as one window across the two provider round trips of
+   the exact-fit path: the count-tokens measurement and the completion.
+   [open_] anchors it at the resolved deadline; [bound_measurement] ends a
+   measurement that outlives it; [remaining] is what the completion may
+   still arm, permit wait included. *)
+module Call_window = struct
+  type 'clock t =
+    | Unbounded
+    | Bounded of
+        { clock : 'clock
+        ; timeout_s : float
+        ; deadline_at : float
+        }
+
+  let open_ = function
+    | Llm_provider.Http_client.Unbounded -> Unbounded
+    | Llm_provider.Http_client.Bounded (clock, timeout_s) ->
+      Bounded { clock; timeout_s; deadline_at = Eio.Time.now clock +. timeout_s }
+  ;;
+
+  let exceeded ~timeout_s ~stage =
+    Llm_provider.Http_client.TimeoutError
+      { message =
+          Printf.sprintf
+            "call_timeout_s deadline exceeded after %.17gs %s \
+             (Pipeline_stage_route.dispatch_sync)"
+            timeout_s
+            stage
+      ; phase = Llm_provider.Http_client.Non_streaming_body
+      }
+  ;;
+
+  let bound_measurement t measure =
+    match t with
+    | Unbounded -> Result.map_error (fun error -> `Measurement error) (measure ())
+    | Bounded { clock; timeout_s; deadline_at } ->
+      (match
+         Eio.Time.with_timeout clock (deadline_at -. Eio.Time.now clock) (fun () ->
+           Ok (measure ()))
+       with
+       | Ok (Ok measured) -> Ok measured
+       | Ok (Error error) -> Error (`Measurement error)
+       | Error `Timeout ->
+         Error
+           (`Call_deadline
+             (exceeded ~timeout_s ~stage:"during the count-tokens round trip")))
+  ;;
+
+  (* A window the measurement used up ends the call here: the completion
+     refuses a bound that is not greater than zero, and nothing was sent. *)
+  let remaining = function
+    | Unbounded -> Ok None
+    | Bounded { clock; timeout_s; deadline_at } ->
+      let remaining_s = deadline_at -. Eio.Time.now clock in
+      if Float.compare remaining_s 0.0 <= 0
+      then
+        Error
+          (exceeded
+             ~timeout_s
+             ~stage:"in the count-tokens round trip, before the completion was sent")
+      else Ok (Some remaining_s)
+  ;;
+end
+
 let dispatch_sync
       ~sw
       ?clock
@@ -256,40 +320,64 @@ let dispatch_sync
           | Error error -> Error (fit_error ~binding error)
           | Ok max_context_tokens ->
             (match
-               Llm_provider.Complete.measure_request
-                 ~sw
-                 ~net:agent.net
-                 ?clock
-                 ?timeout_s:agent.options.body_timeout_s
-                 serialized
+               Llm_provider.Http_client.resolve_explicit_deadline
+                 ~operation:"Pipeline_stage_route.dispatch_sync"
+                 ~parameter:"call_timeout_s"
+                 ~clock
+                 ~timeout_s:agent.options.call_timeout_s
              with
              | Error error ->
-               Error
-                 (measurement_error
-                    ~binding
-                    ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
-                    ~provider
-                    error)
-             | Ok measured ->
-               (match
-                  Llm_provider.Complete.admit_request
-                    ~now_unix_s
-                    ~max_context_tokens
-                    measured
-                with
-                | Error error -> Error (fit_error ~binding error)
-                | Ok admitted ->
-                  Llm_provider.Complete.complete_admitted
-                    ~sw
-                    ~net:agent.net
-                    ?clock
-                    ?transport:agent.options.transport
-                    admitted
-                    ?body_timeout_s:agent.options.body_timeout_s
-                    ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                    ()
-                  |> Result.map_error
-                       (Provider_failure_attribution.of_http_error ~binding ~provider)))))
+               Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
+             | Ok call_deadline ->
+               (* The call deadline is one window from here. The count-tokens
+                  round trip spends from it, and the completion arms what it
+                  left, permit wait included. *)
+               let call_window = Call_window.open_ call_deadline in
+               let measured =
+                 Call_window.bound_measurement call_window (fun () ->
+                   Llm_provider.Complete.measure_request
+                     ~sw
+                     ~net:agent.net
+                     ?clock
+                     ?timeout_s:agent.options.body_timeout_s
+                     serialized)
+               in
+               (match measured with
+                | Error (`Call_deadline error) ->
+                  Error (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                | Error (`Measurement error) ->
+                  Error
+                    (measurement_error
+                       ~binding
+                       ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                       ~provider
+                       error)
+                | Ok measured ->
+                  (match
+                     Llm_provider.Complete.admit_request
+                       ~now_unix_s
+                       ~max_context_tokens
+                       measured
+                   with
+                   | Error error -> Error (fit_error ~binding error)
+                   | Ok admitted ->
+                     (match Call_window.remaining call_window with
+                      | Error error ->
+                        Error
+                          (Provider_failure_attribution.of_http_error ~binding ~provider error)
+                      | Ok call_timeout_s ->
+                        Llm_provider.Complete.complete_admitted
+                          ~sw
+                          ~net:agent.net
+                          ?clock
+                          ?transport:agent.options.transport
+                          admitted
+                          ?body_timeout_s:agent.options.body_timeout_s
+                          ?call_timeout_s
+                          ?request_wire_observer:agent.pre_dispatch_serialization_observer
+                          ()
+                        |> Result.map_error
+                             (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
   in
   finish_call ?on_provider_failure result
 ;;

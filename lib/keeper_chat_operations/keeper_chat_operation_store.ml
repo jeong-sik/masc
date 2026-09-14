@@ -156,11 +156,16 @@ let error_to_string = function
 
 let path store = store.path
 
+(* [Rc.to_string] is the primary code and [errmsg] for IOERR is always
+   "disk I/O error". The extended code names the failing syscall (IOERR_LOCK
+   3850, IOERR_WRITE 778, IOERR_FSYNC 1034, IOERR_SHMOPEN 4618, ...), see
+   https://sqlite.org/rescode.html. Without it an outage cannot be attributed. *)
 let sqlite_error db operation rc =
   Printf.sprintf
-    "%s: rc=%s detail=%s"
+    "%s: rc=%s extended_rc=%d detail=%s"
     operation
     (Sqlite3.Rc.to_string rc)
+    (Sqlite3.extended_errcode_int db)
     (Sqlite3.errmsg db)
 ;;
 

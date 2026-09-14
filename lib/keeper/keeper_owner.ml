@@ -1680,7 +1680,19 @@ let start
           let result =
             match completion with
             | Operation_child_finished { claimed_operation_id; execution } ->
-              finish_operation_child claimed_operation_id execution
+              (* The child ignores this result and the row stays Running, so
+                 a refused settlement is otherwise invisible until the next
+                 boot settles it. *)
+              (match finish_operation_child claimed_operation_id execution with
+               | Ok () as ok -> ok
+               | Error error as failed ->
+                 Log.Keeper.error ~keeper_name:t.keeper_name
+                   "chat operation settlement refused operation=%s: %s"
+                   (match claimed_operation_id with
+                    | Some operation_id -> Chat_operation.Operation_id.to_string operation_id
+                    | None -> "unclaimed")
+                   (error_to_string error);
+                 failed)
             | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
               let response =
                 match outcome with

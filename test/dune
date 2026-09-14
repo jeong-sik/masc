@@ -1938,8 +1938,9 @@
  (modules test_keeper_stream_idle_floor)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
-; A process with no clock refuses the provider attempt instead of running it
-; unbounded. The only driver suite that installs no clock.
+; A process with no clock in Eio_context refuses the provider attempt in the
+; name of the deadline it could not set. The only driver suite that installs
+; no clock.
 (test
  (name test_keeper_attempt_without_clock)
  (modules test_keeper_attempt_without_clock)

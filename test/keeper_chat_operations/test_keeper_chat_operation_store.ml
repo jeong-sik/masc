@@ -262,10 +262,14 @@ let test_restart_interrupts_running_once_and_preserves_queued () =
   Fun.protect
     ~finally:(fun () -> ignore (Store.close reopened : (unit, Store.error) result))
     (fun () ->
-       check int "one running interrupted" 1
-         (store_ok (Store.settle_running_after_restart reopened ~now:4.0));
+       (match store_ok (Store.settle_running_after_restart reopened ~now:4.0) with
+        | [ interrupted ] ->
+          check bool "the interrupted operation is returned by identity" true
+            (Operation.Operation_id.equal interrupted.Operation.operation_id running_id)
+        | interrupted ->
+          failf "expected one running operation interrupted, got %d" (List.length interrupted));
        check int "settlement is idempotent" 0
-         (store_ok (Store.settle_running_after_restart reopened ~now:5.0));
+         (List.length (store_ok (Store.settle_running_after_restart reopened ~now:5.0)));
        let interrupted = get_exn reopened running_id in
        (match interrupted.state with
         | Operation.Failed
@@ -579,7 +583,7 @@ let test_concurrent_writer_is_waited_out_not_fenced () =
         match Store.settle_running_after_restart store ~now:1.0 with
         | Ok settled ->
           ignore (Unix.waitpid [] child);
-          check int "waited-out writer lets the commit through" 0 settled
+          check int "waited-out writer lets the commit through" 0 (List.length settled)
         | Error error ->
           ignore (Unix.waitpid [] child);
           fail (Store.error_to_string error)

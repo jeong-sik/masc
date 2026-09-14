@@ -564,10 +564,16 @@ let render_overview (state : state) =
      below it does. It said nothing: an overview that answered with no items,
      one not read yet and one that failed all left the panel blank under its
      title. A failure is already the summary row's to say. *)
+  (* These notes stand in for rows, so they start where rows start. This
+     panel writes its own two cells of indent ahead of every row, and the
+     notes are written for a body that adds its own -- pasted in whole, the
+     note sat two cells right of the rows it replaces and of the title above
+     them, while the Events panel beside it put its title and its rows on one
+     column. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
-    | Page_empty -> Some "  (nothing needs attention)"
-    | Page_unread -> Some page_unread_note
+    | Page_empty -> Some "(nothing needs attention)"
+    | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None
   in
   for i = 0 to row_budget.attention_rows - 1 do

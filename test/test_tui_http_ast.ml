@@ -479,6 +479,22 @@ let test_http_client_does_not_own_tui_env_contract () =
     (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
 ;;
 
+(* The Overview's Attention panel writes two cells of indent ahead of every
+   row it draws. Its empty and unread notes stand in for rows, and they are
+   written for a body that indents them itself -- pasted in whole, a note sat
+   two cells right of the rows it replaces and of the title above them, while
+   the Events panel beside it put its title and its rows on one column. *)
+let test_the_attention_note_starts_where_its_rows_do () =
+  check int "the note carries no indent of its own" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
+       ~needle:"  (nothing needs attention)");
+  check int "it is still the panel's word" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_overview"
+       ~needle:"(nothing needs attention)")
+;;
+
 let test_keeper_chat_uses_current_async_contract () =
   let module_path = "bin/masc_tui.ml" in
   (* Asked where the body is built, and on the whole literal. The needle used
@@ -2799,6 +2815,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the attention note starts where its rows do" `Quick
+          test_the_attention_note_starts_where_its_rows_do;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;
         test_case "auth headers used" `Quick test_http_get_uses_auth_headers;

@@ -166,6 +166,7 @@ val run_named :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
+  ?person_queued_probe:(unit -> bool) ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
   ?continue_from_checkpoint:bool ->
   ?trace_link:string * string ->

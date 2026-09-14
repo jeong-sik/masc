@@ -1105,6 +1105,7 @@ let run_named
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?enable_thinking
     ?cooperative_yield_probe
+    ?person_queued_probe
     ?agent_core_checkpoint
     ?(continue_from_checkpoint = false)
     ?trace_link
@@ -2048,6 +2049,7 @@ let run_named
                         keeper_name
                         (Printexc.to_string exn);
                       None)
+            ; person_queued_probe
             ; temperature
             ; accept
             ; hooks

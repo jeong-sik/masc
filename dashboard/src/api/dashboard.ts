@@ -63,7 +63,9 @@ export {
 export type {
   GoalVerificationReviewKind,
   GoalVerificationRunStatus,
+  GoalVerificationRowKind,
   GoalVerificationRunRecord,
+  GoalVerificationScanSkippedRecord,
   DashboardGoalVerificationRunsResponse,
 } from './dashboard-goal-verification-runs'
 export {

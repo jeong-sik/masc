@@ -40,6 +40,20 @@ type run =
   ; status : run_status
   }
 
+(** One retained row (RFC-0444 §2.3 row 7). A [Scan_skipped] row is a
+    verifier scan the goal store refused: it reviewed nothing, so it is its
+    own arm rather than a [run] with blank identity, and it carries the whole
+    typed value the scan saw. Every stored event and every served row names
+    its arm in [kind] ([review] or [scan_skipped]); a row without it does not
+    decode. *)
+type row =
+  | Review of run
+  | Scan_skipped of
+      { run_id : string
+      ; started_at : float
+      ; unavailable : Goal_store.unavailable
+      }
+
 type t
 
 val storage_filename : string
@@ -68,10 +82,28 @@ val mark_completed :
   unit ->
   unit
 
-val list_runs : t -> run list
-val get : t -> run_id:string -> run option
+val record_scan_skipped :
+  t ->
+  run_id:string ->
+  started_at:float ->
+  unavailable:Goal_store.unavailable ->
+  unit
+(** Append one terminal {!Scan_skipped} row: registered and completed under
+    the registry's own mutation lock, so it survives replay. Retention is per
+    row kind, so skipped scans never evict retained reviews. *)
+
+val list_runs : t -> row list
+val get : t -> run_id:string -> row option
 val status_label : run_status -> string
+
 val run_to_yojson : run -> Yojson.Safe.t
+(** A review row with [kind:"review"]. *)
+
+val row_to_yojson : row -> Yojson.Safe.t
+(** {!run_to_yojson} for a review; a skipped scan is
+    [{kind:"scan_skipped", run_id, started_at, reason, field, file, mirror,
+    reset_step}] — the goal_store_unavailable envelope's own members
+    ({!Goal_unavailable_envelope.fields}). *)
 
 val change_observer_fn : (unit -> unit) Atomic.t
 

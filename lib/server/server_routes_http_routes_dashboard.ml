@@ -1480,7 +1480,7 @@ let add_routes ~sw ~clock router =
              ; ( "runs"
                , `List
                    (List.map
-                      Goal_verification_run_registry.run_to_yojson
+                      Goal_verification_run_registry.row_to_yojson
                       runs) )
              ]
          in

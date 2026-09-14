@@ -52,7 +52,7 @@ let test_completed_run_replays_with_tool_evidence () =
     ();
   match R.get (R.replay path) ~run_id with
   | Some
-      { goal_id = "goal-a"
+      (R.Review { goal_id = "goal-a"
       ; review_kind = R.Proof
       ; authority_actor = "verifier_exact"
       ; status =
@@ -63,7 +63,7 @@ let test_completed_run_replays_with_tool_evidence () =
             ; _
             }
       ; _
-      } ->
+      }) ->
     check string "replayed tool" "verification_read_file" tool.tool_name
   | _ -> fail "completed Goal verification run did not replay"
 ;;
@@ -78,13 +78,13 @@ let test_cancelled_review_preserves_its_observations_after_restart () =
   R.mark_completed registry ~run_id ~outcome:(R.Review_cancelled { detail }) ~evaluated_verdict:None
     ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:2.5 ();
   let before = match R.get registry ~run_id with
-    | Some run -> R.run_to_yojson run |> Yojson.Safe.to_string
+    | Some row -> R.row_to_yojson row |> Yojson.Safe.to_string
     | None -> fail "cancelled run was not recorded before restart"
   in
   match R.get (R.replay path) ~run_id with
-  | Some ({ status = R.Completed
+  | Some (R.Review ({ status = R.Completed
       { outcome = R.Review_cancelled { detail = retained_detail };
-        tools = [ tool ]; evaluator_runtime = Some "runtime-a"; _ }; _ } as run) ->
+        tools = [ tool ]; evaluator_runtime = Some "runtime-a"; _ }; _ } as run)) ->
     check string "cancellation explanation survives" detail retained_detail;
     check string "lookup result survives" "proof bytes" tool.output_excerpt;
     check string "every projected observation survives replay" before
@@ -104,15 +104,15 @@ let test_superseded_review_retains_its_bound_criterion_and_verdict () =
     ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:2. () ;
   (* The evaluated verdict must already survive a restart before commit runs. *)
   (match R.get (R.replay path) ~run_id with
-   | Some { status = R.Completed { outcome = R.Reviewed; evaluated_verdict = Some (R.Approved _); _ }; _ } -> ()
+   | Some (R.Review { status = R.Completed { outcome = R.Reviewed; evaluated_verdict = Some (R.Approved _); _ }; _ }) -> ()
    | _ -> fail "evaluated verdict was not durable before commit");
   R.mark_completed registry ~run_id
     ~outcome:(R.Superseded { detail = "a new proof request replaced the reviewed criterion" })
     ~evaluated_verdict ~tools:[ sample_tool () ] ~evaluator_runtime:"runtime-a" ~elapsed_s:3. () ;
   match R.get (R.replay path) ~run_id with
-  | Some { request_id; criterion = retained_criterion;
+  | Some (R.Review { request_id; criterion = retained_criterion;
       status = R.Completed { outcome = R.Superseded _;
-        evaluated_verdict = Some (R.Approved { reason }); tools = [ tool ]; _ }; _ } ->
+        evaluated_verdict = Some (R.Approved { reason }); tools = [ tool ]; _ }; _ }) ->
     check string "original request retained" "request-before-edit" request_id;
     check bool "frozen criterion retained" true (Goal_store.criterion_equal criterion retained_criterion);
     check string "evaluated approval retained" "three services reached target three" reason;
@@ -188,13 +188,74 @@ let test_reviewed_observation_survives_replay () =
     ();
   match R.get (R.replay path) ~run_id with
   | Some
-      { status =
-          R.Completed
-            { outcome = R.Reviewed; tools = [ tool ]; _ }
-      ; _
-      } ->
+      (R.Review
+         { status =
+             R.Completed
+               { outcome = R.Reviewed; tools = [ tool ]; _ }
+         ; _
+         }) ->
     check string "replayed reviewed tool" "verification_read_file" tool.tool_name
   | _ -> fail "reviewed Goal verification observation did not replay"
+;;
+
+(* RFC-0444 §2.3 row 7: a skipped scan is terminal when written, so it
+   survives replay with the whole typed value, and it is served under the
+   goal_store_unavailable envelope's own members. *)
+let unavailable : Goal_store.unavailable =
+  { file = "/work/.masc/goals.json"
+  ; reason = Goal_store.Schema_rejected
+      { field = "criterion_revision"; detail = "criterion_revision must be a non-blank string" }
+  ; mirror = Goal_store.Mirror_decodes { goal_count = 97; updated_at = "2026-09-08T16:20:13Z" }
+  ; reset_step = Goal_store.Repair_field "criterion_revision"
+  }
+;;
+
+let test_skipped_scan_replays_with_its_typed_value () =
+  with_path @@ fun path ->
+  let registry = R.create ~path () in
+  let run_id = "scan-skipped" in
+  R.record_scan_skipped registry ~run_id ~started_at:30.0 ~unavailable;
+  (match R.get (R.replay path) ~run_id with
+   | Some (R.Scan_skipped { unavailable = replayed; started_at; _ }) ->
+     check bool "the typed value survives restart unchanged" true (replayed = unavailable);
+     check (float 0.) "the scan time survives restart" 30.0 started_at
+   | Some (R.Review _) -> fail "a skipped scan replayed as a review"
+   | None -> fail "a skipped scan vanished on replay");
+  match R.get registry ~run_id with
+  | Some row ->
+    let json = R.row_to_yojson row in
+    let member name = Yojson.Safe.Util.member name json in
+    check string "kind" "scan_skipped" (Yojson.Safe.Util.to_string (member "kind"));
+    check string "reason" "schema_rejected" (Yojson.Safe.Util.to_string (member "reason"));
+    check string "field" "criterion_revision" (Yojson.Safe.Util.to_string (member "field"));
+    check string "file" unavailable.file (Yojson.Safe.Util.to_string (member "file"));
+    check string "mirror status" "mirror_decodes"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "status" (member "mirror")));
+    check string "reset_step" "repair_field" (Yojson.Safe.Util.to_string (member "reset_step"));
+    check bool "no goal identity is invented" true
+      (List.for_all
+         (fun name -> Yojson.Safe.Util.member name json = `Null)
+         [ "goal_id"; "request_id"; "criterion"; "review_kind"; "status" ])
+  | None -> fail "a skipped scan was not recorded"
+;;
+
+let test_skipped_scans_do_not_evict_retained_reviews () =
+  with_path @@ fun path ->
+  let registry = R.create ~path () in
+  let run_id = "review-kept" in
+  R.register_running registry ~run_id ~goal_id:"goal-kept"
+    ~request_id:"request-kept" ~criterion ~review_kind:R.Proof
+    ~authority_actor:"verifier_exact" ~started_at:10.;
+  R.mark_completed registry ~run_id ~outcome:R.Committed
+    ~evaluated_verdict:(Some (R.Approved { reason = "three services verified" }))
+    ~tools:[] ~elapsed_s:1. ();
+  for index = 1 to R.max_completed_retained + 1 do
+    R.record_scan_skipped registry ~run_id:(Printf.sprintf "scan-%d" index)
+      ~started_at:(20. +. float_of_int index) ~unavailable
+  done;
+  match R.get (R.replay path) ~run_id with
+  | Some (R.Review { status = R.Completed { outcome = R.Committed; _ }; _ }) -> ()
+  | Some _ | None -> fail "a run of skipped scans evicted the retained review"
 ;;
 
 let () =
@@ -225,6 +286,12 @@ let () =
             "reviewed observation survives restart"
             `Quick
             test_reviewed_observation_survives_replay
+        ] )
+    ; ( "skipped scans"
+      , [ test_case "skipped scan replays with its typed value" `Quick
+            test_skipped_scan_replays_with_its_typed_value
+        ; test_case "skipped scans do not evict retained reviews" `Quick
+            test_skipped_scans_do_not_evict_retained_reviews
         ] )
     ]
 ;;

@@ -641,8 +641,10 @@ let reconcile_committed_proof config ~goal_id =
           | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
           | Ok (Goal_phase.Move_to phase) ->
             Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
-  (* The scan contract stays a string in PR-1; RFC-0444 PR-5 turns it into
-     [Scan_skipped of unavailable]. *)
+  (* This locked re-read folds its write_error — including a store that
+     became unavailable after the verifier scan listed it — to a string. The
+     scan records only its own list read as [Scan_skipped] (RFC-0444 PR-5);
+     a failure here reaches it as [Ledger_reconcile_failed] naming the goal. *)
   Result.map (fun ((goal : Goal_store.goal), (outcome, verdict)) ->
     Option.iter (fun verdict -> emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
       ~payload:(gate_event_payload ctx ~phase:goal.phase verdict)) verdict;

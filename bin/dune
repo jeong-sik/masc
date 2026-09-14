@@ -1359,6 +1359,7 @@
   masc.keeper_runtime
   masc.voice_wizard
   masc.voice_setup
+  masc.voice_config
   masc.workspace_connection
   masc_tui_lane_addons
   masc_tui_queue_inspection

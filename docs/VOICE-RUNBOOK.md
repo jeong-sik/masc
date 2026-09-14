@@ -1244,6 +1244,14 @@ Two blanks are real answers rather than unfinished ones:
 The save carries the revision the pane read. A wizard left open while something
 else wrote is told its read went stale rather than overwriting that writer.
 
+Where the voice lands depends on what the section already holds. A voice name is
+provider vocabulary -- `say` takes `Yuna`, ElevenLabs a 20-character id -- so it
+becomes `[voice.tts] default_voice` only when every endpoint already there
+shares this one's kind. Beside another kind it goes on the endpoint instead,
+which leaves the existing default readable by the endpoints that fall back to
+it and, as the trade, puts this one out of reach of `agent_voices` (see
+"a `default_voice` on the endpoint outranks both" above).
+
 On success the pane reloads, and for speech out every configured endpoint is
 asked to say one sentence. Each answer is shown, **including the refusals** —
 that is the part a fallback chain hides by stopping at the first endpoint that

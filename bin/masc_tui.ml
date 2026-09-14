@@ -2772,11 +2772,48 @@ let voice_wizard_probe_lines json =
   | _ -> []
 ;;
 
+(* The kinds already in the section the draft is going into. A voice name is
+   provider vocabulary, so whether the draft's voice can be the section default
+   depends on what else falls back to it -- {!Voice_setup.voice_placement} is
+   the rule and this is its input. A kind this binary cannot name stays [None]
+   rather than being guessed at: the answer then keeps the voice off the
+   section default, which is the side that breaks nothing. *)
+let voice_setup_section_kinds state (section : Voice_setup.section) =
+  let side =
+    match section with
+    | Voice_setup.Tts -> "tts"
+    | Voice_setup.Stt -> "stt"
+  in
+  match state.voice_setup with
+  | None -> []
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt side fields with
+     | Some (`Assoc section_fields) ->
+       (match List.assoc_opt "endpoints" section_fields with
+        | Some (`List entries) ->
+          List.map
+            (fun entry ->
+              match entry with
+              | `Assoc entry ->
+                (match List.assoc_opt "kind" entry with
+                 | Some (`String kind) -> Voice_config.endpoint_kind_of_name kind
+                 | Some _ | None -> None)
+              | _ -> None)
+            entries
+        | Some _ | None -> [])
+     | Some _ | None -> [])
+  | Some _ -> []
+;;
+
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_types.voice_wizard_session) =
+  let alongside =
+    voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
+  in
   match
     ( Masc_tui_types.voice_wizard_save_held session
-    , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision )
+    , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
+        ~alongside )
   with
   | Some reason, _ -> state.voice_wizard <- Some { session with vws_status = Some reason }
   | None, Error gaps ->

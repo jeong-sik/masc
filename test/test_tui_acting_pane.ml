@@ -1292,10 +1292,11 @@ let test_an_opened_call_draws_its_facts_and_previews () =
   in
   let texts = List.map text view.Pane.rows in
   let facts = List.nth texts (first_call_row + 2) in
-  check bool "the receipt age" true (contains "40.0s ago" facts);
-  check bool "the schedule in words" true
-    (contains "step 2 \xc2\xb7 concurrent, 3 at once" facts);
-  check bool "the disposition" true (contains "deferred" facts);
+  check bool "the disposition first, then the receipt age" true
+    (contains "deferred \xc2\xb7 40.0s ago" facts);
+  check bool "the schedule in words" true (contains "concurrent, 3 at once" facts);
+  check bool "no planned step: the list already shows the order" false
+    (contains "step" facts);
   check bool "the input preview" true
     (contains "in  {\"to\":\"probe\"}" (List.nth texts (first_call_row + 3)));
   let out = List.nth texts (first_call_row + 4) in
@@ -1331,6 +1332,63 @@ let test_an_opened_wire_call_says_what_it_does_not_carry () =
   check bool "no input" true (contains "in  not carried" (List.nth texts 6));
   check bool "no output" true (contains "out not carried" (List.nth texts 7));
   check bool "the call still out follows" true (contains "Execute" (List.nth texts 8))
+
+(* The widest facts row the vocabulary can produce -- the longest
+   disposition word, a minutes-and-seconds age, a two-digit batch -- is 47
+   cells after the indent, inside the pane's 50. The first cut of this row
+   put the disposition last, where a three-at-once batch left it five cells
+   and "deferred" drew as "defer". *)
+let test_the_widest_facts_row_keeps_every_word () =
+  let wide =
+    [ runner_call ~at:(now -. 725.) ~duration_ms:5. ~id:"wide"
+        ~schedule:(schedule ~step:12 ~batch_index:3 ~at_once:12 Contract.Concurrent)
+        ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed) "Read"
+    ]
+  in
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0
+      { (runner_input ~expanded:[ "runner", Acting.Call_by_id "wide" ] ()) with
+        Pane.chunks = chunks [ "runner" ] (entries wide)
+      }
+  in
+  let facts = text (List.nth view.Pane.rows (first_call_row + 1)) in
+  check bool "the whole row" true
+    (contains "completed \xc2\xb7 12m05s ago \xc2\xb7 concurrent, 12 at once" facts);
+  check int "at the pane's width" cols (width (List.nth view.Pane.rows (first_call_row + 1)))
+
+(* A ledger row whose schedule or disposition did not parse keeps the error
+   beside the call rather than a default: the call row wears no dispatch
+   mark, and the opened row says which reading is missing. *)
+let test_an_unparsed_schedule_or_disposition_is_said_not_defaulted () =
+  let row =
+    ( 960.
+    , Observer.Keeper_tool_call
+        { Observer.kt_keeper = "runner"
+        ; kt_turn = Some 12
+        ; kt_tool = "Read"
+        ; kt_duration_ms = Some 5.
+        ; kt_disposition = Some (Error "keeper call has unknown disposition delivered")
+        ; kt_at = 960.
+        ; kt_tool_use_id = Some "odd"
+        ; kt_schedule = Some (Error "tool schedule batch_size must be positive")
+        ; kt_tool_args = None
+        ; kt_tool_result = None
+        ; kt_tool_args_preview = None
+        ; kt_tool_output_preview = None
+        } )
+  in
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0
+      { (runner_input ~expanded:[ "runner", Acting.Call_by_id "odd" ] ()) with
+        Pane.chunks = chunks [ "runner" ] (entries [ row ])
+      }
+  in
+  let texts = List.map text view.Pane.rows in
+  check bool "no dispatch mark on the call row" true
+    (contains "\xe2\x96\xa0    Read" (List.nth texts first_call_row));
+  let facts = List.nth texts (first_call_row + 1) in
+  check bool "the disposition is a question" true (contains "disposition ?" facts);
+  check bool "so is the schedule" true (contains "schedule ?" facts)
 
 let test_each_order_lists_the_calls_as_the_heading_says () =
   List.iter
@@ -1433,6 +1491,10 @@ let () =
             test_an_opened_call_draws_its_facts_and_previews
         ; test_case "an opened wire call says what it does not carry" `Quick
             test_an_opened_wire_call_says_what_it_does_not_carry
+        ; test_case "the widest facts row keeps every word" `Quick
+            test_the_widest_facts_row_keeps_every_word
+        ; test_case "an unparsed schedule or disposition is said, not defaulted" `Quick
+            test_an_unparsed_schedule_or_disposition_is_said_not_defaulted
         ; test_case "each order lists the calls as the heading says" `Quick
             test_each_order_lists_the_calls_as_the_heading_says
         ; test_case "the order cycles through all four" `Quick

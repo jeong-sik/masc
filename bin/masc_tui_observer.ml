@@ -299,8 +299,12 @@ let decode_keeper_tool_call fields =
        ; kt_tool
        ; kt_duration_ms = float_field fields "duration_ms"
        ; kt_disposition =
-           Option.map Masc.Tui_decode.keeper_call_disposition_of_string
-             (string_field fields "disposition")
+           (* Blank is no word, as the call log decoder reads it, so the two
+              planes agree on what an absent disposition is. *)
+           (match string_field fields "disposition" with
+            | Some word when String.trim word <> "" ->
+                Some (Masc.Tui_decode.keeper_call_disposition_of_string word)
+            | Some _ | None -> None)
        ; kt_at
        ; kt_tool_use_id
        ; kt_schedule = keeper_schedule fields

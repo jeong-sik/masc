@@ -423,6 +423,31 @@ let test_exact_event_references_and_keeper_io () =
   | [Observer.Undecodable _] -> ()
   | _ -> fail "malformed identity became missing identity"
 
+(* The disposition arrives typed in the call log's vocabulary. A blank word
+   is no word, as the call log decoder reads it; a word outside the
+   vocabulary stays an error beside the call rather than a default. *)
+let test_keeper_disposition_is_typed_at_the_wire () =
+  let observe extra =
+    let json = `Assoc
+      ([ "type", `String "keeper_tool_call"; "name", `String "alpha"
+       ; "tool_name", `String "Read"; "ts_unix", `Int 100 ] @ extra)
+    in
+    match decode_all ["data: " ^ Yojson.Safe.to_string json ^ "\n\n"] with
+    | [Observer.Event (Observer.Keeper_tool_call event)] -> event.kt_disposition
+    | _ -> fail "the call was not decoded"
+  in
+  check bool "absent stays absent" true (observe [] = None);
+  check bool "blank is absent, as the call log reads it" true
+    (observe [ "disposition", `String "" ] = None);
+  check bool "the wire word becomes the variant" true
+    (observe [ "disposition", `String "deferred" ]
+     = Some (Ok Masc.Tui_decode.Keeper_call_deferred));
+  match observe [ "disposition", `String "delivered" ] with
+  | Some (Error reason) ->
+      check bool "an unknown word is kept as the error" true
+        (String.starts_with ~prefix:"keeper call has unknown disposition" reason)
+  | Some (Ok _) | None -> fail "an unknown word was folded into a default"
+
 let test_keeper_scheduling_keeps_io_when_metadata_is_invalid () =
   let observe extra =
     let json = `Assoc
@@ -493,7 +518,9 @@ let () =
             test_the_initialize_body_names_the_method_and_the_client
         ] )
     ; ( "events"
-      , [ test_case "Keeper scheduling preserves call evidence" `Quick
+      , [ test_case "Keeper disposition is typed at the wire" `Quick
+            test_keeper_disposition_is_typed_at_the_wire
+        ; test_case "Keeper scheduling preserves call evidence" `Quick
             test_keeper_scheduling_keeps_io_when_metadata_is_invalid
         ; test_case "exact event references and redacted Keeper I/O survive" `Quick
             test_exact_event_references_and_keeper_io

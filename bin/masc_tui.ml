@@ -8863,22 +8863,28 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
          only what the feed still holds -- a key for a call that has left
          the projection is dropped here rather than kept for a call that
          may never come back. *)
-      let held =
-        Masc_tui_acting.projection_chunks (recent_chunk_projection state)
-        |> List.exists (fun (chunk : Masc_tui_acting.chunk) ->
-               List.exists
+      let chunks = Masc_tui_acting.projection_chunks (recent_chunk_projection state) in
+      let held (name, opened) =
+        List.exists
+          (fun (chunk : Masc_tui_acting.chunk) ->
+            String.equal chunk.Masc_tui_acting.ck_keeper name
+            && List.exists
                  (fun tool ->
-                   Masc_tui_acting.call_key_equal (Masc_tui_acting.call_key tool) key)
-                 (Masc_tui_acting.chunk_tools chunk)
-               && String.equal chunk.Masc_tui_acting.ck_keeper keeper_name)
+                   Masc_tui_acting.call_key_equal (Masc_tui_acting.call_key tool) opened)
+                 (Masc_tui_acting.chunk_tools chunk))
+          chunks
       in
       let same (name, opened) =
         String.equal name keeper_name && Masc_tui_acting.call_key_equal opened key
       in
-      let others = List.filter (fun entry -> not (same entry)) state.acting_pane_expanded in
+      let others =
+        List.filter
+          (fun entry -> (not (same entry)) && held entry)
+          state.acting_pane_expanded
+      in
       state.acting_pane_expanded
-      <- (if held && not (List.exists same state.acting_pane_expanded) then
-            (keeper_name, key) :: others
+      <- (if held (keeper_name, key) && not (List.exists same state.acting_pane_expanded)
+          then (keeper_name, key) :: others
           else others)
   | Masc_tui_acting_pane.Target_calls keeper_name -> (
       (* An earlier turn's row is the keeper's calls surface by another hand,

@@ -146,8 +146,21 @@ let resolve_origin net ({ uri; host } : validated_origin) =
           ; kind = https_init_error_network_kind reason
           }
       in
-      Result.map (fun wrap -> Some wrap)
-      @@ Result.map_error wrap_error (Api_common.make_https_result ())
+      let* wrap = Result.map_error wrap_error (Api_common.make_https_result ()) in
+      Result.map (fun peer -> Some (wrap peer))
+      @@ Result.map_error
+           (fun reason ->
+              NetworkError
+                { message =
+                    Printf.sprintf
+                      "https host %S of %s is neither an address nor a host name; the \
+                       certificate cannot be checked against it: %s"
+                      host
+                      (Uri.to_string uri)
+                      reason
+                ; kind = Tls_error
+                })
+           (Api_common.tls_peer_of_host host)
     | Some "http" | Some _ | None -> Ok None
   in
   Ok (net, addresses, tls_wrap)
@@ -160,7 +173,7 @@ let make_connection ~sw ~net ~origin =
     let connection : connection =
       try
         match tls_wrap with
-        | Some wrap -> (wrap origin.uri socket :> connection)
+        | Some wrap -> (wrap socket :> connection)
         | None -> (socket :> connection)
       with exn ->
         let bt = Printexc.get_raw_backtrace () in

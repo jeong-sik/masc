@@ -12,9 +12,10 @@ module Http_client = Llm_provider.Http_client
 
 let outer_budget_s = 10.0
 
-(* Generous against a loaded CI runner; the budgets under test are well
-   under a second, so the elapsed window still separates "the budget ended
-   it" from "the outer guard ended it". *)
+(* On the gate (run 34824991296, 2026-09-14) each case ended within 10 ms
+   of its budget; the slack is for a loaded runner's scheduling, and stays
+   well under the guard so the window still separates "the budget ended it"
+   from "the guard ended it". *)
 let slack_s = 2.5
 
 (* Accepts one connection and never writes a byte: the TCP handshake
@@ -79,11 +80,7 @@ let describe = function
 
 let check_timeout_phase ~label ~expected ~budget_s (outcome, elapsed) =
   (match outcome with
-   | Ended (Error (Http_client.TimeoutError { phase; _ }))
-     when
-       String.equal
-         (Http_client.timeout_phase_to_label phase)
-         (Http_client.timeout_phase_to_label expected) -> ()
+   | Ended (Error (Http_client.TimeoutError { phase; _ })) when phase = expected -> ()
    | other ->
      Alcotest.failf
        "[%s] expected TimeoutError phase=%s, got %s after %.2fs"
@@ -108,8 +105,8 @@ let with_env f =
   f ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
 ;;
 
-(* Nine of the ten live providers declare no connect budget. Before this
-   the request below had no bound at all. *)
+(* A provider that declares no connect budget: the first-event budget is
+   what stands in front of the headers. *)
 let test_the_first_event_budget_stands_in_front_of_the_headers () =
   with_env @@ fun ~sw ~clock ~net ->
   let port = start_silent_server ~sw ~net in
@@ -140,13 +137,11 @@ let test_a_wider_connect_budget_yields_to_the_first_event_budget () =
        ~budget_s:0.4
 ;;
 
-(* The connection is made inside the window. A peer that completes the TCP
-   handshake and never sends a ServerHello stalls the TLS handshake, which
-   ran before the budget started until 2026-09-14. The address is an IP
-   literal on purpose: until the same day the TLS wrapper raised
-   [Invalid_argument "invalid host name"] for one, out of the client as an
-   untyped exception, so this case also holds that an https endpoint written
-   as an address fails typed. *)
+(* The connection is made inside the window: a peer that completes the TCP
+   handshake and never sends a ServerHello stalls the TLS handshake, and the
+   budget ends it. The address is an IP literal on purpose: an https endpoint
+   written as an address is a TLS peer named by its address, and this case
+   holds that it reaches the handshake as one. *)
 let test_the_budget_covers_the_tls_handshake () =
   match Llm_provider.Api_common.make_https_result () with
   | Error reason ->

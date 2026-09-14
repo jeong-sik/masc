@@ -31,8 +31,19 @@ function createIssueTaxonomyCore(ssot) {
         present: true,
         error: `the body carries ${blocks.length} ${language} blocks; keep exactly one`,
       }
+    // Some issue composers (API payloads round-tripped through a JSON string,
+    // a form that does not render Enter as a real newline) write the field
+    // separators as the two literal characters `\` `n` instead of an actual
+    // newline. The block still matches the fence pattern above -- only its
+    // first line has to be a real newline -- so it reads as present with
+    // every field folded into whichever key came first (2026-09-14, 14
+    // issues in one batch lost their label to this). Normalizing literal
+    // `\n` to a real newline before splitting reads both shapes the same
+    // way; a body that means a literal backslash-n has no other use inside
+    // this block, since every field here is a short vocabulary token.
+    const inner = blocks[0][1].replace(/\\n/g, '\n')
     const fields = {}
-    for (const raw of blocks[0][1].split('\n')) {
+    for (const raw of inner.split('\n')) {
       const line = raw.trim()
       if (!line || line.startsWith('#')) continue
       const separator = line.indexOf(':')

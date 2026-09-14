@@ -116,20 +116,24 @@ stream_idle_timeout_sec = %g
       (Keeper_runtime_resolved.stream_idle_timeout_sec ());
     let attempt_errors = ref [] in
     let started = Unix.gettimeofday () in
+    (* Under the fixture budget: a turn the idle bound does not end would
+       otherwise hang on the attempt watchdog until the runner kills the
+       suite, a failure with no name. *)
     let result =
-      Keeper_turn_driver.run_named
-        ~system_prompt:"Stream idle bound proof."
-        ~runtime_id:"stall.sample"
-        ~keeper_name:"stream-idle-bound-proof"
-        ~base_path
-        ~agent_core_tools:[]
-        ~goal:"answer, then stop mid-stream"
-        ~on_event:(fun _ -> ())
-        ~on_runtime_attempt_error:(fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->
-          attempt_errors := error :: !attempt_errors)
-        ~sw
-        ~net:env#net
-        ()
+      Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+        Keeper_turn_driver.run_named
+          ~system_prompt:"Stream idle bound proof."
+          ~runtime_id:"stall.sample"
+          ~keeper_name:"stream-idle-bound-proof"
+          ~base_path
+          ~agent_core_tools:[]
+          ~goal:"answer, then stop mid-stream"
+          ~on_event:(fun _ -> ())
+          ~on_runtime_attempt_error:(fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->
+            attempt_errors := error :: !attempt_errors)
+          ~sw
+          ~net:env#net
+          ())
     in
     let elapsed_s = Unix.gettimeofday () -. started in
     check bool "the turn does not complete on a stalled stream" true (Result.is_error result);

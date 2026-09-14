@@ -813,7 +813,9 @@ let semantic_rows db ~active_only =
       in loop [])
 ;;
 
-let inspect_outstanding ~path =
+type inspection_scope = Outstanding_integrity_audit | Pending_inputs
+
+let inspect_outstanding_with ~scope ~path =
   let inspect db =
     let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
     let* version = single_int64 db ~operation:"read inspection schema version" "PRAGMA user_version" in
@@ -824,13 +826,18 @@ let inspect_outstanding ~path =
         Ok true
       else let* () = validate_schema db in Ok false
     in
-    let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
-    let* () = if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
+    let* () = match scope with
+      | Pending_inputs -> Ok ()
+      | Outstanding_integrity_audit ->
+        let* integrity = single_text db ~operation:"check operation store integrity" "PRAGMA quick_check" in
+        if String.equal integrity "ok" then Ok () else Error (Integrity_error integrity) in
     let* objects = read_schema_objects db in
     let has_batches = List.exists (fun (_, name, _) -> name = "operation_batch_members") objects in
     let* outstanding =
       with_statement db ~operation:"inspect durable operations"
-        ("SELECT " ^ select_columns ^ " FROM operations ORDER BY sequence")
+        ("SELECT " ^ select_columns ^ " FROM operations"
+         ^ (match scope with Pending_inputs -> " WHERE state IN ('queued', 'running')"
+            | Outstanding_integrity_audit -> "") ^ " ORDER BY sequence")
         (fun stmt ->
           let rec read acc =
             let rc = Sqlite3.step stmt in
@@ -845,7 +852,9 @@ let inspect_outstanding ~path =
     (* An exactly validated v1 schema cannot contain semantic records.
        Ownerless stores remain inspectable without a write or migration. *)
     let* semantic_executions =
-      if chat_only then Ok [] else semantic_rows db ~active_only:true in
+      match scope with
+      | Pending_inputs -> Ok []
+      | Outstanding_integrity_audit -> if chat_only then Ok [] else semantic_rows db ~active_only:true in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
     Ok (Stored_operations { chat_operations = outstanding; semantic_executions })
   in
@@ -876,6 +885,14 @@ let inspect_outstanding ~path =
     in absent_companions [ "-journal"; "-wal"; "-shm" ]
   | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
 ;;
+
+let inspect_outstanding ~path = inspect_outstanding_with ~scope:Outstanding_integrity_audit ~path
+let inspect_pending_inputs ~path =
+  inspect_outstanding_with ~scope:Pending_inputs ~path |> Result.map (function
+    | Missing_store -> None
+    | Stored_operations {chat_operations; _} -> Some chat_operations)
+;;
+
 
 let next_sequence db =
   let* sequence =

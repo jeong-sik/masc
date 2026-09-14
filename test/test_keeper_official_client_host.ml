@@ -1643,11 +1643,32 @@ let test_native_read_is_effect_free_and_admitted () =
        ~client_label:"Codex")
 ;;
 
+(* #36066 (audit F386): [resolve_native_posture] loads the keeper's
+   declaration before it reads any posture, and refuses a keeper nothing
+   declares. The posture cases below therefore run under a base path that
+   declares every keeper they name. A declaration with no [tools.native]
+   key leaves [native_tool_posture] unset, which is what lets the runtime
+   default stand in the cases that rely on it. *)
+let with_declared_keepers names body =
+  let base_path = Filename.temp_file "official-client-posture-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       List.iter
+         (Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None)
+         names;
+       body ~base_path)
+;;
+
 let test_required_native_none_never_degrades () =
+  with_declared_keepers [ "required-native-posture" ]
+  @@ fun ~base_path ->
   let resolve ~none_supported =
     Host.resolve_native_posture
       ~required:(Some Runtime_native_tools.Native_none)
-      ~base_path:"/nonexistent-required-native-posture-base"
+      ~base_path
       ~keeper_name:"required-native-posture"
       ~client_label:"fixture"
       ~default:Runtime_native_tools.Native_read
@@ -1669,6 +1690,13 @@ let test_required_native_none_never_degrades () =
    records the downgrade as a typed event. The pure predicate above still
    refuses — the policy below keeps the runtime call alive. *)
 let test_resolve_degrades_instead_of_failing_the_turn () =
+  with_declared_keepers
+    [ "rfc0390-default-posture"
+    ; "rfc0390-full-auto"
+    ; "rfc0390-none-codex"
+    ; "rfc0390-read-codex"
+    ]
+  @@ fun ~base_path ->
   let run = Host.resolve_native_posture ~required:None in
   let posture_of = function
     | Ok p -> Runtime_native_tools.to_string p
@@ -1676,13 +1704,29 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
       failf "runtime call must not die: %s"
         (Agent_core.Error.to_string detail)
   in
-  (* No profile declared: the runtime default posture stands, admission is
-     trivially satisfied, no degradation, no event. *)
-  check string "undeclared default stays" "none"
+  (* A keeper nothing declares is refused on the profile field itself
+     (#36066); this is the one outcome that is not a posture. *)
+  (match
+     run
+       ~base_path
+       ~keeper_name:"rfc0390-undeclared"
+       ~client_label:"Claude Code"
+       ~default:Runtime_native_tools.claude_code_default
+       ~none_supported:true
+   with
+   | Error (Agent_core.Error.Config
+       (Agent_core.Error.InvalidConfig { field = "keeper.tools.native"; _ })) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok posture ->
+     failf "a keeper nothing declares resolved posture %s"
+       (Runtime_native_tools.to_string posture));
+  (* Declared with no [tools.native] key: the runtime default posture stands,
+     admission is trivially satisfied, no degradation, no event. *)
+  check string "declared without tools.native keeps the runtime default" "none"
     (posture_of
        (run
-          ~base_path:"/nonexistent-rfc0390-base"
-          ~keeper_name:"rfc0390-undeclared"
+          ~base_path
+          ~keeper_name:"rfc0390-default-posture"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.claude_code_default
           ~none_supported:true));
@@ -1690,7 +1734,7 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "full under Auto degrades to read" "read"
     (posture_of
        (run
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-full-auto"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.Native_full
@@ -1699,7 +1743,7 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "none on Codex degrades to read" "read"
     (posture_of
        (run
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-none-codex"
           ~client_label:"Codex"
           ~default:Runtime_native_tools.Native_none
@@ -1710,7 +1754,7 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
   check string "read is admitted untouched" "read"
     (posture_of
        (run
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-read-codex"
           ~client_label:"Codex"
           ~default:Runtime_native_tools.Native_read
@@ -1724,6 +1768,9 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
    contradiction — publish once per process per (keeper, client) pair,
    then go quiet until a resolution honors the declaration. *)
 let test_static_contradiction_reports_once_until_rearmed () =
+  with_declared_keepers
+    [ "rfc0390-full-auto-per-turn"; "rfc0390-none-codex-static" ]
+  @@ fun ~base_path ->
   (* The Event_bus needs a running Eio scheduler; the heartbeat
      integration tests wrap bus setup in Eio_main.run the same way. *)
   Eio_main.run @@ fun _env ->
@@ -1781,7 +1828,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   ignore
     (posture_of
        (Host.resolve_native_posture ~required:None
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.Native_full
@@ -1789,7 +1836,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   ignore
     (posture_of
        (Host.resolve_native_posture ~required:None
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.Native_full
@@ -1807,7 +1854,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
     ignore
       (posture_of
          (Host.resolve_native_posture ~required:None
-            ~base_path:"/nonexistent-rfc0390-base"
+            ~base_path
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"
             ~default:Runtime_native_tools.Native_none
@@ -1819,7 +1866,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   ignore
     (posture_of
        (Host.resolve_native_posture ~required:None
-          ~base_path:"/nonexistent-rfc0390-base"
+          ~base_path
           ~keeper_name:"rfc0390-none-codex-static"
           ~client_label:"Codex"
           ~default:Runtime_native_tools.Native_read
@@ -1830,7 +1877,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
     ignore
       (posture_of
          (Host.resolve_native_posture ~required:None
-            ~base_path:"/nonexistent-rfc0390-base"
+            ~base_path
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"
             ~default:Runtime_native_tools.Native_none

@@ -94,7 +94,7 @@ let test_local_queue_is_not_server_admission () =
   add "alpha" "local-alpha";
   add "beta" "local-beta";
   check (list string) "only target's unsent messages are counted"
-    ["1 message waiting in this TUI; not sent to the server yet"]
+    ["Queue (1 waiting · auto-next:on) NEXT: \"hello\" · Ctrl-T:queue"]
     (Tui.keeper_message_activity_rows state);
   state.msg_target_keeper_name <- None;
   check (list string) "no target has no attributed activity" []

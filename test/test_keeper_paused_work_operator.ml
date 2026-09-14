@@ -393,7 +393,8 @@ let test_admission_busy_http_json_preserves_typed_detail () =
   let holder =
     admission_error_json
       (Keeper_owner.Turn_busy
-         (Some { lane = Keeper_owner.Chat_operation; started_at = 42.5 }))
+         (Some { lane = Keeper_owner.Chat_operation; started_at = 42.5
+               ; interrupt_token = Keeper_interrupt_token.fresh () }))
   in
   Alcotest.(check string)
     "holder error code"

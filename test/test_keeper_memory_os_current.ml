@@ -988,6 +988,10 @@ let test_purge_plan_removes_memory_sidecars () =
     (contains Shutdown.Keeper_memory_current_artifact);
   check bool "plan removes the source-bound snapshot" true
     (contains Shutdown.Keeper_memory_source_current_artifact);
+  check bool "plan removes the working context recall index" true
+    (contains Shutdown.Keeper_working_context_recall_artifact);
+  check bool "plan removes the working context" true
+    (contains Shutdown.Keeper_working_context_artifact);
   check bool "plan removes the memory journal" true
     (contains Shutdown.Keeper_memory_journal_artifact)
 ;;

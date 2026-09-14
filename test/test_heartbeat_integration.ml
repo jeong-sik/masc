@@ -4284,6 +4284,18 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
           (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       in
       write_file (Filename.concat session_dir "history.jsonl") "{}\n";
+      let working_context_path =
+        Masc.Keeper_librarian_context.path
+          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.base_path) ~keeper_id:meta.name
+      in
+      write_file working_context_path "stale derived context";
+      let working_context_recall_path =
+        Masc.Keeper_librarian_context_recall.path
+          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+            ~base_path:config.base_path) ~keeper_name:meta.name
+      in
+      write_file working_context_recall_path "stale recall index";
       let configuration_path =
         Filename.concat
           (Config_dir_resolver.keepers_dir_for_base_path
@@ -4442,6 +4454,8 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; runtime_dir
         ; session_dir
         ; configuration_path
+        ; working_context_path
+        ; working_context_recall_path
         ; agent_path
         ; agent_metrics_dir
         ; Auth.credential_file config.base_path meta.name
@@ -4453,6 +4467,12 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         (fun path ->
            check bool ("artifact removed: " ^ path) false (Sys.file_exists path))
         removed_paths;
+      (match Masc.Keeper_librarian_context.read
+         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path) ~keeper_id:meta.name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "same-name successor inherited purged working context"
+       | Error detail -> fail ("purged context still unreadable: " ^ detail));
       check bool "unrelated agent artifact preserved" true
         (Sys.file_exists unrelated_path);
       check bool "other Keeper log is preserved" true (Sys.file_exists unrelated_log);

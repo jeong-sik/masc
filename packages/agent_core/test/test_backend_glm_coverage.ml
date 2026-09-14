@@ -248,6 +248,7 @@ let test_parse_stream_chunk_uses_resolved_reasoning_dialect () =
     check (option string) "content" (Some "token") chunk.delta_content;
     check (option string) "reasoning" (Some "thinking") chunk.delta_reasoning
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> fail "expected stream chunk"
 ;;
 
@@ -260,6 +261,7 @@ let test_parse_stream_chunk_does_not_invent_missing_dialect () =
     check (option string) "content" (Some "token") chunk.delta_content;
     check (option string) "reasoning stays absent" None chunk.delta_reasoning
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _
     -> fail "expected stream chunk"
 ;;
 

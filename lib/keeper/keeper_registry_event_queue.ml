@@ -13,7 +13,8 @@ let publish_pending ~base_path name pending =
    | Some entry -> Atomic.set entry.event_queue pending);
   Keeper_waiting_inventory_broadcast.changed
     ~keeper_name:name
-    ~source:Event_queue
+    ~source:Event_queue;
+  Keeper_librarian_queue_signal.changed ~base_path ~keeper_name:name
 ;;
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =

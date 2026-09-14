@@ -853,6 +853,13 @@
  (modules test_streaming_cut_cleanup)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio eio_main))
 
+; Loopback listeners that accept and stay silent: the phase before the
+; response headers must end at a budget, TLS handshake included.
+(test
+ (name test_stream_pre_header_budget)
+ (modules test_stream_pre_header_budget)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
+
 (test
  (name test_otel_tracer_fiber)
  (modules test_otel_tracer_fiber)

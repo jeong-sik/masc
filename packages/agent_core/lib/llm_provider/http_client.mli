@@ -602,10 +602,18 @@ val post_stream
     it can be reused across requests. [f] must consume the full response
     body; leaving unread bytes on the reader will corrupt the next reuse.
 
-    An explicitly supplied [connect_timeout_s] bounds only the connect +
-    initial response headers phase and requires [clock]. Supplying the
-    deadline without [clock] returns [AcceptRejected]; a stall with both
-    supplied surfaces as [TimeoutError { phase = Http_operation; _ }].
+    The phase before the response headers -- the connection (DNS, TCP,
+    TLS), the request and the wait for the status line -- runs under the
+    narrower of [connect_timeout_s] and [first_event_timeout_s]; either
+    requires [clock], and a budget supplied without it returns
+    [AcceptRejected]. A stall the connect budget ends surfaces as
+    [TimeoutError { phase = Http_operation; _ }]; one the first-event
+    budget ends surfaces as [TimeoutError { phase = First_token; _ }], the
+    provider having been silent for the whole time allowed before a first
+    token. With neither supplied the phase is unbounded. [f] still arms the
+    first-event budget on the reader itself ({!read_sse}, {!read_ndjson});
+    this parameter is what stands in front of the headers, where the reader
+    cannot.
 
     Body consumption in [f] runs OUTSIDE [catch_network]. A body-phase
     [Eio.Time.Timeout] (first-token / prefill wait, inter-chunk idle)
@@ -627,6 +635,7 @@ val with_post_stream
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
   -> ?connect_timeout_s:float
+  -> ?first_event_timeout_s:float
   -> ?on_response_status:(int -> unit)
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> url:string

@@ -81,12 +81,14 @@ type provider =
   ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
-    (** Per-provider override for the AGENT_CORE connect + initial-response-headers
-      wall-clock timeout (seconds). [None] keeps the AGENT_CORE kind-based default
-      (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
-      on the provider, not the model, because it is a transport property.
-      agent-core boundary, Agent Core contract I2: MASC declares the budget; AGENT_CORE owns enforcement
-      and phase=Http_operation attribution. *)
+    (** Per-provider bound on the phase before the response headers -- the
+      connection (DNS, TCP, TLS), the request and the wait for the status
+      line -- in seconds. [None] leaves that phase to the keeper's
+      first-event budget, which AGENT_CORE applies in front of the headers as
+      well as on the stream; a declared value narrows it. Declared on the
+      provider, not the model, because it is a transport property.
+      agent-core boundary, Agent Core contract I2: MASC declares the budget;
+      AGENT_CORE owns enforcement and phase=Http_operation attribution. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)

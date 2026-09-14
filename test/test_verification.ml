@@ -1198,6 +1198,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     CA.For_testing.review_notes
       ~request
       ~evidence_access
+      ~unread_images:[]
       ~result
       ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-run" })
   in
@@ -3996,6 +3997,114 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
         "a markdown diff does not attach" None
         (VS.image_media_type_of_binary_format "md"))
 
+(* F401: an image artifact whose filed body is gone used to vanish from the
+   review with its read failure discarded, so the committed verdict read as
+   if the judge had looked at every picture. Proves that
+   [evidence_images_of_snapshot] keeps the reference with the store's typed
+   reason under [unread] instead of dropping it, that a readable sibling
+   still attaches, and that [review_notes] names the unread image with that
+   reason under [review.unread_images]. *)
+let test_an_unreadable_image_body_is_named_in_the_review_record () =
+  with_temp_dir (fun base_path ->
+      let png_bytes = "\x89PNG\r\n\x1a\n" in
+      let gone_body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-unread" ~index:0 png_bytes
+      in
+      let kept_body =
+        VS.persist_binary_body
+          ~base_path ~request_id:"vrf-unread" ~index:1 png_bytes
+      in
+      let masc_dir = CU.masc_dir_from_base_path ~base_path in
+      (match gone_body with
+       | Some relative -> Sys.remove (Filename.concat masc_dir relative)
+       | None -> Alcotest.fail "the body was filed under a request id");
+      let binary ~reference ~body =
+        VS.Evidence_artifact_binary
+          { reference
+          ; bytes = String.length png_bytes
+          ; sha256 = "e3b0c442"
+          ; format = "png"
+          ; body
+          }
+      in
+      let request : V.verification_request =
+        { id = "vrf-unread"
+        ; task_id = "task-unread"
+        ; output = `Assoc []
+        ; criteria = []
+        ; worker = "omega"
+        ; created_at = 42.0
+        }
+      in
+      let evidence_access : VS.submitted_evidence_access =
+        VS.Evidence_available
+          { request =
+              { id = request.id
+              ; task_id = request.task_id
+              ; worker = request.worker
+              ; created_at = request.created_at
+              }
+          ; items =
+              [ binary ~reference:"artifact:gone.png" ~body:gone_body
+              ; binary ~reference:"artifact:kept.png" ~body:kept_body
+              ]
+          }
+      in
+      let { CA.For_testing.images; unread } =
+        CA.For_testing.evidence_images_of_snapshot ~base_path evidence_access
+      in
+      Alcotest.(check (list string))
+        "the readable sibling still attaches"
+        [ "artifact:kept.png" ]
+        (List.map
+           (fun (img : Masc.Task.Anti_rationalization.evidence_image) ->
+              img.image_reference)
+           images);
+      (match unread with
+       | [ ("artifact:gone.png", VS.Body_unreadable _) ] -> ()
+       | [ ("artifact:gone.png", VS.Not_binary) ] ->
+         Alcotest.fail "a png artifact is a binary item"
+       | [ ("artifact:gone.png", VS.Body_not_filed) ] ->
+         Alcotest.fail "the body was filed before it was removed"
+       | [ ("artifact:gone.png", VS.Over_delivery_ceiling _) ] ->
+         Alcotest.fail "an 8-byte body is under the ceiling"
+       | [] -> Alcotest.fail "the removed body must be kept as unread"
+       | (reference, _) :: _ ->
+         Alcotest.failf "unexpected unread list starting at %s" reference);
+      let result : Masc.Task.Anti_rationalization.review_result =
+        { verdict = Some (Masc.Task.Anti_rationalization.Approve "looked fine")
+        ; evaluator_runtime = "review-runtime"
+        ; generator_runtime = None
+        ; gate = Masc.Task.Anti_rationalization.Structured_tool
+        ; fallback_reason = None
+        ; evaluator_error_retryable = None
+        }
+      in
+      let notes =
+        CA.For_testing.review_notes
+          ~request
+          ~evidence_access
+          ~unread_images:unread
+          ~result
+          ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-run" })
+      in
+      let open Yojson.Safe.Util in
+      let unread_json =
+        Yojson.Safe.from_string notes
+        |> member "review" |> member "unread_images" |> to_list
+      in
+      Alcotest.(check (list string))
+        "the verdict names the image the judge did not see"
+        [ "artifact:gone.png" ]
+        (List.map (fun entry -> entry |> member "reference" |> to_string) unread_json);
+      Alcotest.(check (list string))
+        "with the typed reason it was not delivered for"
+        [ "body_unreadable" ]
+        (List.map
+           (fun entry -> entry |> member "reason" |> member "kind" |> to_string)
+           unread_json))
+
 let test_checkout_relative_artifact_is_not_guessed () =
   with_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -4394,5 +4503,7 @@ let () =
         test_a_binary_payload_is_adopted_and_filed;
       Alcotest.test_case "a filed body reads back and only images attach" `Quick
         test_a_filed_binary_body_reads_back_and_only_images_attach;
+      Alcotest.test_case "an unreadable image body is named in the review record" `Quick
+        test_an_unreadable_image_body_is_named_in_the_review_record;
     ];
   ]

@@ -1452,8 +1452,21 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      with printable text. In a viewport too small to draw the composer where input
      is unsupported, printable Q also routes here. In ordinary typing mode,
      printable Q is never swallowed and types into the draft normally. *)
-  | k when (String.equal k "Q" && not (keeper_message_input_supported state))
-           || (String.length k = 1 && Char.code k.[0] = 17) ->
+  | k
+    when state.view = Keepers Keeper_message
+         && state.keeper_message_focus = Right_pane
+         && Option.is_none state.msg_recall_replaces
+         && Option.is_none state.voice_capture
+         && ((String.equal k "Q" && not (keeper_message_input_supported state))
+             || (String.length k = 1 && Char.code k.[0] = 17)) ->
+    (* The surface guard is the point of this arm, not decoration.
+       [handle_message_key] has a second caller -- the composer row on every
+       other surface -- and this arm leaves the chat pane by changing
+       [state.view]. Without the guard, Ctrl-Q typed into the composer row on
+       Overview moved the reader to the Keeper detail it would have returned
+       to; measured on a pty against the merged binary. Esc settles the
+       innermost thing first, so a recall being replaced or a capture in
+       flight keeps the key too. *)
     leave_keeper_message state ~drain_queue;
     true
   | "\r" ->
@@ -2772,11 +2785,48 @@ let voice_wizard_probe_lines json =
   | _ -> []
 ;;
 
+(* The kinds already in the section the draft is going into. A voice name is
+   provider vocabulary, so whether the draft's voice can be the section default
+   depends on what else falls back to it -- {!Voice_setup.voice_placement} is
+   the rule and this is its input. A kind this binary cannot name stays [None]
+   rather than being guessed at: the answer then keeps the voice off the
+   section default, which is the side that breaks nothing. *)
+let voice_setup_section_kinds state (section : Voice_setup.section) =
+  let side =
+    match section with
+    | Voice_setup.Tts -> "tts"
+    | Voice_setup.Stt -> "stt"
+  in
+  match state.voice_setup with
+  | None -> []
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt side fields with
+     | Some (`Assoc section_fields) ->
+       (match List.assoc_opt "endpoints" section_fields with
+        | Some (`List entries) ->
+          List.map
+            (fun entry ->
+              match entry with
+              | `Assoc entry ->
+                (match List.assoc_opt "kind" entry with
+                 | Some (`String kind) -> Voice_config.endpoint_kind_of_name kind
+                 | Some _ | None -> None)
+              | _ -> None)
+            entries
+        | Some _ | None -> [])
+     | Some _ | None -> [])
+  | Some _ -> []
+;;
+
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_types.voice_wizard_session) =
+  let alongside =
+    voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
+  in
   match
     ( Masc_tui_types.voice_wizard_save_held session
-    , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision )
+    , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
+        ~alongside )
   with
   | Some reason, _ -> state.voice_wizard <- Some { session with vws_status = Some reason }
   | None, Error gaps ->
@@ -4738,7 +4788,10 @@ let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
-    state.lane_addons <- Some {view with error=Some "A Lane request is pending; Esc returns to existing activity"}
+    (* The answer to the key just pressed goes at the top of the pane, so a
+       reader scrolled into a draft would not see it. *)
+    state.lane_addons <- Some {view with scroll=0;
+      error=Some "A Lane request is pending; Esc returns to existing activity"}
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
@@ -11965,7 +12018,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               let updated = Addons.put_document view session in
               {updated with document_key=view.document_key} in
             match response with
-            | Document.Rejected failure -> {view with error=Some failure.message}
+            (* Same reason as the pending note: a rejection is the answer to
+               the save, and it is drawn above the draft the reader is in. *)
+            | Document.Rejected failure -> {view with error=Some failure.message;scroll=0}
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
   (* The capture messages carry the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. The
@@ -17162,6 +17217,12 @@ and is loaded on demand through keeper_skill.
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Some detail})
                       | _ -> ())
+                 (* A line that takes letters owns them. This branch answered
+                    "3", "q", "r" and "s" as surface commands first, so typing
+                    a file name with one of those letters in it lost the letter
+                    and ran the command: "terminal.toml" refreshed the surface
+                    at its "r" and arrived as "al.toml". Esc closes the line and
+                    every one of those keys is there. *)
                  | None,None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
@@ -17233,12 +17294,20 @@ and is loaded on demand through keeper_skill.
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
+                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
                          let last = List.length (Addons.lines ~width view) - 1 in
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
+                     | "left" | "right" when (match view.focus with Addons.Timeline | Addons.Connections -> true | _ -> false) ->
+                         let delta = if key = "right" then 1 else -1 in
+                         update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.focus with
@@ -17247,6 +17316,8 @@ and is loaded on demand through keeper_skill.
                               update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
+                          | Some snapshot, (Addons.Timeline | Addons.Connections) ->
+                              update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)); scroll=0; document_key=None }
                           | None, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
@@ -20598,8 +20669,8 @@ and is loaded on demand through keeper_skill.
                      state.lane_runs_cursor <- 0;
                      state.lane_runs_scroll <- 0
                  | Lanes_overview ->
-                     (* Back to the Runtime parent it hangs off, loaded. *)
-                     goto_surface state ~mailbox:async_messages Runtime)
+                     (* Lanes is a primary surface; Esc returns to the ring. *)
+                     goto_surface state ~mailbox:async_messages Overview)
             | Acting | Metrics | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
@@ -22261,7 +22332,7 @@ and is loaded on demand through keeper_skill.
                           ~mailbox:async_messages;
                         launch_code_file_load state ~mailbox:async_messages
                           ~path)))
-       | Some "o" | Some "O" when state.view = Lanes ->
+       | Some "o" | Some "O" | Some "A" when state.view = Lanes ->
            launch_lane_addons state ~mailbox:async_messages
              Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->

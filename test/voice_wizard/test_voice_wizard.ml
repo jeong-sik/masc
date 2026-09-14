@@ -120,7 +120,7 @@ let test_a_local_endpoint_may_go_without_a_credential () =
     }
   in
   Alcotest.(check (list string)) "nothing is missing" [] (gap_names draft);
-  match Voice_wizard.changes draft with
+  match Voice_wizard.changes draft ~alongside:[] with
   | Error _ -> Alcotest.fail "a local endpoint without a credential is complete"
   | Ok _ -> ()
 
@@ -134,7 +134,7 @@ let test_elevenlabs_without_its_credential_is_incomplete () =
     ; Voice_wizard.credential_variable = "  "
     }
   in
-  match Voice_wizard.changes draft with
+  match Voice_wizard.changes draft ~alongside:[] with
   | Ok _ -> Alcotest.fail "elevenlabs cannot be reached without its key"
   | Error gaps ->
     Alcotest.(check bool) "the missing credential is what it names" true
@@ -148,7 +148,7 @@ let test_speech_out_needs_a_voice () =
     ; Voice_wizard.model = "eleven_multilingual_v2"
     }
   in
-  match Voice_wizard.changes draft with
+  match Voice_wizard.changes draft ~alongside:[] with
   | Ok _ -> Alcotest.fail "speech out with no voice is not complete"
   | Error gaps ->
     Alcotest.(check bool) "the voice is what it names" true
@@ -163,7 +163,7 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
     ; Voice_wizard.voice = "af_heart"
     }
   in
-  match Voice_wizard.changes draft with
+  match Voice_wizard.changes draft ~alongside:[] with
   | Error _ -> Alcotest.fail "the draft is complete"
   | Ok changes ->
     let endpoint =
@@ -209,7 +209,7 @@ let test_whisper_cli_is_incomplete_without_the_model_file () =
       Voice_wizard.endpoint_id = "whisper-local"
     }
   in
-  match Voice_wizard.changes draft with
+  match Voice_wizard.changes draft ~alongside:[] with
   | Ok _ -> Alcotest.fail "whisper-cli has nothing to load without the model file"
   | Error gaps ->
     Alcotest.(check bool) "the model is what it names" true
@@ -218,6 +218,95 @@ let test_whisper_cli_is_incomplete_without_the_model_file () =
       (List.mem Voice_wizard.Address_is_blank gaps);
     Alcotest.(check bool) "nor a key nothing sends" false
       (List.mem Voice_wizard.Credential_variable_is_blank gaps)
+
+(* Where the voice is written is not the wizard's choice to make freshly: a
+   voice name is provider vocabulary, and the section default is read by every
+   endpoint that declares none. Writing say's "Yuna" over a section an
+   ElevenLabs endpoint falls back to hands that endpoint a voice it cannot
+   resolve, and it fails at the first speak rather than at the save. *)
+let voice_written draft ~alongside =
+  match Voice_wizard.changes draft ~alongside with
+  | Error gaps ->
+    Alcotest.failf "the draft should be complete: %s"
+      (String.concat "; " (List.map Voice_wizard.gap_message gaps))
+  | Ok changes ->
+    let section =
+      List.find_map
+        (function
+          | Voice_setup.Set_tts_default_voice voice -> Some voice
+          | Voice_setup.Put_endpoint _ | Voice_setup.Remove_endpoint _
+          | Voice_setup.Set_default_model _ | Voice_setup.Set_send_on_stop _
+          | Voice_setup.Set_agent_voice _ -> None)
+        changes
+    in
+    let endpoint =
+      List.find_map
+        (function
+          | Voice_setup.Put_endpoint (_, endpoint) ->
+            Some endpoint.Voice_config.default_voice
+          | Voice_setup.Remove_endpoint _ | Voice_setup.Set_default_model _
+          | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
+          | Voice_setup.Set_agent_voice _ -> None)
+        changes
+    in
+    section, Option.join endpoint
+
+(* Only what that provider is asked for: say takes no model, and ElevenLabs
+   arrives with its address and credential variable already filled in. *)
+let speaking ~provider ~voice =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider) with
+      Voice_wizard.endpoint_id = "added"
+    ; Voice_wizard.voice
+    }
+  in
+  match provider with
+  | Voice_wizard.Macos_say -> draft
+  | Voice_wizard.Whisper_cli | Voice_wizard.Elevenlabs | Voice_wizard.Openai_compatible
+  | Voice_wizard.Mcp_tool -> { draft with Voice_wizard.model = "a-model" }
+
+let test_the_first_endpoint_owns_the_section_default () =
+  let section, endpoint =
+    voice_written (speaking ~provider:Voice_wizard.Macos_say ~voice:"Yuna") ~alongside:[]
+  in
+  Alcotest.(check (option string)) "the section default is this one's" (Some "Yuna")
+    section;
+  (* An endpoint voice outranks voice.tts.agent_voices, so one written where it
+     is not needed makes every per-keeper voice inert. *)
+  Alcotest.(check (option string)) "and the endpoint declares none" None endpoint
+
+let test_another_kind_carries_its_own_voice () =
+  let section, endpoint =
+    voice_written
+      (speaking ~provider:Voice_wizard.Elevenlabs ~voice:"SAz9YHcvj6GT2YYXdXww")
+      ~alongside:[ Some Voice_config.Macos_say ]
+  in
+  Alcotest.(check (option string)) "the section default is left as say's" None section;
+  Alcotest.(check (option string)) "and the id goes on the endpoint asking for it"
+    (Some "SAz9YHcvj6GT2YYXdXww") endpoint
+
+let test_one_more_of_the_same_kind_keeps_the_section_default () =
+  let section, endpoint =
+    voice_written
+      (speaking ~provider:Voice_wizard.Elevenlabs ~voice:"SAz9YHcvj6GT2YYXdXww")
+      ~alongside:[ Some Voice_config.Elevenlabs_direct ]
+  in
+  Alcotest.(check (option string)) "everything there reads this vocabulary"
+    (Some "SAz9YHcvj6GT2YYXdXww") section;
+  Alcotest.(check (option string)) "so per-keeper voices keep reaching the endpoint"
+    None endpoint
+
+let test_speech_in_writes_no_voice_at_all () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli)
+      with
+      Voice_wizard.endpoint_id = "whisper-local"
+    ; Voice_wizard.model = "/opt/models/ggml-large-v3.bin"
+    }
+  in
+  let section, endpoint = voice_written draft ~alongside:[] in
+  Alcotest.(check (option string)) "no section default" None section;
+  Alcotest.(check (option string)) "and none on the endpoint" None endpoint
 
 (* The one that matters. A draft the wizard calls complete has to produce a file
    the loader reads back, with the model on the endpoint it was given for. *)
@@ -233,7 +322,7 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
       }
     in
     let changes =
-      match Voice_wizard.changes draft with
+      match Voice_wizard.changes draft ~alongside:[] with
       | Ok changes -> changes
       | Error gaps ->
         Alcotest.failf "the draft should be complete: %s"
@@ -285,7 +374,7 @@ let test_a_command_endpoint_is_written_with_nothing_to_reach () =
       }
     in
     let changes =
-      match Voice_wizard.changes draft with
+      match Voice_wizard.changes draft ~alongside:[] with
       | Ok changes -> changes
       | Error gaps ->
         Alcotest.failf "the draft should be complete: %s"
@@ -403,6 +492,14 @@ let () =
     ; ( "what it writes"
       , [ Alcotest.test_case "a complete draft writes a configuration that loads" `Quick
             test_a_complete_draft_writes_a_configuration_that_loads
+        ; Alcotest.test_case "the first endpoint owns the section default" `Quick
+            test_the_first_endpoint_owns_the_section_default
+        ; Alcotest.test_case "another kind carries its own voice" `Quick
+            test_another_kind_carries_its_own_voice
+        ; Alcotest.test_case "one more of the same kind keeps the section default" `Quick
+            test_one_more_of_the_same_kind_keeps_the_section_default
+        ; Alcotest.test_case "speech in writes no voice at all" `Quick
+            test_speech_in_writes_no_voice_at_all
         ; Alcotest.test_case "a command endpoint is written with nothing to reach" `Quick
             test_a_command_endpoint_is_written_with_nothing_to_reach
         ] )

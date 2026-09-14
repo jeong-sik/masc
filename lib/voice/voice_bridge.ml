@@ -340,7 +340,8 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~audio_device () =
+let try_http_tts_for_dashboard ~(tts : Voice_config.tts_config) ~agent_id ~message ~voice
+      ~audio_device () =
   (* The dashboard's own attempt, which only knows the HTTP endpoints. Each is
      asked for its own model; one that has none is passed over rather than
      asked with a blank name. *)
@@ -937,7 +938,7 @@ let attempt_tts_endpoint
       ~message
       ~voice
       ~priority
-      ~tts
+      ~(tts : Voice_config.tts_config)
       ?audio_device
       endpoint
   =
@@ -1125,7 +1126,7 @@ let try_http_tts_for_browser_audio
       ~sw
       ~clock
       ~net
-      ~tts
+      ~(tts : Voice_config.tts_config)
       ~agent_id
       ~message
       ~priority

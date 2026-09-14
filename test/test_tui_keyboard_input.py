@@ -11557,6 +11557,25 @@ def runtime_surface_interaction(
             # Runtime is a Config child. Verify the parent before opening it;
             # keep [9] bare so the probe request is observed after [start].
             tab_until(process, master_fd, output, b"MASC Config")
+            # DETAIL is what is left of the row after the five fixed columns,
+            # and at the harness's hundred that is eighteen cells -- enough
+            # for "[unassigned] \xc2\xb7 si\xe2\x80\xa6" and no more. #36120 put the
+            # keeper assignment in front of the lane fact, so the words this
+            # scenario reads (head, single candidate, the active timestamp)
+            # stopped fitting. Give the row the width its facts need: 131 is
+            # the widest terminal that still keeps the acting pane off the
+            # screen (Masc_tui_acting_pane.threshold_cols = 132), so the
+            # surface keeps the whole frame. The later resize back to a
+            # hundred columns is what proves the listing survives narrowing.
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=30,
+                columns=131,
+                needle=b"MASC Config",
+                controls=(FULL_REDRAW,),
+            )
             read_available(master_fd, output)
             start = len(output)
             os.write(master_fd, b"9")  # Config -> Runtime
@@ -11606,7 +11625,10 @@ def runtime_surface_interaction(
                 "Resolved A / model-a",
                 "ready / reachable",
                 "CLI not probed",
-                "active (sticky",
+                # #36155 renamed this half: the timestamp beside "active" is
+                # the last success, and "sticky since" claimed a point the
+                # stickiness never ran from.
+                "active (last success",
                 "unobserved",
                 "single candidate",
             ):
@@ -15682,6 +15704,10 @@ def run_runtime_regression(executable: str) -> None:
         interact=runtime_surface_interaction(fixtures, initial_probe, force_probe),
         refresh=0.05,
         http_fixtures=fixtures,
+        # Same reading, same clock: the detail draws the probe's checked-at in
+        # the terminal's zone, so without this the expected "10:20:00" only
+        # matches on a machine that already runs UTC.
+        extra_env={"TZ": "UTC"},
     )
 
 

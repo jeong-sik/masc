@@ -40,6 +40,19 @@
     declare. *)
 val with_admission : config:Provider_config.t -> (unit -> 'a) -> 'a
 
+(** [with_admission] whose wait for a permit ends at [deadline_at] on
+    [clock]. [Error `Permit_wait_expired] means the endpoint stayed saturated
+    until the deadline and [f] never ran; the waiter has left the FIFO.
+    Without a declaration there is no wait and [f] runs at once. [f] itself
+    runs without this deadline, so a caller that bounds the whole call arms
+    what is left of it around [f]. *)
+val with_admission_until
+  :  clock:_ Eio.Time.clock
+  -> deadline_at:float
+  -> config:Provider_config.t
+  -> (unit -> 'a)
+  -> ('a, [> `Permit_wait_expired ]) result
+
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or
     [None] when no dispatch has declared admission for it yet.
     Diagnostics only. *)

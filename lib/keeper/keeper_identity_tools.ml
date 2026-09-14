@@ -11,6 +11,35 @@ type catalog = {
 
 let ( let* ) = Result.bind
 
+type transports = {
+  mcp_post : Mcp_client.post;
+  token_post : Keeper_oauth_flow.post;
+  discover : mcp_url:string -> (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result;
+}
+
+(* The production transports, every request bounded on [clock]. The MCP
+   session runs under the keeper's no-progress threshold
+   ([Keeper_runtime_resolved.provider_call_deadline_sec]): a tools/call is
+   work the model is waiting on, and the attempt watchdog does not watch a
+   tool in flight, so this deadline is the only liveness the call has. The
+   OAuth hops a renewal makes -- discovery and the token endpoint -- are
+   short JSON round trips of the same class as the Slack and Discord REST
+   calls, and run under the shared request timeout those use. *)
+let http_transports ~clock =
+  let rest_timeout_sec = Masc_http_client.default_request_timeout_sec in
+  { mcp_post =
+      Mcp_client.http_post
+        ~clock
+        ~deadline_s:(Keeper_runtime_resolved.provider_call_deadline_sec ());
+    token_post = Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec;
+    discover =
+      (fun ~mcp_url ->
+        Keeper_oauth_discovery.discover
+          ~get:(Keeper_oauth_discovery.http_get ~clock ~timeout_sec:rest_timeout_sec)
+          ~ask:(Keeper_oauth_discovery.http_ask ~clock ~timeout_sec:rest_timeout_sec)
+          ~mcp_url ());
+  }
+
 let catalog_path ~base_path ~keeper_name ~provider_id =
   let identity_dir =
     Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
@@ -199,14 +228,14 @@ let access_token_for ~base_path ~keeper_name ~(provider : Provider.t) =
     Keeper_github_identity.stored_token ~base_path ~keeper_name ~hostname
 ;;
 
-let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
+let refresh ~mcp_post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
   let* access_token = access_token_for ~base_path ~keeper_name ~provider in
   let* client =
     Result.map_error Mcp_client.error_to_string
-      (Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ())
+      (Mcp_client.connect ~post:mcp_post ~url:provider.Provider.mcp_url ~access_token ())
   in
   let* tools =
-    Result.map_error Mcp_client.error_to_string (Mcp_client.list_tools ?post client)
+    Result.map_error Mcp_client.error_to_string (Mcp_client.list_tools ~post:mcp_post client)
   in
   let catalog =
     { provider_id = provider.Provider.id
@@ -388,7 +417,7 @@ let renewal_error_message = function
    [renew_if_needed] when the declared window has opened, and the reactive path
    in [run_call] when the endpoint answered 401 -- the only renewal a provider
    that issued no expiry ever gets. *)
-let force_refresh ?token_post ?discover ~base_path ~keeper_name
+let force_refresh ~token_post ~discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now () =
   let* refresh_token =
     match
@@ -403,11 +432,6 @@ let force_refresh ?token_post ?discover ~base_path ~keeper_name
            "this keeper has no refresh token; attach it to the provider again")
     | Ok (Some value) when String.trim value <> "" -> Ok (String.trim value)
     | Ok (Some _) -> Error (Renew_permanent "this keeper's refresh token file is empty")
-  in
-  let discover =
-    match discover with
-    | Some discover -> discover
-    | None -> fun ~mcp_url -> Keeper_oauth_discovery.discover ~mcp_url ()
   in
   let* discovered =
     match discover ~mcp_url:provider.Provider.mcp_url with
@@ -431,7 +455,7 @@ let force_refresh ?token_post ?discover ~base_path ~keeper_name
   in
   let* tokens =
     match
-      Keeper_oauth_flow.refresh ?post:token_post ~discovered
+      Keeper_oauth_flow.refresh ~post:token_post ~discovered
         ~client_id:configured_client_id.Keeper_oauth_client_store.client_id
         ?client_secret:configured_client_id.Keeper_oauth_client_store.client_secret
         ~refresh_token ~now ()
@@ -454,7 +478,7 @@ let force_refresh ?token_post ?discover ~base_path ~keeper_name
   Ok tokens.Keeper_oauth_flow.access_token
 ;;
 
-let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
+let renew_if_needed ~token_post ~discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now ~access_token () =
   match provider.Provider.credential_source with
   (* gh owns this credential: it minted the token, it rewrites the file it
@@ -470,16 +494,17 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
   | Some expires_at ->
     if not (Keeper_oauth_flow.needs_renewal ~provider ~expires_at ~now)
     then Ok access_token
-    else force_refresh ?token_post ?discover ~base_path ~keeper_name ~provider ~now ()
+    else force_refresh ~token_post ~discover ~base_path ~keeper_name ~provider ~now ()
 ;;
 
-let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
+let run_call_once ~transports ~base_path ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments () =
+  let { mcp_post; token_post; discover } = transports in
   match access_token_for ~base_path ~keeper_name ~provider with
   | Error message -> Error (Precondition message)
   | Ok stored_token -> (
     match
-      renew_if_needed ?token_post ?discover ~base_path ~keeper_name ~provider
+      renew_if_needed ~token_post ~discover ~base_path ~keeper_name ~provider
         (* [Time_compat.now] rather than the raw clock: masc reads time
            through one module so a deterministic boundary has one place to
            look, and the determinism gate flags anything that goes around
@@ -490,14 +515,14 @@ let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
     | Error (Renew_transient message) -> Error (Transient_precondition message)
     | Ok access_token -> (
       match
-        Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
+        Mcp_client.connect ~post:mcp_post ~url:provider.Provider.mcp_url ~access_token ()
       with
       (* A session that never came up carries proof the call was not sent;
          an error after [call_tool] does not, and the two must stay apart
          because replay reads the phase as the effect's disposition. *)
       | Error error -> Error (Mcp { phase = Before_send; error })
       | Ok client -> (
-        match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+        match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
         | Error error when is_method_not_found_error error -> (
           (* The wire error alone does not distinguish an unknown tools/call
              method from a stale tool name.  Only investigate when the
@@ -507,7 +532,7 @@ let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
           match load ~base_path ~keeper_name ~provider_id:provider.Provider.id with
           | Ok (Some previous_catalog)
             when catalog_contains previous_catalog.tools remote_name -> (
-            match Mcp_client.list_tools ?post client with
+            match Mcp_client.list_tools ~post:mcp_post client with
             | Error rediscovery_error ->
               Log.Keeper.emit Log.Warn ~keeper_name
                 (Printf.sprintf
@@ -550,7 +575,7 @@ let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
                    predictable failure, not recovery. *)
                 Error (Mcp { phase = After_send; error })
               else
-                match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+                match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
                 | Error retry_error ->
                   Error (Mcp { phase = After_send; error = retry_error })
                 | Ok result -> Ok result)
@@ -573,10 +598,10 @@ let run_call_once ?post ?token_post ?discover ~base_path ~keeper_name
    and retry once. [force_refresh] stores the new token, so the retry reads it
    back through [access_token_for]; any refresh failure keeps the original 401,
    so the operator still learns to re-attach and there is no second retry. *)
-let run_call ?post ?token_post ?discover ~base_path ~keeper_name
+let run_call ~transports ~base_path ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments () =
   match
-    run_call_once ?post ?token_post ?discover ~base_path ~keeper_name ~provider
+    run_call_once ~transports ~base_path ~keeper_name ~provider
       ~remote_name ~arguments ()
   with
   | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) as unauthorized -> (
@@ -586,12 +611,12 @@ let run_call ?post ?token_post ?discover ~base_path ~keeper_name
     | Provider.Github_cli _ -> unauthorized
     | Provider.Oauth_exchange -> (
       match
-        force_refresh ?token_post ?discover ~base_path ~keeper_name ~provider
-          ~now:(Time_compat.now ()) ()
+        force_refresh ~token_post:transports.token_post ~discover:transports.discover
+          ~base_path ~keeper_name ~provider ~now:(Time_compat.now ()) ()
       with
       | Error _ -> unauthorized
       | Ok _ ->
-        run_call_once ?post ?token_post ?discover ~base_path ~keeper_name ~provider
+        run_call_once ~transports ~base_path ~keeper_name ~provider
           ~remote_name ~arguments ()))
   | other -> other
 ;;

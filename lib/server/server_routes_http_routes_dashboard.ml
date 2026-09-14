@@ -3446,7 +3446,7 @@ let add_routes ~sw ~clock router =
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_identity_refresh_post state req reqd body_str
+                 Keeper_api.handle_keeper_identity_refresh_post ~clock state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_identity_switch ->
@@ -3466,7 +3466,7 @@ let add_routes ~sw ~clock router =
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_oauth_login_post state req reqd body_str
+                 Keeper_api.handle_keeper_oauth_login_post ~clock state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_boot ->

@@ -555,6 +555,7 @@ let make_tool_bundle_for_descriptors_with_policy
      Gate wrapper is the same either way. *)
   let gate_wrapped offered =
     Keeper_identity_gate.agent_tool
+      ?clock
       ~config
       ~meta
       ?continuation_channel

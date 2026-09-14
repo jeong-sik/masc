@@ -114,9 +114,11 @@ val handle_keeper_github_login_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val handle_keeper_oauth_login_post :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
 val handle_keeper_identity_refresh_post :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
 val handle_keeper_identity_switch_post :

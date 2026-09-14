@@ -37,8 +37,13 @@ type post =
   url:string -> headers:(string * string) list -> body:string ->
   (int * string, string) result
 
-let default_post ~url ~headers ~body =
-  Masc_http_client.post_sync ~url ~headers ~body ()
+(* The production transport to the token endpoint: one short JSON round
+   trip, bounded by [timeout_sec] on [clock]. There is no default, because
+   the shared client's default arm is unbounded and a token endpoint that
+   never answers would hold whichever turn was renewing. *)
+let http_post ~clock ~timeout_sec : post =
+  fun ~url ~headers ~body ->
+    Masc_http_client.post_sync ~clock ~timeout_sec ~url ~headers ~body ()
 
 (* RFC 7636 wants 43-128 unreserved characters. Hex from the process crypto
    source is unreserved by construction, so no escaping question arises at
@@ -202,7 +207,7 @@ let exchange ~post ~discovered ~now parameters =
   | Ok (status, body) -> Error (Provider_rejected { status; body })
 
 let complete
-      ?(post = default_post)
+      ~post
       ?client_secret
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
@@ -228,7 +233,7 @@ let complete
          ])
 
 let refresh
-      ?(post = default_post)
+      ~post
       ?client_secret
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id

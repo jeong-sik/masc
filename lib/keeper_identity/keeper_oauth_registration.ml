@@ -24,8 +24,12 @@ type post =
   url:string -> headers:(string * string) list -> body:string ->
   (int * string, string) result
 
-let default_post ~url ~headers ~body =
-  Masc_http_client.post_sync ~url ~headers ~body ()
+(* The production transport: one registration request bounded by
+   [timeout_sec] on [clock]. No default, for the same reason as the other
+   OAuth hops: the shared client's default arm is unbounded. *)
+let http_post ~clock ~timeout_sec : post =
+  fun ~url ~headers ~body ->
+    Masc_http_client.post_sync ~clock ~timeout_sec ~url ~headers ~body ()
 
 let request_body ~client_name ~redirect_uri =
   Yojson.Safe.to_string
@@ -41,7 +45,7 @@ let request_body ~client_name ~redirect_uri =
        ])
 
 let register
-      ?(post = default_post)
+      ~post
       ~registration_url
       ~client_name
       ~redirect_uri

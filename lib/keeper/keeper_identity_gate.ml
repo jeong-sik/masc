@@ -111,8 +111,56 @@ let gate_unavailable_message reason =
     (Keeper_gate.unavailable_reason_to_string reason)
 ;;
 
+(* Injected transports are a test's. Production builds bounded ones from a
+   clock, the turn's when the caller carries one and the process's otherwise.
+   A process with no clock cannot bound the call and does not make it: that
+   is a precondition failure like a missing credential, and the model is told
+   it is deterministic. *)
+let resolve_transports ?transports ?clock () =
+  match transports with
+  | Some transports -> Ok transports
+  | None ->
+    (match
+       (match clock with
+        | Some clock -> Some clock
+        | None -> Eio_context.get_clock_opt ())
+     with
+     | Some clock -> Ok (Keeper_identity_tools.http_transports ~clock)
+     | None ->
+       Error
+         (Keeper_identity_tools.Precondition
+            "this process has no clock to bound the call with; nothing was sent"))
+;;
+
+(* The one way a call leaves this module, for the live tool and for a replay
+   alike: the transports are resolved per call, so a turn that started
+   without a clock and gained one is not held to the earlier refusal. *)
+let send_call
+      ?transports
+      ?clock
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~provider
+      ~remote_name
+      ~arguments
+      ()
+  =
+  match resolve_transports ?transports ?clock () with
+  | Error error -> Error error
+  | Ok transports ->
+    Keeper_identity_tools.run_call
+      ~transports
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~provider
+      ~remote_name
+      ~arguments
+      ()
+;;
+
 let agent_tool
-      ?post
+      ?transports
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -120,18 +168,18 @@ let agent_tool
       ?gate_grant
       (offered : Keeper_identity_tools.offered_tool)
   =
-  let base_path = config.Workspace.base_path in
-  let run_raw arguments =
-    Keeper_identity_tools.tool_result_of_call
-      (Keeper_identity_tools.run_call
-         ?post
-         ~base_path
-         ~keeper_name:meta.name
-         ~provider:offered.Keeper_identity_tools.provider
-         ~remote_name:offered.Keeper_identity_tools.remote_name
-         ~arguments
-         ())
+  let send arguments =
+    send_call
+      ?transports
+      ?clock
+      ~config
+      ~meta
+      ~provider:offered.Keeper_identity_tools.provider
+      ~remote_name:offered.Keeper_identity_tools.remote_name
+      ~arguments
+      ()
   in
+  let run_raw arguments = Keeper_identity_tools.tool_result_of_call (send arguments) in
   let gated arguments =
     match offered.Keeper_identity_tools.read_only with
     (* The provider's own word, written down at attach time. Only an
@@ -279,7 +327,8 @@ let execution_of_call_result result =
 ;;
 
 let replay_call_with_outcome
-      ?post
+      ?transports
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -326,10 +375,11 @@ let replay_call_with_outcome
        Keeper_tool_execution.with_gate_authorization
          authorization
          (execution_of_call_result
-            (Keeper_identity_tools.run_call
-               ?post
-               ~base_path:config.Workspace.base_path
-               ~keeper_name:meta.name
+            (send_call
+               ?transports
+               ?clock
+               ~config
+               ~meta
                ~provider
                ~remote_name:call.remote_name
                ~arguments:call.arguments

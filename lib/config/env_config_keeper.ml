@@ -609,11 +609,7 @@ module KeeperKeepalive = struct
        | Error detail -> refuse_declared_timeout env_key raw detail)
   ;;
 
-  let declared_timeout_seconds env_key =
-    Option.map snd (declared_timeout_seconds_with_raw env_key)
-  ;;
-
-  (* [declared_timeout_seconds] for a setting with a declared range: a value
+  (* [declared_timeout_seconds_with_raw] for a setting with a declared range: a value
      outside it is refused the way an unparsable one is, and the way the
      runtime.toml validator refuses it, instead of being moved to the nearest
      bound behind the operator's back. *)

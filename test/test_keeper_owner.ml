@@ -3106,6 +3106,66 @@ let test_availability_recovers_under_an_autonomous_child () =
       | Error error -> fail (Owner.error_to_string error))
 ;;
 
+(* #36203 #4: on a free slot the autonomous lane must not take the turn ahead
+   of a claimable queued chat. [start_child_if_needed] already gives a freed
+   slot to a queued chat everywhere else; the autonomous admission path is the
+   one place it did not, so a chat at the head of the queue waited a whole
+   autonomous turn. *)
+let test_autonomous_admission_defers_to_a_queued_chat () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let ready = ref false in
+  let executed = ref [] in
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let op = Option.get (owner_ok (claim ())) in
+    executed := op.Chat_operation.operation_id :: !executed;
+    Eio.Promise.resolve resolve_started ();
+    Eio.Promise.await release;
+    Owner.Operation_succeeded { outcome_ref = "chat-answered" }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor_ready ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_ready:(fun ~keeper_name:_ -> !ready)
+         ~operation_executor:(Some execute) ~keeper_name:"admission-order"
+         ~initial_meta:(Some (make_meta "admission-order")) ())
+  in
+  let queued = operation_id "kmsg-admission" in
+  (* Queue a chat while the runner is not ready so it stays Queued with the
+     slot free. *)
+  ignore
+    (owner_ok
+       (Owner.submit_operation owner ~operation_id:queued ~source:operation_source
+          ~input:(operation_input "answer me")));
+  (match Owner.turn_in_flight owner with
+   | None -> ()
+   | Some _ -> fail "the chat started before the runner was ready");
+  ready := true;
+  (match
+     Owner.run_autonomous_if_idle owner (fun () ->
+       fail "the autonomous lane ran ahead of a queued chat")
+   with
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
+   | Ok (`Busy other) ->
+     fail ("autonomous deferred to the wrong lane: " ^ Owner.autonomous_block_to_string other)
+   | Ok (`Ran _) -> fail "autonomous took the slot ahead of the queued chat"
+   | Ok `Interrupted -> fail "nothing interrupted the autonomous admission"
+   | Error error -> fail (Owner.error_to_string error));
+  Eio.Promise.await started;
+  Eio.Promise.resolve resolve_release ();
+  let answered = await_terminal owner queued 1_000 in
+  (match answered.state with
+   | Chat_operation.Succeeded { outcome_ref; _ } ->
+     check string "the queued chat is what took the slot" "chat-answered" outcome_ref
+   | _ -> fail "the deferred-to chat did not complete");
+  check (list string) "only the queued chat executed"
+    [ Chat_operation.Operation_id.to_string queued ]
+    (List.map Chat_operation.Operation_id.to_string !executed)
+;;
+
 let test_keeper_owners_do_not_cross_block () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -4464,6 +4524,8 @@ let () =
             test_recovery_does_not_replay_an_active_or_uncertain_child
         ; test_case "availability recovers under an autonomous child" `Quick
             test_availability_recovers_under_an_autonomous_child
+        ; test_case "autonomous admission defers to a queued chat" `Quick
+            test_autonomous_admission_defers_to_a_queued_chat
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

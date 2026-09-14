@@ -156,6 +156,39 @@ let test_first_token_classifier_edges () =
     false
     (S.sse_event_is_first_token_signal
        (ContentBlockDelta { index = 0; delta = ThinkingDelta "" }));
+  (* A redacted thinking block is generated content: Anthropic delivers it
+     whole in the block start, other codecs as a snapshot delta. Either ends
+     the first-event wait; an empty carrier does not. *)
+  check
+    bool
+    "redacted thinking block start with data"
+    true
+    (S.sse_event_is_first_token_signal
+       (ContentBlockStart
+          { index = 0
+          ; content_type = "redacted_thinking"
+          ; tool_id = Some "ciphertext"
+          ; tool_name = None
+          }));
+  check
+    bool
+    "redacted thinking block start without data"
+    false
+    (S.sse_event_is_first_token_signal
+       (ContentBlockStart
+          { index = 0; content_type = "redacted_thinking"; tool_id = None; tool_name = None }));
+  check
+    bool
+    "redacted thinking snapshot"
+    true
+    (S.sse_event_is_first_token_signal
+       (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "ciphertext" }));
+  check
+    bool
+    "empty redacted thinking snapshot"
+    false
+    (S.sse_event_is_first_token_signal
+       (ContentBlockDelta { index = 0; delta = RedactedThinkingSnapshot "" }));
   List.iter
     (fun event ->
        check bool "non-token event" false (S.sse_event_is_first_token_signal event))

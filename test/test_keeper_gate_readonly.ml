@@ -856,7 +856,11 @@ let test_git_refusal_reaches_the_judge_with_the_original_status () =
       ~keeper_always_allow:false
       ~observe:(fun () ->
         incr asked;
-        Keeper_gate.Observed_refused { status = Unix.WEXITED 23; stderr })
+        Keeper_gate.Observed_refused
+          { status = Unix.WEXITED 23
+          ; stderr
+          ; refusal_kind = Keeper_gate.Unspecified
+          })
       (script_gate_request ~sandbox_profile:microvm base_path
          "git diff --output=changes.patch")
   in
@@ -884,7 +888,11 @@ let test_auto_judge_defers_a_refused_observe_run () =
     Keeper_gate.decide
       ~keeper_always_allow:false
       ~observe:(fun () ->
-        Keeper_gate.Observed_refused { status = Unix.WEXITED 2; stderr })
+        Keeper_gate.Observed_refused
+          { status = Unix.WEXITED 2
+          ; stderr
+          ; refusal_kind = Keeper_gate.Write_denied
+          })
       (boxed_request base_path)
   in
   deferred_to_the_judge "a refused observe run" decision;

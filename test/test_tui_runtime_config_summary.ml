@@ -92,6 +92,43 @@ let test_an_invalid_read_counts_its_errors () =
                ())
           ()))
 
+let verdict metadata = row 2 metadata
+
+(* The row had a third field, "restart required", that was the OR of the two
+   restart flags. [View.decode] keeps [keeper = Pending_restart] and
+   [keeper_requires_restart] equal, so whenever the Keeper was the reason the
+   row said it twice; and when routing was the reason the word could not say
+   which side. Routing carries its own state now, the way Keeper always did. *)
+let test_a_settled_read_does_not_mention_restart () =
+  check string "two fields, neither about a restart"
+    "Routing active \xc2\xb7 Keeper applied" (verdict (metadata ()))
+
+let test_the_keeper_field_is_not_repeated_by_a_third () =
+  check string "the Keeper says it once"
+    "Routing active \xc2\xb7 Keeper pending restart"
+    (verdict
+       { (metadata ()) with
+         keeper = View.Pending_restart
+       ; keeper_requires_restart = true
+       })
+
+let test_routing_says_which_side_needs_the_restart () =
+  check string "routing carries its own state"
+    "Routing active, pending restart \xc2\xb7 Keeper applied"
+    (verdict { (metadata ()) with routing_requires_restart = true })
+
+(* Both sides at once still reads as two facts, not one word for both. *)
+let test_both_sides_are_named () =
+  check string "each side says its own"
+    "Routing applied, pending restart \xc2\xb7 Keeper pending restart"
+    (verdict
+       { (metadata ()) with
+         routing = View.Routing_applied
+       ; routing_requires_restart = true
+       ; keeper = View.Pending_restart
+       ; keeper_requires_restart = true
+       })
+
 let test_a_file_that_would_not_parse_says_so () =
   check string "no counts to give" "Validation: invalid TOML"
     (validation (metadata ~validation:(View.Parse_error "line 4") ()))
@@ -107,6 +144,13 @@ let () =
             test_a_clean_read_does_not_count_to_zero
         ; test_case "warnings are counted" `Quick
             test_warnings_are_counted_because_valid_does_not_cover_them
+        ; test_case "a settled read does not mention restart" `Quick
+            test_a_settled_read_does_not_mention_restart
+        ; test_case "the keeper field is not repeated by a third" `Quick
+            test_the_keeper_field_is_not_repeated_by_a_third
+        ; test_case "routing says which side needs the restart" `Quick
+            test_routing_says_which_side_needs_the_restart
+        ; test_case "both sides are named" `Quick test_both_sides_are_named
         ; test_case "an invalid read counts its errors" `Quick
             test_an_invalid_read_counts_its_errors
         ; test_case "a file that would not parse says so" `Quick

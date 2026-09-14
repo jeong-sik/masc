@@ -2796,8 +2796,10 @@ let responses_sse_frame_completed text =
    2026-09-10 a gpt-5.6-luna turn was cut 164 s in with "stream_idle_timeout_s
    deadline exceeded while awaiting_first_delta": the opening frame had ended
    the first-event wait, so the silent prefill sat under the 120 s inter-token
-   idle. Here the opening frame arrives at once, the first token 0.12 s later
-   (> idle 0.03, < first-event 1.0), and the turn must complete. *)
+   idle. Here the opening frame arrives at once and the first token 0.4 s
+   later (> idle 0.1, < first-event 1.0), in the same write as the completion
+   so that no idle window spans a server write boundary, and the turn must
+   complete. *)
 let test_complete_stream_responses_prelude_keeps_first_event_budget () =
   Eio_main.run
   @@ fun env ->
@@ -2810,8 +2812,7 @@ let test_complete_stream_responses_prelude_keeps_first_event_budget () =
         ~net:env#net
         ~clock:env#clock
         [ 0.0, responses_sse_frame_created
-        ; 0.12, responses_sse_frame_text_delta "late"
-        ; 0.0, responses_sse_frame_completed "late"
+        ; 0.4, responses_sse_frame_text_delta "late" ^ responses_sse_frame_completed "late"
         ]
     in
     let config =
@@ -2829,7 +2830,7 @@ let test_complete_stream_responses_prelude_keeps_first_event_budget () =
         ~sw
         ~net:env#net
         ~clock:env#clock
-        ~stream_idle_timeout_s:0.03
+        ~stream_idle_timeout_s:0.1
         ~first_event_timeout_s:1.0
         ~config
         ~messages
@@ -2839,9 +2840,12 @@ let test_complete_stream_responses_prelude_keeps_first_event_budget () =
     | Ok resp ->
       check string "text" "late" (text_of_response resp);
       Eio.Switch.fail sw Exit
-    | Error (Http_client.TimeoutError { message; _ }) ->
+    | Error (Http_client.TimeoutError { message; phase; _ }) ->
       fail
-        (Printf.sprintf "the opening frame ended the first-event wait: %s" message)
+        (Printf.sprintf
+           "the opening frame ended the first-event wait (phase %s): %s"
+           (Http_client.timeout_phase_to_label phase)
+           message)
     | Error _ -> fail "expected the Responses stream to complete"
   with
   | Exit -> ()

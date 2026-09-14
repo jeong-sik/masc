@@ -119,7 +119,20 @@ let decode json =
     configured_count; pending_keys; applied_keys; preempted_keys;
   } }
 
-let routing_label = function Routing_active -> "active" | Routing_applied -> "applied"
+(* Keeper carries its restart state inside its own word ("pending restart"),
+   and [decode] refuses a read where [keeper = Pending_restart] and
+   [keeper_requires_restart] disagree -- so the two always say the same thing.
+   Routing had no such word, so the row ended in a third field, "restart
+   required", that was the OR of the two: it repeated the Keeper field
+   whenever the Keeper was the reason, and when routing was the reason it
+   could not say which side needed the restart. Routing now says its own
+   state the way Keeper does, and the field that named neither side is gone.
+   The detail screen still spells both sides on rows of their own. *)
+let routing_label routing ~requires_restart =
+  let state =
+    match routing with Routing_active -> "active" | Routing_applied -> "applied"
+  in
+  if requires_restart then state ^ ", pending restart" else state
 let keeper_label = function
   | Not_configured -> "not configured" | Pending_restart -> "pending restart"
   | Applied -> "applied" | Preempted_by_env -> "preempted by environment" | Mixed -> "mixed"
@@ -169,9 +182,10 @@ let verdict_rows metadata =
   let attention = restart metadata || metadata.preempted_keys <> [] in
   [ validation_line metadata.validation;
     (if metadata.keeper = Invalid_configuration then Bad else if attention then Warning else Neutral),
-      Printf.sprintf "Routing %s · Keeper %s · restart %s"
-        (routing_label metadata.routing) (keeper_label metadata.keeper)
-        (if restart metadata then "required" else "not required") ]
+      Printf.sprintf "Routing %s · Keeper %s"
+        (routing_label metadata.routing
+           ~requires_restart:metadata.routing_requires_restart)
+        (keeper_label metadata.keeper) ]
 
 let summary_lines metadata =
   revision_row (short_revision metadata.source_revision) :: verdict_rows metadata

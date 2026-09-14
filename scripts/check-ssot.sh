@@ -429,14 +429,24 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
 # instead -- "the read failed; nothing here is a reading" -- so one screen
 # disagreed with the eighteen others and with its own title, which says
 # "(load failed)". Either half re-spelled is the same drift.
-r16_pattern='fail(ed|ure)?; [^)]*reading'
+#
+# The note has since dropped the head it used to lead with, because the reason
+# was already on the row above and in the title. So the pattern no longer asks
+# for a verdict at all. What every spelling of this note has said, before and
+# after, is that what is on screen is not a reading -- "nothing here is a
+# reading", "the count above is not a reading" -- and it says so as the last
+# words inside the note's own brackets, which is what this matches. The
+# brackets are what keeps prose out: these files say "a reading" a dozen times
+# in comments and every one of them carries on past it with a comma or a
+# semicolon, so none of them closes there.
+r16_pattern='\([^)]*a reading\)'
 r16_self_test_failed=0
 for fixture in \
+  '  (nothing here is a reading)' \
   '  (load failed; nothing here is a reading)' \
   '  (load failed; the count above is not a reading)' \
   '  (load failed; these rows are not a reading)' \
-  '  (the read failed; nothing here is a reading)' \
-  '  (refresh failed; nothing here is a reading)'; do
+  '  (the read failed; nothing here is a reading)'; do
   if ! printf '%s\n' "$fixture" | rg -q "$r16_pattern"; then
     echo "ERROR[R16-pattern-self-test]: did not match $fixture" >&2
     r16_self_test_failed=1

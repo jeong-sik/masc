@@ -1235,6 +1235,7 @@ let start
              (* A fenced operation store must not block a metadata commit; try
                 to reopen it opportunistically so a chat child can start after
                 the commit, but do not gate the commit on the result. *)
+             (* fire-and-forget: the reopen's result is not read. *)
              ignore (recover_operation_availability t : (unit, error) result);
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->

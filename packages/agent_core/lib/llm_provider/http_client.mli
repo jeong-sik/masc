@@ -598,20 +598,25 @@ val post_stream
     it can be reused across requests. [f] must consume the full response
     body; leaving unread bytes on the reader will corrupt the next reuse.
 
-    The phase before the first body read -- the connection (TCP, TLS),
-    the request, the wait for the status line and, when the status is not
-    200, the whole refusal body -- runs under the narrower of
-    [connect_timeout_s] and [first_event_timeout_s]; either requires
-    [clock], and a budget supplied without it returns [AcceptRejected]. A
-    stall the connect budget ends surfaces as
+    The phase before the response headers -- the connection (TCP, TLS),
+    the request and the wait for the status line -- runs under the
+    narrower of [connect_timeout_s] and [first_event_timeout_s]; either
+    requires [clock], and a budget supplied without it returns
+    [AcceptRejected]. A stall the connect budget ends surfaces as
     [TimeoutError { phase = Http_operation; _ }]; one the first-event
     budget ends surfaces as [TimeoutError { phase = First_token; _ }], the
-    provider having sent neither a first token nor a complete refusal in
-    the whole time allowed before a first token. With neither supplied the
-    phase is unbounded. DNS resolution runs
-    in a systhread the window cannot cancel: a closed window is observed
-    once the lookup returns, and until then the resolver's own timeout is
-    the bound. [f] receives [pre_header_elapsed_s], the seconds this phase
+    provider having sent no status line in the whole time allowed before a
+    first token. A refusing status line is the provider's answer: its body
+    is read under what the window has left, and a body that does not
+    arrive in time still yields [HttpError] with the status and the
+    Retry-After received and an empty body, not a timeout. A window that
+    closes as the connection is handed back closes that connection too.
+    With neither budget supplied the phase is unbounded. Two steps run
+    outside the window's reach: DNS
+    resolution, in a systhread the window cannot cancel (a closed window is
+    observed once the lookup returns, and until then the resolver's own
+    timeout is the bound), and the process's first trust-store load for
+    https, synchronous on this domain. [f] receives [pre_header_elapsed_s], the seconds this phase
     took on [clock] (0 without one), and arms what is left of the
     first-event budget on the reader ({!read_sse}, {!read_ndjson}): the
     budget is one window from the request to the first token, not one in

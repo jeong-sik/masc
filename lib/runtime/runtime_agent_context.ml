@@ -76,8 +76,9 @@ type config =
         streams on the same binding ends the wait as
         [TimeoutError { phase = Queue }] when it runs out, and rotates, instead
         of the attempt watchdog ending it as no progress; a granted stream
-        runs under its own budgets. The keeper passes its no-progress
-        threshold. *)
+        runs under its own budgets. On a binding measured before dispatch it
+        is one window over both permit waits, the count-tokens request's and
+        the stream's. The keeper passes its no-progress threshold. *)
   ; max_tokens : int option
     (** Caller-level output-token override. [None] adds no override, so an
         explicit [provider_cfg.max_tokens] remains authoritative; when both are

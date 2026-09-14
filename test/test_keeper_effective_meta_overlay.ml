@@ -1464,11 +1464,12 @@ instructions = "Missing sandbox profile"
 let test_keeper_list_row_in_failing_phase_is_not_offline () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "failing-not-offline" in
-  write_file
-    (Filename.concat keepers_dir (name ^ ".toml"))
-    {|[keeper]
-instructions = "Fails a turn and keeps running"
-|};
+  (* A declared sandbox profile, because this row has to be the ordinary one.
+     Written like the error-row cases above it, the keeper has no profile, so
+     [read_effective_meta] refuses and the row is the error row -- which
+     carries keepalive_running but no phase and no health, leaving two of the
+     three assertions below comparing None against nothing. *)
+  write_keeper_agent ~keepers_dir ~name "Fails a turn and keeps running";
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
   Masc.Keeper_registry.For_testing.clear ();

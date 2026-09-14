@@ -2824,6 +2824,69 @@ let test_startup_queued_waits_for_runner_readiness () =
          (List.rev_map Chat_operation.Operation_id.to_string !executed))
 ;;
 
+(* A reopen closes the handle before it opens a new one, so a reopen that
+   fails leaves the Owner holding a closed database. The reads that run while
+   the fence is up -- a dashboard poll, a TUI refresh -- used to be what
+   discovered that, and "database handle is closed" then replaced the reason
+   the reopen failed. The cause has to survive its own consequence. *)
+let test_a_read_under_a_failed_reopen_keeps_the_cause () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let path = Filename.temp_file "keeper-owner-reopen-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path
+         ~now:(fun () -> 42.0)
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         ~keeper_name:"reopen-failure"
+         ~initial_meta:(Some (make_meta "reopen-failure")))
+  in
+  let fenced = operation_id "kmsg-reopen-failure" in
+  let detail_of label = function
+    | Error (Owner.Store_unavailable detail) -> detail
+    | Error error -> fail (label ^ ": wrong error: " ^ Owner.error_to_string error)
+    | Ok _ -> fail (label ^ ": the fenced store answered")
+  in
+  Fun.protect
+    ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+    (fun () ->
+       Keeper_chat_operation_store.For_testing.fail_next_commit
+         Keeper_chat_operation_store.For_testing.Fail_before_commit;
+       ignore
+         (detail_of "fencing submit"
+            (Owner.submit_operation owner ~operation_id:fenced ~source:operation_source
+               ~input:(operation_input "fences the store"))
+          : string);
+       (* The file goes while the fence is up, so the next mutation's reopen
+          closes the handle and then has nothing to open. *)
+       Unix.unlink path;
+       let reopen_failure =
+         detail_of "reopen"
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-unlink")
+              ~source:operation_source ~input:(operation_input "attempts the reopen"))
+       in
+       check bool "the reopen failure names something other than the closure" true
+         (reopen_failure <> "database handle is closed");
+       let read = detail_of "read" (Owner.exact_operation owner fenced) in
+       check string "a read under the closed handle repeats the cause"
+         reopen_failure read;
+       (* The sharper half: the read must not have replaced the recorded
+          fault with its own symptom. *)
+       let after_read =
+         detail_of "submit after read"
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-after-read")
+              ~source:operation_source ~input:(operation_input "reads the fault back"))
+       in
+       check string "the cause survives the read" reopen_failure after_read)
+;;
+
 let test_operation_store_failure_is_retried_at_the_next_mutation () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -4514,6 +4577,10 @@ let () =
             "operation store failure is retried at the next mutation"
             `Quick
             test_operation_store_failure_is_retried_at_the_next_mutation
+        ; test_case
+            "a read under a failed reopen keeps the cause"
+            `Quick
+            test_a_read_under_a_failed_reopen_keeps_the_cause
         ; test_case "autonomous operator interrupt is a typed outcome" `Quick
             test_autonomous_operator_interrupt_is_a_typed_outcome
         ; test_case "idle wake recovers storage and answers queued chat" `Quick

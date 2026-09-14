@@ -3382,11 +3382,25 @@ let render_schedule_list (state : state) =
                16 snapshot.scs_rows
              |> min 40
            in
+           let wake_width = schedule_wake_word_cells in
+           let recurrence_width =
+             Render_schedule.schedule_recurrence_width
+               ~inner_width:(max 1 (framed_inner_width cols - 2))
+               ~target_width:subject_width ~wake_width
+           in
+           c.push_styled ~style:(Theme.recede ())
+             ("  "
+             ^ Render_schedule.schedule_header_row ~target_width:subject_width
+                 ~wake_width ~recurrence_width);
+           c.push_divider ();
+           (* The column names and the rule under them, the two rows every
+              other list on this screen already spends to say what it draws. *)
+           let header_rows = 2 in
            (* The body outside the list: the source warning, the request count,
-              next due and its divider, the two delivery rows, and the cancel
-              rows. *)
+              next due and its divider, the column names and their rule, the
+              two delivery rows, and the cancel rows. *)
            let content_height =
-             max 1 (budget - warning_rows - 3 - 2 - cancel_rows)
+             max 1 (budget - warning_rows - 3 - header_rows - 2 - cancel_rows)
            in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
@@ -3421,34 +3435,32 @@ let render_schedule_list (state : state) =
                  Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
                    row.sch_last_wake_status
                in
+               (* The enqueue result and what became of the wake are two
+                  facts, and the list carried only the first: a wake the queue
+                  cancelled forty seconds later still read [wake:succeeded].
+                  Both are here, each under its own name.
+
+                  The target is measured from the rows rather than given the
+                  rest of the line. The subject is a keeper name on every row
+                  that has a payload target, so [cols - 76] spent ninety cells
+                  on [edgar.a.poe] and the recurrence past it -- which is where
+                  the timezone lives -- read [daily 08:00:00 A~]. The fallback
+                  summary can be long, so it is capped rather than trusted. *)
                let line =
-                 Printf.sprintf "%s%s%s %s  %s  wake:%s%s%s \xc2\xb7 %s  %s"
-                   status_color
-                   (* The column still lines up: the padding goes after the
-                      bracket, not inside it. *)
-                   (fit_width (bracketed ~max_cells:10 row.sch_status) 12)
-                   Ansi.reset
-                   due
-                   (* Measured from the rows rather than given the rest of the
-                      line. The subject is a keeper name on every row that has
-                      a payload target, so [cols - 76] spent ninety cells on
-                      [edgar.a.poe] and the recurrence past it -- which is
-                      where the timezone lives -- read [daily 08:00:00 A~].
-                      The fallback summary can be long, so it is capped rather
-                      than trusted. *)
-                   (fit_width (Terminal_text.single_line subject)
-                      subject_width)
-                   (schedule_status_color last_wake)
-                   (fit_width last_wake schedule_wake_word_cells)
-                   Ansi.reset
-                   (* The enqueue result and what became of the wake are two
-                      facts, and the list carried only the first: a wake the
-                      queue cancelled forty seconds later still read
-                      [wake:succeeded]. Both are here now, in that order. *)
-                   (fit_width
-                      (Terminal_text.single_line (schedule_delivery_word row))
-                      12)
-                   (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
+                 Render_schedule.schedule_row ~status_style:status_color
+                   ~wake_style:(schedule_status_color last_wake)
+                   ~recurrence_style:Ansi.dim ~target_width:subject_width
+                   ~wake_width ~recurrence_width
+                   { Render_schedule.srow_status =
+                       bracketed ~max_cells:10 row.sch_status
+                   ; srow_due = due
+                   ; srow_target = Terminal_text.single_line subject
+                   ; srow_wake = last_wake
+                   ; srow_delivery =
+                       Terminal_text.single_line (schedule_delivery_word row)
+                   ; srow_recurrence =
+                       Terminal_text.single_line row.sch_recurrence_summary
+                   }
                in
                let content =
                  if is_selected then

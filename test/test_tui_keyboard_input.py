@@ -11956,16 +11956,20 @@ def schedule_detail_interaction() -> Interaction:
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
-            b"wake:succeeded",
+            # The column names above the list. The row used to name one of
+            # its six columns inside itself -- "wake:" on the word, a dot
+            # before the delivery's -- and leave the other five unnamed.
+            b"TARGET",
+            b"WAKE",
+            b"DELIVERY",
+            b"RECURRENCE",
             # What became of the wake, on the row itself. The enqueue result
             # beside it is "succeeded" on a wake the queue cancelled forty
             # seconds later, so the list said nothing about delivery until
-            # the cursor was moved onto the row. The separator is part of the
-            # needle because the word alone also appears in the reaction line
-            # below the list, which is the surface this is not testing. The
-            # dot is spaced like every other dot on the screen; it used to be
-            # glued to the second word.
-            "succeeded \u00b7 consumed_ack".encode(),
+            # the cursor was moved onto the row. Both words are in the needle
+            # because either alone also appears in the reaction line below the
+            # list, which is the surface this is not testing.
+            b"succeeded consumed_ack",
             # The list used to carry a dispatch chip beside these. #31562
             # dropped it because it only ever repeated the row's own status,
             # which the identity line above the delivery row already names.
@@ -15445,12 +15449,16 @@ def run_schedule_delivery_regression(executable: str) -> None:
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (
-            # The enqueue result, which the row already carried.
-            b"wake:succeeded",
-            # What became of the wake, beside it. The separator is part of
-            # the needle: the word alone also appears in the reaction line
+            # The enqueue result and what became of the wake, side by side
+            # under the WAKE and DELIVERY column names. Both words are in the
+            # needle because either alone also appears in the reaction line
             # under the list, which is the surface this is not testing.
-            "\u00b7consumed_ack".encode(),
+            #
+            # This assertion spent a while unable to pass: it kept asking for
+            # the dot glued to the second word after the row spaced it, and
+            # nothing ran it. The suite selects by edited path, and a change
+            # to the row's renderer does not select this file.
+            b"succeeded consumed_ack",
         ):
             if needle not in plain:
                 raise AssertionError(

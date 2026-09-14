@@ -285,6 +285,41 @@ val verification_row :
     used to live in two format strings, and printf's width is a floor: a task
     id past fourteen cells pushed every column after it out of line. *)
 
+(** {1 Schedules list columns} *)
+
+type schedule_row_values = {
+  srow_status : string;
+  srow_due : string;
+  srow_target : string;
+  srow_wake : string;
+  srow_delivery : string;
+  srow_recurrence : string;
+}
+
+val schedule_minimum_recurrence_width : int
+
+val schedule_recurrence_width :
+  inner_width:int -> target_width:int -> wake_width:int -> int
+(** Cells the recurrence may occupy: what the named columns leave, never below
+    {!schedule_minimum_recurrence_width}. *)
+
+val schedule_header_row :
+  target_width:int -> wake_width:int -> recurrence_width:int -> string
+
+val schedule_row :
+  ?status_style:string ->
+  ?wake_style:string ->
+  ?recurrence_style:string ->
+  target_width:int ->
+  wake_width:int ->
+  recurrence_width:int ->
+  schedule_row_values ->
+  string
+(** One schedule, on the same columns as {!schedule_header_row}. The list used
+    to name one of its six columns and name it inside the row -- "wake:" on the
+    wake's word, a dot before the delivery's -- and leave the other five for the
+    reader to work out. *)
+
 (** {1 Lane run columns} *)
 
 type lane_run_row_values = {

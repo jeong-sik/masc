@@ -53,3 +53,8 @@ val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, err
 val container_id : t -> string
 val container_name : t -> string
 val error_to_string : error -> string
+
+(** Read-only engine inspection. Failure does not imply that the image is absent. *)
+val inspect_image :
+  mgr:_ Eio.Process.mgr -> package:Lane_addon_types.package ->
+  ?docker_command:string -> unit -> (string, error) result

@@ -216,7 +216,7 @@ let guided_actions () =
     skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
-  let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in
+  let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> ok in
   let first = UI.submit_action view |> ok in
   check string "current worker supplies identity" "worker" first.instance_id;
   check bool "arbitrary schema field and value are used" true
@@ -228,14 +228,14 @@ let guided_actions () =
   check bool "replacement cannot inherit open menu authority" true
     (Result.is_error (UI.submit_action {view with snapshot=Some replaced}));
   check bool "observation-only package has no invented action" true
-    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some
       {snapshot with instances=[{instance with action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty}]}}));
   let technical = UI.open_actions ~request_id:first.request_id
-    {UI.initial with presentation=UI.Technical;snapshot=Some snapshot} |> ok in
+    {UI.initial with focus=UI.Instances; presentation=UI.Technical;snapshot=Some snapshot} |> ok in
   check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
   List.iter (fun width -> check int "refresh does not move compact content"
-    (List.length (UI.lines ~width {UI.initial with snapshot=Some snapshot}))
-    (List.length (UI.lines ~width {UI.initial with loading=true;snapshot=Some snapshot}))) [10;40;100];
+    (List.length (UI.lines ~width {UI.initial with focus=UI.Instances; snapshot=Some snapshot}))
+    (List.length (UI.lines ~width {UI.initial with focus=UI.Instances; loading=true;snapshot=Some snapshot}))) [10;40;100];
   let with_document = {technical with document_key=Some "draft.toml"} in
   check bool "menu remains visible over an open document" true
     (List.mem "operation: \"capture\"" (UI.lines ~width:100 with_document));
@@ -248,7 +248,7 @@ let guided_actions () =
   let reverse_action = Yojson.Safe.from_string {|{"type":"object","required":["z","a"],
     "additionalProperties":false,"properties":{"z":{"type":"string","const":"last"},"a":{"type":"string","const":"first"}}}|} in
   let reverse_schema = replace "properties" (replace "action" reverse_action property_fields) schema in
-  let reverse_view = UI.open_actions ~request_id:first.request_id {UI.initial with
+  let reverse_view = UI.open_actions ~request_id:first.request_id {UI.initial with focus=UI.Instances;
     snapshot=Some {snapshot with instances=[{instance with action_schema=Some reverse_schema}]}} |> ok in
   let request = UI.submit_action reverse_view |> ok in
   check bool "request is canonical before receipt comparison" true
@@ -260,11 +260,74 @@ let guided_actions () =
     input_sha256=UI.Action.input_digest input;action=request.action;state=UI.Action.Confirmed;
     result=Some (`Assoc []);detail=None} in
   ignore (UI.action_receipt request (UI.Action.to_json receipt) |> ok);
-  let compact = UI.lines ~width:100 {UI.initial with snapshot=Some snapshot} in
+  let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} in
   check bool "first screen names installed package" true
     (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
   check bool "technical action schema is folded by default" false
-    (List.exists (fun line -> String.contains line '{') compact)
+    (List.exists (fun line -> String.contains line '{') compact);
+  let form_schema = match schema with
+    | `Assoc fields ->
+        let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+        let action = Yojson.Safe.from_string
+          {|{"type":"object","properties":{"query":{"type":"string","minLength":3}},"required":["query"],"additionalProperties":false}|} in
+        `Assoc (("properties",`Assoc (("action",action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+    | _ -> assert false in
+  let form_view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000002"
+    {UI.initial with focus=UI.Instances; snapshot=Some {snapshot with instances=[{instance with action_schema=Some form_schema}]}} |> ok in
+  let edit key view = match UI.edit_action ~key view |> ok with
+    | next,None -> next | _,Some _ -> fail "editing must not submit" in
+  let typed = form_view |> edit "j" |> edit "o" |> edit "b" in
+  let reviewed = edit "\019" typed in
+  check bool "review remains explicit before submission" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Review input" line) (UI.lines ~width:100 reviewed));
+  let submitted = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "review Enter must submit" in
+  check bool "free text including navigation letters is preserved" true
+    (submitted.action=`Assoc ["query",`String "job"]);
+  let replaced = {reviewed with snapshot=Some {snapshot with instances=[{instance with id="replacement";incarnation="replacement";action_schema=Some form_schema}]}} in
+  check bool "review does not authorize a replaced worker" true
+    (Result.is_error (UI.edit_action ~key:"enter" replaced));
+  let pasted_text = "https://예시.test/경기\n\019\r" in
+  let pasted = UI.paste_action ~text:pasted_text form_view in
+  let pasted_review = edit "\019" pasted in
+  let pasted_review = UI.paste_action ~text:"must not change review" pasted_review in
+  let request = match UI.edit_action ~key:"enter" pasted_review |> ok with
+    | _,Some request -> request | _ -> fail "paste review must submit only on Enter" in
+  check bool "paste is Unicode text, never input commands; review stays immutable" true
+    (request.action=`Assoc ["query",`String pasted_text]);
+  let open_schema action =
+    let schema = match form_schema with
+      | `Assoc fields ->
+          let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+          `Assoc (("properties",`Assoc (("action",Yojson.Safe.from_string action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+      | _ -> assert false in
+    UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000003"
+      {UI.initial with focus=UI.Instances; snapshot=Some {snapshot with instances=[{instance with action_schema=Some schema}]}} |> ok in
+  let optional = open_schema
+    {|{"type":"object","properties":{"operation":{"type":"string","const":"search"},"query":{"type":"string"}},"required":["operation"],"additionalProperties":false}|} in
+  let optional = optional |> edit "tab" |> UI.paste_action ~text:"검색" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" optional |> ok with
+    | _,Some request -> request | _ -> fail "optional parameter action must submit" in
+  check bool "optional fields remain editable beside a required constant" true
+    (request.action=`Assoc ["operation",`String "search";"query",`String "검색"]);
+  let nested = open_schema
+    {|{"type":"object","properties":{"query":{"type":"string"},"options":{"type":"object","properties":{"mode":{"type":"string","const":"custom"},"target":{"type":"string"}},"required":["mode","target"],"additionalProperties":false}},"required":["query"],"additionalProperties":false}|} in
+  let nested = nested |> UI.paste_action ~text:"search" |> edit "tab" in
+  let reviewed = edit "\019" nested in
+  let request = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "omitted optional object must submit" in
+  check bool "nested constants never activate an omitted optional object" true
+    (request.action=`Assoc ["query",`String "search"]);
+  let enabled = nested |> edit "tab" |> UI.paste_action ~text:"selected" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" enabled |> ok with
+    | _,Some request -> request | _ -> fail "explicit optional object must submit" in
+  check bool "explicit child activates its object's required constants" true
+    (request.action=`Assoc ["options",`Assoc ["mode",`String "custom";"target",`String "selected"];"query",`String "search"]);
+  let unset = enabled |> edit "esc" |> edit "\021" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" unset |> ok with
+    | _,Some request -> request | _ -> fail "unset last child must omit optional object" in
+  check bool "unsetting the last explicit child removes optional object" true
+    (request.action=`Assoc ["query",`String "search"])
 
 let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
@@ -281,7 +344,7 @@ let context_flow_uses_declared_connections () =
     declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
   let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
     output={rows=[];coverage=[]};complete=None} in
-  let view = {UI.initial with presentation=UI.Flow;snapshot=Some snapshot} in
+  let view = {UI.initial with focus=UI.Connections;presentation=UI.Flow;snapshot=Some snapshot} in
   check bool "flow exposes the selected action target" true
     (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
   let moved = UI.lines ~width:160 {view with instance_cursor=1} in
@@ -301,7 +364,173 @@ let context_flow_uses_declared_connections () =
     (List.mem "  project-observer -> project-metric · producer absent in this run"
       (UI.lines ~width:160 {view with snapshot=Some {snapshot with instances=[consumer]}}))
 
+let guided_installation () =
+  let module Install = Masc_tui_lane_installer in
+  let edit key state = match Install.handle ~key state |> ok with
+    | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
+  let path = Install.create () |> ok |> Install.paste ~text:"/packages/arbitrary/lane.toml" |> edit "\019" in
+  check string "manifest is requested only after explicit reviewed Enter" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
+  let preview image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+    "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
+      "image",`String "worker:revision-1";"binding_schema",schema]] in
+  let response = preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"]) in
+  let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
+  let reopened = Install.create () |> ok in
+  check bool "canceled preview cannot replace a freshly opened wizard" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" (Ok response) reopened));
+  check bool "different request identity cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:9 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending));
+  check bool "different manifest cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/other/lane.toml" (Ok response) pending));
+  let failed,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Error "preview failed") pending |> Option.get in
+  check (option string) "failed preview retains error" (Some "preview failed") error;
+  check bool "failed preview restores editable request for retry" true
+    (Result.is_ok (Install.begin_preview ~request_id:11 ~path:"/packages/arbitrary/lane.toml" failed));
+  let form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok response) pending |> Option.get in
+  check (option string) "matching preview advances without error" None error;
+  check bool "failed image inspection remains explicit" true
+    (List.mem "Image unverified: engine offline" (Install.lines form));
+  let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
+    |> Install.paste ~text:"project-run" |> edit "tab"
+    |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in
+  let session = match Install.handle ~key:"enter" reviewed |> ok with
+    | Draft session -> session | _ -> fail "expected local declaration draft" in
+  check bool "wizard produces unsaved create document" true (session.base=None);
+  check string "declaration filename derives from entered installation" "research-observer.toml" session.file_name;
+  let document = match Otoml.Parser.from_string_result session.text with
+    | Ok document -> document | Error _ -> fail "generated TOML must parse" in
+  check string "actual manifest path survives TOML encoding" "/packages/arbitrary/lane.toml"
+    (Otoml.find_opt document Otoml.get_string ["manifest_path"] |> Option.get);
+  check string "quoted Unicode binding survives serialization" "quoted \"topic\" and 한국어"
+    (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get)
+
+let object_array_fields () =
+  let module Form = Masc_tui_schema_form in
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"records":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"object","properties":{"label":{"type":"string","minLength":1},"kind":{"type":"string","const":"record"},"note":{"type":"string"}},"required":["label","kind"],"additionalProperties":false}}},"required":["records"],"additionalProperties":false}|} in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | _ -> fail "array editing must not submit the enclosing form" in
+  let add text form = form |> edit "a" |> Form.insert_text ~text |> edit "\019" |> edit "enter" in
+  let initial = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  let array = edit "\005" initial in
+  check bool "opening an array does not create a required value" true
+    (Result.is_error (Form.value (edit "esc" array)));
+  check bool "empty array enforces declared minItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" array));
+  let child = edit "a" array in
+  check bool "item validates required fields before review" true
+    (Result.is_error (Form.handle ~key:"\019" child));
+  let two = array |> add "첫번째" |> add "second" in
+  let too_many = add "third" two in
+  check bool "multiple items enforce declared maxItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" too_many));
+  let fixed = too_many |> edit "d" |> edit "k" |> edit "e" |> edit "\021"
+    |> Form.insert_text ~text:"edited" |> edit "\019" |> edit "enter" in
+  let applied = edit "\019" fixed in
+  let item label = `Assoc ["kind",`String "record";"label",`String label] in
+  let expected = `Assoc ["records",`List [item "edited";item "second"]] in
+  check bool "object items preserve order, constants and absent optional fields" true
+    ((Form.value applied |> ok)=expected);
+  let reviewed = edit "\019" applied in
+  let submitted = match Form.handle ~key:"enter" reviewed |> ok with
+    | Form.Submit json -> json | _ -> fail "only enclosing review Enter submits" in
+  check bool "enclosing form submits the reviewed array" true (submitted=expected);
+  let discarded = applied |> edit "\005" |> edit "d" |> edit "esc" in
+  check bool "canceling array edits preserves its committed value" true
+    ((Form.value discarded |> ok)=expected);
+  let optional_schema = match schema with `Assoc fields ->
+    `Assoc (("required",`List [])::List.remove_assoc "required" fields) | _ -> assert false in
+  let optional = Form.create ~schema:optional_schema ~initial:(`Assoc []) |> ok in
+  let optional = optional |> edit "\005" |> edit "a" |> edit "esc" |> edit "esc" in
+  check bool "canceling new optional item never activates its array" true
+    ((Form.value optional |> ok)=`Assoc []);
+  let primitive_schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"values":{"type":"array","items":{"type":"string"}}},"required":["values"],"additionalProperties":false}|} in
+  let primitive = Form.create ~schema:primitive_schema ~initial:(`Assoc []) |> ok in
+  check bool "primitive arrays remain direct JSON input" true
+    (Result.is_error (Form.handle ~key:"\005" primitive));
+  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" |> edit "\019" in
+  check bool "primitive array JSON remains valid" true
+    ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
+
+let refresh_preserves_operator_target () =
+  let row id : UI.Row.row = {id;lane_id="worker/events";kind=UI.Row.Event;
+    title=id;observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let worker id : UI.instance = {id;incarnation=id;run_id="project";
+    addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=1;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty} in
+  let declaration id : UI.declaration = {source_path=id ^ ".toml";
+    installation_id=Some id;desired=Some "1";applied=Some "1";
+    instance_id=Some id;issues=[]} in
+  let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
+    output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "worker";declaration "other"]}} in
+  let view = {UI.initial with focus=UI.Instances;snapshot=Some snapshot;scroll=7;selected=["chosen"]} in
+  let reordered = {snapshot with instances=List.rev snapshot.instances;
+    output={snapshot.output with rows=List.rev snapshot.output.rows};
+    configuration=Option.map (fun (c : UI.configuration) -> {c with declarations=List.rev c.declarations}) snapshot.configuration} in
+  let refreshed = UI.reconcile_snapshot view reordered in
+  check (option string) "worker identity survives reorder" (Some "worker")
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance refreshed));
+  check (option string) "row identity survives reorder" (Some "chosen")
+    (Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row refreshed));
+  check (option string) "declaration identity survives reorder" (Some "worker.toml")
+    (Option.map (fun (d : UI.declaration) -> d.source_path) (UI.selected_declaration refreshed));
+  check int "refresh retains requested scroll position" 7 refreshed.scroll;
+  let removed = UI.reconcile_snapshot refreshed {snapshot with instances=[worker "other"];
+    output={snapshot.output with rows=[row "other"]};configuration=None} in
+  check bool "removed targets do not select arbitrary replacement" true
+    (UI.selected_instance removed=None && UI.selected_row removed=None && UI.selected_declaration removed=None);
+  let replaced = UI.reconcile_snapshot view {snapshot with instances=[{(worker "worker") with incarnation="replacement"}]} in
+  check bool "new incarnation requires explicit selection" true (UI.selected_instance replaced=None);
+  check bool "timeline cannot act through a replaced row owner" true
+    (UI.selected_instance {replaced with focus=UI.Timeline}=None);
+  let draft = Draft.create "worker.toml" |> ok in
+  let editing = UI.put_document {view with focus=UI.Configurations} draft in
+  let changed declaration instances = UI.reconcile_snapshot editing {snapshot with instances;
+    configuration=Some {directory="/config";complete=true;declarations=[declaration]}} in
+  List.iter (fun (label,declaration,instances) ->
+    let replaced = changed declaration instances in
+    check bool (label ^ " invalidates same-path operator selection") true
+      (UI.selected_declaration replaced=None && UI.selected_instance replaced=None);
+    check bool (label ^ " retains the independent document draft") true
+      (UI.selected_document replaced=Some draft))
+    ["installation",{(declaration "worker") with installation_id=Some "new-installation"},snapshot.instances;
+     "instance",{(declaration "worker") with instance_id=Some "other"},snapshot.instances;
+     "run",declaration "worker",[{(worker "worker") with run_id="new-run"}];
+     "incarnation",declaration "worker",[{(worker "worker") with incarnation="new-incarnation"}]];
+  (* The timeline status line is painted: its warning tone reaches the text
+     wrapped in SGR codes, so read the text those codes carry. *)
+  let plain line =
+    let n = String.length line in
+    let buf = Buffer.create n in
+    let rec walk i =
+      if i < n then
+        if line.[i] = '\027' then
+          let j = ref (i + 1) in
+          while !j < n && line.[!j] <> 'm' do incr j done;
+          walk (if !j < n then !j + 1 else !j)
+        else (Buffer.add_char buf line.[i]; walk (i + 1)) in
+    walk 0;
+    Buffer.contents buf in
+  let failed = {view with focus=UI.Timeline;error=Some "network failed"} in
+  check bool "stale snapshot exposes refresh failure" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Error: network failed" (plain line))
+      (UI.lines ~height:24 ~width:120 failed))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
+  test_case "edit object array items through nested schema forms" `Quick object_array_fields;
+  test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;

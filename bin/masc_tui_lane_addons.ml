@@ -22,10 +22,12 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
   schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  form : Masc_tui_schema_form.t option;
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  installer : Masc_tui_lane_installer.t option;
   subscription_panel : Masc_tui_lane_subscriptions.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
@@ -34,7 +36,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { subscription_panel=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { installer=None;subscription_panel=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Timeline; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -181,14 +183,83 @@ let parse_request input =
             let* rest = query rest in Ok ((key, value) :: rest) in
       let* query = query fields in Ok (Slice query)
   | _ -> Error "Use inspect, attach {manifest_path,run_id,binding}, observe ID, detach ID, slice {run_id,since,until,lane_id}, evidence {instance_id,row_ids,keeper_name?}, act/action {instance_id,expected_incarnation,request_id,action}"
+let at_cursor items cursor = if cursor < 0 then None else List.nth_opt items cursor
 let selected_declaration view = Option.bind view.snapshot (fun snapshot ->
-  Option.bind snapshot.configuration (fun configuration -> List.nth_opt configuration.declarations view.configuration_cursor))
+  Option.bind snapshot.configuration (fun configuration -> at_cursor configuration.declarations view.configuration_cursor))
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name}
-let selected_instance view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.instances view.instance_cursor)
+let selected_row view = Option.bind view.snapshot (fun snapshot -> at_cursor snapshot.output.rows view.row_cursor)
+let row_owner instances (row : Row.row) =
+  List.find_opt (fun (instance : instance) ->
+    String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) instances
+let reconcile_snapshot view snapshot =
+  let locate key items wanted =
+    let rec loop index = function
+      | [] -> -1
+      | item :: rest -> if key item = wanted then index else loop (index + 1) rest in
+    loop 0 items in
+  let declarations snapshot = Option.fold ~none:[]
+      ~some:(fun (configuration : configuration) -> configuration.declarations) snapshot.configuration in
+  let anchor key old_items new_items cursor =
+    match at_cursor old_items cursor with
+    | None -> -1
+    | Some item -> locate key new_items (key item) in
+  match view.snapshot with
+  | None -> {view with snapshot=Some snapshot;scroll=0}
+  | Some previous ->
+      let row_cursor = anchor (fun (row : Row.row) -> row.id)
+          previous.output.rows snapshot.output.rows view.row_cursor in
+      let owner_identity instances row = Option.bind row (row_owner instances)
+          |> Option.map (fun (instance : instance) -> instance.id, instance.incarnation) in
+      let row_cursor =
+        if owner_identity previous.instances (selected_row view)
+           = owner_identity snapshot.instances (at_cursor snapshot.output.rows row_cursor)
+        then row_cursor else -1 in
+      let configuration_cursor = anchor (fun (declaration : declaration) -> declaration.source_path)
+          (declarations previous) (declarations snapshot) view.configuration_cursor in
+      let declaration_owner snapshot cursor =
+        Option.map (fun (declaration : declaration) ->
+          let worker = Option.bind declaration.instance_id (fun id ->
+            List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances)
+            |> Option.map (fun (instance : instance) -> instance.id, instance.incarnation, instance.run_id) in
+          declaration.installation_id, declaration.instance_id, worker)
+          (at_cursor (declarations snapshot) cursor) in
+      let configuration_cursor =
+        if declaration_owner previous view.configuration_cursor = declaration_owner snapshot configuration_cursor
+        then configuration_cursor else -1 in
+      (* A vanished identity leaves no selection. Selecting a replacement is
+         an explicit navigation action, never a side effect of a refresh. *)
+      {view with snapshot=Some snapshot;
+        row_cursor;
+        instance_cursor=anchor (fun (instance : instance) -> instance.id, instance.incarnation)
+          previous.instances snapshot.instances view.instance_cursor;
+        configuration_cursor}
+let selected_instance view = Option.bind view.snapshot (fun snapshot ->
+  match view.focus with
+  | Timeline | Rows -> Option.bind (selected_row view) (row_owner snapshot.instances)
+  | Configurations -> Option.bind (selected_declaration view) (fun declaration ->
+      Option.bind declaration.instance_id (fun id ->
+        List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
+  | Connections | Instances -> at_cursor snapshot.instances view.instance_cursor)
+let evidence_request view =
+  let* snapshot = Option.to_result ~none:"Observation snapshot unavailable" view.snapshot in
+  let* () = if view.selected=[] then Error "Select evidence rows first" else Ok () in
+  let rec owners = function
+    | [] -> Ok []
+    | id::rest ->
+        let* row = Option.to_result ~none:"Selected evidence is outside the current view; select again"
+          (List.find_opt (fun (row : Row.row) -> row.id=id) snapshot.output.rows) in
+        let* owner = Option.to_result ~none:"Selected evidence owner unavailable"
+          (row_owner snapshot.instances row) in
+        let* rest=owners rest in Ok (owner.id::rest) in
+  let* owners=owners view.selected in
+  match List.sort_uniq String.compare owners with
+  | [instance_id] -> Ok (Evidence (`Assoc ["instance_id",`String instance_id;
+      "row_ids",`List (List.map (fun id -> `String id) view.selected)]))
+  | _ -> Error "Selected evidence spans multiple instances; select one owner at a time"
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
     Option.bind snapshot.configuration (fun config ->
@@ -200,7 +271,6 @@ let selected_source_path view =
               then Some d.source_path else None) config.declarations) in
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
-let selected_row view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.output.rows view.row_cursor)
 let subscription_targets view =
   match view.snapshot with
   | Some {configuration=Some config;instances;_} when config.complete ->
@@ -308,13 +378,13 @@ let ordered_rows snapshot =
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
-let _move_observation view delta =
+let move_observation view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
       let rows = ordered_rows snapshot in
       let rec find position = function
-        | [] -> 0
+        | [] -> -1
         | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
       let position = max 0 (min (List.length rows-1) (find 0 rows + delta)) in
       match List.nth_opt rows position with
@@ -354,6 +424,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
     if view.focus=focus then "[" ^ label ^ "]" else label)
     [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
   let status = match view.loading, view.snapshot, view.error with
+    | _, Some _, Some error -> [line ~tone:Attention ("Error: " ^ error ^ " · previous reading retained")]
     | true, _, _ -> [line ~tone:Dim "Refreshing · previous reading remains visible"]
     | false, None, Some error -> wrap ~tone:Attention ("Load failed: " ^ error)
     | false, None, None -> [line ~tone:Dim "No reading yet · r:refresh"]
@@ -674,7 +745,8 @@ let rec finite_values = function
            match List.assoc_opt "type" fields,
                  List.assoc_opt "properties" fields,
                  List.assoc_opt "required" fields with
-           | Some (`String "object"), Some (`Assoc properties), Some (`List required) ->
+           | Some (`String "object"), Some (`Assoc properties), Some (`List required)
+             when List.length properties=List.length required ->
                let rec expand = function
                  | [] -> Some [[]]
                  | `String key :: rest ->
@@ -709,12 +781,28 @@ let action_target view =
   | Rows -> selected_instance view
   | Timeline | Connections -> selected_instance view
 
+let can_observe (instance : instance) = match instance.phase with
+  | Row.Attached | Row.Observing | Row.Failed _ -> true
+  | Row.Detaching | Row.Detached -> false
+
+let instance_controls (instance : instance) = match instance.phase with
+  | Row.Attached | Row.Observing ->
+      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:remove"
+  | Row.Detaching -> "removal pending"
+  | Row.Detached -> "retained history · D:details"
+  | Row.Failed _ -> "o:retry observation" ^
+      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
+
+let overview_hints view =
+  "i:install  S:subscriptions  1-5:views  j/k:select  Tab:focus  " ^
+  (match selected_instance view with None -> "" | Some instance -> instance_controls instance ^ "  ") ^
+  "f:flow  D:details  J/K:scroll  Esc:back"
+
 let open_actions ~request_id view =
   let* instance = match action_target view with
     | Some instance -> Ok instance
-    | None -> (match Option.bind view.snapshot (fun snapshot -> match snapshot.instances with first :: _ -> Some first | [] -> None) with
-        | Some instance -> Ok instance
-        | None -> Error "Select an installed Add-on first (Tab:instances).") in
+    | None -> Error "Selected installation or event has no available worker; select an instance explicitly" in
+  let* () = if can_observe instance then Ok () else Error "This instance is unavailable for actions; D shows its state and retained evidence." in
   let* schema = match instance.action_schema with
     | Some schema -> Ok schema
     | None -> Error "This Add-on provides observations only. Press o to observe." in
@@ -722,16 +810,18 @@ let open_actions ~request_id view =
   let* action_schema =
     let* properties = field "properties" schema in
     field "action" properties in
-  let* choices = match finite_values action_schema with
-    | Some (_::_ as choices) -> Ok choices
-    | Some [] | None -> Error "This action needs parameters. D shows its schema; :act accepts an explicit action." in
+  let* choices,form = match finite_values action_schema with
+    | Some (_::_ as choices) -> Ok (choices,None)
+    | Some [] | None ->
+        let* form = Masc_tui_schema_form.create ~schema:action_schema ~initial:(`Assoc []) in
+        Ok ([],Some form) in
   let choices = List.filter (fun action ->
     Result.is_ok (Action.validate ~schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id ~action))) choices in
-  if choices=[] then Error "The advertised schema has no valid preset action. D shows details."
+  if choices=[] && Option.is_none form then Error "The advertised schema has no valid preset action. D shows details."
   else Ok {view with action_menu=Some {
     target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
-    schema;choices;cursor=0}; presentation=Summary;scroll=0;error=None}
+    schema;choices;form;cursor=0}; presentation=Summary;scroll=0;error=None}
 
 let move_action view delta =
   {view with scroll=0;action_menu=Option.map (fun menu ->
@@ -746,12 +836,29 @@ let submit_action view =
       && instance.action_schema=Some menu.schema) snapshot.instances) with
     | Some instance -> Ok instance
     | None -> Error "The selected Add-on changed. Refresh and choose its action again." in
-  let* action = match List.nth_opt menu.choices menu.cursor with
-    | Some action -> Ok action | None -> Error "No selected action." in
+  let* action = match menu.form with
+    | Some form -> Masc_tui_schema_form.value form
+    | None -> (match List.nth_opt menu.choices menu.cursor with
+      | Some action -> Ok action | None -> Error "No selected action.") in
   let* action = Action.canonical action in
   let* _ = Action.validate ~schema:menu.schema ~name:"lane_act"
       (Action.arguments ~instance_id:instance.id ~request_id:menu.request_id ~action) in
   Ok {instance_id=instance.id;incarnation=instance.incarnation;request_id=menu.request_id;action}
+
+let paste_action ~text view =
+  match view.action_menu with
+  | Some ({form=Some form;_} as menu) ->
+      {view with action_menu=Some {menu with form=Some (Masc_tui_schema_form.insert_text ~text form)};scroll=0}
+  | _ -> view
+
+let edit_action ~key view =
+  let* menu = match view.action_menu with Some menu -> Ok menu | None -> Error "No action form" in
+  let* form = match menu.form with Some form -> Ok form | None -> Error "No action form" in
+  let* event = Masc_tui_schema_form.handle ~key form in
+  match event with
+  | Masc_tui_schema_form.Cancel -> Ok ({view with action_menu=None;error=None;scroll=0},None)
+  | Updated form -> Ok ({view with action_menu=Some {menu with form=Some form};error=None;scroll=0},None)
+  | Submit _ -> let* request = submit_action view in Ok (view,Some request)
 
 let scalar_text = function
   | `String text -> Some text
@@ -878,19 +985,35 @@ let flow_lines view =
      "f:back to observations  D:technical details  J/K:scroll"]
 
 let lines ?(height=24) ?(failed_note = "") ~width view =
-  match view.action_menu with
-  | Some menu ->
-      (["Run action on " ^ menu.target_title;
+  match view.installer with
+  | Some installer ->
+      ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])
+       @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
+       @ Masc_tui_lane_installer.lines installer)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+        (Masc.Tui_decode.sanitize_terminal_text line))
+  | None -> match view.subscription_panel,view.action_menu with
+  | Some panel,_ ->
+      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
+       :: Masc_tui_lane_subscriptions.lines panel)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+           (Masc.Tui_decode.sanitize_terminal_text line))
+  | None,Some menu ->
+      (["Run action on " ^ menu.target_title]
+       @ Option.to_list (Option.map (fun error -> "Input error: " ^ error) view.error)
+       @ (match menu.form with
+       | Some form -> Masc_tui_schema_form.lines form
+       | None -> [
         Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
           (menu.cursor+1) (List.length menu.choices);
         "J/K:scroll action details"]
        @ (match List.nth_opt menu.choices menu.cursor with
           | Some action -> action_fields "" action
-          | None -> ["No selected action"]))
+          | None -> ["No selected action"])))
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
-  | None ->
+  | None,None ->
       if view.presentation = Flow then flow_lines view |> List.concat_map
         (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (Masc.Tui_decode.sanitize_terminal_text line))
       else if view.presentation <> Summary || view.focus = Rows || Option.is_some view.document_key || Option.is_some view.draft

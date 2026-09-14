@@ -356,11 +356,14 @@ val complete_serialized
     and terminal lines are all liveness; there is no thinking-only or total
     stream wall-clock cutoff. SSE keepalive comments do not renew the
     deadline (see {!Http_client.read_sse}).
-    A stalled endpoint surfaces as
-    [TimeoutError { phase = Stream_idle state; _ }], where [state]
-    records whether the stream was waiting for the first event, answer
-    deltas, thinking deltas, tool-call deltas, heartbeat/substrate, or
-    completion. The typed failure is returned unchanged so downstream
+    A stall before the first output surfaces as
+    [TimeoutError { phase = First_token; _ }]; a stall after it as
+    [TimeoutError { phase = Stream_idle state; _ }], where [state] is the
+    production the last frame left the stream in: answer deltas, thinking
+    deltas, tool-call deltas, heartbeat/substrate, or completion. A frame
+    that is not a production, a text block's stop or a usage-only message
+    delta, leaves the state where it was. The typed failure is returned
+    unchanged so downstream
     orchestration can distinguish streaming/thinking idleness from total-call
     deadlines and schedule any later attempt independently. Non-HTTP transports
     (CLI subprocess) ignore

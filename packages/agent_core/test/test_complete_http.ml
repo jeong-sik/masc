@@ -1460,14 +1460,21 @@ let anthropic_sse_frame_delta text =
     text
 ;;
 
-let anthropic_sse_frame_stop =
-  "event: content_block_stop\n\
-   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
-   event: message_delta\n\
+let anthropic_sse_frame_block_stop =
+  "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+;;
+
+let anthropic_sse_frame_usage_only =
+  "event: message_delta\n\
    data: \
-   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n\
-   event: message_stop\n\
-   data: {\"type\":\"message_stop\"}\n\n"
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+;;
+
+let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+(* The tail every Anthropic turn ends with, in the order the wire sends it. *)
+let anthropic_sse_frame_stop =
+  anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only ^ anthropic_sse_frame_message_stop
 ;;
 
 let anthropic_sse_frame_thinking_block_start =
@@ -2778,21 +2785,15 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
   | Exit -> ()
 ;;
 
-(* A frame that projects nothing the classifier names -- a usage-bearing
-   message_delta on its own, the shape of an OpenAI-compatible usage-only
-   final chunk -- must not put the stream back to "awaiting the first
-   delta" once output has been seen: a stall after it is an idle gap in the
-   state the last production left, and the phase, the message and the
-   telemetry all say so. (A content_block_stop is not such a frame: the
-   classifier names it a tool-call completion.) *)
-let anthropic_sse_frame_usage_only =
-  "event: message_delta\n\
-   data: \
-   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
-;;
-
-let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-
+(* The frames after the last delta project nothing the classifier names as
+   a production: the text block's stop closes a block that is not a tool
+   call, and the usage-bearing message_delta is the shape of an
+   OpenAI-compatible usage-only final chunk. Neither may put the stream back
+   to "awaiting the first delta" or forward to "streaming a tool call": a
+   stall after them is an idle gap in the state the last production left,
+   and the phase, the message and the telemetry all say so. This is the
+   wire order of every Anthropic turn whose proxy holds the socket after the
+   final block. *)
 let timeout_telemetry telemetry =
   List.filter_map
     (function
@@ -2815,7 +2816,7 @@ let test_complete_stream_idle_after_output_keeps_the_production_state () =
         [ 0.0, anthropic_sse_frame_message_start
         ; 0.0, anthropic_sse_frame_content_block_start
         ; 0.0, anthropic_sse_frame_delta "hello"
-        ; 0.0, anthropic_sse_frame_usage_only
+        ; 0.0, anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only
         ; 0.5, anthropic_sse_frame_message_stop
         ]
     in

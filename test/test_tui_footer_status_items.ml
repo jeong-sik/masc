@@ -545,6 +545,31 @@ let test_the_cut_keeps_the_way_out () =
   Alcotest.(check bool) "and something did give way" false
     (contains ~needle:"Ctrl-R:reasoning" line)
 
+(* A row may lose what the reader can look up. It does not lose the way in
+   either.
+
+   Measured on the fixture server: at eighty columns Code, Board, Planning,
+   Memory and Workspace each drew a footer with no key that opens the row
+   under the cursor, and Memory's was three navigation keys and two exits.
+   The hints below are the Code tree's, as masc_tui_keys builds them. *)
+let test_the_cut_keeps_the_key_that_opens_a_row () =
+  let hints =
+    "j/k:move  h/l:pane  PgUp/PgDn:page  Home/End:top/bottom  \
+     Right / Enter:open  Left / Esc:back  /:find  \
+     n / N:next / previous match  r:reload  Tab:next  q:quit"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints ()
+  in
+  Alcotest.(check bool) "the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "the key that opens a row survives" true
+    (contains ~needle:"Right / Enter:open" line);
+  Alcotest.(check bool) "the way out still survives too" true
+    (contains ~needle:"Left / Esc:back" line);
+  Alcotest.(check bool) "and a navigation nicety gave way" false
+    (contains ~needle:"Home/End:top/bottom" line)
+
 let test_a_compound_leave_key_is_the_same_door () =
   (* Surfaces spell it [Left / Esc] or [Right / Esc] where an arrow does the
      same thing. It is one key under two spellings, not two keys. *)
@@ -1077,6 +1102,8 @@ let tests =
           test_cut_hints_name_the_key_that_shows_them
       ; Alcotest.test_case "the cut keeps the way out" `Quick
           test_the_cut_keeps_the_way_out
+      ; Alcotest.test_case "the cut keeps the key that opens a row" `Quick
+          test_the_cut_keeps_the_key_that_opens_a_row
       ; Alcotest.test_case "a compound leave key is the same door" `Quick
           test_a_compound_leave_key_is_the_same_door
       ; Alcotest.test_case "a compound leave key without spaces is still the door"

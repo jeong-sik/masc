@@ -653,10 +653,12 @@ let test_stream_idle_timeout_invalid_toml_returns_error () =
   | Error failure ->
     check bool "classified as a validate failure" true
       (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
-    check bool "diagnostic names the TOML key" true
+    (* The row now carries the ceiling too, so the diagnostic reads the
+       declared range the way provider_call_deadline_sec's does. *)
+    check bool "diagnostic names the TOML key and the declared range" true
       (String.ends_with
          ~suffix:
-           "turn.stream_idle_timeout_sec: expected a finite, positive number of seconds"
+           "turn.stream_idle_timeout_sec: value is outside the declared range (0, 3600]"
          (Keeper_runtime_config.load_failure_to_string failure))
 
 let test_stream_idle_timeout_toml_wrong_type_returns_error () =

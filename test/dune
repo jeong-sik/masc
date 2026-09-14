@@ -6125,6 +6125,12 @@
  (deps test_tui_lane_visual_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_lane_visual_pty.py} %{dep:../bin/masc_tui.exe})))
 
+(rule
+ (alias runtest-test_tui_lane_operator_pty)
+ (deps test_tui_lane_operator_pty.py test_tui_lane_visual_pty.py
+   test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_lane_operator_pty.py} %{dep:../bin/masc_tui.exe})))
+
 
 (include stanzas/test_operator_media_inspection.inc)
 

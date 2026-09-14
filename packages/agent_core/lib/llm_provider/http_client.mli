@@ -529,9 +529,13 @@ val dispatch_sync_request
     request/response-header phase. [body_timeout_s] is the caller-owned total
     deadline across connection establishment, request/response headers, and
     full response-body consumption. The earlier deadline wins. Each explicit
-    timeout requires [clock]. Caller-owned cancellation and a nested
-    [Eio.Time.Timeout] are re-raised only after the checked-out connection has
-    been closed. *)
+    timeout requires [clock]. A body that outruns the total deadline ends a
+    successful status as [TimeoutError { phase = Wall_clock; _ }], the body
+    being the answer; under a status that is not a success the answer is
+    already in hand, and the response is returned with that status, its
+    headers, and an empty body, the connection released and not parked.
+    Caller-owned cancellation and a nested [Eio.Time.Timeout] are re-raised
+    only after the checked-out connection has been closed. *)
 val post_sync_once
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock

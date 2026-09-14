@@ -390,6 +390,64 @@ let test_metrics_is_one_row_that_answers_its_other_names () =
     [ "metrics"; "telemetry"; "charts"; "stats"; "tele" ]
 ;;
 
+(* Every surface has a palette row that arrives on it. The list names each
+   constructor once, and the match under it names each again with no
+   wildcard: a surface added to the type fails to compile here until it is
+   decided, so a destination cannot be added and left unreachable by name --
+   which is how Runtime and Changes went without a row.
+
+   Connectors is the one surface decided the other way, for now. Its list
+   half has no path in at all (#35662), and whether that half is retired or
+   given a path is still open there; a palette row here would answer it. *)
+let every_surface =
+  [ Overview; Acting; Metrics; Keepers Keeper_list; Memory; Lanes; Clients
+  ; Board; Approvals; Planning; Schedules; Verification; Harness; Fusion
+  ; Repositories; Code; Changes; Runtime; Config; Resources; Tools
+  ; System_logs
+  ]
+
+let _every_surface_is_decided : surface -> unit = function
+  | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Runtime | Config | Resources | Tools
+  | System_logs -> ()
+  | Connectors -> (* #35662 *) ()
+
+let test_every_surface_and_config_pane_has_a_row () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entries = palette_entries state in
+  List.iteri
+    (fun index surface ->
+      check_bool
+        (Printf.sprintf "a row goes to every_surface.(%d)" index)
+        true
+        (List.exists
+           (function _, Palette_goto target -> target = surface | _ -> false)
+           entries))
+    every_surface;
+  List.iter
+    (fun (pane, label) ->
+      check_bool
+        (Printf.sprintf "a row opens the %s pane" label)
+        true
+        (List.exists
+           (function _, Palette_config target -> target = pane | _ -> false)
+           entries);
+      (* Typed the way the other destinations are: "go" and the name. *)
+      state.palette_query <- "go " ^ label;
+      match palette_matches state with
+      | (_, Palette_config target) :: _ when target = pane -> ()
+      | _ ->
+        Alcotest.fail (Printf.sprintf "%S does not lead with its pane" ("go " ^ label)))
+    config_panes;
+  state.palette_query <- "go config";
+  match palette_matches state with
+  | ("go Config", Palette_goto Config) :: _ -> ()
+  | _ -> Alcotest.fail "\"go config\" no longer leads with the Config surface"
+;;
+
 let test_addons_do_not_require_a_keeper () =
   let state =
     create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
@@ -436,6 +494,8 @@ let () =
             `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
             test_addons_do_not_require_a_keeper
+        ; Alcotest.test_case "every surface and Config pane has a row" `Quick
+            test_every_surface_and_config_pane_has_a_row
         ] )
     ]
 ;;

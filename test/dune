@@ -380,6 +380,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_keeper_provider_subcall
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -732,6 +733,7 @@
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
+  test_keeper_provider_subcall
   test_runtime_verification
   test_tool_resolution_runtime_projection
   test_keeper_id
@@ -5963,7 +5965,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries alcotest yojson unix eio eio_main masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries alcotest yojson unix eio eio_main httpun masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)

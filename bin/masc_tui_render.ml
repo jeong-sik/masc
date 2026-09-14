@@ -2126,12 +2126,6 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
 
   box_top buf cols;
   box_line buf cols header;
-  box_line buf cols
-    (Printf.sprintf "  Actions:  %s[c]%s Reply   %s[v/V]%s Vote (+/-)   %s[Y]%s Copy Link   %s[Esc]%s Back"
-       (Theme.ok ()) Ansi.reset
-       (Theme.warn ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.recede ()) Ansi.reset);
   box_divider buf cols;
 
   let title_line = Printf.sprintf "  %s%s%s"
@@ -2404,17 +2398,12 @@ let render_board_read (state : state) (list_post : board_post) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let footer =
-    let pane_hint =
-      if cols >= keeper_split_threshold_cols && not state.board_detail_wide then
-        "  h/l:pane  Ctrl-W:switch"
-      else ""
-    in
     footer_line state ~max_cells:cols
       ~hints:
-        (Printf.sprintf
-           "j/k:%s  [/]:post  PgUp/PgDn:page%s  z:wide  Y:copy link  Left / Esc:back  c:reply  r:refresh  Tab:next"
-           (if state.board_focus = Left_pane then "posts" else "scroll")
-           pane_hint)
+        (Masc_tui_keys.footer_hints_board_read
+           ~focus_posts:(state.board_focus = Left_pane)
+           ~split:
+             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
   in
   if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in
@@ -11033,6 +11022,18 @@ let pane_surface_title (state : state) ~name =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
     (connection_badge state)
 
+(* The row between the strip and the title, then the title. Every other
+   surface draws that row first -- a gap on its own, the box's top edge beside
+   a roster -- and its title under it. The two pane surfaces drew the title
+   first and left the row to the pane, so alone on the surface the gap fell
+   between the title and the pane's own heading: the title sat one row higher
+   than on every other screen, and the heading read as a second, detached
+   block. Beside the other pane the list's box draws its top edge on that row,
+   so a split frame keeps it there. The row count is the same either way. *)
+let pane_surface_header buf cols (state : state) ~name ~split =
+  if not split then box_top buf cols;
+  box_line buf cols (pane_surface_title state ~name)
+
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
 
@@ -11047,8 +11048,8 @@ let code_pane_content_height (state : state) =
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  box_line buf cols (pane_surface_title state ~name:"Workspace / Code");
   let split = cols >= keeper_split_threshold_cols in
+  pane_surface_header buf cols state ~name:"Workspace / Code" ~split;
   let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
@@ -11057,8 +11058,9 @@ let render_code (state : state) =
   let list_pane ~framed pane_buf pane_cols =
     (* Beside the file pane the box is the pane separator; alone on a narrow
        terminal it is the redundant outer frame every other surface dropped
-       (same rule as keeper_detail_pane). *)
-    let framed_top = if framed then framed_top else box_top in
+       (same rule as keeper_detail_pane). Alone, its top row is the gap
+       [pane_surface_header] already drew above the title. *)
+    let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
     let framed_empty = if framed then framed_empty else box_empty in
@@ -11196,7 +11198,7 @@ let render_code (state : state) =
     done;
     framed_bottom pane_buf pane_cols
   in
-  let content_pane pane_buf pane_cols =
+  let content_pane ~split pane_buf pane_cols =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
@@ -11284,7 +11286,7 @@ let render_code (state : state) =
            | None -> with_note)
       | None -> "(Enter opens the selected file)"
     in
-    box_top pane_buf pane_cols;
+    if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
        ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
@@ -11694,11 +11696,11 @@ let render_code (state : state) =
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
      list_pane ~framed:true left_buf left_cols;
-     content_pane right_buf right_cols;
+     content_pane ~split right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
-   else if state.code_focus_file = Right_pane then content_pane buf cols
+   else if state.code_focus_file = Right_pane then content_pane ~split buf cols
    else list_pane ~framed:false buf cols);
   let code_pane =
     if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
@@ -11796,9 +11798,9 @@ let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  box_line buf cols (pane_surface_title state ~name:"Config / Resources");
-  let pane_rows = pane_surface_content_height ~rows in
   let split = cols >= keeper_split_threshold_cols in
+  pane_surface_header buf cols state ~name:"Config / Resources" ~split;
+  let pane_rows = pane_surface_content_height ~rows in
   let list_rows_budget = pane_rows in
   let rows_list =
     match state.resources_list with Some rows -> rows | None -> []
@@ -11809,7 +11811,7 @@ let render_resources (state : state) =
     (* Same rule as the code surface: beside the content pane the box is the
        pane separator; alone on a narrow terminal it is the redundant outer
        frame every other surface dropped. *)
-    let framed_top = if framed then framed_top else box_top in
+    let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
     let framed_empty = if framed then framed_empty else box_empty in
@@ -11864,7 +11866,7 @@ let render_resources (state : state) =
     done;
     framed_bottom pane_buf pane_cols
   in
-  let content_pane pane_buf pane_cols =
+  let content_pane ~split pane_buf pane_cols =
     let selected_resource = List.nth_opt rows_list cursor in
     let error_uri = Option.map fst state.resource_content_error in
     let content_uri = Option.map fst state.resource_content in
@@ -11887,7 +11889,7 @@ let render_resources (state : state) =
       | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
       | None -> "Resource detail"
     in
-    box_top pane_buf pane_cols;
+    if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
        ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
@@ -11944,11 +11946,11 @@ let render_resources (state : state) =
      let left_buf = Buffer.create 1024 in
      let right_buf = Buffer.create 4096 in
      list_pane ~framed:true left_buf left_cols;
-     content_pane right_buf right_cols;
+     content_pane ~split right_buf right_cols;
      write_two_panes buf ~left_cols:left_cols ~left:left_buf
        ~right:right_buf
    end
-   else if state.resource_focus = Right_pane then content_pane buf cols
+   else if state.resource_focus = Right_pane then content_pane ~split buf cols
    else list_pane ~framed:false buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

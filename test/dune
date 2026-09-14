@@ -1488,6 +1488,13 @@
  (modules test_voice_noise_reduction_cleanup)
  (libraries alcotest masc_test_deps unix))
 
+; Mock clock as the Voice MCP call's clock: an answer that arrived as the
+; window closed is the answer, not Timed_out.
+(test
+ (name test_voice_bridge_watched_work)
+ (modules test_voice_bridge_watched_work)
+ (libraries alcotest eio eio.mock masc))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 

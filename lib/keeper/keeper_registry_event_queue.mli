@@ -128,10 +128,13 @@ val cancel_scheduled_wakes_result :
   reason:string ->
   (int, string) result
 (** Cancel every pending [Schedule_due] stimulus whose [schedule_id] is in the
-    given set, through the exact accepted-cancellation transition. Returns the
-    number of pending entries removed. This is the cancel-propagation half of
-    task-370: a cancelled schedule's enqueued utterances leave the durable
-    queue at the cancel boundary instead of riding the wake path. *)
+    given set, through the exact accepted-cancellation transition. Each
+    receipt is projected to the reaction ledger right after its commit, so the
+    outbox is empty when the call returns: the next entry of the same call and
+    the keeper's next turn ack are not refused. Returns the number of pending
+    entries removed. This is the cancel-propagation half of task-370: a
+    cancelled schedule's enqueued utterances leave the durable queue at the
+    cancel boundary instead of riding the wake path. *)
 
 val drain_owner_absent_pending_result :
   base_path:string ->
@@ -142,6 +145,7 @@ val drain_owner_absent_pending_result :
 (** Cancel every pending stimulus owned by a name the Keeper store does not
     know. No maintenance cycle can make that wait productive; retaining it
     produced 881 retained visits for one stale queue and a 913-error day.
+    Projects each receipt after its commit like [cancel_scheduled_wakes_result].
     Returns the number of pending entries removed. *)
 
 val transfer_pending_accepted_result :

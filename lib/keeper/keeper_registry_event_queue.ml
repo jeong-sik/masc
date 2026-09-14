@@ -699,6 +699,68 @@ let cancel_pending_accepted_result
     ()
 ;;
 
+(* Every accepted cancellation leaves its receipt in the single-slot
+   transition outbox, and the state refuses the next cancellation, transfer or
+   turn ack on that queue while the slot is taken. The maintenance projector
+   empties it once a minute over a page of owners. The two folds below cancel
+   several entries of one queue in one call, so they project each receipt to
+   the reaction ledger right after its commit, the way the turn acks already
+   do, instead of leaving the second entry to that sweep. Measured 2026-09-14:
+   a two-occurrence supersede for one keeper was refused with "cannot cancel
+   pending work while an outbox transition exists" on 22 retries in eleven
+   minutes, and every one of the keeper's turn acks in between would have been
+   refused the same way. *)
+let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancellation =
+  let receipt_to_project =
+    match
+      Keeper_event_queue_persistence.cancel_pending_accepted_result
+        ~base_path
+        ~keeper_name:name
+        ~applied_at
+        ~cancellation
+        ()
+    with
+    | Error detail -> Error detail
+    | Ok (Transition_applied receipt) -> Ok (Some receipt)
+    | Ok (Transition_already_applied receipt) ->
+      (* A replay: the receipt is either still waiting in the outbox (the
+         earlier call died between commit and projection) or already projected.
+         The slot holds one entry and nothing commits behind an unprojected
+         one, so a different head means this receipt is already a witness. *)
+      (match
+         Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:name
+       with
+       | Error detail -> Error detail
+       | Ok state ->
+         (match Keeper_event_queue_state.transition_outbox state with
+          | [ entry ]
+            when String.equal entry.receipt.transition_id receipt.transition_id ->
+            Ok (Some receipt)
+          | [] | [ _ ] | _ :: _ :: _ -> Ok None))
+    | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
+      let stage =
+        match stage with
+        | `Checkpoint -> "checkpoint"
+        | `Wal_compaction -> "wal_compaction"
+        | `Projection -> "projection"
+      in
+      Error
+        (Printf.sprintf
+           "accepted cancellation %s committed but %s follow-up failed: %s"
+           receipt.transition_id
+           stage
+           detail)
+  in
+  match receipt_to_project with
+  | Error detail -> Error detail
+  | Ok None -> Ok ()
+  | Ok (Some (receipt : Keeper_event_queue_state.transition_receipt)) ->
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name:name
+      ~expected_transition_id:receipt.transition_id
+;;
+
 let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~reason =
   (* Cancel propagation (task-370): a cancelled schedule's already-enqueued
      utterances must leave the durable queue at the cancel boundary, not ride
@@ -729,11 +791,20 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
       List.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
            if matching selection.source then
+             (* One id per cancelled entry, derived from the entry's exact
+                address. The wall clock it used to carry has two fractional
+                digits, so two entries of one schedule cancelled in the same
+                tick collided as an "accepted cancellation operation conflict"
+                and the second was never cancelled (2026-09-14, the first tick
+                that superseded two pending occurrences at once). The address
+                also makes a retry of the same cancellation a replay rather
+                than a conflict. *)
              let operation_id =
                Printf.sprintf
-                 "schedule-cancel:%s:%s"
+                 "schedule-cancel:%s:%s:%Ld"
                  name
-                 (string_of_float (Time_compat.now ()))
+                 (Keeper_event_queue_state.source_snapshot_ref selection.source)
+                 selection.admitted_revision
              in
              Some
                { Keeper_event_queue_state.source = selection.source
@@ -750,14 +821,13 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
          | Error _ as error -> error
          | Ok count ->
            (match
-              Keeper_event_queue_persistence.cancel_pending_accepted_result
+              commit_and_project_accepted_cancellation
                 ~base_path
-                ~keeper_name:name
+                name
                 ~applied_at
-                ~cancellation
-                ()
+                cancellation
             with
-            | Ok _ -> Ok (count + 1)
+            | Ok () -> Ok (count + 1)
             | Error detail -> Error detail))
       (Ok 0)
       cancelled
@@ -786,11 +856,15 @@ let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
          match acc with
          | Error _ as error -> error
          | Ok count ->
+           (* Same address-derived id as the schedule cancellation above:
+              this fold cancels every pending entry in one tick, so a
+              wall-clock id collided from the second entry on. *)
            let operation_id =
              Printf.sprintf
-               "owner-absent-drain:%s:%s"
+               "owner-absent-drain:%s:%s:%Ld"
                name
-               (string_of_float (Time_compat.now ()))
+               (Keeper_event_queue_state.source_snapshot_ref selection.source)
+               selection.admitted_revision
            in
            let cancellation =
              { Keeper_event_queue_state.source = selection.source
@@ -800,14 +874,13 @@ let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
              }
            in
            (match
-              Keeper_event_queue_persistence.cancel_pending_accepted_result
+              commit_and_project_accepted_cancellation
                 ~base_path
-                ~keeper_name:name
+                name
                 ~applied_at
-                ~cancellation
-                ()
+                cancellation
             with
-            | Ok _ -> Ok (count + 1)
+            | Ok () -> Ok (count + 1)
             | Error detail -> Error detail))
       (Ok 0)
       selections

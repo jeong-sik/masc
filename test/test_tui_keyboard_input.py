@@ -11606,7 +11606,7 @@ def runtime_surface_interaction(
                 "Resolved A / model-a",
                 "ready / reachable",
                 "CLI not probed",
-                "last success",
+                "active (sticky",
                 "unobserved",
                 "single candidate",
             ):

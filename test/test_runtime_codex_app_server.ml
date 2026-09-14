@@ -47,9 +47,6 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
-(* Keeper context is acknowledged before its turn/start request. *)
-let context_injected = {|{"id":4,"result":{}}|}
-let turn_after_context = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -3437,11 +3434,25 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
   let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
   let resume_capture = Filename.temp_file "masc-codex-context-resume-" ".jsonl" in
   let dynamic_context = "DYNAMIC_CONTEXT_RAW\nsecond line" in
+  let effect_count = ref 0 in
+  let tool = Agent_core.Tool.create ~name:"masc_probe"
+    ~description:"Record an effect before configuration refresh" ~parameters:[]
+    (fun _ -> incr effect_count;
+      Ok { Agent_core.Types.content = "effect retained"; content_blocks = None; _meta = None }) in
+  let native_history =
+    [ Agent_core.Types.user_msg "Native correction: use the saved result."
+    ; Agent_core.Types.make_message ~role:Assistant
+        [Agent_core.Types.ToolUse {id="native-effect"; name="masc_probe"; input=`Assoc []}]
+    ; Agent_core.Types.make_message ~role:Tool
+        [Agent_core.Types.ToolResult {tool_use_id="native-effect"; content="already completed";
+         outcome=Tool_succeeded; json=Some (`Assoc ["receipt", `String "durable-native-receipt"]);
+         content_blocks=None}]
+    ; Agent_core.Types.make_message ~role:Assistant [Agent_core.Types.Text "Native work completed."] ] in
   let goal = "WIRE_GOAL_EXACT\nsecond line" in
   (* Named here rather than taken from [run_keeper_turn]'s default, because
      the expectation below is built from it. *)
   let system_prompt = "CONTEXT_WIRE_SYSTEM_PROMPT" in
-  let hooks : Agent_core.Hooks.hooks =
+  let hooks dynamic_context : Agent_core.Hooks.hooks =
     { Agent_core.Hooks.empty with
       before_turn_params =
         Some
@@ -3484,21 +3495,22 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
       Sys.remove start_capture;
       Sys.remove resume_capture)
     (fun () ->
-       with_fixture ~inject_items:true
+       with_fixture
          ~capture_path:start_capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; turn_after_context
+         ; turn_result
+         ; tool_call_request
          ; item_completed
          ; turn_completed
          ]
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools:[tool]
                 ~base_path
-                ~hooks
+                ~hooks:(hooks dynamic_context)
                 ~goal
                 ~system_prompt
                 ~cli_path
@@ -3519,16 +3531,19 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools:[tool]
                 ~base_path
-                ~hooks
+                ~initial_messages:native_history
+                ~hooks:(hooks "UPDATED_CONTEXT")
                 ~goal
-                ~system_prompt
+                ~system_prompt:"UPDATED_SYSTEM_PROMPT"
                 ~cli_path
                 ~model:"gpt-fixture"
                 ()
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> check int "resumed context turn" 2 result.turns);
+       check int "refresh does not repeat completed tool effect" 1 !effect_count;
        let start_instructions =
          request start_capture "thread/start"
          |> request_param_string "developerInstructions"
@@ -3537,44 +3552,54 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          request resume_capture "thread/resume"
          |> request_param_string "developerInstructions"
        in
-       check string
-         "start and resume receive identical developer instructions"
-         start_instructions
-         resume_instructions;
        let posture_note =
          Keeper_codex_runtime.For_testing.native_posture_note
            Runtime_native_tools.Native_read |> String.concat "\n\n"
        in
-       check string "stable instructions retain Keeper prompt and native posture"
-         (system_prompt ^ "\n\n" ^ posture_note) start_instructions;
-       let developer_items capture =
-         request capture "thread/inject_items"
-         |> Yojson.Safe.Util.member "params"
-         |> Yojson.Safe.Util.member "items"
-         |> Yojson.Safe.Util.to_list
-         |> List.map (fun item ->
-           let open Yojson.Safe.Util in
-           check string "context injection role" "developer" (item |> member "role" |> to_string);
-           item |> member "content" |> index 0 |> member "text" |> to_string)
-       in
-       let expected_context_envelope =
-         { (Agent_core.Types.system_msg dynamic_context) with
+       let envelope context =
+         { (Agent_core.Types.system_msg context) with
            metadata = Agent_core.Types.Extra_system_context_provenance.metadata
          }
          |> Keeper_official_client_host.encode_history_message
        in
-       check (list string) "start injects current context"
-         [expected_context_envelope] (developer_items start_capture);
-       let resumed_requests =
-         In_channel.with_open_bin resume_capture In_channel.input_lines
-         |> List.map Yojson.Safe.from_string
-       in
-       check bool "resume does not append developer context to persistent history"
-         false
-         (List.exists (fun json ->
-            Yojson.Safe.Util.member "method" json = `String "thread/inject_items")
-            resumed_requests);
-       let context_envelope_text = List.hd (developer_items start_capture) in
+       check string "start config includes current context"
+         (system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" ^ envelope dynamic_context)
+         start_instructions;
+       let current_prefix = "UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note ^ "\n\n" ^ envelope "UPDATED_CONTEXT" in
+       check bool "resume replaces instructions and current context" true
+         (String.starts_with ~prefix:current_prefix resume_instructions);
+       let external_snapshot = resume_instructions |> String.split_on_char '\n'
+         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
+           | `Assoc fields as json when List.assoc_opt "schema" fields =
+               Some (`String "masc.official-client-canonical-context.v1") -> Some json
+           | _ -> None | exception Yojson.Json_error _ -> None)
+         |> function Some value -> value | None -> fail "missing external canonical snapshot" in
+       let exact_messages = `List (List.map Keeper_official_client_context_codec.to_json native_history) in
+       check string "native exchange and completed effect receipt remain exact"
+         (Yojson.Safe.to_string exact_messages)
+         (Yojson.Safe.Util.member "messages" external_snapshot |> Yojson.Safe.to_string);
+       let expected_digest = exact_messages |> Yojson.Safe.to_string
+         |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+       (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+        | Ok (Some {context_frontier=Some frontier; _}) ->
+          check string "durable frontier matches transmitted snapshot" expected_digest frontier.snapshot_sha256;
+          check int "frontier records all canonical messages" 4 frontier.message_count;
+          check bool "frontier records replaceable channel" true
+            (frontier.delivery = Keeper_official_client_session_store.Replaced_configuration);
+          check bool "only settled vendor turn acknowledges context" true
+            (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"})
+        | Ok _ -> fail "missing durable context frontier"
+        | Error detail -> fail detail);
+       check string "resume retains vendor thread"
+         "thread-1" (request resume_capture "thread/resume" |> request_param_string "threadId");
+       List.iter (fun capture ->
+         let requests = In_channel.with_open_bin capture In_channel.input_lines
+           |> List.map Yojson.Safe.from_string in
+         check bool "current context never accumulates in persistent history" false
+           (List.exists (fun json ->
+             Yojson.Safe.Util.member "method" json = `String "thread/inject_items") requests))
+         [start_capture; resume_capture];
+       let context_envelope_text = envelope dynamic_context in
        let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
        check string
@@ -3687,12 +3712,11 @@ let test_production_keeper_dispatches_codex_runtime () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~inject_items:true
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; turn_after_context
+         ; turn_result
          ; item_completed
          ; turn_completed
          ]
@@ -3718,12 +3742,11 @@ let test_production_keeper_reports_codex_token_usage () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~inject_items:true
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; turn_after_context
+         ; turn_result
          ; item_completed
          ; token_usage_updated
          ; turn_completed
@@ -3760,12 +3783,11 @@ let test_production_keeper_resumes_across_trace_rotation () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~inject_items:true
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; turn_after_context
+         ; turn_result
          ; item_completed
          ; turn_completed
          ]
@@ -3836,13 +3858,12 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path; Sys.remove capture)
     (fun () ->
-       with_fixture ~inject_items:true
+       with_fixture
          ~capture_path:capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; context_injected
-         ; turn_after_context
+         ; turn_result
          ; item_completed
          ; turn_completed
          ]
@@ -3864,18 +3885,16 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
            let open Yojson.Safe.Util in
            In_channel.input_lines input
            |> List.map Yojson.Safe.from_string
-           |> List.find (fun row -> member "method" row = `String "thread/inject_items")
-           |> member "params" |> member "items" |> to_list
-           |> List.find_map (fun item ->
-             if member "role" item <> `String "developer" then None
-             else
-               let text = item |> member "content" |> index 0 |> member "text" |> to_string in
-               match Yojson.Safe.from_string text with
-               | envelope when member "schema" envelope = `String Keeper_official_client_context_codec.schema ->
-                 Some envelope
-               | _ -> None
-               | exception Yojson.Json_error _ -> None)
-           |> function Some envelope -> envelope | None -> fail "current developer context was not injected")
+           |> List.find (fun row -> member "method" row = `String "thread/start")
+           |> member "params" |> member "developerInstructions" |> to_string
+           |> String.split_on_char '\n'
+           |> List.find_map (fun text ->
+             match Yojson.Safe.from_string text with
+             | envelope when member "schema" envelope = `String Keeper_official_client_context_codec.schema ->
+               Some envelope
+             | _ -> None
+             | exception Yojson.Json_error _ -> None)
+           |> function Some envelope -> envelope | None -> fail "current developer context missing from configuration")
        in
        let open Yojson.Safe.Util in
        check string
@@ -4009,12 +4028,11 @@ let test_keeper_projects_typed_tools_and_hooks () =
       ; extra_messages = []
       }
   in
-  with_fixture ~inject_items:true
+  with_fixture
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; context_injected
-    ; turn_after_context
+    ; turn_result
     ; tool_call_request
     ; item_completed
     ; turn_completed

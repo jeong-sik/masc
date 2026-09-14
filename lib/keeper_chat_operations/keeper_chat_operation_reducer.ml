@@ -2,7 +2,7 @@ module Operation = Keeper_chat_operation
 
 type command =
   | Start of { started_at : float }
-  | Requeue_runtime_retry
+  | Requeue_continuation
   | Edit_queued of
       { input : Yojson.Safe.t
       ; execution_digest : string
@@ -20,7 +20,7 @@ type command =
 
 type persistence_intent =
   | Persist_running
-  | Persist_runtime_retry
+  | Persist_continuation
   | Persist_queued_edit
   | Persist_queued_move
   | Persist_terminal
@@ -60,7 +60,16 @@ let validate_terminal_time completed_at =
 ;;
 
 let apply (operation : Operation.t) command =
-  match command, operation.state with
+  let is_member = match operation.batch_membership with
+    | Some member -> not (Operation.Operation_id.equal member.execution_id operation.operation_id)
+    | None -> false in
+  if is_member then Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
+  else if Option.is_some operation.batch_membership && (match command with
+    | Edit_queued _ -> true
+    | Start _ | Requeue_continuation | Move_queued _ | Cancel_queued _
+    | Succeed_running _ | Fail_running _ -> false)
+  then Error (Invalid_input "shared execution input is already frozen")
+  else match command, operation.state with
   | Start { started_at }, Queued ->
     (match Operation.validate_timestamp ~field:"started_at" started_at with
      | Error detail -> Error (Invalid_input detail)
@@ -69,8 +78,8 @@ let apply (operation : Operation.t) command =
          (transition
             { operation with state = Running { started_at } }
             Persist_running))
-  | Requeue_runtime_retry, Running _ ->
-    Ok (transition { operation with state = Queued } Persist_runtime_retry)
+  | Requeue_continuation, Running _ ->
+    Ok (transition { operation with state = Queued } Persist_continuation)
   | Edit_queued { input; execution_digest }, Queued ->
     if String.length execution_digest <> 64
     then Error (Invalid_input "execution_digest must be lowercase SHA-256 hex")
@@ -129,7 +138,7 @@ let apply (operation : Operation.t) command =
   | (Start _ | Edit_queued _ | Move_queued _ | Cancel_queued _),
     (Running _ | Succeeded _ | Failed _ | Cancelled _) ->
     Error Not_queued
-  | (Succeed_running _ | Fail_running _ | Requeue_runtime_retry),
+  | (Succeed_running _ | Fail_running _ | Requeue_continuation),
     (Queued | Succeeded _ | Failed _ | Cancelled _) ->
     Error Not_running
 ;;

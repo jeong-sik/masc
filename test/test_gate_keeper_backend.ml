@@ -49,6 +49,7 @@ let stream_payload_exn
   ; channel_workspace_id
   ; attachments
   ; direct_message
+  ; admission_intent = Server_routes_http_keeper_stream.Queue_only
   ; since_seq = Keeper_chat_event_log.Whole_turn
   }
 

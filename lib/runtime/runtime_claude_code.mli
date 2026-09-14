@@ -249,13 +249,16 @@ val cli_admitted_reasoning_effort :
     caller opts into, not a silent coercion inside the argv builder. *)
 
 val command :
+  system_prompt_file:string option ->
   config ->
   dynamic_tools:dynamic_tool list ->
   reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   session_mode:session_mode ->
   session_id:string ->
   (string list, error) result
-(** The exact argv handed to the CLI. Exposed because the flag set is a
+(** Build CLI argv from the prepared replacement file. A configured prompt
+    requires a file; an unset prompt requires None. Prompt bytes never occupy argv.
+    Exposed because the flag set is a
     contract with the installed client — tests pin how [config.native]
     selects [--tools] and what [--allowedTools] pre-approves (RFC-0390). *)
 

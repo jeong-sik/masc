@@ -65,6 +65,39 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
    healthy · 1 idle" read the same over a dead coordinator as over a live one,
    and the badge also carries the workspace mismatch, which this screen could
    not report at all. *)
+(* A title brackets the words that say a reading is missing, because it has no
+   label to hang them on; a labelled field has one, and the brackets inside it
+   say a second time what the label already said. [Masc_tui_types] carries both
+   spellings for that reason.
+
+   Two rows reached for the title's helper from behind a label -- Overview drew
+   "Pulse: (load failed)" and Lanes "Lane Add-ons: (not loaded)". That
+   typechecks either way, so there was nothing to catch it but a screen. The
+   words themselves are pinned by scripts/check-ssot.sh; which of the two a row
+   asks for is pinned here. *)
+let test_a_labelled_field_does_not_bracket_its_missing_reading () =
+  let asks ~module_path ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+  in
+  let prim = "bin/masc_tui_render_prim.ml" in
+  Alcotest.(check int) "the Pulse field asks for the field spelling" 1
+    (asks ~module_path:prim ~binding_name:"overview_pulse_text"
+       ~callee:"field_missing_reading");
+  Alcotest.(check int) "and not the title's" 0
+    (asks ~module_path:prim ~binding_name:"overview_pulse_text"
+       ~callee:"title_missing_reading");
+  (* The Lanes overview draws both kinds on one screen -- its own title, which
+     brackets, and the add-ons count behind a label, which does not -- so this
+     one reads "at least one of each" rather than a pair of exact counts. *)
+  Alcotest.(check bool) "the add-ons field asks for the field spelling" true
+    (asks ~module_path:render ~binding_name:"render_lanes_overview"
+       ~callee:"field_missing_reading"
+     > 0);
+  Alcotest.(check bool) "and the surface title still brackets its own" true
+    (asks ~module_path:render ~binding_name:"render_lanes_overview"
+       ~callee:"title_missing_reading"
+     > 0)
+
 let test_the_roster_title_says_whether_the_reading_is_live () =
   (* Asked as "at least once", because a surface whose title has two branches
      -- one for the reading, one for the failure -- draws it in each. *)
@@ -658,6 +691,8 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick
+            test_a_labelled_field_does_not_bracket_its_missing_reading
         ; Alcotest.test_case "the roster title says whether it is live" `Quick
             test_the_roster_title_says_whether_the_reading_is_live
         ; Alcotest.test_case "the schedule detail says what became of the wake"

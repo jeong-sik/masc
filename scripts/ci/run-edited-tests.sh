@@ -40,6 +40,28 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
+# WORKAROUND: production-blocking. One suite is a single walk of 74 PTY
+# scenarios and legitimately takes longer than the bound above. It measures
+# 261s locally and CI killed it at exactly 300.0s on two separate runs
+# (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
+# that edits that file is killed whatever it changed. #36349 is one: it
+# repairs four broken layers of that walk, passes locally with no failures,
+# and is why test/test_tui_keyboard_input is red on main.
+#
+# The bound stays 300s for every other suite. Raising it everywhere would
+# double what a genuinely hung suite costs, which is what that bound is for.
+#
+# Removal target: #36343's split. Once enough of that walk's 69 inline
+# scenarios live in focused suites of their own, the walk fits 300s again and
+# this case goes with it. Nothing else belongs in this list -- a second entry
+# means the split stopped being the plan.
+suite_timeout() {
+  case "$1" in
+    */test_tui_keyboard_input.py) echo 600 ;;
+    *) echo "${per_suite_timeout}" ;;
+  esac
+}
+
 # Which suites this pull request runs, from its changed-file list in
 # ${changed}. Sets ${sources} and returns 1 when there is nothing to run, so
 # --self-test can exercise the same code the pull-request path does rather
@@ -585,7 +607,7 @@ while IFS= read -r source; do
   case "${source}" in
     *.py)
       echo "== ${dir}/${name} (dune rule)"
-      if ! timeout "${per_suite_timeout}" \
+      if ! timeout "$(suite_timeout "${source}")" \
         dune build "@${dir}/runtest-${name}" < /dev/null
       then
         failed="${failed}${dir}/${name} (run)\n"

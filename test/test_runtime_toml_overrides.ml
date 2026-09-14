@@ -765,6 +765,29 @@ let test_settings_projection_uses_typed_effective_values () =
     (deadline |> member "effective_value" |> to_string)
 ;;
 
+(* The projector behind [effective_value] is a match on the env name,
+   written apart from the registry it projects and from the [*_env_key]
+   constants the readers use; a row it does not name reaches the operator
+   panel with a null value and an error string. Every registered row must
+   read, so a renamed or misspelled arm shows here and not on the panel. *)
+let test_every_registered_setting_reads_in_the_projection () =
+  let open Yojson.Safe.Util in
+  let unreadable =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+    |> List.filter_map (fun row ->
+      match row |> member "effective_error" with
+      | `Null -> None
+      | error ->
+        Some
+          (Printf.sprintf
+             "%s: %s"
+             (row |> member "env" |> to_string)
+             (Yojson.Safe.to_string error)))
+  in
+  check (list string) "every registered setting has a typed effective value" [] unreadable
+;;
+
 (* The provider-call threshold is the keeper's only bound on a sub-call
    made from inside a tool and the attempt watchdog's threshold. A value that
    is not a finite positive number of seconds must not read as unset (which
@@ -967,6 +990,8 @@ let () =
             test_removed_toml_overlay_is_pending_restart
         ; test_case "settings projection uses typed effective values" `Quick
             test_settings_projection_uses_typed_effective_values
+        ; test_case "every registered setting reads in the projection" `Quick
+            test_every_registered_setting_reads_in_the_projection
         ; test_case "a malformed provider call deadline is a configuration error" `Quick
             test_a_malformed_provider_call_deadline_is_a_configuration_error
         ; test_case "an out-of-range provider call deadline is a configuration error" `Quick

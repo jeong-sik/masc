@@ -70,26 +70,41 @@ val admit_request_body
   -> prepared_request
   -> (serialized_request, Http_client.http_error) result
 
+(** What the measurement is ahead of, and the caller's bounds for it; see
+    {!Prepared_completion_request.next_stage}. *)
+type measurement_next_stage = Prepared_completion_request.next_stage =
+  | Completion of { call_timeout_s : float option }
+  | Stream of
+      { admission_timeout_s : float option
+      ; first_event_timeout_s : float option
+      }
+
 (** Validate and measure the exact prepared request through the provider-native
     count protocol. Invalid local configuration fails before admission or I/O;
     the count round-trip uses the same provider admission authority as
-    completion dispatch, so it waits for the endpoint's permit like the
-    completion does. [timeout_s] bounds the count round trip; [call_timeout_s]
-    bounds the permit wait and the round trip together, in seconds from the
-    call, ending the wait as [TimeoutError { phase = Queue }] and the round
-    trip as [TimeoutError { phase = Non_streaming_body }], both carried as
-    [Input_count_failed (Transport _)]. Neither is a bound without [clock].
-    Unsupported protocols return the existing typed [Unsupported] measurement
-    error; no estimate is used. *)
+    completion dispatch, so it waits for the endpoint's permit like the stage
+    after it. [timeout_s] bounds the count round trip on its own;
+    [next_stage] carries the bounds of the stage the measurement is ahead of,
+    which the permit wait and the round trip run under (the phases are named
+    there). None is a bound without [clock]. Unsupported protocols return the
+    existing typed [Unsupported] measurement error; no estimate is used. *)
 val measure_request
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
-  -> ?call_timeout_s:float
+  -> next_stage:measurement_next_stage
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized_request
   -> (measured_request, Count_tokens_sync.completion_request_error) result
+
+(** Seconds the count round trip took, the permit wait excluded; [None] when
+    it was not timed (no clock). *)
+val count_round_trip_s : measured_request -> float option
+
+(** The admitted request with the first-event budget the stream stage will
+    arm: what the count round trip left of the caller's. *)
+val with_first_event_timeout_s : float -> admitted_request -> admitted_request
 
 (** Resolve the validated positive context-token limit from the explicit
     [max_context] config value, or the exact model capability when none was

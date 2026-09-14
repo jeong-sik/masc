@@ -2590,9 +2590,11 @@ let with_post_stream
     | Some c -> c.sw
     | None -> sw
   in
-  (* Phase 1a: the connection, the request, the response headers and, for a
-     status other than 200, the refusal body, one window under [deadline]
-     (see [pre_header_deadline]). The connection is made inside the window:
+  (* Phase 1a: the connection, the request and the response headers, one
+     window under [deadline] (see [pre_header_deadline]); a refusal's body
+     is then read under what that window has left, and a body that does not
+     arrive in time still yields the refusal, with the status and headers
+     received and no body. The connection is made inside the window:
      the TCP connect and the TLS handshake are the first things a dead or
      blackholed endpoint stalls on. Cohttp_eio.Client.post returns once
      headers are parsed (body is a lazy flow), so a 200's body is left to
@@ -2610,91 +2612,132 @@ let with_post_stream
         :: maybe_add_connection_close ?cache headers
       in
       let hdr = Http.Header.of_list headers_with_length in
+      (* The window as an instant, so the refusal body below can run under
+         what the headers left of it. *)
+      let closes_at =
+        match deadline with
+        | Unbounded -> None
+        | Bounded (clock, timeout_s) -> Some (clock, Eio.Time.now clock +. timeout_s)
+      in
+      let under_the_window f =
+        match closes_at with
+        | None -> f ()
+        | Some (clock, closes_at) ->
+          Eio.Time.with_timeout_exn clock (closes_at -. Eio.Time.now clock) f
+      in
+      (* Held outside the window: when the window closes in the same
+         scheduler pass as the fiber returns, [Fiber.first] keeps the timeout
+         and drops what the fiber returned, connection included. *)
+      let connection = ref None in
+      let close_connection () = Option.iter Eio.Resource.close !connection in
       let* answer =
-        with_explicit_deadline deadline (fun () ->
-          let* conn =
-            match cache with
-            | None -> make_connection ~sw:request_sw ~net ~origin
-            | Some cache ->
-              (match cache_take cache origin with
-               | Some e -> Ok e.connection
-               | None ->
-                 let+ conn = make_connection ~sw:cache.sw ~net ~origin in
-                 Atomic.incr cache.create_count_total;
-                 conn)
-          in
-          let tracked_conn, transport_eof_seen = track_connection_eof conn in
-          let client =
-            Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn)
-          in
-          match
-            Cohttp_eio.Client.post
-              ~sw:request_sw
-              client
-              ~headers:hdr
-              ~body:(Cohttp_eio.Body.of_string body)
-              origin.uri
-          with
-          | resp, resp_body ->
-            let status = Cohttp.Response.status resp in
-            Option.iter
-              (fun observe -> observe (Cohttp.Code.code_of_status status))
-              on_response_status;
-            (match status with
-             | `OK -> Ok (`Stream_headers (conn, transport_eof_seen, resp, resp_body))
-             | _ ->
-               (* A refusal's body is the provider's whole answer, and it is
-                  read inside the window: a peer that sends a status line and
-                  then nothing runs out the same budget a silent prefill
-                  does, instead of holding the caller until something outside
-                  this client gives up. The window closing arrives here as
-                  cancellation, as it does for the request above. *)
-               (match read_response_body resp_body with
-                | Ok refusal_body -> Ok (`Refusal (conn, resp, refusal_body))
-                | Error err ->
-                  Eio.Resource.close conn;
-                  Error err
-                | exception (Eio.Cancel.Cancelled _ as exn) ->
-                  Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
-                  raise exn
-                | exception exn ->
-                  Eio.Resource.close conn;
-                  (match classify_network_exn exn with
-                   | Some e -> Error e
-                   | None when !transport_eof_seen -> Error (eof_error exn)
-                   | None -> raise exn)))
-          | exception (Eio.Cancel.Cancelled _ as exn) ->
-            (* The window closing arrives here as cancellation, and so does
-               an outer cancel; either way the socket must not outlive the
-               request on the cache's switch, and the cancellation itself
-               is not something to classify. *)
-            Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
-            raise exn
-          | exception exn ->
-            (* A peer that closes during the request or the status line
-               reads as End_of_file through the tracked connection; an
-               exception the classifier does not know is that EOF when the
-               tracker saw one, and escapes otherwise. *)
-            Eio.Resource.close conn;
-            (match classify_network_exn exn with
-             | Some e -> Error e
-             | None when !transport_eof_seen -> Error (eof_error exn)
-             | None -> raise exn))
+        match
+          under_the_window (fun () ->
+            let* conn =
+              match cache with
+              | None -> make_connection ~sw:request_sw ~net ~origin
+              | Some cache ->
+                (match cache_take cache origin with
+                 | Some e -> Ok e.connection
+                 | None ->
+                   let+ conn = make_connection ~sw:cache.sw ~net ~origin in
+                   Atomic.incr cache.create_count_total;
+                   conn)
+            in
+            connection := Some conn;
+            let tracked_conn, transport_eof_seen = track_connection_eof conn in
+            let client =
+              Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn)
+            in
+            match
+              Cohttp_eio.Client.post
+                ~sw:request_sw
+                client
+                ~headers:hdr
+                ~body:(Cohttp_eio.Body.of_string body)
+                origin.uri
+            with
+            | resp, resp_body ->
+              let status = Cohttp.Response.status resp in
+              Option.iter
+                (fun observe -> observe (Cohttp.Code.code_of_status status))
+                on_response_status;
+              (match status with
+               | `OK -> Ok (`Stream_headers (conn, transport_eof_seen, resp, resp_body))
+               | _ -> Ok (`Refusal_headers (conn, transport_eof_seen, resp, resp_body)))
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+              (* The window closing arrives here as cancellation, and so does
+                 an outer cancel; either way the socket must not outlive the
+                 request on the cache's switch, and the cancellation itself
+                 is not something to classify. *)
+              Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
+              raise exn
+            | exception exn ->
+              (* A peer that closes during the request or the status line
+                 reads as End_of_file through the tracked connection; an
+                 exception the classifier does not know is that EOF when the
+                 tracker saw one, and escapes otherwise. *)
+              Eio.Resource.close conn;
+              (match classify_network_exn exn with
+               | Some e -> Error e
+               | None when !transport_eof_seen -> Error (eof_error exn)
+               | None -> raise exn))
+        with
+        | answer -> answer
+        | exception (Eio.Cancel.Cancelled _ as exn) ->
+          Eio.Cancel.protect close_connection;
+          raise exn
+        | exception exn ->
+          (* [Eio.Time.Timeout] from the window, or the status observer. *)
+          close_connection ();
+          raise exn
       in
       match answer with
-      | `Refusal (conn, resp, refusal_body) ->
+      | `Refusal_headers (conn, transport_eof_seen, resp, resp_body) ->
         let code = Cohttp.Code.code_of_status (Cohttp.Response.status resp) in
         let resp_headers = Cohttp.Response.headers resp in
         let retry_after_header = retry_after_header_of_response_headers resp_headers in
-        profile_opaque_client_error
-          ~url
-          ~code
-          ~resp_headers
-          ~request_headers:headers_with_length
-          ~request_body:body
-          ~response_body:refusal_body;
-        Eio.Resource.close conn;
-        Error (HttpError { code; body = refusal_body; retry_after_header })
+        (* A refusal's body is the rest of the provider's answer, read under
+           what the window has left. The status line and its headers are
+           already the answer: a body that does not arrive in time does not
+           turn a refusal into silence, so the refusal is returned with what
+           was received and no body. A refusal's connection is never reused. *)
+        let refusal body = Error (HttpError { code; body; retry_after_header }) in
+        Fun.protect
+          ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
+          (fun () ->
+             let read_body () =
+               match read_response_body resp_body with
+               | Ok refusal_body -> Ok (Ok refusal_body)
+               | Error err -> Ok (Error err)
+               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+               | exception exn ->
+                 (match classify_network_exn exn with
+                  | Some e -> Ok (Error e)
+                  | None when !transport_eof_seen -> Ok (Error (eof_error exn))
+                  | None -> raise exn)
+             in
+             let body_result =
+               match closes_at with
+               | None -> read_body ()
+               | Some (clock, closes_at) ->
+                 let left_s = closes_at -. Eio.Time.now clock in
+                 if Float.compare left_s 0.0 <= 0
+                 then Error `Timeout
+                 else Eio.Time.with_timeout clock left_s read_body
+             in
+             match body_result with
+             | Ok (Ok refusal_body) ->
+               profile_opaque_client_error
+                 ~url
+                 ~code
+                 ~resp_headers
+                 ~request_headers:headers_with_length
+                 ~request_body:body
+                 ~response_body:refusal_body;
+               refusal refusal_body
+             | Ok (Error err) -> Error err
+             | Error `Timeout -> refusal "")
       | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
         (try
            (* EOF proves the body was drained; it does not prove the connection
@@ -2727,9 +2770,7 @@ let with_post_stream
     | Error (TimeoutError { phase = Http_operation; _ }), First_event_budget ->
       Error
         (TimeoutError
-           { message =
-               "no response headers, or no complete refusal body, before the \
-                first-event budget ran out"
+           { message = "no response headers before the first-event budget ran out"
            ; phase = First_token
            })
     | (Ok _ | Error _), (Connect_budget | First_event_budget) -> post_result

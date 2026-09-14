@@ -191,14 +191,15 @@ module KeeperKeepalive : sig
       value. *)
 
 
+  (** Env names of the four turn budgets. The readers below, the resolved
+      layer's source attribution and the suites that declare a budget use
+      these, never a re-spelled literal; the settings panel's projector
+      still names them as literals. *)
+
   val stream_idle_timeout_env_key : string
   val first_event_timeout_env_key : string
   val body_timeout_env_key : string
   val provider_call_deadline_env_key : string
-  (** Env names of the four turn budgets, each spelled once: the readers
-      below, the resolved layer's source attribution, and a suite that must
-      not run under an ambient operator value all use these, never a
-      re-spelled literal. *)
 
   val stream_idle_timeout_sec : unit -> float option
   (** Explicit streaming-provider idle-gap timeout as the operator wrote it.
@@ -238,10 +239,11 @@ module KeeperKeepalive : sig
       completion calls, read on every call from the environment (the setting
       has no runtime.toml key). [None] (unset) leaves the runtime builder wire
       untouched. [Some s] forwards to [Builder.with_body_timeout] for sync
-      completion paths. Streaming paths ignore it and rely on
-      {!stream_idle_timeout_sec} plus attempt liveness observation. A declared
-      value that is not a finite positive number of seconds within the
-      declared range raises {!Env_config_core.Config_error}.
+      completion paths. Streaming paths ignore it: their liveness is bounded
+      by the operator's {!stream_idle_timeout_sec} or its floor, and by the
+      attempt watchdog. A declared value that is not a finite positive number
+      of seconds within the declared range raises
+      {!Env_config_core.Config_error}.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. *)
 

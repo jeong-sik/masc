@@ -1,14 +1,17 @@
-(** The call deadline is one window across the exact-fit path.
+(** The caller's budgets are one window across the exact-fit path.
 
     A provider whose requests are measured before they are sent takes the
-    exact-fit arm of the non-streaming route: a count-tokens request, then
-    the completion, each behind the binding's admission permit. The call
-    deadline the caller set bounds that whole path from the call: the
-    measurement's permit wait and round trip spend from it, and the
-    completion arms what they left, its own permit wait included. These
-    cases run the real route against a loopback count-tokens listener and
-    an injected completion transport, and read the elapsed time off the
-    clock, so a hang is a failure at [outer_budget_s] and not a wait. *)
+    exact-fit arm of the route: a count-tokens request, then the completion
+    or the stream, each behind the binding's admission permit. Ahead of a
+    non-streaming completion the call deadline bounds that whole path from
+    the call: the measurement's permit wait and round trip spend from it,
+    and the completion arms what they left, its own permit wait included.
+    Ahead of a stream the admission budget spans both permit waits and the
+    first-event budget spans the count round trip and the stream's wait for
+    its first token. These cases run the real route against a loopback
+    count-tokens listener and an injected transport, and read the elapsed
+    time off the clock, so a hang is a failure at [outer_budget_s] and not
+    a wait. *)
 open Alcotest
 open Llm_provider
 
@@ -116,24 +119,48 @@ let response =
   }
 ;;
 
-(* Records the dispatch, then takes longer than any call here has left. *)
-let slow_transport ~clock ~dispatched : Llm_transport.t =
+(* What the case declares on the agent, and so which route it takes. *)
+type bounds =
+  | Call_deadline
+    (** the non-streaming route under [call_deadline_s] *)
+  | Stream_budgets
+    (** the streaming route with [call_deadline_s] as both the admission
+        and the first-event budget *)
+
+(* Records the dispatch. The completion then takes longer than any call
+   here has left; the stream records the first-event budget it was handed
+   and declines at once, since an injected transport arms that budget
+   itself. *)
+let recording_transport ~clock ~dispatched ~stream_first_event_s : Llm_transport.t =
   { complete_sync =
       (fun _ ->
         dispatched := true;
         Eio.Time.sleep clock provider_takes_s;
         { Llm_transport.response = Ok response; latency_ms = None })
-  ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> fail "the route is non-streaming")
+  ; complete_stream =
+      (fun ?on_telemetry:_ ~on_event:_ request ->
+        dispatched := true;
+        stream_first_event_s := request.Llm_transport.first_event_timeout_s;
+        Error
+          (Http_client.NetworkError
+             { message = "the stream declines"; kind = Http_client.Unknown }))
   }
 ;;
 
-let build_agent ~net ~provider_config ~transport =
-  Agent_core.Builder.create ~net ~model:provider_config.Provider_config.model_id
-  |> Agent_core.Builder.with_provider_config provider_config
-  |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
-  |> Agent_core.Builder.without_event_bus
-  |> Agent_core.Builder.with_transport transport
-  |> Agent_core.Builder.with_call_timeout call_deadline_s
+let build_agent ~net ~provider_config ~transport ~bounds =
+  let builder =
+    Agent_core.Builder.create ~net ~model:provider_config.Provider_config.model_id
+    |> Agent_core.Builder.with_provider_config provider_config
+    |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
+    |> Agent_core.Builder.without_event_bus
+    |> Agent_core.Builder.with_transport transport
+  in
+  (match bounds with
+   | Call_deadline -> Agent_core.Builder.with_call_timeout call_deadline_s builder
+   | Stream_budgets ->
+     builder
+     |> Agent_core.Builder.with_admission_timeout call_deadline_s
+     |> Agent_core.Builder.with_first_event_timeout call_deadline_s)
   |> Agent_core.Builder.build_safe
   |> function
   | Ok agent -> agent
@@ -150,7 +177,7 @@ let describe = function
   | Ended (Error error) -> Agent_core.Error.to_string error
 ;;
 
-let run_case ~behaviour ~holder f =
+let run_case ?(bounds = Call_deadline) ~behaviour ~holder f =
   Eio_main.run
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -172,19 +199,34 @@ let run_case ~behaviour ~holder f =
        Eio.Promise.await listener.first_count_request;
        hold ()));
   let dispatched = ref false in
+  let stream_first_event_s = ref None in
   let agent =
-    build_agent ~net ~provider_config ~transport:(slow_transport ~clock ~dispatched)
+    build_agent
+      ~net
+      ~provider_config
+      ~transport:(recording_transport ~clock ~dispatched ~stream_first_event_s)
+      ~bounds
   in
+  let prompt = "measure, then complete" in
   let started = Eio.Time.now clock in
   let outcome =
     try
       Eio.Time.with_timeout_exn clock outer_budget_s (fun () ->
-        Ended (Agent_core.Agent.run ~sw ~clock agent "measure, then complete"))
+        Ended
+          (match bounds with
+           | Call_deadline -> Agent_core.Agent.run ~sw ~clock agent prompt
+           | Stream_budgets ->
+             Agent_core.Agent.run_stream ~sw ~clock ~on_event:(fun _ -> ()) agent prompt))
     with
     | Eio.Time.Timeout -> Hung
   in
   let elapsed = Eio.Time.now clock -. started in
-  f ~outcome ~elapsed ~dispatched:!dispatched ~count_posts:(Atomic.get listener.count_posts);
+  f
+    ~outcome
+    ~elapsed
+    ~dispatched:!dispatched
+    ~count_posts:(Atomic.get listener.count_posts)
+    ~stream_first_event_s:!stream_first_event_s;
   Eio.Promise.resolve resolve_release ()
 ;;
 
@@ -222,7 +264,7 @@ let check_one_window elapsed =
    nothing measured and nothing sent. *)
 let test_the_measurements_permit_wait_ends_at_the_call_deadline () =
   run_case ~behaviour:Answers_at_once ~holder:From_the_start
-  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ->
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
   check_timeout ~expected:Http_client.Queue ~stage:"count-tokens request" outcome elapsed;
   check_one_window elapsed;
   check int "nothing was measured" 0 count_posts;
@@ -236,7 +278,7 @@ let test_the_completions_permit_wait_runs_under_what_the_measurement_left () =
   run_case
     ~behaviour:(Answers_after count_tokens_delay_s)
     ~holder:Once_the_measurement_is_in_flight
-  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ->
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
   check_timeout ~expected:Http_client.Queue ~stage:"(Complete.complete)" outcome elapsed;
   check_one_window elapsed;
   if elapsed >= two_windows_total_s
@@ -249,7 +291,7 @@ let test_the_completions_permit_wait_runs_under_what_the_measurement_left () =
    the window; the completion then runs under what the measurement left. *)
 let test_the_count_tokens_round_trip_spends_from_the_window () =
   run_case ~behaviour:(Answers_after count_tokens_delay_s) ~holder:Nobody
-  @@ fun ~outcome ~elapsed ~dispatched ~count_posts:_ ->
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts:_ ~stream_first_event_s:_ ->
   check_timeout
     ~expected:Http_client.Non_streaming_body
     ~stage:"during the provider round trip"
@@ -265,7 +307,7 @@ let test_the_count_tokens_round_trip_spends_from_the_window () =
    deadline is what ends it. *)
 let test_a_measurement_that_never_answers_ends_at_the_call_deadline () =
   run_case ~behaviour:Never_answers ~holder:Nobody
-  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ->
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
   check_timeout
     ~expected:Http_client.Non_streaming_body
     ~stage:"during the count-tokens round trip"
@@ -276,10 +318,99 @@ let test_a_measurement_that_never_answers_ends_at_the_call_deadline () =
   check bool "the completion was never dispatched" false dispatched
 ;;
 
+(* Ahead of a stream. The permit is held before the case starts: the
+   measurement's wait for it ends at the admission budget, as the stream's
+   own would, with nothing measured and nothing sent. *)
+let test_ahead_of_a_stream_the_measurements_permit_wait_ends_at_the_admission_budget () =
+  run_case ~bounds:Stream_budgets ~behaviour:Answers_at_once ~holder:From_the_start
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
+  check_timeout ~expected:Http_client.Queue ~stage:"count-tokens request" outcome elapsed;
+  check_one_window elapsed;
+  check int "nothing was measured" 0 count_posts;
+  check bool "the stream was never dispatched" false dispatched
+;;
+
+(* Ahead of a stream, the measurement never answers and no body budget is
+   declared: the count round trip is provider silence before the first
+   token, and the first-event budget ends it. *)
+let test_the_count_tokens_round_trip_spends_from_the_first_event_budget () =
+  run_case ~bounds:Stream_budgets ~behaviour:Never_answers ~holder:Nobody
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
+  check_timeout
+    ~expected:Http_client.First_token
+    ~stage:"during the count-tokens round trip"
+    outcome
+    elapsed;
+  check_one_window elapsed;
+  check int "the measurement was sent" 1 count_posts;
+  check bool "the stream was never dispatched" false dispatched
+;;
+
+(* The measurement answers late but inside the first-event budget; the
+   stream is then handed what the round trip left of it, not a fresh
+   budget. The transport declines at once, so the case reads the budget it
+   was handed rather than waiting on it. *)
+let test_the_stream_arms_what_the_count_round_trip_left_of_the_first_event_budget () =
+  run_case ~bounds:Stream_budgets ~behaviour:(Answers_after count_tokens_delay_s) ~holder:Nobody
+  @@ fun ~outcome:_ ~elapsed:_ ~dispatched ~count_posts ~stream_first_event_s ->
+  check int "the request was measured once" 1 count_posts;
+  check bool "the stream was dispatched" true dispatched;
+  let left_s = call_deadline_s -. count_tokens_delay_s in
+  match stream_first_event_s with
+  | Some handed_s ->
+    (* The round trip took at least the listener's delay, so the remainder
+       is at most [left_s]; the slack covers what the runner added. *)
+    if handed_s > left_s || handed_s < left_s -. slack_s
+    then
+      failf
+        "the stream was handed a %.2fs first-event budget; a %.1fs budget less the %.1fs \
+         round trip is %.1fs"
+        handed_s
+        call_deadline_s
+        count_tokens_delay_s
+        left_s
+  | None -> fail "the stream was handed no first-event budget"
+;;
+
+(* The measurement gets the permit and answers late; the holder joined the
+   FIFO meanwhile, so the stream queues behind it under what the admission
+   budget has left, not under a fresh budget. *)
+let test_the_streams_permit_wait_runs_under_what_the_admission_budget_has_left () =
+  run_case
+    ~bounds:Stream_budgets
+    ~behaviour:(Answers_after count_tokens_delay_s)
+    ~holder:Once_the_measurement_is_in_flight
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
+  check_timeout ~expected:Http_client.Queue ~stage:"(Complete.complete_stream)" outcome elapsed;
+  check_one_window elapsed;
+  if elapsed >= two_windows_total_s
+  then failf "ended at %.2fs: the stream was given a second admission budget" elapsed;
+  check int "the request was measured once" 1 count_posts;
+  check bool "the stream was never dispatched" false dispatched
+;;
+
 let () =
   Alcotest.run
     "exact-fit call window"
-    [ ( "one window from the call"
+    [ ( "ahead of a stream"
+      , [ test_case
+            "the measurement's permit wait ends at the admission budget"
+            `Quick
+            test_ahead_of_a_stream_the_measurements_permit_wait_ends_at_the_admission_budget
+        ; test_case
+            "the count-tokens round trip spends from the first-event budget"
+            `Quick
+            test_the_count_tokens_round_trip_spends_from_the_first_event_budget
+        ; test_case
+            "the stream arms what the count round trip left of the first-event budget"
+            `Quick
+            test_the_stream_arms_what_the_count_round_trip_left_of_the_first_event_budget
+        ; test_case
+            "the stream's permit wait runs under what the admission budget has left"
+            `Quick
+            test_the_streams_permit_wait_runs_under_what_the_admission_budget_has_left
+        ] )
+    ; ( "one window from the call"
       , [ test_case
             "the measurement's permit wait ends at the call deadline"
             `Quick

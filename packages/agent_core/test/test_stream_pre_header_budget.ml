@@ -268,7 +268,12 @@ let test_a_complete_refusal_is_still_the_typed_http_error () =
    the reader is handed what is left of that budget, so the silence after
    the headers ends at the budget counted from the request, not at a second
    full budget counted from the first body read. The upper bound of the
-   window is below the two-window total, so the case tells them apart. *)
+   window is below the two-window total, so the case tells them apart.
+
+   The accounting is split between [with_post_stream], which spends the
+   pre-header part and hands over what is left, and the streaming
+   completion, which arms that remainder on the reader; only the streaming
+   completion observes both halves, so this case drives it. *)
 let late_headers_after_s = 0.4
 let one_window_budget_s = 0.5
 let two_windows_total_s = late_headers_after_s +. one_window_budget_s
@@ -276,9 +281,36 @@ let two_windows_total_s = late_headers_after_s +. one_window_budget_s
 let test_the_first_event_budget_is_one_window_across_the_headers () =
   with_env @@ fun ~sw ~clock ~net ->
   let port = start_late_headers_server ~sw ~net ~clock ~headers_after_s:late_headers_after_s in
-  let outcome, elapsed =
-    run ~clock ~net ~scheme:"http" ~port ~first_event_timeout_s:one_window_budget_s ()
+  let config =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"one-window"
+      ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+      ~request_path:"/v1/chat/completions"
+      ~temperature:0.0
+      ~max_tokens:16
+      ()
   in
+  let started = Eio.Time.now clock in
+  let outcome =
+    try
+      Eio.Time.with_timeout_exn clock outer_budget_s (fun () ->
+        Ended
+          (Result.map
+             (fun (_ : Llm_provider.Types.api_response) -> ())
+             (Llm_provider.Complete.complete_stream
+                ~sw
+                ~net
+                ~clock
+                ~first_event_timeout_s:one_window_budget_s
+                ~config
+                ~messages:[ Llm_provider.Types.user_msg "hello" ]
+                ~on_event:(fun _ -> ())
+                ())))
+    with
+    | Eio.Time.Timeout -> Hung
+  in
+  let elapsed = Eio.Time.now clock -. started in
   (match outcome with
    | Ended (Error (Http_client.TimeoutError { phase = Http_client.First_token; _ })) -> ()
    | other ->

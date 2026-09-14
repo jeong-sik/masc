@@ -85,10 +85,12 @@ type options =
         back to [body_timeout_s], then to [stream_idle_timeout_s], and stays
         unarmed only when none of the three is set; inter-token idle still
         guards once the stream produces, and [connect_timeout_s] still guards
-        connection setup. On the exact-fit path the count-tokens round trip
-        is provider silence before the first token too: it spends from this
-        window first (ending as [TimeoutError { phase = First_token }]) and
-        the stream arms what it left. @since 0.218.0 *)
+        connection setup. On the exact-fit path, when this is declared, the
+        count-tokens round trip is provider silence before the first token
+        too: it spends from this window first (ending as
+        [TimeoutError { phase = First_token }]) and the stream arms what it
+        left; the fallbacks above do not reach the round trip, whose only
+        other bound is [body_timeout_s]. @since 0.218.0 *)
   ; body_timeout_s : float option
     (** Per-call total deadline applied to non-streaming HTTP response body
         consumption. Threaded through {!Pipeline.stage_route} into both the
@@ -129,8 +131,10 @@ type options =
         into {!Llm_provider.Complete.complete_stream_serialized} and
         {!Llm_provider.Complete.complete_stream_admitted}; on the exact-fit
         path it is one window from the call over both permit waits, the
-        count-tokens request's and the stream's. The non-streaming path's
-        whole-call bound is [call_timeout_s]. Requires [clock].
+        count-tokens request's and the stream's, and over the count round
+        trip between them, which a late permit leaves only what the window
+        has left. The non-streaming path's whole-call bound is
+        [call_timeout_s]. Requires [clock].
         @since 0.231.15 *)
   ; hooks : Hooks.hooks
   ; guardrails_async : Guardrails_async.t

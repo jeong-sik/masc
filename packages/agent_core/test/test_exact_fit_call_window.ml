@@ -7,8 +7,9 @@
     the call: the measurement's permit wait and round trip spend from it,
     and the completion arms what they left, its own permit wait included.
     Ahead of a stream the admission budget spans both permit waits and the
-    first-event budget spans the count round trip and the stream's wait for
-    its first token. These cases run the real route against a loopback
+    count round trip between them, and the first-event budget spans the
+    count round trip and the stream's wait for its first token. These
+    cases run the real route against a loopback
     count-tokens listener and an injected transport, and read the elapsed
     time off the clock, so a hang is a failure at [outer_budget_s] and not
     a wait. *)
@@ -23,6 +24,16 @@ let call_deadline_s = 1.0
 let slack_s = 0.5
 let count_tokens_delay_s = 0.6
 let two_windows_total_s = count_tokens_delay_s +. call_deadline_s
+
+(* A permit released this late leaves the round trip less of the window
+   than the listener's delay: [late_grant_s +. count_tokens_delay_s] is past
+   [call_deadline_s]. *)
+let late_grant_s = 0.9
+
+(* What a loopback count-tokens round trip adds beyond the listener's own
+   delay: connecting, the request, the answer. A budget handed on below
+   [left - this] was over-charged. *)
+let round_trip_overhead_s = 0.3
 let provider_takes_s = 5.0
 let outer_budget_s = 10.0
 
@@ -84,6 +95,7 @@ let start_count_tokens_server ~sw ~net ~clock ~behaviour =
 type holder =
   | Nobody
   | From_the_start
+  | Until of float (** holds the permit from the start and releases it this late *)
   | Once_the_measurement_is_in_flight
     (** joins the FIFO while the measurement holds the permit, so the
         permit passes to the holder and the completion queues behind it *)
@@ -188,6 +200,10 @@ let run_case ?(bounds = Call_deadline) ~behaviour ~holder f =
   (match holder with
    | Nobody -> ()
    | From_the_start -> Eio.Fiber.fork ~sw hold
+   | Until release_s ->
+     Eio.Fiber.fork ~sw (fun () ->
+       Provider_admission.with_admission ~config:provider_config (fun () ->
+         Eio.Time.sleep clock release_s))
    | Once_the_measurement_is_in_flight ->
      Eio.Fiber.fork ~sw (fun () ->
        Eio.Promise.await listener.first_count_request;
@@ -353,17 +369,40 @@ let test_the_stream_arms_what_the_count_round_trip_left_of_the_first_event_budge
   match stream_first_event_s with
   | Some handed_s ->
     (* The round trip took at least the listener's delay, so the remainder
-       is at most [left_s]; the slack covers what the runner added. *)
-    if handed_s > left_s || handed_s < left_s -. slack_s
+       is at most [left_s], and at most the round trip's overhead less. *)
+    if handed_s > left_s || handed_s < left_s -. round_trip_overhead_s
     then
       failf
         "the stream was handed a %.2fs first-event budget; a %.1fs budget less the %.1fs \
-         round trip is %.1fs"
+         round trip is %.1fs, less at most %.1fs of overhead"
         handed_s
         call_deadline_s
         count_tokens_delay_s
         left_s
+        round_trip_overhead_s
   | None -> fail "the stream was handed no first-event budget"
+;;
+
+(* The permit is released late, inside the admission budget; the round
+   trip that follows would outrun the budget, and the stream would not be
+   sent past it, so the budget ends the round trip where it stands rather
+   than after a full listener delay. *)
+let test_a_late_permit_leaves_the_round_trip_what_the_admission_budget_has_left () =
+  run_case
+    ~bounds:Stream_budgets
+    ~behaviour:(Answers_after count_tokens_delay_s)
+    ~holder:(Until late_grant_s)
+  @@ fun ~outcome ~elapsed ~dispatched ~count_posts ~stream_first_event_s:_ ->
+  check_timeout
+    ~expected:Http_client.Queue
+    ~stage:"during the count-tokens round trip, which the admission budget spans"
+    outcome
+    elapsed;
+  check_one_window elapsed;
+  if elapsed >= late_grant_s +. count_tokens_delay_s
+  then failf "ended at %.2fs: the round trip ran past the admission budget" elapsed;
+  check int "the measurement was sent" 1 count_posts;
+  check bool "the stream was never dispatched" false dispatched
 ;;
 
 (* The measurement gets the permit and answers late; the holder joined the
@@ -403,6 +442,10 @@ let () =
             "the stream's permit wait runs under what the admission budget has left"
             `Quick
             test_the_streams_permit_wait_runs_under_what_the_admission_budget_has_left
+        ; test_case
+            "a late permit leaves the round trip what the admission budget has left"
+            `Quick
+            test_a_late_permit_leaves_the_round_trip_what_the_admission_budget_has_left
         ] )
     ; ( "one window from the call"
       , [ test_case

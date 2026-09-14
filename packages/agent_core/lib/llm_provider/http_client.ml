@@ -2474,10 +2474,65 @@ let eof_error exn =
   NetworkError { message = Printexc.to_string exn; kind = End_of_file }
 ;;
 
+(* Which budget bounds the phase before the response headers, so the
+   timeout it raises is reported as the budget that was spent. *)
+type pre_header_budget =
+  | Connect_budget
+  | First_event_budget
+
+(* The phase before the response headers -- the connection (DNS, TCP, TLS),
+   the request and the wait for the status line -- runs under the narrower
+   of the connect budget and the first-event budget. Until 2026-09-14 it ran
+   under the connect budget alone, and a provider with no connect-timeout-s
+   declared (nine of the ten live providers) had no bound on it at all: the
+   first-event budget is anchored at the first body read, which a server
+   that accepts the request and never answers never reaches. The one live
+   provider that declared a connect budget (ollama_cloud, 180 s) spent it on
+   that wait six times on 2026-09-14 alone, so the wait is real, and on the
+   other nine only the keeper's watchdog stood behind it. The first-event
+   budget is the operator's word on how long a provider may stay silent
+   before its first token; silence before the headers is that silence. *)
+let pre_header_deadline
+      ~(connect : 'clock explicit_deadline)
+      ~(first_event : 'clock explicit_deadline)
+  : 'clock explicit_deadline * pre_header_budget
+  =
+  match connect, first_event with
+  | Unbounded, Unbounded -> Unbounded, Connect_budget
+  | (Bounded _ as connect), Unbounded -> connect, Connect_budget
+  | Unbounded, (Bounded _ as first_event) -> first_event, First_event_budget
+  | Bounded (clock, connect_s), Bounded (_, first_event_s) ->
+    if connect_s <= first_event_s
+    then Bounded (clock, connect_s), Connect_budget
+    else Bounded (clock, first_event_s), First_event_budget
+;;
+
+let%test "pre-header phase: a first-event budget stands in for an undeclared connect budget" =
+  match pre_header_deadline ~connect:Unbounded ~first_event:(Bounded ((), 600.0)) with
+  | Bounded ((), 600.0), First_event_budget -> true
+  | _ -> false
+;;
+
+let%test "pre-header phase: the narrower declared budget names itself" =
+  match
+    ( pre_header_deadline ~connect:(Bounded ((), 30.0)) ~first_event:(Bounded ((), 600.0))
+    , pre_header_deadline ~connect:(Bounded ((), 900.0)) ~first_event:(Bounded ((), 600.0)) )
+  with
+  | (Bounded ((), 30.0), Connect_budget), (Bounded ((), 600.0), First_event_budget) -> true
+  | _ -> false
+;;
+
+let%test "pre-header phase: nothing declared stays unbounded" =
+  match pre_header_deadline ~connect:Unbounded ~first_event:Unbounded with
+  | Unbounded, Connect_budget -> true
+  | _ -> false
+;;
+
 let with_post_stream
       ?cache
       ?clock
       ?connect_timeout_s
+      ?first_event_timeout_s
       ?on_response_status
       ~net
       ~url
@@ -2486,12 +2541,22 @@ let with_post_stream
       ~f
       ()
   =
-  let* deadline =
+  let* connect_deadline =
     resolve_explicit_deadline
       ~operation:"with_post_stream"
       ~parameter:"connect_timeout_s"
       ~clock
       ~timeout_s:connect_timeout_s
+  in
+  let* first_event_deadline =
+    resolve_explicit_deadline
+      ~operation:"with_post_stream"
+      ~parameter:"first_event_timeout_s"
+      ~clock
+      ~timeout_s:first_event_timeout_s
+  in
+  let deadline, pre_header_budget =
+    pre_header_deadline ~connect:connect_deadline ~first_event:first_event_deadline
   in
   Eio.Switch.run
   @@ fun sw ->
@@ -2503,47 +2568,60 @@ let with_post_stream
     | Some c -> c.sw
     | None -> sw
   in
-  (* Phase 1a: connect + post + response headers, bounded by
-     [connect_timeout_s]. Cohttp_eio.Client.post returns once headers are
+  (* Phase 1a: the connection, the request and the response headers, one
+     window under [deadline] (see [pre_header_deadline]). The connection is
+     made inside the window: DNS, TCP and the TLS handshake are the first
+     things a dead or blackholed endpoint stalls on, and a budget that
+     started after them bounded only the part of the wait that was already
+     the easiest to end. Cohttp_eio.Client.post returns once headers are
      parsed (body is a lazy flow), so wrapping only this stage in
-     [catch_network] keeps a connect / header-phase stall as
-     [TimeoutError { phase = Http_operation }] without absorbing body-phase
-     timeouts (first-token / prefill wait, inter-chunk idle).
+     [catch_network] keeps a pre-header stall as a [TimeoutError] named for
+     its budget without absorbing body-phase timeouts (first-token / prefill
+     wait, inter-chunk idle).
 
      Streaming is handled manually rather than through [with_client] so the
      connection is NOT parked until [f] has fully consumed the reader. *)
   let post_result =
     catch_network (fun () ->
       let* origin = parse_uri url in
-      let* conn =
-        match cache with
-        | None -> make_connection ~sw:request_sw ~net ~origin
-        | Some cache ->
-          (match cache_take cache origin with
-           | Some e -> Ok e.connection
-           | None ->
-             let+ conn = make_connection ~sw:cache.sw ~net ~origin in
-             Atomic.incr cache.create_count_total;
-             conn)
-      in
-      let tracked_conn, transport_eof_seen = track_connection_eof conn in
-      let client = Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn) in
       let headers_with_length =
         ("content-length", string_of_int (String.length body))
         :: maybe_add_connection_close ?cache headers
       in
       let hdr = Http.Header.of_list headers_with_length in
+      let* conn, transport_eof_seen, resp, resp_body =
+        with_explicit_deadline deadline (fun () ->
+          let* conn =
+            match cache with
+            | None -> make_connection ~sw:request_sw ~net ~origin
+            | Some cache ->
+              (match cache_take cache origin with
+               | Some e -> Ok e.connection
+               | None ->
+                 let+ conn = make_connection ~sw:cache.sw ~net ~origin in
+                 Atomic.incr cache.create_count_total;
+                 conn)
+          in
+          let tracked_conn, transport_eof_seen = track_connection_eof conn in
+          let client =
+            Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn)
+          in
+          match
+            Cohttp_eio.Client.post
+              ~sw:request_sw
+              client
+              ~headers:hdr
+              ~body:(Cohttp_eio.Body.of_string body)
+              origin.uri
+          with
+          | resp, resp_body -> Ok (conn, transport_eof_seen, resp, resp_body)
+          | exception exn ->
+            (* The window closing arrives here as cancellation; the socket
+               must not outlive the request on the cache's switch. *)
+            Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
+            raise exn)
+      in
       try
-        let* resp, resp_body =
-          with_explicit_deadline deadline (fun () ->
-            Ok
-              (Cohttp_eio.Client.post
-                 ~sw:request_sw
-                 client
-                 ~headers:hdr
-                 ~body:(Cohttp_eio.Body.of_string body)
-                 origin.uri))
-        in
         let status = Cohttp.Response.status resp in
         Option.iter
           (fun observe -> observe (Cohttp.Code.code_of_status status))
@@ -2586,6 +2664,22 @@ let with_post_stream
          | Some e -> Error e
          | None when !transport_eof_seen -> Error (eof_error exn)
          | None -> raise exn))
+  in
+  (* [catch_network] names every [Eio.Time.Timeout] [Http_operation]. When
+     the window that closed was the first-event budget, the provider was
+     silent for the whole time the operator allowed before a first token,
+     and the phase says so: the consumers that rotate on a silent prefill
+     read [First_token], and a connect budget that was never declared is
+     not what ran out. *)
+  let post_result =
+    match post_result, pre_header_budget with
+    | Error (TimeoutError { phase = Http_operation; _ }), First_event_budget ->
+      Error
+        (TimeoutError
+           { message = "no response headers before the first-event budget ran out"
+           ; phase = First_token
+           })
+    | (Ok _ | Error _), (Connect_budget | First_event_budget) -> post_result
   in
   (* Phase 1b: body consumption. Deliberately OUTSIDE [catch_network]: a
      body-phase [Eio.Time.Timeout] is phase-distinct from the connect /

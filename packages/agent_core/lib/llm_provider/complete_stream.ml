@@ -596,6 +596,7 @@ let complete_stream_http
           ?cache:connection_cache
           ?clock
           ?connect_timeout_s:config.connect_timeout_s
+          ?first_event_timeout_s
           ~on_response_status
           ~net
           ~url

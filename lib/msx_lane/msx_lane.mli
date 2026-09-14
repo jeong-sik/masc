@@ -25,8 +25,8 @@ val key_of_string : string -> (key, string) result
 val key_to_string : key -> string
 (** Canonical ledger spelling; inverse of {!key_of_string} for named keys. *)
 
-val is_bitmap_mode : string -> bool
-(** Whether an observation [mode] name draws pixels rather than a name table:
+val is_bitmap_mode : Msx.display_mode -> bool
+(** Whether a display mode draws pixels rather than a name table:
     GRAPHIC4-7 and the undefined combinations. In those the observation's
     [screen_text] is empty — the name table underneath is leftover noise, and
     sending it anyway cost ~2 KB per screen (measured over 315 keeper calls
@@ -117,13 +117,15 @@ type loaded = {
 
 val load :
   ledger_dir:string ->
-  roms_dir:string ->
+  roms_dir:string option ->
   cart_path:string option ->
   disk_path:string option ->
   (loaded, error) result
-(** Creates the workspace machine, replacing any previous one. [roms_dir]
-    holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub);
-    the empty string means no BIOS and the bus reads 0xFF. The ledger is
+(** Creates the workspace machine, replacing any previous one. [Some roms_dir]
+    holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub),
+    all three required -- a directory missing one is [Unreadable] naming that
+    file, never a machine with an empty ROM in it. [None] means no BIOS and
+    the bus reads 0xFF. The ledger is
     [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
 
     [disk_path] plugs a raw .dsk floppy image into drive A and boots it

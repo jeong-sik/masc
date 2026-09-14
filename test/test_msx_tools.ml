@@ -69,6 +69,12 @@ let test_rendered_pixel_snapshot () =
   write_code bios 0 [0xc3; 0x10; 0x40]; (* JP 4010; cartridge page is slot 2 *)
   Out_channel.with_open_bin (Filename.concat roms_dir "cbios_main_msx2.rom")
     (fun oc -> output_bytes oc bios);
+  (* The lane refuses a directory without the whole C-BIOS triple; the logo
+     and sub ROMs are never reached by this firmware, so zeros suffice. *)
+  List.iter (fun name ->
+    Out_channel.with_open_bin (Filename.concat roms_dir name)
+      (fun oc -> output_bytes oc (Bytes.make 16384 '\000')))
+    [ "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
   let cart = Bytes.make 16384 '\000' in
   write_code cart 0 [0x41; 0x42; 0x10; 0x40];
   write_code cart 0x10 [
@@ -81,7 +87,7 @@ let test_rendered_pixel_snapshot () =
     0xc3; 0x1b; 0x40 ];
   let cart_path = Filename.concat base_path "pixel-toggle.rom" in
   Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
-  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir
+  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir:(Some roms_dir)
                      ~cart_path:(Some cart_path) ~disk_path:None));
   let first = read () in
   let bytes = String.sub first.rgb 0 (String.length first.rgb) in
@@ -460,7 +466,7 @@ let test_concurrent_loads_announce_the_medium_once () =
   let load () =
     Atomic.incr arrived;
     while Atomic.get arrived < racers do Domain.cpu_relax () done;
-    Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:(Some cart_path) ~disk_path:None
+    Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:(Some cart_path) ~disk_path:None
   in
   let transitions =
     List.init racers (fun _ -> Domain.spawn load)
@@ -525,7 +531,7 @@ let test_rejected_disk_preserves_machine () =
   List.iter (fun size ->
     let disk_path = Filename.concat base_path (Printf.sprintf "short-%d.dsk" size) in
     Out_channel.with_open_bin disk_path (fun oc -> output_string oc (String.make size '\000'));
-    (match Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:(Some disk_path) with
+    (match Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:(Some disk_path) with
      | Error (Msx_lane.Invalid_request _) -> ()
      | Error e -> fail (Msx_lane.error_to_string e)
      | Ok _ -> fail "unreadable boot sector must reject load");
@@ -635,7 +641,7 @@ let disk_swap_fixture base_path =
   Bytes.fill disk 512 512 'B';
   Out_channel.with_open_bin b (fun oc -> output_bytes oc disk);
   let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
-  let loaded = Msx_lane.load ~ledger_dir ~roms_dir:roms ~cart_path:None ~disk_path:(Some a)
+  let loaded = Msx_lane.load ~ledger_dir ~roms_dir:(Some roms) ~cart_path:None ~disk_path:(Some a)
     |> lane_observation "synthetic disk boot" in
   check (option string) "disk A is mounted" (Some "A.dsk") loaded.observation.disk;
   ledger_dir, a, b
@@ -714,16 +720,96 @@ let test_disk_backup_failure_preserves_machine () =
 
 (* Bitmap modes draw into pixels, so their name table is noise; the
    observation sends an empty screen_text there instead of ~2 KB of it. The
-   classification is what the diet hangs on, so pin the mode names. *)
+   classification is what the diet hangs on, so pin every variant of
+   Msx.display_mode (F182): the judgement reads the variant, not the name
+   display_mode_to_string renders, so a name starting with "UNDEFINED" is
+   no longer something a caller can hand it -- the table below is the whole
+   sum, and a new mode fails this test's exhaustiveness at compile time. *)
 let test_bitmap_mode_classification () =
-  check bool "GRAPHIC4 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC4");
-  check bool "GRAPHIC6 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC6");
-  check bool "GRAPHIC7 is a bitmap mode" true (Msx_lane.is_bitmap_mode "GRAPHIC7");
-  check bool "undefined combinations count as bitmap" true
-    (Msx_lane.is_bitmap_mode "UNDEFINED(0x1c)");
-  check bool "a font mode is not bitmap" false (Msx_lane.is_bitmap_mode "GRAPHIC1");
-  check bool "a tile mode is not bitmap" false (Msx_lane.is_bitmap_mode "GRAPHIC2");
-  check bool "text mode is not bitmap" false (Msx_lane.is_bitmap_mode "TEXT1")
+  List.iter
+    (fun ((mode : Msx.display_mode), bitmap) ->
+      check bool (Msx.display_mode_to_string mode) bitmap (Msx_lane.is_bitmap_mode mode))
+    [ (Msx.Text1, false)
+    ; (Msx.Text2, false)
+    ; (Msx.Multicolor, false)
+    ; (Msx.Graphic1, false)
+    ; (Msx.Graphic2, false)
+    ; (Msx.Graphic3, false)
+    ; (Msx.Graphic4, true)
+    ; (Msx.Graphic5, true)
+    ; (Msx.Graphic6, true)
+    ; (Msx.Graphic7, true)
+    ; (Msx.Undefined 0x1c, true)
+    ]
+;;
+
+(* F406: a roms_dir that holds cbios_main_msx2.rom but not the other two used
+   to load, boarding "" for the missing ROMs -- a machine with a hole in it
+   that no observation could tell from a real BIOS. Now the lane requires the
+   whole triple and names the first file it did not find, on the direct path
+   and through the tool (a runtime failure carrying that name). The
+   inventory chain and the [bios] report field are read from the same
+   decision (F363): an inventory with only the main ROM is still the source
+   the load refuses, and no inventory at all reports bios=false. *)
+let test_incomplete_bios_triple_is_refused () =
+  with_workspace @@ fun base_path ->
+  ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let zeros = Bytes.make 16384 '\000' in
+  let write_roms dir names =
+    Sys.mkdir dir 0o755;
+    List.iter
+      (fun name ->
+        Out_channel.with_open_bin (Filename.concat dir name) (fun oc -> output_bytes oc zeros))
+      names
+  in
+  let refusal dir =
+    match Msx_lane.load ~ledger_dir ~roms_dir:(Some dir) ~cart_path:None ~disk_path:None with
+    | Error (Msx_lane.Unreadable message) -> message
+    | Error e -> fail ("wrong refusal: " ^ Msx_lane.error_to_string e)
+    | Ok _ -> fail "an incomplete BIOS triple must not load"
+  in
+  let contains ~needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  let missing_logo = Filename.concat base_path "missing-logo" in
+  write_roms missing_logo [ "cbios_main_msx2.rom"; "cbios_sub.rom" ];
+  check bool "a directory without the logo ROM names it" true
+    (contains ~needle:"cbios_logo_msx2.rom" (refusal missing_logo));
+  let missing_sub = Filename.concat base_path "missing-sub" in
+  write_roms missing_sub [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom" ];
+  check bool "a directory without the sub ROM names it" true
+    (contains ~needle:"cbios_sub.rom" (refusal missing_sub));
+  let empty = Filename.concat base_path "empty-bios" in
+  write_roms empty [];
+  check bool "an empty directory names the main ROM first" true
+    (contains ~needle:"cbios_main_msx2.rom" (refusal empty));
+  check bool "the refusal leaves no machine behind" true
+    (rejected (dispatch ~base_path "masc_msx_screen" []));
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String missing_logo) ] in
+  check (option string) "through the tool the incomplete triple is a runtime failure"
+    (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
+    (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
+  check bool "the tool's failure names the missing ROM" true
+    (contains ~needle:"cbios_logo_msx2.rom" (Tool_result.message r));
+  (* The inventory holding only the main ROM is chosen as the source and then
+     refused for the same reason -- it is not silently downgraded to no BIOS. *)
+  let inventory =
+    Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "bios"
+  in
+  Fs_compat.mkdir_p (Filename.dirname inventory);
+  write_roms inventory [ "cbios_main_msx2.rom" ];
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "an inventory with only the main ROM is refused, not downgraded" true
+    (contains ~needle:"cbios_logo_msx2.rom" (Tool_result.message r));
+  let complete = Filename.concat base_path "complete-bios" in
+  write_roms complete [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String complete) ] in
+  check bool "the whole triple loads" true (is_completed r);
+  check (option bool) "an explicit roms_dir reports bios=true" (Some true)
+    (match member "bios" (Tool_result.data r) with Some (`Bool b) -> Some b | _ -> None)
 ;;
 
 let test_key_vocabulary () =
@@ -953,6 +1039,8 @@ let () =
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "bitmap mode classification" `Quick test_bitmap_mode_classification
+        ; test_case "incomplete BIOS triple is refused by name" `Quick
+            test_incomplete_bios_triple_is_refused
         ; test_case "registration" `Quick test_registration
         ; test_case "peek and ram_diff" `Quick test_peek_and_ram_diff
         ; test_case "xspelunker: two presses reach the level card" `Quick

@@ -20,7 +20,7 @@ let with_tick_machine f =
       Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
       Unix.rmdir dir)
     (fun () ->
-      (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
+      (match Lane.load ~ledger_dir:dir ~roms_dir:None ~cart_path:None ~disk_path:None with
        | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
       f ())
 
@@ -175,6 +175,12 @@ let test_encoded_pixel_snapshot () =
   write_code bios 0 [0xc3; 0x10; 0x40]; (* JP 4010; cartridge page is slot 2 *)
   Out_channel.with_open_bin (Filename.concat roms_dir "cbios_main_msx2.rom")
     (fun oc -> output_bytes oc bios);
+  (* The lane refuses a directory without the whole C-BIOS triple; the logo
+     and sub ROMs are never reached by this firmware, so zeros suffice. *)
+  List.iter (fun name ->
+    Out_channel.with_open_bin (Filename.concat roms_dir name)
+      (fun oc -> output_bytes oc (Bytes.make 16384 '\000')))
+    [ "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
   let cart = Bytes.make 16384 '\000' in
   write_code cart 0 [0x41; 0x42; 0x10; 0x40];
   write_code cart 0x10 [
@@ -187,7 +193,7 @@ let test_encoded_pixel_snapshot () =
     0xc3; 0x1b; 0x40 ];
   let cart_path = Filename.concat base_path "pixel-toggle.rom" in
   Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
-  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir
+  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir:(Some roms_dir)
                      ~cart_path:(Some cart_path) ~disk_path:None));
     let first = Route.frame_json () in
     let encoded = pixels first in
@@ -238,7 +244,7 @@ let test_encoded_pixel_snapshot () =
     ignore (require (Lane.eject ()));
     check bool "eject does not expose cached pixels" true
       (member "rgb_base64" (Route.frame_json ()) = None);
-    ignore (require (Lane.load ~ledger_dir ~roms_dir:"" ~cart_path:None ~disk_path:None));
+    ignore (require (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
     let replacement = Route.frame_json () in
     check bool "replacement machine does not inherit cached pixels" false
       (String.equal encoded (pixels replacement)))
@@ -400,7 +406,7 @@ let () =
             check bool "no pixels when unloaded" true (member "rgb_base64" j = None))
         ; test_case "a loaded machine yields a decodable frame" `Quick (fun () ->
             let dir = Filename.temp_dir "msx-frame-route-" "" in
-            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
+            (match Lane.load ~ledger_dir:dir ~roms_dir:None ~cart_path:None ~disk_path:None with
              | Ok _ -> ()
              | Error e -> fail (Lane.error_to_string e));
             let j = Route.frame_json () in
@@ -422,7 +428,7 @@ let () =
     ; ( "press_json"
       , [ test_case "press result carries ok and the new frame" `Quick (fun () ->
             let dir = Filename.temp_dir "msx-press-route-" "" in
-            (match Lane.load ~ledger_dir:dir ~roms_dir:"" ~cart_path:None ~disk_path:None with
+            (match Lane.load ~ledger_dir:dir ~roms_dir:None ~cart_path:None ~disk_path:None with
              | Ok _ -> () | Error e -> fail (Lane.error_to_string e));
             (match Lane.press ~who:"operator" ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
                      ~hold_frames:2 ~step_frames:6 ~sequence:false with

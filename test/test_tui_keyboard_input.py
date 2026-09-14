@@ -4250,7 +4250,15 @@ def clients_footer_interaction(
     # Landing on a row first: a search arms over rows, not over a roster that
     # has not loaded. Each step below changes the footer row itself, so the
     # presenter has to draw it again -- an unchanged row can be skipped.
-    palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    landed = palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    # Column names are drawn the way every other list on the screen draws
+    # them. Clients and the Activity feed spelled theirs "Status"/"Time"
+    # while Memory, Board, Planning, Lanes and the logs used capitals.
+    landed_plain = CSI_RE.sub(b"", landed)
+    if b"STATUS" not in landed_plain or b"LAST SEEN" not in landed_plain:
+        raise AssertionError(
+            f"Clients did not name its columns in capitals: {landed_plain!r}"
+        )
     # A query being typed ends in the caret search_marker draws, and carries
     # the count of rows it reaches when the surface can count them.
     send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  j/k:move")
@@ -10843,7 +10851,12 @@ def enter_outside_changes_interaction(
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
     send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
-    send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    events = send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    # The same capitals, on the feed's own columns.
+    if b"TIME" not in CSI_RE.sub(b"", events):
+        raise AssertionError(
+            f"the Activity feed did not name its columns in capitals: {events!r}"
+        )
     send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
     send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")

@@ -304,7 +304,7 @@ opening ten chats.
 ```
  MASC Activity (212 of 640 held, actions)  01:12:04  [connected]
    feed: live 640  dropped 0
-   Time     Keeper             Event            Detail
+   TIME     KEEPER             EVENT            DETAIL
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
    01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
    01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
@@ -429,7 +429,7 @@ with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
 
 ```
  MASC Runtime · Clients (12 attached)  17:02:53  [connected]
-  Status    Name                 Type        Keeper           Task      Last seen
+  STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
  >active   codex-mcp-client      codex       -                -         17:02:41
   busy     analyst-agent         keeper      analyst          task-845  17:02:50
 ```

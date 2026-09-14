@@ -1758,11 +1758,14 @@ type keeper_turn_state =
   | Keeper_turn_running of {
       lane : keeper_turn_lane;
       started_at_unix : float;
-      interrupt_token : string option;
+      interrupt_token : string;
       preview : keeper_turn_preview option;
     }
       (** [started_at_unix] is the server owner clock's epoch reading; derive
           display age against the local clock, never trust a precomputed one.
+          [interrupt_token] is the stop handle the Owner minted with the turn
+          slot. A running turn on the wire always carries one; a row without
+          it is a decode error, not an idle turn.
           [preview] is the live glance an older server does not send. *)
   | Keeper_turn_unavailable of string
       (** The owner registry could not answer for this keeper — distinct from

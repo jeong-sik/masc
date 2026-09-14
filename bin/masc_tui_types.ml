@@ -8707,8 +8707,8 @@ let keeper_observed_turn (state : state) keeper_name =
   else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
     if row.ktr_keeper_name <> keeper_name then None
     else match row.ktr_state with
-      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token = Some token; _ } ->
-        Some (started_at_unix, token)
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
+        Some (started_at_unix, interrupt_token)
       | _ -> None) state.keeper_turns
 ;;
 
@@ -8726,25 +8726,26 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
 
+(* The hint and Esc read one fact. [keeper_observed_turn] is None while the
+   turns poll is failing, and a stale running row kept for display must not
+   offer a stop that Esc would not send. *)
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name when Option.is_some (working_chat_for_keeper state keeper_name) -> []
   | Some keeper_name ->
-    List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
-      if row.ktr_keeper_name <> keeper_name then None else
-      match row.ktr_state with
-      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
-        (match keeper_observed_interrupt state keeper_name started_at_unix with
-         | Some item -> Some (match item.oi_status with
-           | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
-           | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
-           | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
-           | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
-         | None when Option.is_some interrupt_token ->
-           Some "Esc: stop and pause queue · Enter:send update · /queue: manage"
-         | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
-      | _ -> None) state.keeper_turns
+    match keeper_observed_turn state keeper_name with
+    | None -> []
+    | Some (started_at_unix, _interrupt_token) ->
+      [ (match keeper_observed_interrupt state keeper_name started_at_unix with
+         | Some item ->
+           (match item.oi_status with
+            | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
+            | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
+            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
+            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
+         | None ->
+           "Esc: stop and pause queue · Enter:send update · /queue: manage") ]
 ;;
 
 let keeper_message_activity_rows (state : state) =

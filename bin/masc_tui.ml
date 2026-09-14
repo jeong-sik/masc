@@ -1368,9 +1368,17 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
     drain_queue ()
   end
 
+let keeper_message_input_supported state =
+  let rows, cols = get_terminal_size () in
+  let status_rows = keeper_message_status_rows state in
+  Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
+    ~terminal_cols:cols
+    ~status_rows:(keeper_message_support_status_rows state ~status_rows)
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
+    ~(inspect_queue : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(drain_queue : unit -> unit)
     ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
     ~(interrupt_turn : unit -> bool) (key : string) : bool =
@@ -1437,27 +1445,15 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "esc" ->
     if interrupt_turn () then true
     else (leave_keeper_message state ~drain_queue; true)
-  (* Q is the leave half of Esc with the interrupt half taken out. Esc's
-     first press on a live turn spends itself stopping the turn, so an
-     operator who wants to walk away and let the turn run had no key: the
-     only exit signalled the turn to stop. This arm never consults
-     [interrupt_turn], so the turn keeps streaming while the operator reads
-     something else, and reopening the chat finds it. The view guard first:
-     [handle_message_key] has a second caller -- the composer row on every
-     other surface -- where every printable key is draft text, and a Q typed
-     into a focused row must be the letter, not a jump out of the surface.
-     Chat side only, too: in the roster pane Esc means "back to chat", so the
-     leave belongs to the composer's focus alone. Empty draft, because
-     mid-sentence Q is the letter someone is typing; nothing mid-flight,
-     because Esc settles the innermost thing first -- a capture, a
-     half-edited queued line -- and Q must not strand either. Decline on any
-     of these and the printable arm answers Q as an ordinary letter. *)
-  | "Q"
-    when state.view = Keepers Keeper_message
-         && state.keeper_message_focus = Right_pane
-         && Buffer.length state.msg_input = 0
-         && Option.is_none state.msg_recall_replaces
-         && Option.is_none state.voice_capture ->
+  (* Q / Ctrl-Q is the leave half of Esc with the interrupt half taken out.
+     Esc's first press on a live turn spends itself stopping the turn, so an
+     operator who wants to walk away and let the turn run needs a quiet exit.
+     Ctrl-Q (byte 17) is always available for this quiet leave without colliding
+     with printable text. In a viewport too small to draw the composer where input
+     is unsupported, printable Q also routes here. In ordinary typing mode,
+     printable Q is never swallowed and types into the draft normally. *)
+  | k when (String.equal k "Q" && not (keeper_message_input_supported state))
+           || (String.length k = 1 && Char.code k.[0] = 17) ->
     leave_keeper_message state ~drain_queue;
     true
   | "\r" ->
@@ -1699,19 +1695,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          on a nested evidence path is most of the work. *)
       open_named_image ();
       true
+    end else if c = Some 20 then begin
+      (* Ctrl-T: inspect full queue modal without having to type /queue *)
+      inspect_queue ();
+      true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       forget_recall state;
       Buffer.add_string state.msg_input s;
       true
     end else
       true  (* Consume but ignore other control chars *)
-
-let keeper_message_input_supported state =
-  let rows, cols = get_terminal_size () in
-  let status_rows = keeper_message_status_rows state in
-  Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
-    ~terminal_cols:cols
-    ~status_rows:(keeper_message_support_status_rows state ~status_rows)
 
 let approval_decision_key = function
   | Confirm -> "y"
@@ -7554,6 +7547,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                      | Chat_queue.Steer_after_interrupt -> "STEER")
                     (Keeper_chat.terminal_safe_text target));
                if Option.is_none (inflight_for state target)
+               || (state.user_input_priority_next
+                   && (Option.is_some (inflight_for state target)
+                       || Option.is_some (working_chat_for_keeper state target)))
                then
                  match
                    Chat_queue.take state.msg_queued
@@ -7562,6 +7558,12 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                  | None -> ()
                  | Some (item, rest) ->
                      state.msg_queued <- rest;
+                     if state.user_input_priority_next
+                        && (Option.is_some (inflight_for state target)
+                            || Option.is_some (working_chat_for_keeper state target))
+                        && Option.is_none state.keeper_run_next_pending
+                        && Option.is_none state.keeper_run_next_inflight then
+                       state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
                      launch_keeper_request ~promoted:item state ~mailbox
                        item.request)
       | Some _ ->
@@ -7605,6 +7607,12 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                   | None -> ()
                   | Some (item, rest) ->
                     state.msg_queued <- rest;
+                    if state.user_input_priority_next
+                       && (Option.is_some (inflight_for state target)
+                           || Option.is_some (working_chat_for_keeper state target))
+                       && Option.is_none state.keeper_run_next_pending
+                       && Option.is_none state.keeper_run_next_inflight then
+                      state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
                     launch_keeper_request ~promoted:item state ~mailbox item.request);
                  add_event state "info" "Message submitted without interruption; refreshing chat controls";
                  launch_keeper_turns_load state ~mailbox))))
@@ -9087,6 +9095,22 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
             | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
          | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
+  | Masc_tui_command.Priority opt ->
+      Buffer.clear state.msg_input;
+      let new_value =
+        match opt with
+        | None -> not state.user_input_priority_next
+        | Some s ->
+          let s = String.lowercase_ascii (String.trim s) in
+          if s = "on" || s = "true" || s = "1" || s = "yes" then true
+          else if s = "off" || s = "false" || s = "0" || s = "no" then false
+          else not state.user_input_priority_next
+      in
+      state.user_input_priority_next <- new_value;
+      notice ~role:Message_local
+        (Printf.sprintf "User input auto-next priority: %s (new messages will %sbe promoted to run next)"
+           (if new_value then "ON" else "OFF")
+           (if new_value then "" else "NOT "))
   | Masc_tui_command.Answer_tool_approval allow ->
       Buffer.clear state.msg_input;
       (match target with
@@ -11656,8 +11680,9 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Answer_tool_approval _
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
-        | Masc_tui_command.Run_next
-        | Masc_tui_command.Steer_turn _
+         | Masc_tui_command.Run_next
+         | Masc_tui_command.Priority _
+         | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
@@ -11693,6 +11718,12 @@ let handle_composer_key state ~base_path ~mailbox key =
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
                          open_context_inspector state ~mailbox ~keeper_name
+                     | None -> ())
+                   ~inspect_queue:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         launch_keeper_queue state ~mailbox ~keeper_name
+                           Masc_tui_queue_inspection.Inspect
                      | None -> ())
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
@@ -14835,6 +14866,10 @@ let main
   state.coalesce_queued_input <-
     Option.value
       (tui_settings.coalesce_queued_input)
+      ~default:true;
+  state.user_input_priority_next <-
+    Option.value
+      (tui_settings.user_input_priority_next)
       ~default:true;
   (* Default false, unlike its neighbours: this one sends without the operator
      confirming, so absence is not consent. *)
@@ -19354,7 +19389,8 @@ and is loaded on demand through keeper_skill.
            let switch_key = String.length k = 1 && Char.code k.[0] = 7 in
            let queue_management_key =
              String.length k = 1
-             && (Char.code k.[0] = 11 || Char.code k.[0] = 16)
+             && (let c = Char.code k.[0] in
+                 c = 11 || c = 16 || c = 17 || c = 20)
            in
            let scroll_recovery_key =
              String.equal k "down" || String.equal k "pagedown"
@@ -19367,11 +19403,8 @@ and is loaded on demand through keeper_skill.
                 the quiet leave must not disappear exactly when the terminal
                 is too small to draw the composer -- a transcript-only
                 viewport is when an operator most needs to step away from a
-                running turn. Only while the draft is empty: with text in it,
-                this condition fails and Q joins the other printables a
-                too-small viewport silently holds (not drops into a draft
-                nobody can see). *)
-             || (String.equal k "Q" && Buffer.length state.msg_input = 0)
+                running turn. When input is supported, Q is typed normally. *)
+             || (String.equal k "Q" && not (keeper_message_input_supported state))
              || display_toggle_key
              || switch_key
              || queue_management_key
@@ -19447,6 +19480,12 @@ and is loaded on demand through keeper_skill.
                      | Some keeper_name ->
                          open_context_inspector state ~mailbox:async_messages
                            ~keeper_name
+                     | None -> ())
+                   ~inspect_queue:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         launch_keeper_queue state ~mailbox:async_messages
+                           ~keeper_name Masc_tui_queue_inspection.Inspect
                      | None -> ())
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with

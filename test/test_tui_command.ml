@@ -30,6 +30,8 @@ let describe = function
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Queue input -> "queue:" ^ input
   | Command.Run_next -> "run-next"
+  | Command.Priority None -> "priority"
+  | Command.Priority (Some opt) -> "priority:" ^ opt
   | Command.Interrupt_turn -> "interrupt"
   | Command.Answer_tool_approval allow -> if allow then "approve" else "deny"
   | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
@@ -129,6 +131,9 @@ let test_pane_commands_parse_by_word () =
     ; "queue:"
     ; "queue:pause"
     ; "run-next"
+    ; "priority"
+    ; "priority:on"
+    ; "priority:off"
     ; "approve"
     ; "deny"
     ; "interrupt"
@@ -179,6 +184,9 @@ let test_pane_commands_parse_by_word () =
        ; "/queue"
        ; "/queue pause"
        ; "/run-next"
+       ; "/priority"
+       ; "/priority on"
+       ; "/autonext off"
        ; "/approve"
        ; "/deny"
        ; "/interrupt"

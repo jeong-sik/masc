@@ -58,6 +58,9 @@ type t =
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
   | Queue of string
   | Run_next
+  | Priority of string option
+      (** [/priority [on|off]] or [/autonext [on|off]] — toggle or set
+          automatic next-turn promotion for queued user input. *)
   | Answer_tool_approval of bool
       (** [/approve] or [/deny] answers this Keeper's held tool call. *)
   | Interrupt_turn

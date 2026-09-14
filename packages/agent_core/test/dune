@@ -877,6 +877,13 @@
  (modules test_stream_pre_header_budget)
  (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
 
+; A loopback listener that accepts and stays silent: the sync path ends the
+; wait for the response headers at the provider's connect budget.
+(test
+ (name test_complete_sync_connect_budget)
+ (modules test_complete_sync_connect_budget)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
+
 (test
  (name test_otel_tracer_fiber)
  (modules test_otel_tracer_fiber)

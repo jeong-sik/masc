@@ -359,9 +359,18 @@ let complete_http
             url
             body_len;
           let latency_counter = start_latency_counter ?clock () in
+          (* The provider's connect budget bounds the wait for the response
+             headers here as it does on the streaming path: connection,
+             request and status line under one window. The sync path
+             dispatched without it, and without the clock, so a server that
+             accepted the request and never answered held a sync call for as
+             long as the socket stayed open unless the caller declared a body
+             deadline as well. *)
           let post_sync_call () =
             Http_client.dispatch_sync_request
               ?cache:connection_cache
+              ?clock
+              ?connect_timeout_s:config.connect_timeout_s
               ~net
               request
               ()

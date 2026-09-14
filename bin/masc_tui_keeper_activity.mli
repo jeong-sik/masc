@@ -33,3 +33,17 @@ val summarize : since:string -> Decode.log_entry list -> window
     field contribute nothing to that total rather than counting as zero. *)
 
 val empty : window
+
+(** What the rows handed in can say about the span.
+
+    [No_rows] has no totals on purpose. The detail pane drew "no metrics rows
+    read" and then four rows of zeros under it -- turns, tokens, cost, tool
+    calls -- which read as a Keeper that did nothing in a day, when nothing had
+    been read at all: the metrics file missing, unreadable, or not loaded yet.
+    A zero is a reading; with no rows there is no reading to show. *)
+type reading =
+  | No_rows
+  | Rows of window
+
+val read : since:string -> Decode.log_entry list -> reading
+(** [No_rows] for no rows at all, otherwise [Rows] of {!summarize}. *)

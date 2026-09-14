@@ -43,6 +43,10 @@ let top_tools counts ~limit =
          | order -> order)
   |> List.filteri (fun index _ -> index < limit)
 
+type reading =
+  | No_rows
+  | Rows of window
+
 let summarize ~since entries =
   let counts = Hashtbl.create 16 in
   let oldest = ref None in
@@ -98,3 +102,8 @@ let summarize ~since entries =
     aw_covered = covered;
     aw_oldest_ts = !oldest;
   }
+
+let read ~since entries =
+  match entries with
+  | [] -> No_rows
+  | _ :: _ -> Rows (summarize ~since entries)

@@ -723,6 +723,7 @@ let test_settings_projection_uses_typed_effective_values () =
    refused). It is a configuration error, as it already is for the two
    streaming timeouts. *)
 let test_a_malformed_provider_call_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   List.iter
     (fun raw ->
@@ -739,7 +740,40 @@ let test_a_malformed_provider_call_deadline_is_a_configuration_error () =
     [ "nan"; "inf"; "9OO"; "0"; "-30" ]
 ;;
 
+(* A declared value outside the setting's range is refused where it is
+   read, as the runtime.toml validator refuses it, instead of being moved to
+   the nearest bound: an operator who wrote 20 must not run under 30 and
+   read 30 in a later message as if they had written it. *)
+let test_an_out_of_range_provider_call_deadline_is_a_configuration_error () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  let below = Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec -. 10.0 in
+  let above = Env_config_keeper.KeeperKeepalive.provider_call_deadline_max_sec +. 1.0 in
+  List.iter
+    (fun seconds ->
+      Config_boot_overrides.set "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" (Printf.sprintf "%g" seconds);
+      (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
+       | exception Env_config_core.Config_error message ->
+         check bool
+           (Printf.sprintf "%g names the setting and the range" seconds)
+           true
+           (Astring.String.is_infix ~affix:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" message
+            && Astring.String.is_infix ~affix:"within [30, 3600]" message)
+       | Some read -> failf "%g read as %g seconds instead of being refused" seconds read
+       | None -> failf "%g read as unset" seconds);
+      Config_boot_overrides.reset_for_tests ())
+    [ below; above ];
+  Config_boot_overrides.set
+    "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
+    (Printf.sprintf "%g" Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec);
+  check (option (float 0.0001))
+    "the lower bound itself is a declared value"
+    (Some Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec)
+    (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ())
+;;
+
 let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
+  with_env "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   write_toml base_path "[turn]\nprovider_call_deadline_sec = 45\n";
@@ -747,7 +781,7 @@ let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
    | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
    | Ok _ -> ());
   check (option (float 0.0001))
-    "the reader sees the value applied at boot, clamped where it is read"
+    "the reader sees the value applied at boot"
     (Some 45.0)
     (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
   Keeper_runtime_resolved.init ();
@@ -756,7 +790,19 @@ let test_the_provider_call_deadline_applied_from_toml_is_read_live () =
     45.0 runtime.provider_call_deadline_sec.value;
   check string "sourced from toml"
     "toml"
-    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
+    (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source);
+  (* The operator panel projects the same live reader, not a copy taken at
+     module load: the row shows the value applied at boot. *)
+  let open Yojson.Safe.Util in
+  let row =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+    |> List.find (fun row ->
+      String.equal (row |> member "env" |> to_string) "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC")
+  in
+  check string "the settings projection shows the applied value"
+    "45"
+    (row |> member "effective_value" |> to_string)
 ;;
 
 (* #28413. Adding a registry row gets a setting listed, but the effective-value
@@ -873,6 +919,8 @@ let () =
             test_settings_projection_uses_typed_effective_values
         ; test_case "a malformed provider call deadline is a configuration error" `Quick
             test_a_malformed_provider_call_deadline_is_a_configuration_error
+        ; test_case "an out-of-range provider call deadline is a configuration error" `Quick
+            test_an_out_of_range_provider_call_deadline_is_a_configuration_error
         ; test_case "the provider call deadline applied from toml is read live" `Quick
             test_the_provider_call_deadline_applied_from_toml_is_read_live
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path

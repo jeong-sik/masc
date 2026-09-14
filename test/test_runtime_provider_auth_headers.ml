@@ -2581,8 +2581,7 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:(Some 120.0)
       ~first_event_timeout_s:None
-      ~process_clock:(Error "process runtime not initialised")
-      ~ctx_clock:None
+      ~clock:None
   with
   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
     check string "field" "stream_idle_timeout_s" field;
@@ -2606,8 +2605,7 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:None
       ~first_event_timeout_s:None
-      ~process_clock:(Error "no runtime")
-      ~ctx_clock:None
+      ~clock:None
   in
   check bool "no idle + no clock -> None" true
     (match clock with
@@ -2622,8 +2620,7 @@ let test_clock_failfast_returns_typed_error_when_first_event_set_without_clock (
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:None
       ~first_event_timeout_s:(Some 600.0)
-      ~process_clock:(Error "process runtime not initialised")
-      ~ctx_clock:None
+      ~clock:None
   with
   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
     check string "field" "first_event_timeout_s" field;
@@ -2650,8 +2647,7 @@ let test_clock_failfast_names_idle_when_both_deadlines_set () =
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:(Some 120.0)
       ~first_event_timeout_s:(Some 600.0)
-      ~process_clock:(Error "no runtime")
-      ~ctx_clock:None
+      ~clock:None
   with
   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
     check string "field" "stream_idle_timeout_s" field

@@ -28,6 +28,7 @@
   time_compat
   masc.monotonic_deadline
   masc.time_codec
+  masc.watched_work
   eio
   eio.unix
   cstruct

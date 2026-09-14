@@ -437,6 +437,9 @@ val handle_analyze_image_with_outcome
   :  ?complete:Keeper_vision_tool.complete_fn
   -> ?config:Workspace.config
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?tool_use_id:string
+     (* #35456: parent invocation identity for candidate-row join. *)
+  -> ?trace_id:string
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -37,6 +37,12 @@ type context =
   ; gate_grant : Keeper_gate.cycle_grant option
     (* Exact human decision delivered to this Keeper lane. External-effect
        handlers may consume it only after matching their normalized request. *)
+  ; tool_use_id : string option
+    (* #35456: the parent agent-core invocation's tool_use_id, carried so
+       in-process sub-calls (vision candidate attempts) can join their
+       start/termination rows to this call. [None] on callers without
+       invocation context (tests, direct dispatch). *)
+  ; trace_id : string option
   ; capability_authority : capability_authority
   }
 
@@ -555,11 +561,14 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_analyze_image ->
     (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
-       the turn-scoped dispatch context. *)
+       the turn-scoped dispatch context. The parent invocation identity rides
+       along so candidate rows join this call (#35456). *)
     Some
       (Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
          ~config:ctx.config
          ?turn_sandbox_factory:ctx.turn_sandbox_factory
+         ?tool_use_id:ctx.tool_use_id
+         ?trace_id:ctx.trace_id
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?net:ctx.net

@@ -118,12 +118,17 @@ val agent_tools : provider:Keeper_oauth_provider.t -> catalog -> offering
     that. This module keeps the catalog and the wire; it holds no
     authorization opinion. *)
 
+(** Which request of a call failed. A call opens a session of its own
+    ([initialize], then the [initialized] notification) and then sends the
+    [tools/call]; a transport error names no step, so the phase does. *)
 type call_phase =
-  | Before_send  (** the [tools/call] was never sent; no effect happened *)
-  | After_send
-      (** the [tools/call] went to the transport; whether it left the host,
-          and whether the effect happened, is the service's to say, not this
-          process's *)
+  | Session_open
+      (** the session never came up; the [tools/call] was never sent and no
+          effect happened *)
+  | Tool_call
+      (** the [tools/call] was handed to the transport; whether it left the
+          host, and whether the effect happened, is the service's to say,
+          not this process's *)
 
 type call_error =
   | Precondition of string
@@ -170,25 +175,19 @@ val run_call :
     mutable cell two fibers share, and that is the part to get right
     deliberately rather than on the way past. *)
 
-type call_proof =
-  | Effect_never_began
-  | Outcome_unknown
-
-val call_proof_of_call_error : call_error -> call_proof
-(** What a failed call proves about the requested effect. A precondition
-    failure, a session that never came up, a refused token and a JSON-RPC
-    rejection the server sends before running any tool prove the effect
-    never began. Every failure after the call went to the transport --
-    a transport error (which may be the connection step of that very
-    request), an HTTP status such as 429 or a 5xx, a JSON-RPC code the
-    server sends after running, an answer that does not parse -- leaves the
-    outcome unknown. A call proves nothing more than these two, which is why
-    the type has two constructors and not {!Tool_result}'s three. *)
-
 val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_disposition
-(** {!call_proof_of_call_error} in replay's vocabulary. Replay reads this as
-    the execution's disposition and {!tool_result_of_call} reads the proof
-    as whether a retry is safe, so the two cannot disagree. *)
+(** What a failed call proves about the requested effect, in replay's
+    vocabulary. A precondition failure, a session that never came up, a
+    refused token and one of the three JSON-RPC rejections a server sends
+    before running any tool ([Invalid_request], [Method_not_found],
+    [Invalid_params]) prove the effect never began. Every other failure of
+    the [tools/call] -- a transport error (which may be the connection step
+    of that very request), an HTTP status such as 429 or a 5xx, any other
+    JSON-RPC code, an answer that does not parse -- leaves the outcome
+    unknown. A call proves nothing more than these two, which is why the
+    proof has two values and not {!Tool_result}'s three. Replay reads this
+    as the execution's disposition and {!tool_result_of_call} reads the same
+    proof as whether a retry is safe, so the two cannot disagree. *)
 
 val call_error_to_string : call_error -> string
 
@@ -201,8 +200,8 @@ val tool_result_of_call :
     server failure is recoverable when a second call is safe: the provider
     said the tool only reads ([read_only = Some true], the offered tool's
     own word; silence is not that), or the failure proves the effect never
-    began
-    ({!call_proof_of_call_error}). A write whose outcome is unknown is not
+    began ({!effect_disposition_of_call_error}). A write whose outcome is
+    unknown is not
     recoverable, and a tool the provider did not mark read-only
     ([read_only = None]) is held to that too; the message tells the model
     to read the service's state first. Kept beside {!run_call} so the

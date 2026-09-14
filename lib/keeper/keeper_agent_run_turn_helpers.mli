@@ -6,8 +6,17 @@ val task_link_already_recorded :
   keeper:string -> task_id:string -> trace_id:string -> bool
 
 val sse_event_progress_kind : Agent_core.Types.sse_event -> string option
+(** A low-cardinality label for what a stream event is, for the turn's
+    [last_progress_kind]; [None] for a ping. *)
+
 val sse_event_watchdog_progress_kind :
   Agent_core.Types.sse_event -> string option
+(** The label when the event shows the provider still producing, which is
+    what the attempt watchdog measures progress by: a non-empty text,
+    reasoning, tool-argument, media or redacted-thinking delta, or a tool
+    block opening. Carrier and control frames give [None]. Whether the
+    production is deliverable is judged by the accept gate when the stream
+    ends, not here. *)
 
 val registry_progress_on_event :
   record_turn_progress:(string -> unit) ->

@@ -121,10 +121,28 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
 
 [@@@warning "+11"]
 
+(* The attempt watchdog asks one question of the stream: is the provider
+   still producing? A token of reasoning answers it as a token of text does,
+   so both refresh the progress the watchdog measures against, as does a
+   tool block opening. Whether what the model produced is deliverable is the
+   accept gate's question, asked once the stream has ended: a thinking-only
+   response is rejected there as [Thinking_only_no_progress] and the lane
+   rotates, so counting reasoning here does not admit a model that only
+   thinks. Carrier frames (empty deltas, signatures, block stops, message
+   frames, pings) are not production and still refresh nothing.
+
+   Measured 2026-09-14 (system log): 48 attempts on the two reasoning models
+   ended as "provider call made no progress for 900s" while the 120 s
+   inter-line idle budget never fired on any of them, so each stream was
+   delivering lines the whole time; a rondo turn's last progress stamp was
+   the before_turn hook 901 s before the cut. A live capture of the same
+   model streamed 3,940 reasoning deltas and no text in its first 98 s. *)
 let sse_event_watchdog_progress_kind event =
   match sse_event_progress_kind event with
-  | Some kind when agent_core_stream_event_is_deliverable event -> Some kind
-  | _ -> None
+  | Some kind
+    when agent_core_stream_event_is_first_token event
+         || agent_core_stream_event_is_deliverable event -> Some kind
+  | Some _ | None -> None
 
 let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter record_turn_progress (sse_event_watchdog_progress_kind event);

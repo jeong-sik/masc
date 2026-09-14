@@ -1108,12 +1108,22 @@ to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
 
 ```
- MASC Schedules  [me]  10:44:57  [connected]
+ MASC Schedules  10:44:57  HTTP [connected]
+ ─────────────────────────────────────────────────────────────────────────────
    Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
- >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
-     [running  ] 2026-08-24T09:12:00  sangsu       one-shot
+ ─────────────────────────────────────────────────────────────────────────────
+   STATUS       DUE                 TARGET  WAKE      DELIVERY     RECURRENCE
+ ─────────────────────────────────────────────────────────────────────────────
+ > [scheduled]  2026-08-24 09:57:00 alpha   —         —            daily 09:57
+   [running]    2026-08-24 09:12:00 sangsu  succeeded consumed_ack one-shot
   j/k:move  Enter:details  n:new  e:modify  x:cancel  r:refresh  Tab:next
 ```
+
+WAKE is what the dispatch did and DELIVERY is what the reaction ledger made of
+it; they are two facts, and a wake the queue cancelled forty seconds later
+still reads `succeeded` under the first. Both used to be labelled inside the
+row — `wake:succeeded · consumed_ack` — while the four columns around them had
+no names at all.
 
 The header count and the page are different things: the server sorts the whole
 store active-first and serves the first twenty rows, so `(page shows first

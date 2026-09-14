@@ -1588,6 +1588,9 @@ let test_promoted_live_output_survives_settlement_and_replay () =
           (count "read_file" screen > 0)
       in
       check_output "still running";
+      state.msg_loaded_keeper <- Some "alpha";
+      state.msg_loaded <- state.msg_history;
+      check_output "loaded user overlap";
       let terminal = match failure with
         | None -> Live.Run_finished
         | Some message -> Live.Run_failed {message}

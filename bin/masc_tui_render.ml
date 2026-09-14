@@ -10190,6 +10190,21 @@ let runtime_name_column width text =
       (max 0 (width - Message_layout.display_width clipped))
       ' '
 
+(* The same column, for the rows whose cell is a word this renderer wrote
+   rather than a name the workspace chose. A name is told apart by its tail,
+   which is why {!runtime_name_column} cuts from the middle; a label is told
+   apart by its head, and cutting one from the middle keeps the half that
+   says nothing. At a hundred columns the lane column is ten cells and
+   the fallback cell came out as the tree glyph, an ellipsis, and the last
+   six characters of the word -- the end of something the reader never
+   sees the start of. *)
+let runtime_label_column width text =
+  let clipped = fit_width text width in
+  clipped
+  ^ String.make
+      (max 0 (width - Message_layout.display_width clipped))
+      ' '
+
 let runtime_detail_field ~width ~style label value =
   let prefix = "  " ^ label ^ ": " in
   let continuation = String.make (Message_layout.display_width prefix) ' ' in
@@ -10696,15 +10711,18 @@ let render_runtime (state : state) =
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
           let is_active = Option.is_some candidate.rcr_preferred_at_ts in
-          let lane_col =
-            if candidate.rcr_candidate_count <= 1 then
-              Terminal_text.single_line candidate.rcr_lane_id
-            else if is_first then
-              Terminal_text.single_line candidate.rcr_lane_id
-            else if is_last then
-              Printf.sprintf "  \xe2\x94\x94\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+          (* A lane id is the workspace's name and a fallback row's cell is
+             this renderer's own word, and the two are cut by different
+             rules -- see [runtime_label_column]. *)
+          let lane_cell =
+            if candidate.rcr_candidate_count <= 1 || is_first then
+              runtime_name_column runtime_lane_width
+                (Terminal_text.single_line candidate.rcr_lane_id)
             else
-              Printf.sprintf "  \xe2\x94\x9c\xe2\x94\x80 fallback #%d" (candidate.rcr_position - 1)
+              runtime_label_column runtime_lane_width
+                (Printf.sprintf "  %s fallback #%d"
+                   (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
+                   (candidate.rcr_position - 1))
           in
           let candidate_label =
             Printf.sprintf "%s%d/%d %s"
@@ -10787,7 +10805,7 @@ let render_runtime (state : state) =
           in
           let line =
             "  "
-            ^ runtime_name_column runtime_lane_width lane_col
+            ^ lane_cell
             ^ " " ^ runtime_name_column runtime_candidate_width candidate_label
             ^ " " ^ runtime_column runtime_identity_width provider_model
             ^ " " ^ runtime_column runtime_status_width route_probe

@@ -11724,6 +11724,13 @@ def runtime_surface_interaction(
                 "active (last success",
                 "unobserved",
                 "single candidate",
+                # A fallback row's lane cell is a word this renderer wrote,
+                # not a name the workspace chose, so it is cut from the tail
+                # and its head survives. Held to the head rather than the
+                # whole label: the column is ten cells at a hundred and
+                # eighteen at a hundred and forty, and this is true at every
+                # one of those widths.
+                "\u2514\u2500 fal",
             ):
                 if needle not in stale_plain:
                     raise AssertionError(
@@ -11732,6 +11739,13 @@ def runtime_surface_interaction(
             if "Probe label must not render" in stale_plain:
                 raise AssertionError(
                     f"Runtime used probe identity instead of resolved SSOT: {stale_plain!r}"
+                )
+            # Cut from the middle, the cell kept the half that says nothing:
+            # "\u2514\u2026ack #1". A lane id is told apart by its tail and keeps the
+            # middle cut; a label is told apart by its head.
+            if "ack #" in stale_plain:
+                raise AssertionError(
+                    f"Runtime cut a fallback label from its middle: {stale_plain!r}"
                 )
 
             # The next ordinary poll carries the refreshed cache value. This

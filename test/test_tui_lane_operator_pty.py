@@ -87,13 +87,18 @@ def main(executable: str, captures: Path | None) -> None:
             raise AssertionError('Unapplied installation opened unrelated worker actions')
         key(b'1', b'Selected second producer')
         key(b' ', b'[x]')
-        key(b'e', b'operator-evidence-receipt')
+        # `e` opens a choice (preserve only, or preserve and send the
+        # reference to a named Keeper) rather than submitting; Enter takes the
+        # default, which sends no keeper_name and is what `preserve` asserts.
+        key(b'e', b'Preserve 1 marked row from Second producer')
+        key(b'\r', b'operator-evidence-receipt')
         if len(accepted) != 1:
             raise AssertionError('Expected one explicit evidence preservation')
         # Keeping the first mark then adding another owner must not submit a
         # mixed batch or silently change the first marked row's identity.
         key(b'j', b'Other producer event')
         key(b' ', b'[x]')
+        # Two owners are refused by `open_evidence`, so no prompt opens here.
         key(b'e', b'Error:')
         if len(accepted) != 1:
             raise AssertionError('Mixed-owner evidence unexpectedly submitted')

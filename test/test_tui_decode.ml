@@ -810,17 +810,101 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
 
+(* The bodies come from the producer the server uses
+   ([Goal_unavailable_envelope.to_yojson], RFC-0444 PR-2), so these fixtures
+   cannot drift from the wire the way a hand-built object can. *)
+let goal_store_unavailable_body reason mirror reset_step =
+  Goal_unavailable_envelope.to_yojson
+    { Goal_store_unavailable.file = "/srv/masc/.masc/goals.json"; reason; mirror; reset_step }
+
+let schema_rejected_body () =
+  goal_store_unavailable_body
+    (Goal_store_unavailable.Schema_rejected
+       { field = "criterion_revision"; detail = "missing" })
+    (Goal_store_unavailable.Mirror_decodes { goal_count = 3; updated_at = "2026-09-08T16:20:13Z" })
+    (Goal_store_unavailable.Repair_field "criterion_revision")
+
+let decode_goal_store_view label json =
+  match Tui_decode.decode_goal_source_failure json with
+  | Ok (Some (Tui_decode.Goal_store_unavailable view)) -> view
+  | Ok (Some (Tui_decode.Goal_task_links_unavailable detail)) ->
+      Alcotest.fail (label ^ ": Goal store envelope read as a link registry failure: " ^ detail)
+  | Ok None -> Alcotest.fail (label ^ ": Goal store envelope read as a projection")
+  | Error message -> Alcotest.fail (label ^ ": " ^ message)
+
+let test_goal_store_unavailable_parses_every_wire_token () =
+  let view = decode_goal_store_view "schema_rejected" (schema_rejected_body ()) in
+  Alcotest.(check string) "file" "/srv/masc/.masc/goals.json" view.gsu_file;
+  Alcotest.(check bool) "reason carries the refused member" true
+    (view.gsu_reason = Tui_decode.Schema_rejected_view "criterion_revision");
+  Alcotest.(check bool) "mirror carries its goal count" true
+    (view.gsu_mirror = Tui_decode.Mirror_decodes_view 3);
+  Alcotest.(check bool) "reset step repairs the same member" true
+    (view.gsu_reset_step = Goal_store_unavailable.Repair_field "criterion_revision");
+  let plain reason mirror reset_step expected_reason expected_mirror =
+    let view =
+      decode_goal_store_view (Goal_store_unavailable.reason_name reason)
+        (goal_store_unavailable_body reason mirror reset_step)
+    in
+    Alcotest.(check bool) (Goal_store_unavailable.reason_name reason ^ " reason") true
+      (view.gsu_reason = expected_reason);
+    Alcotest.(check bool) (Goal_store_unavailable.mirror_status_name mirror ^ " mirror") true
+      (view.gsu_mirror = expected_mirror);
+    Alcotest.(check bool) (Goal_store_unavailable.reset_step_name reset_step ^ " reset") true
+      (view.gsu_reset_step = reset_step)
+  in
+  plain Goal_store_unavailable.Missing_after_init Goal_store_unavailable.Mirror_absent
+    Goal_store_unavailable.Reset_goal_store Tui_decode.Missing_after_init_view
+    Tui_decode.Mirror_absent_view;
+  plain (Goal_store_unavailable.Unreadable Unix.EACCES)
+    (Goal_store_unavailable.Mirror_unreadable Unix.EACCES)
+    Goal_store_unavailable.Restore_permission Tui_decode.Unreadable_view
+    Tui_decode.Mirror_unreadable_view;
+  plain (Goal_store_unavailable.Not_json "unexpected byte")
+    (Goal_store_unavailable.Mirror_rejected (Goal_store_unavailable.Not_json "unexpected byte"))
+    Goal_store_unavailable.Reset_goal_store Tui_decode.Not_json_view
+    Tui_decode.Mirror_rejected_view
+
 let test_goal_store_unavailable_preserves_source_detail () =
-  let detail = "goals.json: criterion_revision is missing" in
-  let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
-                      "error", `String detail ] in
+  let json = schema_rejected_body () in
+  let rendered =
+    "goal_store: unavailable reason=schema_rejected field=criterion_revision \
+     file=/srv/masc/.masc/goals.json mirror=decodes goal_count=3 \
+     reset=repair field criterion_revision"
+  in
   (match Tui_decode.decode_planning_snapshot json with
-   | Error message -> Alcotest.(check string) "planning source failure" detail message
+   | Error message -> Alcotest.(check string) "planning source failure" rendered message
    | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
   match Tui_decode.decode_goal_detail_timeline json with
   | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure" detail message
+      Alcotest.(check string) "detail source failure is not a Gate failure" rendered message
   | _ -> Alcotest.fail "Goal detail source failure was not preserved"
+
+let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
+  let with_member key value = function
+    | `Assoc fields -> `Assoc (List.map (fun (k, v) -> if String.equal k key then k, value else k, v) fields)
+    | json -> json
+  in
+  let with_mirror_member key value json =
+    with_member "mirror" (with_member key value (Yojson.Safe.Util.member "mirror" json)) json
+  in
+  let refused label json =
+    match Tui_decode.decode_goal_source_failure json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " was accepted")
+  in
+  let body = schema_rejected_body () in
+  refused "unknown reason" (with_member "reason" (`String "corrupt") body);
+  refused "unknown mirror status" (with_mirror_member "status" (`String "mirror_fine") body);
+  refused "unknown reset step" (with_member "reset_step" (`String "reboot") body);
+  refused "schema_rejected without a field" (with_member "field" `Null body);
+  refused "a field beside not_json" (with_member "reason" (`String "not_json") body);
+  refused "mirror_decodes without goal_count" (with_mirror_member "goal_count" `Null body);
+  refused "goal_count beside mirror_absent"
+    (with_mirror_member "status" (`String "mirror_absent") body);
+  refused "a rendered error line in place of the members"
+    (`Assoc [ "ok", `Bool false; "error_code", `String "goal_store_unavailable";
+              "error", `String "goals.json: criterion_revision is missing" ])
 
 let test_goal_link_source_unavailable_preserves_detail () =
   let detail = "goal_task_links: primary registry is missing" in
@@ -9079,8 +9163,12 @@ let () =
       [
         Alcotest.test_case "current contract" `Quick
           test_decode_planning_snapshot_current_contract;
+        Alcotest.test_case "Goal store envelope parses every wire token" `Quick
+          test_goal_store_unavailable_parses_every_wire_token;
         Alcotest.test_case "Goal source failure preserves cause in planning and detail" `Quick
           test_goal_store_unavailable_preserves_source_detail;
+        Alcotest.test_case "Goal store envelope rejects unknown or mismatched tokens" `Quick
+          test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens;
         Alcotest.test_case "Goal link source unavailable retains detail" `Quick
           test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick

@@ -3430,7 +3430,17 @@ let render_schedule_list (state : state) =
 
          let count = List.length snapshot.scs_rows in
          if count = 0 then begin
-           c.push (Ansi.dim ^ "  (no scheduled automation)" ^ Ansi.reset)
+           (* The key that fills this list, on the row that says it is empty.
+              [n] is an Act key on a surface whose Navigate keys take the
+              footer first -- j/k, PgUp/PgDn, [ / ] -- so at a hundred and ten
+              columns the footer drops every action this screen has, [n] with
+              them. An operator looking at an empty Schedules screen then has
+              nowhere on it saying a schedule can be made at all. Same move
+              [page_unread_note] made for [r]. *)
+           c.push
+             (Ansi.dim
+             ^ "  (no scheduled automation \xe2\x80\x94 press n to create one)"
+             ^ Ansi.reset)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,
@@ -7156,11 +7166,20 @@ let activity_tab_strip ~cols ~on_logs ~after =
 (* [after] is what the caller draws past this title on the same row -- the
    clock and the badge -- so the strip can leave room for it. *)
 let activity_title ~cols ~on_logs ~after reading =
-  Printf.sprintf "%s  %s  \xc2\xb7  %s"
-    (screen_title " MASC Activity")
-    (activity_tab_strip ~cols ~on_logs
-       ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after))
-    reading
+  let strip =
+    activity_tab_strip ~cols ~on_logs
+      ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after)
+  in
+  (* The dot is the strip's, not the row's. It was a literal in this format
+     string, so when the row ran out of width and the strip drew nothing the
+     dot stayed: at 56 columns the title read "MASC Activity    \xc2\xb7  (0 rows
+     \xc2\xb7 0 events held)", a separator with its left side missing. A strip that
+     draws nothing takes its separator with it. *)
+  let strip_part =
+    if Masc_tui_message_layout.display_width strip = 0 then ""
+    else Printf.sprintf "  %s  \xc2\xb7" strip
+  in
+  Printf.sprintf "%s%s  %s" (screen_title " MASC Activity") strip_part reading
 
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in

@@ -320,9 +320,10 @@ let same_run_retry_allowed observed = not (Atomic.get observed)
    [threshold_sec, threshold_sec + progress_poll_interval_sec). *)
 let progress_poll_interval_sec = 15.0
 
-let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
-  match sample with
-  | Some { last_progress_at; active_tool_count; awaiting_approval } ->
+let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~permit_wait ~sample =
+  let judge ~attempt_started_at ~sample =
+    match sample with
+    | Some { last_progress_at; active_tool_count; awaiting_approval } ->
     (* A tool call that runs for minutes refreshes no progress signal while
        it runs, so tools in flight are work, not a stall. The 2026-08-12
        live attempt spent 120s inside one [Execute] and was healthy.
@@ -337,12 +338,32 @@ let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
     (not awaiting_approval)
     && active_tool_count = 0
     && now -. last_progress_at > threshold_sec
-  | None ->
-    (* Probe absent, or the keeper has no live turn observation to read.
-       Falling back to elapsed time reproduces the pre-#28417 ceiling: losing
-       the progress signal must not silently disable enforcement and leave a
-       wedged attempt running unbounded. *)
-    now -. attempt_started_at > threshold_sec
+    | None ->
+      (* Probe absent, or the keeper has no live turn observation to read.
+         Falling back to elapsed time reproduces the pre-#28417 ceiling: losing
+         the progress signal must not silently disable enforcement and leave a
+         wedged attempt running unbounded. *)
+      now -. attempt_started_at > threshold_sec
+  in
+  (* A wait for the binding's admission permit is queueing, not the provider
+     gone quiet, and the only waits that write the cell are the bounded ones
+     (Agent Core writes it for no other), so the admission bound ends it and
+     nothing here needs to. Standing down for it leaves nothing unbounded,
+     and the record then says [Queue] instead of racing the admission bound
+     with a coarser clock. The wait's end is the instant the attempt's own
+     budgets start from -- a stream granted late runs under its first-event
+     budget from the grant -- so the watchdog counts from that instant too,
+     as it counts from a lease's resumption, not from before the wait. *)
+  match permit_wait with
+  | Llm_provider.Provider_admission.Waiting_for_permit -> false
+  | Llm_provider.Provider_admission.Before_any_wait -> judge ~attempt_started_at ~sample
+  | Llm_provider.Provider_admission.Wait_settled_at settled_at ->
+    judge
+      ~attempt_started_at:(max settled_at attempt_started_at)
+      ~sample:
+        (Option.map
+           (fun sample -> { sample with last_progress_at = max settled_at sample.last_progress_at })
+           sample)
 ;;
 
 type provider_lease_phase =
@@ -363,14 +384,14 @@ let observe_provider_lease ~now ~on_yield ~on_resume =
 ;;
 
 let provider_lease_stalled ~lease_phase ~now ~threshold_sec ~attempt_started_at
-    ~sample =
+    ~permit_wait ~sample =
   match lease_phase with
   | Provider_yielded -> false
   | Provider_active_since resumed_at ->
     let sample = Option.map (fun sample ->
       { sample with last_progress_at = max resumed_at sample.last_progress_at }) sample in
     attempt_stalled ~now ~threshold_sec
-      ~attempt_started_at:(max resumed_at attempt_started_at) ~sample
+      ~attempt_started_at:(max resumed_at attempt_started_at) ~permit_wait ~sample
 ;;
 
 (* #28417: blocks until the attempt has gone [threshold_sec] without a
@@ -379,7 +400,7 @@ let provider_lease_stalled ~lease_phase ~now ~threshold_sec ~attempt_started_at
    transient read failure degrades this fiber to the elapsed fallback instead
    of cancelling the attempt it is watching. *)
 let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
-    ~lease_phase =
+    ~lease_phase ~permit_wait =
   Eio.Time.sleep clock progress_poll_interval_sec;
   let sample =
     match probe with
@@ -396,10 +417,11 @@ let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
        ~now:(Time_compat.now ())
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:(Atomic.get permit_wait)
        ~sample
   then ()
   else await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
-    ~lease_phase
+    ~lease_phase ~permit_wait
 ;;
 
 (* First-token-wait preemption (RFC-0441 pre-first-token gap). A person queued
@@ -1015,6 +1037,10 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     | Some sink -> sink snapshot
     | None -> Ok ()
   in
+  (* The attempt's bounded wait for the binding's admission permit, as Agent
+     Core writes it: on while the wait is on, then the instant it settled.
+     The stall watchdog reads it on each poll. *)
+  let permit_wait = Atomic.make Llm_provider.Provider_admission.Before_any_wait in
   let config_result =
     let base_config =
       Runtime_candidate.default_config
@@ -1059,6 +1085,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                with nothing sent and the same rotation; left to the attempt
                watchdog it was "made no progress" with the queue invisible. *)
             admission_timeout_s = Some ctx.provider_call_deadline_sec
+          ; permit_wait = Some permit_wait
           ; temperature
           ; hooks = hooks_with_gate
           ; tool_approval =
@@ -1265,7 +1292,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
             ~threshold_sec
             ~attempt_started_at
             ~lease_phase
-            ~probe:ctx.provider_progress_probe;
+            ~probe:ctx.provider_progress_probe
+            ~permit_wait;
           `Attempt_stalled
         in
         (match

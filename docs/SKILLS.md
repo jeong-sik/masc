@@ -29,10 +29,9 @@ description: Walk the release checklist before shipping.
   같아야 한다. 이름 누락·불일치·문법 오류, 필드 길이 초과, 알 수 없는 top-level field,
   잘못된 metadata 값은 그 Skill 하나를 거부한다. 클라이언트 확장은 공식 `metadata`
   string map 아래에 둔다.
-- `masc-composition-tool`과 `disable-model-invocation` 같은 top-level field는 거부한다. composition의 존재와
-  표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지 않으므로
-  선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark 외부
-  fence로 감싼다.
+- composition의 존재와 표면은 본문 fence 하나가 전부 결정한다. 이 결정을 바꾸는
+  frontmatter 필드는 없으므로 선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는
+  더 긴 CommonMark 외부 fence로 감싼다.
 - Agent Skills의 실험적 선택 필드 `allowed-tools`는 문법만 검증하고 즉시 버린다.
   MASC에서는 사전 승인이나 도구 제한이 아니며 AST, registry, prompt, Gate, Keeper
   effective surface, immutable snapshot entry 어디에도 값이 남지 않는다. 실행 권한의
@@ -44,7 +43,25 @@ description: Walk the release checklist before shipping.
 - 본문은 frozen snapshot bytes로 보존된다. Keeper는 `keeper_skill`에 canonical exact
   reference를 전달해 본문을 받는다.
 
-## 2. 스킬의 두 종류 — 본문이 결정한다
+## 2. Skill 로 둘 것과 Tool 로 둘 것
+
+| 필요한 것 | 둘 곳 |
+|---|---|
+| 없는 능력 / 스키마·권한·typed 오류 계약 / 외부 호출 | Tool |
+| 중간 판단 없는 고정 도구 사슬 | Composition skill (쓰임새는 TOML `description`) |
+| 갈림길 판단·함정·절차 | Instruction skill |
+| 런타임이 이미 매 요청 넣는 정보 (예: 현재 시각은 `[Temporal]` 로 들어간다) | 두지 않는다 |
+| 도구·하네스 결함을 피해 가는 절차 | 스킬로 만들지 않고 결함을 고친다 |
+
+- 노드가 하나뿐인 합성은 그 도구를 직접 부르는 것과 같다. 스킬로 만들 이유가 없다.
+- 결함을 피해 가는 절차를 스킬로 적으면 그 결함이 일하는 방법으로 굳고, 다음 작성자가
+  그대로 따라 쓴다. 도구를 고치면 절차가 필요 없어진다.
+- 모든 노드 입력이 실행 전에 정해지면(파라미터, 리터럴, 앞 노드 출력의 필드) 합성으로 쓴다.
+  앞 단계 결과를 읽고 다음 단계를 골라야 하면 지시 스킬로 쓴다.
+
+작성 절차 전체는 빌트인 `skill-authoring` 스킬에 있다.
+
+## 3. 스킬의 두 종류 — 본문이 결정한다
 
 Keeper별 Skill 표면은 Keeper profile의 `[keeper.skills]`가 정한다.
 
@@ -71,10 +88,7 @@ names = ["release-checklist", "memory-probe"]
 |---|---|---|
 | 0 | 지시 스킬 | task 라우팅 + `keeper_skill` 목록에 이름·설명 한 줄 |
 | 1 | 합성 스킬 | `keeper_compose_<name>` 도구로 승격 |
-| 2+ | 오류 | 턴이 typed config error 로 거부된다 |
-
-frontmatter invocation-policy 필드는 이 결정을 덮어쓸 수 없다
-(`keeper_skill_catalog.ml`).
+| 2+ | 합성 읽기 오류 | 도구가 생기지 않고 본문은 지시 스킬로 남는다. 진단은 `/api/v1/skills` 에 남는다 |
 
 ### 지시 스킬 (instruction)
 
@@ -129,13 +143,57 @@ name = "query"
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_cancel` 로 조회·취소한다.
+- 노드가 실패하면 호출 전체가 실패하고 `cause` 에 그 노드가 실린다. 그 뒤 batch 는 돌지
+  않는다. 성공하면 `actions` 에 노드마다 `node_id` 와 결과가 실린다.
 
-## 3. 파라미터 — Parallel as a Tool 의 손잡이
+### 합성 본문은 Keeper 에게 안 보인다
 
-`[[compositions.params]]` 가 스칼라 파라미터(`string`/`integer`/`number`/`boolean`)를
+`keeper_compose_<name>` 도구 설명은 fence 안 `[[compositions]] description` 이 전부다
+(`lib/keeper/keeper_tool_composition_surface.ml` `entry_description`). 입력 스키마에는
+`[[compositions.params]]` 의 `description` 이 실린다. fence 밖 본문은 사람만 읽는다.
+`keeper_skill` 의 Available 목록에는 지시 스킬만 오르므로 합성 본문을 열 경로도 없다.
+
+- 언제 쓰는지, 언제 쓰면 안 되는지, 결과를 어떻게 읽는지는 TOML `description` 에 적는다.
+  frontmatter 의 1024자 한도를 같이 지키고, frontmatter `description` 도 같은 값으로 둔다.
+- TOML `description` 을 비우면 "Execute the validated Keeper composition <name>." 같은 일반
+  문장이 대신 나간다. Keeper 는 그것만으로 이 도구를 언제 쓸지 알 수 없다.
+
+### 노드 입력은 도구 기본값을 그대로 받는다
+
+노드에 `{}` 나 필수 필드만 넘기면 개수·모양·요약 여부가 전부 그 도구 기본값이다. 합성은
+돌 때마다 같은 입력을 되풀이하므로 기본값이 만든 응답 크기를 매번 그대로 치르고, 도구
+기본값이 바뀌면 스킬을 고치지 않아도 응답이 달라진다.
+2026-09-07 ~ 2026-09-15 `tool_calls` 기록에서 `what-arrived` 합성 안의
+`masc_schedule_list {}` 노드는 342번 불렸고, 결과 크기 중앙값이 135,286 byte 였다.
+`limit`, `compact`, `projection` 처럼 도구가 받는 개수·모양 인자는 노드 입력에 적는다.
+
+노드 입력은 스킬을 읽을 때가 아니라 노드가 돌 때 도구 스키마로 검사한다. 필드 이름을
+틀려도 로드는 되고 첫 호출에서 실패하므로, `config/tools/<tool>.toml` 과 직접 대조한다.
+
+## 4. 파라미터 — Parallel as a Tool 의 손잡이
+
+`[[compositions.params]]` 가 파라미터(`string`/`integer`/`number`/`boolean`)를
 선언하면 도구의 input schema 가 거기서 생성된다 — required·타입·설명이 그대로 실려
 모델이 여느 도구처럼 검증받으며 인자를 넘긴다.
 
+값을 몇 개로 정해 두려면 `type = "string"` 에 `enum` 을 붙인다. 표기는
+`config/tools/*.toml` 의 도구 정의와 같다.
+
+```toml
+[[compositions.params]]
+name = "mode"
+type = "string"
+enum = ["scene", "regions"]
+description = "scene: 보이는 내용, regions: 이후 범위 읽기에 쓸 영역 목록."
+```
+
+- input schema 의 그 속성에 `"enum": ["scene", "regions"]` 이 실려 모델에게 선택지로
+  보인다.
+- masc 의 실행 전 인자 검증은 타입과 required 만 본다. 목록 밖 값은 plan 에 바인딩할 때
+  `argument_outside_enum` 오류로 거절된다. 노드 도구가 더 많은 값을 받아도
+  (`BrowserRead` 는 `text` 도 받는다) 합성이 정한 목록 밖 값으로는 돌지 않는다.
+- `enum` 은 `string` 에만 붙는다. 빈 목록, 같은 값이 두 번 든 목록, 다른 타입에 붙은
+  `enum` 은 로드 오류다.
 - 선언과 참조는 정확히 일치해야 한다: 선언 안 된 `param` 참조도, 아무 노드도 안 읽는
   선언도 로드 오류다.
 - 파라미터는 전부 required 다.
@@ -143,14 +201,19 @@ name = "query"
   broker 는 crash 후 worker closure 를 재생하지 않으므로 바인딩된 plan 은 어떤 async
   run 과도 정확히 같은 수명을 가진다. 정적 read-only 제약은 그대로다.
 
-## 4. 오류는 턴을 막는다
+## 5. 오류는 그 스킬만 격리한다
 
-Agent Skills frontmatter 계약을 어긴 문서, fence 문법/합성 plan 오류, 중복 스킬은 그
-source candidate를 typed rejection으로 격리한다. 해당 Skill을 Task가 지명한 턴만 admission
-오류를 받고, 올바른 형제 Skill은 계속 사용할 수 있다. `SKILL.md`가 없는 디렉토리는
-스킬이 아니므로 그냥 건너뛴다.
+Agent Skills frontmatter 계약을 어긴 문서와 중복 스킬은 그 source candidate를 typed
+rejection으로 격리한다. 해당 Skill을 Task가 지명한 턴만 admission 오류를 받고, 올바른
+형제 Skill은 계속 사용할 수 있다. `SKILL.md`가 없는 디렉토리는 스킬이 아니므로 그냥
+건너뛴다.
 
-## 5. 관측
+fence 문법 오류, fence 두 개 이상, 이름 불일치, 합성 plan 거부는 문서를 버리지 않는다.
+`keeper_compose_<name>` 도구는 생기지 않고, 본문은 지시 스킬로 `keeper_skill` 목록에 오르며,
+이유는 projection 진단으로 남는다(`keeper_skill_catalog.ml` `project_entry_or_fallback`).
+합성으로 쓴 스킬이 도구 목록에 없으면 먼저 `/api/v1/skills` 의 진단을 본다.
+
+## 6. 관측
 
 - `GET /api/v1/skills` — 발행 스냅샷의 valid entry와 typed rejection, 종류·합성 도구
   이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.

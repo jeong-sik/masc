@@ -99,6 +99,7 @@ let test_the_post_header_carries_the_readers_vote () =
   let rendered =
     F.format_post
       ~viewer_vote:Board.Down
+      ~replies:0
       (post ~id:"p-0123456789abcdef0123456789abcdef" ~author:"analyst")
   in
   Alcotest.(check bool)
@@ -110,7 +111,9 @@ let test_the_post_header_carries_the_readers_vote () =
     false
     (contains
        ~needle:"내 투표"
-       (F.format_post (post ~id:"p-0123456789abcdef0123456789abcdef" ~author:"analyst")))
+       (F.format_post
+          ~replies:0
+          (post ~id:"p-0123456789abcdef0123456789abcdef" ~author:"analyst")))
 ;;
 
 let () =

@@ -78,4 +78,13 @@ module For_test : sig
     agents:Masc_domain.agent list ->
     Yojson.Safe.t
   (** Exact production projection for the ["agents"] execution-dashboard field. *)
+
+  val render_under_timeout :
+    clock:_ Eio.Time.clock ->
+    timeout_s:float ->
+    (unit -> Yojson.Safe.t) ->
+    (Yojson.Safe.t, [ `Timeout ]) result
+  (** The window {!json} renders under: the render's result whenever it
+      finished, even in the scheduler pass the window closed; [`Timeout] only
+      when it had not. *)
 end

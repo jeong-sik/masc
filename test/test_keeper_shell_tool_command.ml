@@ -12,7 +12,7 @@ let () =
     K.split_words [ "board"; "post"; "get"; "p-1" ]
     = Some ("masc_board_post_get", [ "p-1" ]));
   assert (K.split_words [ "board"; "list" ] = Some ("masc_board_list", []));
-  assert (K.split_words [ "time"; "now" ] = Some ("keeper_time_now", []));
+  assert (K.split_words [ "lane"; "status" ] = Some ("keeper_lane_status", []));
   (* The path alone splits fine; the argument count is the schema's word,
      not the split's. *)
   assert (
@@ -45,7 +45,7 @@ let () =
       | Ok _ -> assert false);
      (* A schema with no required key states zero required parameters, so
         an optional-only tool answers the path alone.  This is the review
-        finding that made [masc board list] and [masc time now] work. *)
+        finding that made [masc board list] and [masc lane status] work. *)
      (match Masc.Keeper_tool_runtime.descriptor_for_internal "masc_board_list" with
       | None -> assert false
       | Some list_descriptor -> (

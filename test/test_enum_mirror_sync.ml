@@ -152,6 +152,7 @@ let test_schedule_contract_mirrors () =
     ; "cancelled_by_kind", Schedule_contract_values.actor_kind_strings
     ; "source", Schedule_contract_values.schedule_source_strings
     ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
+    ; "owner", Schedule_contract_values.owner_kind_strings
     ]
 ;;
 (* The three Goal tool schemas moved into config/tools/masc_goal_*.toml, where

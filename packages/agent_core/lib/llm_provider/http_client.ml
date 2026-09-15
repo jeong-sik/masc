@@ -21,9 +21,7 @@ type network_error_kind =
   | End_of_file
   | Unknown
 
-type stream_idle_state =
-  | Awaiting_first_event
-  | Awaiting_first_delta
+type stream_production =
   | Streaming_answer
   | Streaming_thinking
   | Streaming_tool_call
@@ -31,6 +29,12 @@ type stream_idle_state =
   | Streaming_substrate
   | Streaming_done
   | Streaming_unknown
+[@@deriving yojson, show]
+
+type stream_idle_state =
+  | Awaiting_first_event
+  | Awaiting_first_delta
+  | Producing of stream_production
 [@@deriving yojson, show]
 
 type timeout_phase =
@@ -41,7 +45,7 @@ type timeout_phase =
   | Http_operation
   | Non_streaming_body
   | Stream_body
-  | Stream_idle of stream_idle_state
+  | Stream_idle of stream_production
   | Provider_step
   | Cli_stdout_idle
   | Unknown_timeout
@@ -260,9 +264,7 @@ let request_body_too_large_error ~actual_bytes ~limit_bytes =
     }
 ;;
 
-let stream_idle_state_to_label = function
-  | Awaiting_first_event -> "awaiting_first_event"
-  | Awaiting_first_delta -> "awaiting_first_delta"
+let stream_production_to_label = function
   | Streaming_answer -> "streaming_answer"
   | Streaming_thinking -> "streaming_thinking"
   | Streaming_tool_call -> "streaming_tool_call"
@@ -272,9 +274,10 @@ let stream_idle_state_to_label = function
   | Streaming_unknown -> "streaming_unknown"
 ;;
 
-let timeout_phase_of_stream_idle_state = function
-  | Awaiting_first_event | Awaiting_first_delta -> First_token
-  | state -> Stream_idle state
+let stream_idle_state_to_label = function
+  | Awaiting_first_event -> "awaiting_first_event"
+  | Awaiting_first_delta -> "awaiting_first_delta"
+  | Producing production -> stream_production_to_label production
 ;;
 
 let timeout_phase_to_label = function
@@ -286,7 +289,7 @@ let timeout_phase_to_label = function
   | Non_streaming_body -> "non_streaming_body"
   | Stream_body -> "stream_body"
   | Stream_idle state ->
-    Printf.sprintf "stream_idle:%s" (stream_idle_state_to_label state)
+    Printf.sprintf "stream_idle:%s" (stream_production_to_label state)
   | Provider_step -> "provider_step"
   | Cli_stdout_idle -> "cli_stdout_idle"
   | Unknown_timeout -> "unknown_timeout"
@@ -1074,13 +1077,6 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
 
 let%test "classify_network_exn: non-network exn is None (propagates)" =
   classify_network_exn Not_found = None
-;;
-
-let%test "timeout_phase_of_stream_idle_state: Awaiting_first_* -> First_token" =
-  (* Prefill (no first chunk yet) must surface as [First_token], never
-     [Http_operation]. Guards the phase-accuracy fix. *)
-  timeout_phase_of_stream_idle_state Awaiting_first_event = First_token
-  && timeout_phase_of_stream_idle_state Awaiting_first_delta = First_token
 ;;
 
 (* ── Retry-After header parsing (RFC 9110 S10.2.3) ────────── *)
@@ -3129,12 +3125,21 @@ let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
    A read that started inside the budget and finished stands, even when it
    finished in the pass the budget ran out: what it read had been asked for
    in time. A read that starts once the budget has run out stands only when
-   it took nothing new from [reader]'s flow -- the lines that had already
-   arrived, such as the delimiter that came with a first token. Taking new
-   bytes then is a timeout even when the flow hands them over: a submitted
-   read can still complete after its fiber was cancelled, so a stream that
-   kept sending would otherwise outlast a total budget line by line. *)
-let read_within_budget ~clock ~anchor ~seconds ~reader read =
+   it never waited for the flow -- the bytes were already in a buffer between
+   the socket and here, such as the delimiter that came with a first token,
+   or a whole first event the response's opening chunk carried. A read that
+   waited does not stand: a submitted read can still complete after its fiber
+   was cancelled (io_uring hands over the bytes the kernel had already been
+   asked for), so a stream that kept sending would otherwise outlast a total
+   budget line by line.
+
+   Whether it waited is what the cancellation says. The budget's arm cancels
+   this read when it wins, and a read that took bytes already in hand never
+   reaches a scheduling point to be cancelled at. Counting bytes named the
+   wrong thing: this reader's buffer is the last of four between the socket
+   and the parser, and a first token still sitting in the cohttp connection's
+   buffer arrives here as new bytes. *)
+let read_within_budget ~clock ~anchor ~seconds read =
   let anchored_at =
     match !anchor with
     | Some t -> t
@@ -3144,12 +3149,14 @@ let read_within_budget ~clock ~anchor ~seconds ~reader read =
       t
   in
   let remaining = anchored_at +. seconds -. Eio.Time.now clock in
-  let received () = Eio.Buf_read.consumed_bytes reader + Eio.Buf_read.buffered_bytes reader in
-  let received_before = received () in
-  match Under_deadline.run clock remaining read with
+  match
+    Under_deadline.run clock remaining (fun () ->
+      let line = read () in
+      line, Eio.Fiber.is_cancelled ())
+  with
   | Error `Timeout -> raise Eio.Time.Timeout
-  | Ok line ->
-    if Float.compare remaining 0. > 0 || received () = received_before
+  | Ok (line, waited_for_the_flow) ->
+    if Float.compare remaining 0. > 0 || not waited_for_the_flow
     then line
     else raise Eio.Time.Timeout
 ;;
@@ -3256,7 +3263,7 @@ let read_sse
     let parsed =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader inner
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -3395,7 +3402,7 @@ let read_ndjson
     let line =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader (fun () ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
           Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is

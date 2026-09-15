@@ -20,7 +20,8 @@
       exception-based loop.
    3. a transient read failure is not collapsed into the permanent-consume
       path: the exact queue selection remains pending and provider dispatch
-      is blocked until a later intake can render it. *)
+      is blocked until a later intake can render it.
+   4. a readable comment event carries the ids of the replies it counts. *)
 
 open Alcotest
 open Masc
@@ -521,6 +522,81 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
     (Keeper_event_queue.length queued)
 ;;
 
+(* (4) A comment event names the replies it counts. The keeper commented once;
+   one reply came before that comment and two after. The event carries exactly
+   the two later ids, oldest first, and the prompt row states the count with
+   those ids, so the reader can see whether it already read them. *)
+let reply_spacing_seconds = 0.01
+
+let test_comment_event_carries_the_reply_ids_it_counts () =
+  let keeper_name = "reply-ids" in
+  let meta = test_meta keeper_name in
+  let post_id =
+    match
+      Board_dispatch.create_post
+        ~author:"external-author"
+        ~content:"thread topic"
+        ~title:"thread"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error error -> failf "post: %s" (Board.show_board_error error)
+  in
+  let add_comment ~author content =
+    (* The reply window opens after the keeper's latest comment, compared by
+       [created_at], so each comment lands strictly after the one before. *)
+    Unix.sleepf reply_spacing_seconds;
+    match Board_dispatch.add_comment ~post_id ~author ~content () with
+    | Ok comment -> Board.Comment_id.to_string comment.id
+    | Error error -> failf "comment: %s" (Board.show_board_error error)
+  in
+  let (_ : string) = add_comment ~author:"peer-early" "before the keeper spoke" in
+  let (_ : string) = add_comment ~author:keeper_name "keeper was here" in
+  let first_reply = add_comment ~author:"peer-a" "first reply" in
+  let second_reply = add_comment ~author:"peer-b" "second reply" in
+  let stimulus : Keeper_event_queue.stimulus =
+    { Keeper_event_queue.post_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = Time_compat.now ()
+    ; payload =
+        Keeper_event_queue.Board_signal
+          { kind = Keeper_event_queue.Comment_added
+          ; author = "peer-b"
+          ; title = "thread"
+          ; content = "second reply"
+          ; hearth = None
+          ; updated_at = Some (Time_compat.now ())
+          }
+    }
+  in
+  match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+  | Error unavailable ->
+    failf
+      "comment event read failed: %s"
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+  | Ok None -> fail "a comment stimulus produced no event"
+  | Ok (Some event) ->
+    check
+      (list string)
+      "the event carries the replies after the keeper's comment"
+      [ first_reply; second_reply ]
+      (List.map
+         Board.Comment_id.to_string
+         event.Keeper_world_observation.external_since);
+    let fields = Keeper_unified_prompt.For_testing.board_event_fields event in
+    check
+      (option string)
+      "the count is the number of ids"
+      (Some "2")
+      (List.assoc_opt "new_replies_since_own" fields);
+    check
+      (option string)
+      "the ids are in the row"
+      (Some (first_reply ^ "," ^ second_reply))
+      (List.assoc_opt "new_reply_ids" fields)
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -557,6 +633,12 @@ let () =
             "a transient head does not block the entry behind it"
             `Quick
             test_transient_head_does_not_block_the_entry_behind_it
+        ] )
+    ; ( "comment reply ids"
+      , [ test_case
+            "a comment event carries the reply ids it counts"
+            `Quick
+            (with_eio test_comment_event_carries_the_reply_ids_it_counts)
         ] )
     ]
 ;;

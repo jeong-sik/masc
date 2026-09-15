@@ -1,6 +1,20 @@
 name = "masc_schedule_list"
-description = "List durable scheduled internal automation requests."
+description = """
+List schedule summary rows; masc_schedule_get reads one in full. Rows follow \
+schedule_id order: pass next_cursor as cursor, same filters, for the next page."""
 additional_properties = false
+
+[[params]]
+name = "owner"
+type = "string"
+required = true
+enum = ["self", "wake_target", "scheduled_by", "all"]
+description = "self: rows you scheduled or that wake you."
+
+[[params]]
+name = "owner_name"
+type = "string"
+description = "Required with wake_target or scheduled_by."
 
 [[params]]
 name = "status"
@@ -10,4 +24,8 @@ enum = ["scheduled", "due", "running", "succeeded", "failed", "cancelled", "expi
 [[params]]
 name = "limit"
 type = "integer"
-description = "Maximum rows to return. Defaults to 50, capped at 200."
+description = "Defaults to 50, capped at 200."
+
+[[params]]
+name = "cursor"
+type = "string"

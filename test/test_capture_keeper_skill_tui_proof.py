@@ -41,7 +41,7 @@ def fixture(action_identity=None):
         "actions": [
             {
                 "identity": identity,
-                "tool_name": "keeper_time_now",
+                "tool_name": "keeper_lane_status",
                 "runtime_id": "runtime-one",
                 "agent_core_turn": 1,
                 "observed_at": "2026-08-27T00:00:00Z",

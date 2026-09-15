@@ -76,8 +76,11 @@ type pending_board_event = {
   matched_targets : string list;
   self_commented : bool;
   (** [true] if this keeper has previously commented on this post. *)
-  new_external_since : int;
-  (** Number of external comments posted after the keeper's latest comment. *)
+  external_since : Board_types.Comment_id.t list;
+  (** The external comments posted after the keeper's latest comment, oldest
+      first. Empty when the keeper has no comment on the post or the event is
+      not a Board comment. The prompt states their count and ids, so the
+      reader can tell which of them it has already read. *)
   latest_external_author : string option;
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;

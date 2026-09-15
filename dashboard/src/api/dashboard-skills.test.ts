@@ -227,9 +227,9 @@ const coverage = {
 }
 
 const compositionNode = {
-  node_id: 'clock',
+  node_id: 'lane',
   execution_id: 'exec-1',
-  tool_name: 'keeper_time_now',
+  tool_name: 'keeper_lane_status',
   input: {},
   schedule: {
     planned_index: 0,
@@ -240,7 +240,7 @@ const compositionNode = {
   result: {
     disposition: 'completed' as const,
     data: {},
-    tool_name: 'keeper_time_now',
+    tool_name: 'keeper_lane_status',
     duration_ms: 1,
   },
   tool_use_id: '',

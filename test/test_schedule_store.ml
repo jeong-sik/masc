@@ -139,9 +139,16 @@ let test_update_accepts_due_but_refuses_terminal_definition () =
   ignore (store_ok "replace due" (update_request config replacement));
   ignore (store_ok "cancel replacement" (cancel_request config ~schedule_id:due.schedule_id));
   let before = read_state config in
-  check_error "terminal update"
-    (Invalid_status_transition "only scheduled or due requests can be modified")
-    (update_request config (make_request ~schedule_id:due.schedule_id ()));
+  (match update_request config (make_request ~schedule_id:due.schedule_id ()) with
+   | Error (Transition_refused { schedule_id; current; attempted; last_wake }) ->
+     check string "the refusal names the schedule" due.schedule_id schedule_id;
+     check_status "the refusal reads the stored status" Cancelled current;
+     check string "the refusal names the transition" "modify"
+       (attempted_transition_to_string attempted);
+     check bool "a schedule that never woke has no last wake" true
+       (Option.is_none last_wake)
+   | Ok _ -> fail "terminal update must be refused"
+   | Error err -> fail (store_error_to_string err));
   check int "refusal does not bump" before.version (read_state config).version
 ;;
 
@@ -207,7 +214,13 @@ let test_running_wake_is_settleable_so_prune_keeps_it () =
   (* Trying to cancel a Running schedule must refuse -- a runner owns the
      wake, and the store must not orphan it under the runner. *)
   (match cancel_request config ~schedule_id:req.schedule_id with
-   | Error (Invalid_status_transition _) -> ()
+   | Error
+       (Transition_refused
+          { current = Running
+          ; attempted = Cancel_schedule
+          ; last_wake = Some { status = Wake_running; _ }
+          ; schedule_id = _
+          }) -> ()
    | Ok _ -> fail "cancel of Running schedule must be refused"
    | Error err -> fail (store_error_to_string err));
   let after_cancel_refused = read_state config in
@@ -1195,6 +1208,11 @@ let test_contract_vocabularies_own_strings_and_errors () =
        Schedule_contract_values.wake_status_strings,
        (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
        rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
+    ; ("owner",
+       [ "self"; "wake_target"; "scheduled_by"; "all" ],
+       Schedule_contract_values.owner_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.owner_kind_of_string v)),
+       rejection_error (Schedule_contract_values.owner_kind_of_string "nope"))
     ]
   in
   List.iter

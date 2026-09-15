@@ -212,18 +212,23 @@ let prepare_server ~base_path ~port ~owned =
                     ~env:(Unix.environment ()) with
             | Error message -> fail message
             | Ok server -> owned := Some server));
-        (* Startup is a bounded resource operation, not a Keeper turn budget. *)
-        match Eio.Time.with_timeout clock 60.0 (fun () ->
-          let rec wait () =
-            (match Option.bind !owned Masc_tui_server_lifecycle.exit_report with
-             | Some report -> fail (server_exit_message report)
-             | None -> ());
-            match read () with
-            | Ok (200, body) when health_state ~base_path body -> Ok ()
-            | Ok (status, _) when status <> 200 ->
-              fail (Printf.sprintf "Server readiness returned HTTP %d." status)
-            | _ -> Eio.Time.sleep clock 0.2; wait ()
-          in wait ()) with
+        (* Startup is a bounded resource operation, not a Keeper turn budget.
+           A server that became ready as the bound passed is ready. *)
+        match
+          Watched_work.run
+            ~watcher:(fun () -> Eio.Time.sleep clock 60.0; Error `Timeout)
+            (fun () ->
+              let rec wait () =
+                (match Option.bind !owned Masc_tui_server_lifecycle.exit_report with
+                 | Some report -> fail (server_exit_message report)
+                 | None -> ());
+                match read () with
+                | Ok (200, body) when health_state ~base_path body -> Ok ()
+                | Ok (status, _) when status <> 200 ->
+                  fail (Printf.sprintf "Server readiness returned HTTP %d." status)
+                | _ -> Eio.Time.sleep clock 0.2; wait ()
+              in wait ())
+        with
         | Ok () ->
           (match Workspace_connection.port port with
            | Error error -> fail (Workspace_connection.error_message error)

@@ -210,18 +210,18 @@ let test_composition_preview_exposes_validated_flow () =
   let source_text =
     {|---
 name: sample
-description: Read the exact clock through a validated composition.
+description: Read the exact lane status through a validated composition.
 ---
 
 ```toml composition
 [[compositions]]
 name = "sample"
-description = "Read the exact clock through a validated composition."
+description = "Read the exact lane status through a validated composition."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "clock"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -233,7 +233,7 @@ value = {}
   | Ok preview ->
     (match preview.profile.flow with
      | Some { nodes = [ node ]; batches = [ batch ] } ->
-       check string "flow node" "keeper_time_now" node.tool_name;
+       check string "flow node" "keeper_lane_status" node.tool_name;
        check string "flow batch" "concurrent" batch.execution_mode
      | _ -> fail "composition preview did not expose its validated flow")
 ;;

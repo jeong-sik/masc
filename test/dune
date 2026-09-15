@@ -1945,6 +1945,14 @@
  (modules test_keeper_stream_idle_floor)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; A run_named turn queued behind a held admission permit ends as Queue at the
+; keeper's deadline: the admission bound ends the wait and the watchdog stands
+; down for it. Slow: the deadline's declared minimum is thirty seconds.
+(test
+ (name test_keeper_queue_cap)
+ (modules test_keeper_queue_cap)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 ; A process with no clock in Eio_context refuses the provider attempt in the
 ; name of the deadline it could not set. The only driver suite that installs
 ; no clock.
@@ -5083,6 +5091,8 @@
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_overview_transport_row.inc)
+(include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
+(include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
@@ -5569,6 +5579,13 @@
 
 (include stanzas/test_browser_downloads.inc)
 (include stanzas/test_browser_bidi_lifecycle.inc)
+
+; Mock clock as the BiDi command window's clock: a reply that arrived as the
+; window closed is the reply, not a timeout that interrupts the session.
+(test
+ (name test_browser_bidi_downloads_reply_window)
+ (modules test_browser_bidi_downloads_reply_window)
+ (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_controls.inc)
 
@@ -5975,6 +5992,8 @@
 
 (include stanzas/test_browser_composition.inc)
 
+(include stanzas/test_shipped_skills.inc)
+
 (rule
  (alias runtest-test_setup_cli)
  (deps test_setup_cli.py ../bin/main_eio.exe
@@ -6184,6 +6203,13 @@
  (modules test_dashboard_compute_window)
  (libraries alcotest eio eio.mock masc.dashboard))
 
+; Mock clock as the execution dashboard render's clock: a render that finished
+; as its window closed is the render, not the timeout page.
+(test
+ (name test_dashboard_execution_render_window)
+ (modules test_dashboard_execution_render_window)
+ (libraries alcotest eio eio.mock yojson masc.dashboard))
+
 ; Mock clock orders the timer's wake-up ahead of the read's: the official
 ; client lanes' idle window keeps a line that arrived as it passed.
 (test
@@ -6272,6 +6298,13 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+
+; An attempt that published its answer must not publish a failure over it:
+; the light body refresh, and the window around the attempt, run after it.
+(test
+ (name test_server_dashboard_http_execution_surfaces_attempt)
+ (modules test_server_dashboard_http_execution_surfaces_attempt)
+ (libraries masc_test_deps))
 
 (rule
  (alias runtest-test_tui_lane_visual_pty)

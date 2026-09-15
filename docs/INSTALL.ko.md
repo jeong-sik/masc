@@ -153,10 +153,13 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 `--prefix` 기본값은 `$HOME/.local/bin`입니다. 터미널의 첫 설치에서는
-`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 `$HOME`을
-제안하므로 그대로 선택하면 데이터는 그 workspace 아래 `.masc`에 생깁니다. 현재 디렉터리에
-기존 `.masc/config`가 있으면 그 workspace를 제안합니다. 명시한 `--base-path`는
-질문 없이 사용하며, 비대화형 또는 `--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다. 설치 위치와
+`.masc`를 담을 workspace 경로를 묻습니다. 새 workspace에는 설정 화면과 같은
+`$HOME/MASC`를 제안합니다. 현재 디렉터리에 기존 `.masc/config`가 있으면 그
+workspace를 제안합니다. 명시한 `--base-path`는 질문 없이 사용하며, 비대화형 또는
+`--no-wizard`에서는 현재 디렉터리를 유지합니다. `.masc`는 지정한 base path 아래에 생깁니다.
+터미널에서 설치하면서 workspace 설정을 새로 만들 때, 그 workspace를 이후 `masc`가 찾는
+기본값으로 기록합니다. 기존 설정을 유지하는 재설치는 기록된 기본값을 건드리지 않습니다. 터미널
+없이 스크립트로 설치하면 기록하지 않으므로, 검증이나 CI 설치가 이 컴퓨터의 기본값을 바꾸지 않습니다. 설치 위치와
 작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
@@ -168,8 +171,9 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ## 첫 설치 마법사
 
 **↑/↓로 이동하고 Space로 여러 항목을 선택한 뒤 Enter로 진행**합니다.
-하나를 고르는 화면에서는 Enter로 선택합니다. `q`로 돌아가거나 취소할 수 있습니다.
-커서 조작을 지원하지 않는 터미널은 번호를 표시하며, `1,3`처럼 여러 번호를 입력합니다.
+하나를 고르는 화면에서는 Enter로 선택합니다. 글자를 치면 목록을 거르고, Esc로 거르기를
+지우고, Ctrl-C로 취소합니다. 커서 조작을 지원하지 않는 터미널은 번호를 표시하며,
+`1,3`처럼 여러 번호를 입력하거나 `q`로 취소합니다.
 
 모델 목록은 CLI 캐시, HTTP 서버, 기존 연결, 설치된 catalog에서 읽습니다.
 목록에 있는 모델도 저장 전에 실제 응답과 무해한 도구 호출을 통과해야 합니다.
@@ -306,7 +310,7 @@ TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세�
 setup 여정은 모델 연결과 샌드박스 사이에서 **3 · Give imp a voice (optional)** 를 묻습니다.
 말하기는 모든 Mac에 있는 `say`를 쓰므로 내려받을 것이 없습니다. 듣기는 따로 묻고,
 `whisper-cli`, 1.6GB 모델 파일, 마이크 녹음용 `sox`가 필요합니다. 여정이 셋 다 설치를
-안내합니다. **Stay text only**나 `q`를 고르면 음성 설정은 바뀌지 않습니다.
+안내합니다. **Stay text only**를 고르면 음성 설정은 바뀌지 않습니다.
 
 여정 밖에서는 `say`가 보여 주는 목록에서 목소리를 고르세요. 목록에 없는 이름은
 거부되고 아무것도 쓰지 않습니다.
@@ -530,8 +534,8 @@ bash /tmp/masc-install.sh --uninstall
 중단된 설치 transaction이 남아 있으면 이를 먼저 복구하라는 오류를 냅니다.
 
 데이터도 제거하려면 **실제 설치했던 workspace 경로**를 명시해야 합니다.
-아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. HOME을 workspace로
-선택했다면 `--base-path "$HOME"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
+아래 예시는 그 workspace 아래 `.masc`를 삭제합니다. 제안된 workspace를 그대로
+골랐다면 `--base-path "$HOME/MASC"`입니다. `.masc` 디렉터리 자체를 base path로 넣지 마세요.
 
 ```bash
 bash /tmp/masc-install.sh --uninstall --purge-data \

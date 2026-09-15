@@ -97,7 +97,8 @@ let stub_main () =
   in
   let v = request.Exec_ssh_protocol.v in
   let trailer ?exit ?signal ?(timed_out = false) ?shim_error () =
-    Exec_ssh_protocol.render_trailer { v; exit; signal; timed_out; shim_error }
+    Exec_ssh_protocol.render_trailer
+      { v; exit; signal; timed_out; shim_error; observed_syscalls = [] }
   in
   match mode with
   | "binary" ->
@@ -109,7 +110,8 @@ let stub_main () =
       { mode = request.mode; boundary = Sandbox_applied } in
     write_all Unix.stderr
       (Exec_ssh_protocol.render_trailer ~execution_receipt
-         { v; exit = None; signal = Some 15; timed_out = true; shim_error = None });
+         { v; exit = None; signal = Some 15; timed_out = true; shim_error = None
+         ; observed_syscalls = [] });
     exit 0
   | "receipt" ->
     let code = match request.mode with
@@ -120,7 +122,8 @@ let stub_main () =
       { mode = request.mode; boundary = Sandbox_applied } in
     write_all Unix.stderr
       (Exec_ssh_protocol.render_trailer ~execution_receipt
-         { v; exit = Some code; signal = None; timed_out = false; shim_error = None });
+         { v; exit = Some code; signal = None; timed_out = false; shim_error = None
+         ; observed_syscalls = [] });
     exit 0
   | "bad-receipt" ->
     write_all Unix.stderr

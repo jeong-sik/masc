@@ -34,9 +34,9 @@ author: claude-main
 - composition 오류는 rejection이 아니라 instruction 스킬 강등이다.
   발행은 성공한 것처럼 보이니 surface 분류(activation_tool)로 긍정
   확인해야 한다.
-- 가변 키 매크로는 못 만든다. composition 파라미터가 스칼라
-  4종(string/int/number/bool)뿐이라 `keys` 목록을 넘길 수 없고, 고정
-  시퀀스만 리터럴로 선언된다.
+- 가변 키 매크로는 못 만든다. composition 파라미터는 스칼라
+  4종(string/int/number/bool)과 정해진 문자열 목록(`enum`)뿐이라 `keys`
+  목록을 넘길 수 없고, 고정 시퀀스만 리터럴로 선언된다.
 
 ## 제안
 

@@ -153,8 +153,11 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 | `masc setup --base-path <dir>` | Docker를 준비하고 기존 `imp`를 시작한 뒤 TUI를 엽니다(0.35.5) |
 | `masc init --base-path <dir>` | 바이너리에 든 자산으로 `.masc/config/`를 만듭니다. Keeper `imp` 하나가 `activation_mode = "manual"`로 들어갑니다 |
 
-`--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 없으면
-`MASC_BASE_PATH`, 그다음 현재 디렉터리를 씁니다. 실행 상태는
+`--base-path`는 `.masc`를 담은 디렉터리이지 `.masc` 자체가 아닙니다. 모든 명령이
+같은 순서로 workspace를 고릅니다. `--base-path`, 그다음 `MASC_BASE_PATH`, 그다음
+`.masc/config`가 있는 현재 디렉터리, 마지막으로 터미널에서 설치하거나 setup할 때
+기록한 기본값입니다. 상위 디렉터리는 찾지 않습니다. 아무것도 없으면 고르는 방법을
+알려주고 끝납니다. 실행 상태는
 `<base-path>/.masc` 아래, 직접 쓰는 설정은 `<base-path>/.masc/config` 아래에
 있습니다.
 
@@ -494,5 +497,5 @@ Releases입니다. 현재 릴리스 계열은 **0.35.5**입니다.
 
 ## 라이선스
 
-MIT. [`LICENSE`](LICENSE)를 보세요. 포함된 폰트의 라이선스는
-[외부 저작물 고지](THIRD-PARTY-LICENSES.md)에 있습니다.
+MIT. [`LICENSE`](LICENSE)를 보세요. 포함된 폰트와 다른 프로젝트에서 가져온 Skill 참고
+파일의 라이선스는 [외부 저작물 고지](THIRD-PARTY-LICENSES.md)에 있습니다.

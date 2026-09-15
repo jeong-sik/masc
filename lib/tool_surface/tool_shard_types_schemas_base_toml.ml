@@ -23,7 +23,6 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
-let time_now = schema_of_name "keeper_time_now"
 let lane_status = schema_of_name "keeper_lane_status"
 let context_status = schema_of_name "keeper_context_status"
 let workspace_memory_read = schema_of_name "keeper_workspace_memory_read"

@@ -7,7 +7,7 @@ let info browser : Lane.client_info =
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
   {client_id; browser; version="1.0"; engine_version="155.0.1"}
 let target id = match Lane.resolve_target ~lane_name:"live" ~client_id:(Some id) with
-  | Ok value -> value | Error error -> fail error
+  | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run (fun sw ->
@@ -26,7 +26,8 @@ let answered promise expected = match Eio.Promise.await promise with
 let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
   let firefox = connect Lane.Firefox and zen = connect Lane.Zen in
   check bool "multiple clients require selection" true
-    (Lane.resolve_target ~lane_name:"live" ~client_id:None = Error "ambiguous_browser_clients");
+    (Lane.resolve_target ~lane_name:"live" ~client_id:None
+     = Error (Lane.Ambiguous_clients [firefox.client_id; zen.client_id]));
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for
     ~target:(target firefox.client_id)
     ~verb:(Lane.Page_interact {tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
@@ -39,6 +40,8 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
   ignore (Lane.deliver_result ~client_id:firefox.client_id ~id:command.id ~payload:(payload "firefox"));
   answered result "firefox")
 let test_single_and_stale_selection () = with_clients (fun _ connect ->
+  check bool "no connected browser is its own answer" true
+    (Lane.resolve_target ~lane_name:"live" ~client_id:None = Error Lane.No_live_client);
   let old = connect Lane.Firefox in
   check bool "one live client auto-resolves" true
     (Result.is_ok (Lane.resolve_target ~lane_name:"live" ~client_id:None));
@@ -46,9 +49,10 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
   ignore (Lane.disconnect_client ~client_id:old.client_id);
   ignore (connect Lane.Zen);
   check bool "old identity never selects new single client" true
-    (Lane.resolve_target ~lane_name:"live" ~client_id:(Some old.client_id) = Error "client_not_connected");
+    (Lane.resolve_target ~lane_name:"live" ~client_id:(Some old.client_id)
+     = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "captured target also stays disconnected" true
-    (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Rejected_before_effect "client_not_connected");
+    (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Rejected_before_effect "selected_client_disconnected");
   check bool "retired native identity cannot re-register" true
     (Lane.take_command ~client_info:old ~window_sec:0.001 = Error "client_disconnected"))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
@@ -62,7 +66,7 @@ let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connec
     ~verb:(Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
   check bool "expiry after target resolution is proven pre-effect" true
-    (answer = Lane.Rejected_before_effect "client_not_connected");
+    (answer = Lane.Rejected_before_effect "selected_client_disconnected");
   check int "no waiter was installed" 0 (Hashtbl.length client.waiters);
   check bool "no command was enqueued" true (Eio.Stream.take_nonblocking client.commands = None))
 let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
@@ -88,9 +92,9 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "automation rejects live identity" true
-    (Lane.resolve_target ~lane_name:"automation" ~client_id:(Some client.client_id) = Error "client_id_requires_live");
+    (Lane.resolve_target ~lane_name:"automation" ~client_id:(Some client.client_id) = Error Lane.Client_id_requires_live);
   check bool "unknown source is refused" true
-    (Lane.resolve_target ~lane_name:"other" ~client_id:None = Error "unknown_lane");
+    (Lane.resolve_target ~lane_name:"other" ~client_id:None = Error Lane.Unknown_lane);
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
   List.iter (fun verb -> match Lane.issue_for ~target:(target client.client_id) ~verb ~timeout_sec:0.1 with
     | Lane.Rejected_before_effect _ -> () | _ -> fail "live session/navigation must be rejected before effect")

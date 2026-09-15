@@ -161,8 +161,11 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.5) |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
-`--base-path` is the directory that holds `.masc`, not `.masc` itself. It
-falls back to `MASC_BASE_PATH`, then the current directory. Runtime state
+`--base-path` is the directory that holds `.masc`, not `.masc` itself. Every
+command picks the workspace in one order: `--base-path`, then `MASC_BASE_PATH`,
+then the current directory when it holds `.masc/config`, then the default an
+install or setup on a terminal recorded. Parent directories are not searched.
+With none of these the command names the choices and exits. Runtime state
 lives under `<base-path>/.masc`; authored configuration under
 `<base-path>/.masc/config`.
 
@@ -522,5 +525,5 @@ Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). Bundled fonts have their own
-[third-party notices](THIRD-PARTY-LICENSES.md).
+MIT. See [`LICENSE`](LICENSE). Bundled fonts and an adapted Skill reference file
+have their own [third-party notices](THIRD-PARTY-LICENSES.md).

@@ -596,7 +596,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
 function skillTemplate(kind: 'instruction' | 'composition', name: string, description: string, body: string): string {
   const frontmatter = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n`
   if (kind === 'instruction') return `${frontmatter}# ${name}\n\n${body}\n`
-  return `${frontmatter}# ${name}\n\n${body}\n\n\`\`\`toml composition\n[[compositions]]\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nexecution = "inline"\n\n[[compositions.nodes]]\nid = "clock"\ntool = "keeper_time_now"\n[compositions.nodes.input]\nkind = "literal"\nvalue = {}\n\`\`\`\n`
+  return `${frontmatter}# ${name}\n\n${body}\n\n\`\`\`toml composition\n[[compositions]]\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nexecution = "inline"\n\n[[compositions.nodes]]\nid = "lane"\ntool = "keeper_lane_status"\n[compositions.nodes.input]\nkind = "literal"\nvalue = {}\n\`\`\`\n`
 }
 
 export function SkillsPanel() {
@@ -720,7 +720,7 @@ export function SkillsPanel() {
           </div>
           <input class="ss-input" value=${createDescription.value} placeholder="When should an agent use this?" onInput=${(event: Event) => { createDescription.value = (event.currentTarget as HTMLInputElement).value }} required />
           <textarea class="ss-input min-h-24" value=${createBody.value} onInput=${(event: Event) => { createBody.value = (event.currentTarget as HTMLTextAreaElement).value }} />
-          ${createKind.value === 'composition' ? html`<div class="ss-muted">Starter flow: keeper_time_now. Create it, then use Edit to add validated nodes/dependencies or switch execution to async.</div>` : null}
+          ${createKind.value === 'composition' ? html`<div class="ss-muted">Starter flow: keeper_lane_status. Create it, then use Edit to add validated nodes/dependencies or switch execution to async.</div>` : null}
           <div class="flex items-center gap-2"><button class="ss-btn" type="submit" disabled=${!createSource.value}>Create + publish</button><span class="ss-muted">${createStatus.value}</span></div>
         </form>
       ` : null}

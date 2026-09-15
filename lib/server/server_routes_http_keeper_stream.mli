@@ -322,11 +322,9 @@ type canonical_reply_payload =
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
   ; external_effect_target : Keeper_surface_post.delivery_target option
-      (** [Some] only on [External_effect_completed], and only when the
-          completed effect was a surface post. A memory-write completion
-          carries {!Keeper_tool_execution.memory_revision_wire_key} instead
-          and decodes to [None]. The decoder rejects the outcome with
-          neither proof, with both, and either proof on any other
+      (** [Some] exactly on [External_effect_completed]: the completed
+          effect was a surface post. The decoder rejects that outcome
+          without a delivery target and a delivery target on any other
           outcome. *)
   ; visible_reply : string
   ; poll_body : string

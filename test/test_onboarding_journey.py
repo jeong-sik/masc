@@ -25,14 +25,16 @@ SETUP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SETUP)
 
 
-def observation(base=None, checks=()):
+def observation(base=None, checks=(), opening='needs_journey'):
     # doctor always emits a message per check, so the fixture does too: the
     # journey reads it for any invalid condition. Each check is (id, condition)
-    # or (id, condition, message).
+    # or (id, condition, message). `opening` is decided by the binary from typed
+    # checks (test_onboarding_status.ml pins that rule); a fixture names the
+    # answer the journey must follow instead of re-deriving it here.
     rows = [dict(id=name, condition=condition, message=(rest[0] if rest else ''))
             for name, condition, *rest in checks]
     return dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
-                base_path=base, checks=rows)
+                base_path=base, opening=opening, checks=rows)
 
 def pdf_readiness(ready=False):
     """The wire shape MASC sends. Belongs anywhere a catalog or receipt is built."""
@@ -715,7 +717,8 @@ class Journey(unittest.TestCase):
                     os.waitpid(pid, 0)
 
     def test_resume_invalid_saved_port_returns_to_workspace_selection(self):
-        state = observation('/old', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
+        state = observation('/old', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')],
+                            opening='open_existing_history')
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'workspace_port', side_effect=SETUP.SetupError('Invalid saved port')), \
                 patch.object(SETUP, 'pick', return_value=[2]) as picker, \
@@ -744,13 +747,14 @@ class Journey(unittest.TestCase):
             self.assertEqual(picker.call_args.args[1][0], 'Use ' + base)
             preflight.assert_called_once_with('/bin/masc', base)
             self.assertEqual([call.args[0] for call in run.call_args_list], [
-                ['/bin/masc', 'init', '--base-path', base],
+                ['/bin/masc', 'init', '--base-path', base, '--record-default'],
                 ['/bin/masc', 'setup', '--base-path', base, '--port', '9876', '--no-tui']])
             opened.assert_called_once_with('/bin/masc', base, 9876)
             self.assertFalse(Path(base).exists())  # renderer did not mutate workspace
 
     def test_persisted_history_resumes_without_model_reselection(self):
-        state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
+        state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')],
+                            opening='open_existing_history')
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'workspace_port', return_value=8945), \
                 patch.object(SETUP, 'select_setup_server', return_value=8945) as owner, \
@@ -801,6 +805,16 @@ class Journey(unittest.TestCase):
         self.assertEqual(verify.call_count, 2)
         self.assertEqual(verify.call_args_list[0], verify.call_args_list[1])
         self.assertEqual(login.call_args.args[0], ['/owned/claude', 'auth', 'login'])
+
+    def test_observation_without_an_opening_is_unsupported(self):
+        document = dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
+                        base_path='/workspace', checks=[])
+        for opening in (None, 'open', 'ready'):
+            payload = dict(document) if opening is None else dict(document, opening=opening)
+            response = subprocess.CompletedProcess([], 0, json.dumps(payload), '')
+            with self.subTest(opening=opening), patch.object(SETUP.subprocess, 'run', return_value=response), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.onboarding_status('/bin/masc')
 
     def test_unrecognized_status_never_becomes_ready(self):
         response = subprocess.CompletedProcess([], 0, json.dumps(dict(status='ready')), '')
@@ -1089,7 +1103,7 @@ class InvalidWorkspaceDiagnostic(unittest.TestCase):
             ('workspace', 'satisfied'),
             ('model_connection', 'needs_verification'),
             ('sandbox', 'needs_verification'),
-            ('keeper_persistence', 'satisfied')))
+            ('keeper_persistence', 'satisfied')), opening='open_existing_history')
         errors = io.StringIO()
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'workspace_port', return_value=8935), \
@@ -1102,6 +1116,30 @@ class InvalidWorkspaceDiagnostic(unittest.TestCase):
         open_workspace.assert_called_once()
         pick.assert_not_called()
         self.assertEqual(errors.getvalue(), '')
+
+    def test_advisory_invalid_check_is_named_and_history_still_opens(self):
+        # Measured 2026-09-15: a browser lane launcher on 64850 against a
+        # workspace connection on 61372 sent every bare `masc` back to question 1
+        # although imp's history was readable. The binary now says the lane is
+        # advisory; the journey prints it and opens the conversation.
+        state = observation('/workspace', (
+            ('workspace', 'satisfied'),
+            ('keeper_persistence', 'satisfied'),
+            ('browser_lane', 'invalid', 'The browser lane launcher targets port 64850 '
+             'while the workspace connection port is 61372.')), opening='open_existing_history')
+        errors = io.StringIO()
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', return_value=61372), \
+                patch.object(SETUP, 'select_setup_server', return_value=61372), \
+                patch.object(SETUP, 'open_workspace', return_value=0) as open_workspace, \
+                patch.object(SETUP, 'pick') as pick, \
+                contextlib.redirect_stderr(errors):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 0)
+        open_workspace.assert_called_once_with('masc', '/workspace', 61372)
+        pick.assert_not_called()
+        self.assertIn('browser_lane', errors.getvalue())
+        self.assertIn('64850', errors.getvalue())
 
     def test_fresh_workspace_still_opens_the_wizard(self):
         state = observation(None, (

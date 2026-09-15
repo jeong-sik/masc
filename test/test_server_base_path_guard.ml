@@ -1,63 +1,100 @@
 open Alcotest
 
-let getenv_none _ = None
+(* Workspace_root.resolve is pure: these observations name every input it reads,
+   so no case depends on the machine's HOME, cwd or recorded default. *)
+let observation ?flag ?environment ?cwd ?(recorded = Workspace_root.No_record)
+    ?(workspaces = []) ?(links = []) () =
+  { Workspace_root.flag
+  ; environment
+  ; cwd
+  ; recorded
+  ; is_workspace = (fun dir -> List.mem dir workspaces)
+  ; realpath = (fun path -> List.assoc_opt path links)
+  }
 
-(* The existing cases are about the cli/env/implicit axis. Left to the real
-   reader they would answer differently on a machine where `masc setup` has
-   recorded a workspace, so they say here that there is no record. *)
-let no_record () = None
+let source_label = function
+  | Ok root -> Workspace_root.source_label root.Workspace_root.source
+  | Error (Workspace_root.No_workspace _) -> "no_workspace"
+  | Error (Workspace_root.Unanchored _) -> "unanchored"
 
-let getenv_base value name =
-  if String.equal name "MASC_BASE_PATH" then Some value else None
+let root_of = function
+  | Ok root -> root.Workspace_root.root
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) -> "(none)"
 
-let default_base_path () = "/tmp/masc-default"
+let resolves label ~source ~root observed =
+  let resolved = Workspace_root.resolve observed in
+  check string (label ^ ": source") source (source_label resolved);
+  check string (label ^ ": root") root (root_of resolved)
 
-let check_source label expected actual =
-  check string label expected
-    (Server_base_path_guard.resolution_source_label actual)
+let a_record = Workspace_root.Record { record = "/cfg/default-base-path"; path = "/recorded" }
 
-let with_env name value f =
-  let prior = Sys.getenv_opt name in
-  (match value with
-  | Some value -> Unix.putenv name value
-  | None -> Unix.putenv name "");
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some value -> Unix.putenv name value
-      | None -> Unix.putenv name "")
-    f
+let flag_wins_over_everything () =
+  resolves "flag" ~source:"explicit_cli" ~root:"/from-flag"
+    (observation ~flag:"/from-flag" ~environment:"/from-env" ~cwd:"/ws"
+       ~recorded:a_record ~workspaces:[ "/ws"; "/recorded" ] ())
 
-let test_implicit_default_ignores_spoofed_resolution_env () =
-  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" (Some "explicit_cli") @@ fun () ->
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
-      ~persisted_default:no_record
-      ~cli_base_path:None ~default_base_path ()
-  in
-  check_source "source" "implicit_base_path" resolved.resolution_source;
-  match Server_base_path_guard.enforce resolved with
-  | Error (Server_base_path_guard.Implicit_base_path _) -> ()
-  | Ok () -> fail "expected implicit default to fail closed"
+let environment_wins_over_cwd_and_record () =
+  resolves "environment" ~source:"explicit_env" ~root:"/from-env"
+    (observation ~environment:"/from-env" ~cwd:"/ws" ~recorded:a_record
+       ~workspaces:[ "/ws"; "/recorded" ] ())
 
-let test_cli_source_wins_over_env () =
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~persisted_default:no_record
-      ~getenv:(getenv_base "/tmp/from-env")
-      ~cli_base_path:(Some "/tmp/from-cli")
-      ~default_base_path ()
-  in
-  check_source "source" "explicit_cli" resolved.resolution_source;
-  check string "base path" "/tmp/from-cli" resolved.normalized_base_path
+(* Measured on 0.35.16: inside a workspace, `masc init`, `masc` and `masc start`
+   exited 1 with "MASC_BASE_PATH is not set" right after logging the cwd. *)
+let a_workspace_cwd_wins_over_the_record () =
+  resolves "cwd" ~source:"current_directory" ~root:"/ws"
+    (observation ~cwd:"/ws" ~recorded:a_record ~workspaces:[ "/ws"; "/recorded" ] ())
 
-let test_env_source_without_cli () =
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~persisted_default:no_record
-      ~getenv:(getenv_base "/tmp/from-env")
-      ~cli_base_path:None ~default_base_path ()
-  in
-  check_source "source" "explicit_env" resolved.resolution_source;
-  check string "base path" "/tmp/from-env" resolved.normalized_base_path
+let a_cwd_without_config_falls_to_the_record () =
+  resolves "record" ~source:"persisted_default" ~root:"/recorded"
+    (observation ~cwd:"/home/me" ~recorded:a_record ~workspaces:[ "/recorded" ] ())
+
+let blank_named_values_count_as_absent () =
+  resolves "blank" ~source:"current_directory" ~root:"/ws"
+    (observation ~flag:"  " ~environment:"" ~cwd:"/ws" ~workspaces:[ "/ws" ] ())
+
+let a_stale_record_is_named_in_the_error () =
+  match
+    Workspace_root.resolve
+      (observation ~cwd:"/elsewhere" ~recorded:a_record ~workspaces:[] ())
+  with
+  | Ok root ->
+    failf "a record without .masc/config resolved to %s" root.Workspace_root.root
+  | Error (Workspace_root.Unanchored { requested; _ }) ->
+    failf "an absolute cwd and record cannot be unanchored (%s)" requested
+  | Error (Workspace_root.No_workspace { cwd; stale_record } as error) ->
+    check (option string) "cwd" (Some "/elsewhere") cwd;
+    check (option (pair string string)) "stale record"
+      (Some ("/cfg/default-base-path", "/recorded")) stale_record;
+    let message = Workspace_root.error_message error in
+    check bool "message names the ignored record" true
+      (String_util.contains_substring message "/recorded");
+    check bool "message offers --base-path" true
+      (String_util.contains_substring message "--base-path")
+
+let a_relative_record_is_stale () =
+  let relative = Workspace_root.Record { record = "/cfg/r"; path = "ws" } in
+  check string "relative record" "no_workspace"
+    (source_label
+       (Workspace_root.resolve
+          (observation ~recorded:relative ~workspaces:[ "ws" ] ())))
+
+let named_roots_are_absolute_and_canonical () =
+  resolves "relative flag" ~source:"explicit_cli" ~root:"/cwd/ws"
+    (observation ~flag:"ws" ~cwd:"/cwd" ());
+  resolves "flag naming .masc" ~source:"explicit_cli" ~root:"/cwd/ws"
+    (observation ~flag:"/cwd/ws/.masc" ~cwd:"/cwd" ());
+  resolves "linked flag" ~source:"explicit_cli" ~root:"/private/tmp/ws"
+    (observation ~flag:"/tmp/ws" ~links:[ "/tmp/ws", "/private/tmp/ws" ] ())
+
+(* Reported by review of #36447: with an unreadable cwd a relative flag used to
+   come back as a relative root, although the interface promises an absolute one. *)
+let a_relative_named_value_without_a_cwd_is_unanchored () =
+  check string "relative flag" "unanchored"
+    (source_label (Workspace_root.resolve (observation ~flag:"ws" ())));
+  check string "relative environment" "unanchored"
+    (source_label (Workspace_root.resolve (observation ~environment:"ws" ())));
+  check string "absolute flag needs no cwd" "explicit_cli"
+    (source_label (Workspace_root.resolve (observation ~flag:"/ws" ())))
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -74,30 +111,18 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let test_explicit_source_checkout_is_allowed () =
-  with_temp_dir "masc-source-repo-" @@ fun dir ->
-  Unix.mkdir (Filename.concat dir ".git") 0o755;
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
-      ~persisted_default:no_record
-      ~cli_base_path:(Some dir) ~default_base_path ()
-  in
-  match Server_base_path_guard.enforce resolved with
-  | Ok () -> ()
-  | Error violation ->
-      fail (Server_base_path_guard.format_violation violation)
-
-let test_plain_workspace_allowed () =
-  with_temp_dir "masc-workspace-" @@ fun dir ->
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
-      ~persisted_default:no_record
-      ~cli_base_path:(Some dir) ~default_base_path ()
-  in
-  match Server_base_path_guard.enforce resolved with
-  | Ok () -> ()
-  | Error violation ->
-      fail (Server_base_path_guard.format_violation violation)
+(* observe is the only reader of the process; its workspace test is the one a
+   real directory decides. *)
+let observe_requires_masc_config () =
+  with_temp_dir "masc-workspace-root-" @@ fun dir ->
+  let masc = Filename.concat dir ".masc" in
+  Unix.mkdir masc 0o755;
+  let observed = Workspace_root.observe ~flag:None () in
+  check bool ".masc alone is not a workspace" false
+    (observed.Workspace_root.is_workspace dir);
+  Unix.mkdir (Filename.concat masc "config") 0o755;
+  check bool ".masc/config is a workspace" true
+    (observed.Workspace_root.is_workspace dir)
 
 let test_canonicalize_existing_freezes_symlink_target () =
   with_temp_dir "masc-canonical-path-" @@ fun dir ->
@@ -124,70 +149,27 @@ let test_canonicalize_existing_retains_failure () =
   | Ok canonical ->
     failf "missing BasePath unexpectedly resolved to %s" canonical
 
-(* The recorded workspace. #35040's first attempt made the reader answer with
-   it and stopped there, and `masc start` with no flag and no env still exited
-   1: the guard refuses whatever the implicit default returns, wherever the
-   value came from. So the source has to be its own case, and it has to be one
-   `enforce` accepts. *)
-let recorded () = Some "/tmp/masc-recorded"
-
-let test_a_recorded_default_is_accepted () =
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
-      ~persisted_default:recorded ~cli_base_path:None ~default_base_path ()
-  in
-  check string "the recorded path is used" "/tmp/masc-recorded" resolved.raw_base_path;
-  check_source "source" "persisted_default" resolved.resolution_source;
-  match Server_base_path_guard.enforce resolved with
-  | Ok () -> ()
-  | Error (Server_base_path_guard.Implicit_base_path _) ->
-    fail "a recorded workspace was named on an earlier command line, not guessed"
-
-let test_env_and_cli_win_over_a_recorded_default () =
-  let from_env =
-    Server_base_path_guard.resolve_startup_base_path
-      ~getenv:(getenv_base "/tmp/masc-env") ~persisted_default:recorded
-      ~cli_base_path:None ~default_base_path ()
-  in
-  check string "env value" "/tmp/masc-env" from_env.raw_base_path;
-  check_source "env source" "explicit_env" from_env.resolution_source;
-  let from_cli =
-    Server_base_path_guard.resolve_startup_base_path
-      ~getenv:(getenv_base "/tmp/masc-env") ~persisted_default:recorded
-      ~cli_base_path:(Some "/tmp/masc-cli") ~default_base_path ()
-  in
-  check string "cli value" "/tmp/masc-cli" from_cli.raw_base_path;
-  check_source "cli source" "explicit_cli" from_cli.resolution_source
-
-let test_a_blank_record_falls_through_to_implicit () =
-  let resolved =
-    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
-      ~persisted_default:(fun () -> Some "   ") ~cli_base_path:None
-      ~default_base_path ()
-  in
-  check_source "source" "implicit_base_path" resolved.resolution_source;
-  match Server_base_path_guard.enforce resolved with
-  | Error (Server_base_path_guard.Implicit_base_path _) -> ()
-  | Ok () -> fail "a blank record names no workspace"
-
 let () =
   Alcotest.run "Server_base_path_guard"
-    [ ( "resolution"
-      , [ test_case "implicit default ignores spoofed resolution env" `Quick
-            test_implicit_default_ignores_spoofed_resolution_env
-        ; test_case "cli source wins over env" `Quick test_cli_source_wins_over_env
-        ; test_case "env source without cli" `Quick test_env_source_without_cli
-        ] )
-    ; ( "guard"
-      , [ test_case "explicit source checkout is allowed" `Quick
-            test_explicit_source_checkout_is_allowed
-        ; test_case "plain workspace allowed" `Quick test_plain_workspace_allowed
-        ; test_case "a recorded default is accepted" `Quick
-            test_a_recorded_default_is_accepted
-        ; test_case "env and cli win over a recorded default" `Quick
-            test_env_and_cli_win_over_a_recorded_default
-        ; test_case "a blank record falls through to implicit" `Quick
-            test_a_blank_record_falls_through_to_implicit
+    [ ( "workspace root order"
+      , [ test_case "flag wins over everything" `Quick flag_wins_over_everything
+        ; test_case "environment wins over cwd and record" `Quick
+            environment_wins_over_cwd_and_record
+        ; test_case "a workspace cwd wins over the record" `Quick
+            a_workspace_cwd_wins_over_the_record
+        ; test_case "a cwd without .masc/config falls to the record" `Quick
+            a_cwd_without_config_falls_to_the_record
+        ; test_case "blank named values count as absent" `Quick
+            blank_named_values_count_as_absent
+        ; test_case "a stale record is named in the error" `Quick
+            a_stale_record_is_named_in_the_error
+        ; test_case "a relative record is stale" `Quick a_relative_record_is_stale
+        ; test_case "named roots are absolute and canonical" `Quick
+            named_roots_are_absolute_and_canonical
+        ; test_case "a relative named value without a cwd is unanchored" `Quick
+            a_relative_named_value_without_a_cwd_is_unanchored
+        ; test_case "observe requires .masc/config" `Quick
+            observe_requires_masc_config
         ] )
     ; ( "canonicalization"
       , [ test_case "existing symlink target is frozen" `Quick

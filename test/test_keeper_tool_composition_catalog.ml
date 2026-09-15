@@ -5,13 +5,13 @@ module Plan = Masc.Keeper_tool_plan
 
 let valid_catalog =
   {|[[compositions]]
-name = "time-memory-query"
-description = "Feed the exact clock result into memory search."
+name = "status-memory-query"
+description = "Feed the lane profile into memory search."
 execution = "inline"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -19,15 +19,15 @@ value = {}
 [[compositions.nodes]]
 id = "search"
 tool = "keeper_memory_search"
-after = ["time"]
+after = ["lane"]
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "time"
-pointer = "/now_iso"
+node = "lane"
+pointer = "/profile"
 |}
 ;;
 
@@ -45,37 +45,39 @@ let test_catalog_builds_executable_typed_plan () =
   in
   check int "one catalog entry" 1 (List.length (Catalog.entries catalog));
   let entry =
-    match Catalog.find catalog "time-memory-query" with
+    match Catalog.find catalog "status-memory-query" with
     | Some entry -> entry
     | None -> fail "composition lookup missed exact name"
   in
   check
     (option string)
     "description"
-    (Some "Feed the exact clock result into memory search.")
+    (Some "Feed the lane profile into memory search.")
     entry.description;
   let layers = Plan.dependency_layers entry.plan in
   check
     (list (list string))
     "typed dependency layers"
-    [ [ "time" ]; [ "search" ] ]
+    [ [ "lane" ]; [ "search" ] ]
     (List.map
        (List.map (fun node -> Plan.Node_id.to_string node.Plan.id))
        layers);
   let run_id = Plan.Run_id.fresh () in
-  let time_output =
+  let lane_output =
     match
       Plan.validate_output
         entry.plan
         ~run_id
-        ~node_id:(node_id "time")
+        ~node_id:(node_id "lane")
         (`Assoc
-            [ "now_iso", `String "2026-08-14T00:00:00Z"
-            ; "now_unix", `Float 0.0
+            [ "profile", `String "docker"
+            ; "lane", `Null
+            ; "endpoint", `Null
+            ; "operator_action", `Null
             ])
     with
     | Ok output -> output
-    | Error _ -> fail "valid clock output was rejected"
+    | Error _ -> fail "valid lane output was rejected"
   in
   match
     Plan.resolve_input
@@ -83,9 +85,9 @@ let test_catalog_builds_executable_typed_plan () =
       ~run_id
       ~node_id:(node_id "search")
       ~lookup:(fun id ->
-        if Plan.Node_id.equal id (node_id "time") then Some time_output else None)
+        if Plan.Node_id.equal id (node_id "lane") then Some lane_output else None)
   with
-  | Ok (`Assoc [ ("query", `String "2026-08-14T00:00:00Z") ]) -> ()
+  | Ok (`Assoc [ ("query", `String "docker") ]) -> ()
   | Ok value ->
     failf "resolved catalog input changed shape: %s" (Yojson.Safe.to_string value)
   | Error _ -> fail "catalog output reference did not resolve"
@@ -98,8 +100,8 @@ name = "bad"
 execution = "inline"
 guess = true
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 input = { kind = "literal", value = {} }
 |}
   in
@@ -116,8 +118,8 @@ let test_catalog_rejects_malformed_output_pointer () =
 name = "bad-pointer"
 execution = "inline"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -130,8 +132,8 @@ kind = "object"
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "output"
-node = "time"
-pointer = "now_iso"
+node = "lane"
+pointer = "profile"
 |}
   in
   match Catalog.parse document with
@@ -147,8 +149,8 @@ let one_node_composition name =
 name = %S
 execution = "inline"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -162,8 +164,8 @@ let one_node_async_composition name =
 name = %S
 execution = "async"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -176,8 +178,8 @@ let test_catalog_requires_explicit_execution_mode () =
     {|[[compositions]]
 name = "missing-execution"
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -193,19 +195,19 @@ value = {}
 
 let test_catalog_accepts_async_only_for_statically_read_only_tools () =
   let catalog =
-    match Catalog.parse (one_node_async_composition "clock-background") with
+    match Catalog.parse (one_node_async_composition "lane-background") with
     | Ok catalog -> catalog
     | Error error -> fail (Catalog.error_to_string error)
   in
   let entry =
-    match Catalog.find catalog "clock-background" with
+    match Catalog.find catalog "lane-background" with
     | Some entry -> entry
     | None -> fail "async composition lookup failed"
   in
   (match entry.execution with
    | Catalog.Async -> ()
    | Catalog.Inline -> fail "async execution mode was rewritten");
-  check string "async tool name" "keeper_compose_clock-background" (Catalog.tool_name entry);
+  check string "async tool name" "keeper_compose_lane-background" (Catalog.tool_name entry);
   check string "status control name" "keeper_composition_status" Catalog.status_tool_name;
   check string "cancel control name" "keeper_composition_cancel" Catalog.cancel_tool_name
 ;;
@@ -233,24 +235,24 @@ value = { title = "not admitted", content = "effectful async" }
 
 let test_catalog_projects_stable_tool_name_and_path () =
   let catalog =
-    match Catalog.parse (one_node_composition "clock-check") with
+    match Catalog.parse (one_node_composition "lane-check") with
     | Ok catalog -> catalog
     | Error _ -> fail "valid named composition was rejected"
   in
   let entry =
-    match Catalog.find catalog "clock-check" with
+    match Catalog.find catalog "lane-check" with
     | Some entry -> entry
     | None -> fail "named composition lookup failed"
   in
-  check string "model-visible tool name" "keeper_compose_clock-check"
+  check string "model-visible tool name" "keeper_compose_lane-check"
     (Catalog.tool_name entry)
 ;;
 
 let test_catalog_rejects_name_outside_tool_alphabet () =
-  match Catalog.parse (one_node_composition "clock check") with
+  match Catalog.parse (one_node_composition "lane check") with
   | Error
       (Catalog.Invalid_composition_name_character
-        { name = "clock check"; character = ' ' }) -> ()
+        { name = "lane check"; character = ' ' }) -> ()
   | Error _ | Ok _ -> fail "composition name outside the tool alphabet was accepted"
 ;;
 
@@ -384,7 +386,7 @@ let test_catalog_params_generate_schema_and_bind () =
 let test_zero_param_instantiation_revalidates_turn_surface () =
   let entry =
     let catalog = parse_ok valid_catalog in
-    match Catalog.find catalog "time-memory-query" with
+    match Catalog.find catalog "status-memory-query" with
     | Some entry -> entry
     | None -> fail "zero-param composition lookup missed exact name"
   in
@@ -392,7 +394,7 @@ let test_zero_param_instantiation_revalidates_turn_surface () =
     Masc.Keeper_tool_descriptor.all_descriptors ()
     |> List.filter (fun descriptor ->
       Masc.Keeper_tool_descriptor.keeper_model_names descriptor
-      |> List.exists (String.equal "keeper_time_now"))
+      |> List.exists (String.equal "keeper_lane_status"))
   in
   match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
   | Error
@@ -455,8 +457,8 @@ type = "string"
 description = "unused"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -478,8 +480,8 @@ type = "object"
 description = "wrong"
 
 [[compositions.nodes]]
-id = "time"
-tool = "keeper_time_now"
+id = "lane"
+tool = "keeper_lane_status"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
@@ -528,6 +530,149 @@ name = "query"
     fail
       ("async composition with params was rejected: "
        ^ Catalog.error_to_string error)
+;;
+
+(* One read whose mode the caller picks from a closed set. [param_lines] is
+   spliced between the param's name and description so each case varies only
+   the declaration under test. *)
+let read_mode_composition ~param_lines =
+  {|[[compositions]]
+name = "read-mode"
+description = "Read one automation tab in the chosen mode."
+execution = "inline"
+
+[[compositions.params]]
+name = "mode"
+|}
+  ^ param_lines
+  ^ {|
+description = "Which read to return."
+
+[[compositions.nodes]]
+id = "read"
+tool = "BrowserRead"
+input = { kind = "object", fields = [
+  { name = "lane", value = { kind = "literal", value = "automation" } },
+  { name = "tabId", value = { kind = "literal", value = 1 } },
+  { name = "mode", value = { kind = "param", name = "mode" } }
+] }
+|}
+;;
+
+let read_mode_entry () =
+  let catalog =
+    parse_ok
+      (read_mode_composition
+         ~param_lines:{|type = "string"
+enum = ["scene", "regions"]|})
+  in
+  match Catalog.find catalog "read-mode" with
+  | Some entry -> entry
+  | None -> fail "enum param composition lookup missed exact name"
+;;
+
+let test_enum_param_projects_members_and_binds () =
+  let entry = read_mode_entry () in
+  (match entry.Catalog.params with
+   | [ { Catalog.param_type = Catalog.Enum_param [ "scene"; "regions" ]; _ } ] -> ()
+   | _ -> fail "enum param did not keep its members in declared order");
+  let schema = Catalog.input_schema_of_params entry.Catalog.params in
+  let open Yojson.Safe.Util in
+  let property = schema |> member "properties" |> member "mode" in
+  check string "enum property is a string" "string" (property |> member "type" |> to_string);
+  check
+    (list string)
+    "schema lists the members"
+    [ "scene"; "regions" ]
+    (property |> member "enum" |> to_list |> List.map to_string);
+  (* The projected schema still passes the pre-dispatch check for a member.
+     That check does not read [enum], so refusing an outside value is left to
+     binding below. *)
+  (match
+     Masc.Tool_input_validation.validate_args
+       ~schema
+       ~name:"keeper_compose_read-mode"
+       ~args:(`Assoc [ "mode", `String "regions" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "input validation refused a declared member");
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  (match
+     Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `String "regions" ]) entry
+   with
+   | Ok plan ->
+     let bound_mode =
+       Plan.nodes plan
+       |> List.find_map (fun (node : Plan.node) ->
+         match node.input with
+         | Plan.Json_template.Object fields -> List.assoc_opt "mode" fields
+         | Plan.Json_template.Literal _
+         | Plan.Json_template.Output _
+         | Plan.Json_template.Param _
+         | Plan.Json_template.Array _ -> None)
+     in
+     (match bound_mode with
+      | Some (Plan.Json_template.Literal (`String "regions")) -> ()
+      | Some _ | None -> fail "the chosen member was not bound as a literal")
+   | Error error ->
+     fail ("a declared member failed to bind: " ^ Catalog.instantiation_error_to_string error));
+  (* BrowserRead itself takes "text" as a mode, so only binding can refuse it
+     for this composition. *)
+  (match
+     Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `String "text" ]) entry
+   with
+   | Error
+       (Catalog.Argument_outside_enum
+          { param = "mode"; members = [ "scene"; "regions" ]; actual = `String "text" } as
+        error) ->
+     check
+       string
+       "typed projection kind"
+       "argument_outside_enum"
+       (Catalog.instantiation_error_to_json error |> member "kind" |> to_string)
+   | Ok _ -> fail "a value outside the members was bound"
+   | Error error ->
+     fail ("wrong refusal for an outside value: " ^ Catalog.instantiation_error_to_string error));
+  (match Catalog.instantiate ~descriptors ~args:(`Assoc [ "mode", `Int 1 ]) entry with
+   | Error (Catalog.Argument_outside_enum { param = "mode"; actual = `Int 1; _ }) -> ()
+   | Ok _ -> fail "a non-string value was bound to an enum param"
+   | Error error ->
+     fail ("wrong refusal for a non-string value: " ^ Catalog.instantiation_error_to_string error));
+  match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
+  | Error (Catalog.Missing_argument "mode") -> ()
+  | Ok _ -> fail "a missing enum argument was bound"
+  | Error error ->
+    fail ("wrong refusal for a missing value: " ^ Catalog.instantiation_error_to_string error)
+;;
+
+let test_enum_param_declaration_errors () =
+  let parse_error param_lines =
+    match Catalog.parse (read_mode_composition ~param_lines) with
+    | Error error -> error
+    | Ok _ -> fail ("declaration was accepted: " ^ param_lines)
+  in
+  (match parse_error {|type = "integer"
+enum = ["scene", "regions"]|} with
+   | Catalog.Param_enum_requires_string_type { type_name = "integer"; _ } -> ()
+   | error -> fail ("enum on integer: " ^ Catalog.error_to_string error));
+  (match parse_error {|type = "string"
+enum = []|} with
+   | Catalog.Empty_param_enum _ -> ()
+   | error -> fail ("empty enum: " ^ Catalog.error_to_string error));
+  (match parse_error {|type = "string"
+enum = ["scene", "scene"]|} with
+   | Catalog.Duplicate_param_enum_value { value = "scene"; _ } -> ()
+   | error -> fail ("repeated member: " ^ Catalog.error_to_string error));
+  (match parse_error {|type = "string"
+enum = "scene"|} with
+   | Catalog.Wrong_value_kind { field = "enum"; expected = Catalog.String_array_value; _ } ->
+     ()
+   | error -> fail ("scalar enum: " ^ Catalog.error_to_string error));
+  match parse_error {|type = "string"
+values = ["scene", "regions"]|} with
+  | Catalog.Unknown_field { field = "values"; _ } -> ()
+  | error -> fail ("unknown member field: " ^ Catalog.error_to_string error)
 ;;
 
 (* A composition tool ships no TOML, so "which file defines this" has to
@@ -658,6 +803,14 @@ let () =
             "param declaration mismatches are rejected"
             `Quick
             test_catalog_rejects_param_declaration_mismatches
+        ; test_case
+            "an enum param projects its members and binds only a member"
+            `Quick
+            test_enum_param_projects_members_and_binds
+        ; test_case
+            "enum param declarations are checked at load"
+            `Quick
+            test_enum_param_declaration_errors
         ; test_case
             "a composition tool names its skill file"
             `Quick

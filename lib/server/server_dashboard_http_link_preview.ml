@@ -383,7 +383,13 @@ let fetch_preview ~clock ~net url =
                            ?content_type
                            ~cache_state:"miss" ())
             in
-            try Eio.Time.with_timeout_exn clock preview_timeout_sec run
+            (* A preview that finished as its window closed is the preview. *)
+            try
+              Watched_work.run
+                ~watcher:(fun () ->
+                  Eio.Time.sleep clock preview_timeout_sec;
+                  Error (Printexc.to_string Eio.Time.Timeout))
+                run
             with Eio.Cancel.Cancelled _ as e -> raise e
                | exn -> Error (Printexc.to_string exn))
 

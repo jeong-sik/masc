@@ -143,7 +143,7 @@ let test_workspace_isolation () = with_workspace (fun root workspace ->
 let test_composition_not_available () = with_workspace (fun root workspace ->
   write (Filename.concat root "skills/evidence-guide/SKILL.md")
     (document
-       "```toml composition\n[[compositions]]\nname = \"evidence-guide\"\ndescription = \"Inspect execution evidence\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = \"clock\"\ntool = \"keeper_time_now\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```");
+       "```toml composition\n[[compositions]]\nname = \"evidence-guide\"\ndescription = \"Inspect execution evidence\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = \"lane\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```");
   let snapshot = refresh workspace in
   let catalog, diagnostics = Masc.Keeper_skill_catalog.of_snapshot snapshot in
   check int "composition fixture projects without errors" 0 (List.length diagnostics);

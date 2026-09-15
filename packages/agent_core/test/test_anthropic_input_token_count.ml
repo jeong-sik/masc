@@ -83,9 +83,14 @@ let config
     ()
 ;;
 
-(* The stage these measurements are ahead of, with no bound on it: the
-   cases here are about what is measured, not when the wait ends. *)
-let unbounded_completion = Complete.Completion { call_timeout_s = None }
+(* A window with no bound on it: the cases that use it are about what is
+   measured and sent, not when the wait ends. *)
+let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t =
+  Deadline_window.open_ Http_client.Unbounded
+;;
+
+(* The stage these measurements are ahead of, with no bound on it. *)
+let unbounded_completion = Complete.Completion { call_window = unbounded_window }
 
 let serialize_sync prepared =
   match Complete.admit_request_body ~stream:false prepared with
@@ -311,6 +316,10 @@ let test_anthropic_synthesizes_type_for_combinator_only_schema () =
     (List.assoc_opt "type" schema = Some (`String "object"))
 ;;
 
+(* Nothing listens on loopback port 1, so a request sent there never reaches
+   a server. *)
+let unreachable_base_url = "http://127.0.0.1:1"
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -517,6 +526,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
                observations := observation :: !observations;
                Ok ())
              admitted
+             ~call_window:unbounded_window
              ()
          in
          result, admitted_evidence, fresh_serialization
@@ -674,7 +684,9 @@ let test_prepared_measure_admit_dispatch () =
           (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
       }
     in
-    let result = Complete.complete_admitted ~sw ~net ~transport admitted () in
+    let result =
+      Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()
+    in
     result, fit, !dispatched
   in
   (match result with
@@ -1085,7 +1097,7 @@ let test_serialization_admission_validates_before_io () =
   Eio.Switch.run
   @@ fun sw ->
   let cfg =
-    config ~request_path:"/v1/responses" ~max_concurrent_requests:0 "http://127.0.0.1:1"
+    config ~request_path:"/v1/responses" ~max_concurrent_requests:0 unreachable_base_url
   in
   let prepared = Complete.prepare_request ~config:cfg ~messages ~tools:[ tool ] () in
   match Complete.admit_request_body ~stream:false prepared with
@@ -1272,7 +1284,7 @@ let run_failing_projection projection =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let provider_config = config ~max_context:512 "http://127.0.0.1:1" in
+  let provider_config = config ~max_context:512 unreachable_base_url in
   let transport =
     { Llm_transport.complete_sync = (fun _ -> fail "unexpected sync dispatch")
     ; complete_stream =

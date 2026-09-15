@@ -21,7 +21,7 @@ class Installation(unittest.TestCase):
             source.chmod(0o755)
             base = root / "workspace"
             manifests = root / "native manifests"
-            argv = ["bash", str(INSTALLER), "--binary", str(source), "--base-path", str(base), "--server", "http://127.0.0.1:18935", "--manifest-dir", str(manifests)]
+            argv = ["bash", str(INSTALLER), "--binary", str(source), "--base-path", str(base), "--manifest-dir", str(manifests)]
             subprocess.run(argv, check=True, capture_output=True)
             token = base / ".masc/browser-lane/token"
             original = token.read_text()
@@ -33,7 +33,7 @@ class Installation(unittest.TestCase):
             launcher = Path(manifest["path"])
             self.assertNotIn(original.strip(), launcher.read_text())
             result = subprocess.run([str(launcher), str(manifests / "masc_browser_host.json"), "browser-lane@masc.local"], check=True, capture_output=True, text=True)
-            self.assertEqual(result.stdout.splitlines(), ["--base-path", str(base), "--token-file", str(token), "--server", "http://127.0.0.1:18935", str(manifests / "masc_browser_host.json"), "browser-lane@masc.local"])
+            self.assertEqual(result.stdout.splitlines(), ["--base-path", str(base), "--token-file", str(token), str(manifests / "masc_browser_host.json"), "browser-lane@masc.local"])
 
     def test_missing_base_path_is_explicit(self):
         env = {k: v for k, v in os.environ.items() if k != "MASC_BASE_PATH"}

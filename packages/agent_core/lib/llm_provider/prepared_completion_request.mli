@@ -53,20 +53,28 @@ val admit_serialized_body
   -> (serialized, Http_client.http_error) result
 
 (** What the measurement is ahead of, and the caller's bounds for it. The
-    measurement takes the endpoint's admission permit like the stage after
-    it, and its count round trip is provider time before that stage's first
-    byte, so it runs under the same budgets that stage will. Ahead of a
-    non-streaming completion that is the whole-call bound: the permit wait
-    ends as [TimeoutError { phase = Queue }] and the round trip as
-    [TimeoutError { phase = Non_streaming_body }]. Ahead of a stream the
-    permit wait ends under the admission budget as [Queue] and the round
-    trip under the first-event budget as [First_token], the count round trip
-    being provider silence before the first token. Each is carried as
-    [Input_count_failed (Transport _)]; none is a bound without [clock]. *)
-type next_stage =
-  | Completion of { call_timeout_s : float option }
+    whole-call and admission bounds arrive as the caller's own opened
+    {!Deadline_window}, so the measurement and the stage after it spend from
+    one [deadline_at]. The measurement takes the endpoint's admission permit
+    like the stage after it, and its count round trip is provider time before
+    that stage's first byte, so it runs under the same budgets that stage
+    will. Ahead of a non-streaming completion that is the whole-call bound:
+    the permit wait ends as [TimeoutError { phase = Queue }] and the round
+    trip as [TimeoutError { phase = Non_streaming_body }]. Ahead of a stream the
+    admission budget spans the permit wait and the round trip after it, as
+    it spans the stream's own wait, since the stream would not be sent past
+    it; the round trip is also provider silence before the first token, so
+    the first-event budget bounds it too. The wait ends as [Queue]. The
+    round trip runs under one window, the shorter of the first-event budget
+    and what the admission budget has left, and ends as the phase of the
+    budget that ended it: [First_token], or [Queue] after a late permit;
+    when the two end together it is [First_token]. Each is carried as
+    [Input_count_failed (Transport _)]. A window carries its own clock; the
+    first-event budget needs [clock] and is refused without it. *)
+type 'clock next_stage =
+  | Completion of { call_window : 'clock Deadline_window.t }
   | Stream of
-      { admission_timeout_s : float option
+      { admission_window : 'clock Deadline_window.t
       ; first_event_timeout_s : float option
       }
 
@@ -74,7 +82,7 @@ val measure
   :  ?connection_cache:Http_client.cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
-  -> next_stage:next_stage
+  -> next_stage:_ Eio.Time.clock next_stage
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

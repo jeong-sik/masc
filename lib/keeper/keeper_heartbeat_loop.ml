@@ -391,12 +391,6 @@ let batch_disposition_of_cycle_outcome
     (match completion.continuation_route with
      | Keeper_unified_turn.Continuation_route_addressed ->
        Batch_ack_completed
-     | Keeper_unified_turn.Continuation_memory_write_completed ->
-       (* The receipt proves a completed non-surface terminal effect; it does
-          not claim model intent. *)
-       Batch_ack_completed
-     | Keeper_unified_turn.Continuation_memory_retract_completed ->
-       Batch_ack_completed
      | Keeper_unified_turn.Continuation_route_mismatch
      | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
      | Keeper_unified_turn.Continuation_route_not_applicable ->

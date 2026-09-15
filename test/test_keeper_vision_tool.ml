@@ -1664,6 +1664,159 @@ let test_vision_candidate_cancellation_does_not_failover () =
      | Eio.Cancel.Cancelled _ as observed -> assert (observed == cancelled));
     assert (!calls = 1))
 
+(* Verdict vrf-5378dc2e (2026-09-14): the join must be readable from the
+   ledger itself, not from the caller's narrative. Every candidate arm opens
+   with a start row and closes with its attempt row, both carrying the
+   parent call's tool_use_id/trace_id. *)
+let vision_candidate_rows () =
+  match Masc.Keeper_tool_call_log.read_recent ~keeper_name:"system" ~n:50 () with
+  | Ok rows ->
+    List.filter_map
+      (fun row ->
+        match Yojson.Safe.Util.member "tool" row with
+        | `String "vision_candidate" -> Some row
+        | _ -> None)
+      rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) ->
+    failwith ("tool call index unavailable: " ^ detail)
+
+let row_input_fields row =
+  match Yojson.Safe.Util.member "input" row with
+  | `Assoc fields -> fields
+  | other ->
+    failwith ("vision_candidate input is not an object: " ^ Yojson.Safe.to_string other)
+
+let row_string_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String s) -> s
+  | _ -> failwith ("vision_candidate input missing string field: " ^ key)
+
+let row_int_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int i) -> i
+  | _ -> failwith ("vision_candidate input missing int field: " ^ key)
+
+let row_top_string row key =
+  match Yojson.Safe.Util.member key row with
+  | `String s -> s
+  | _ -> failwith ("vision_candidate row missing " ^ key)
+
+let with_candidate_row_ledger f =
+  with_temp_base (fun base ->
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Masc.Keeper_tool_call_log.init ~base_path:base ();
+    Fun.protect
+      ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+      f)
+
+let test_candidate_rows_join_parent_tool_call () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_candidate_row_ledger (fun () ->
+      with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "0" (fun () ->
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          incr calls;
+          if !calls = 1 then
+            Error
+              (Llm_provider.Http_client.HttpError
+                 { code = 500; body = Llm_provider.Http_client.Received "down"; retry_after_header = None })
+          else Ok (ok_response "second runtime answered")
+        in
+        let outcome =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+                ~net:(Eio.Stdenv.net env) ~tool_use_id:"call-vision-join"
+                ~trace_id:"trace-vision-join" ~query:"read the screenshot"
+                ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+        in
+        (match outcome with
+         | Vt.Vo_ok reading -> assert (reading.runtime_id = "p2.vision-b")
+         | _ -> failwith "expected the walk to reach the second candidate");
+        let rows = vision_candidate_rows () in
+        assert (List.length rows = 4);
+        let events =
+          List.map
+            (fun row -> row_input_fields row |> row_string_field "result")
+            rows
+        in
+        assert (events = [ "started"; "error"; "started"; "ok" ]);
+        List.iter
+          (fun row ->
+            assert (row_top_string row "tool_use_id" = "call-vision-join");
+            assert (row_top_string row "trace_id" = "trace-vision-join"))
+          rows;
+        match rows with
+        | [ start_a; error_a; start_b; ok_b ] ->
+          assert
+            (row_string_field "runtime_id" (row_input_fields start_a)
+             = "p1.vision-a");
+          assert (row_int_field "attempt_index" (row_input_fields start_a) = 0);
+          assert
+            (row_int_field "candidate_count" (row_input_fields start_a) = 2);
+          assert
+            (row_string_field "reason" (row_input_fields error_a)
+             = "transient_provider_error");
+          assert
+            (row_string_field "runtime_id" (row_input_fields start_b)
+             = "p2.vision-b");
+          assert (row_int_field "attempt_index" (row_input_fields start_b) = 1);
+          assert
+            (row_string_field "runtime_id" (row_input_fields ok_b)
+             = "p2.vision-b")
+        | _ -> failwith "unexpected vision_candidate row shape")))
+
+(* The repro's exact shape: the parent cancels the in-flight provider call.
+   Before this the walk re-raised with no row at all; now the arm leaves the
+   start row and a cancelled row, both joined to the parent call. *)
+let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_candidate_row_ledger (fun () ->
+      let calls = ref 0 in
+      (* A real cancellation, not a [Cancelled] value raised by hand:
+         [complete] cancels the context the walk runs in, so the cancelled
+         row is written from a fiber whose context is cancelled. The append
+         guard yields before each ledger write, standing in for the store's
+         mutex held by another writer -- the one place that write suspends.
+         Written without protection, the row is lost at that yield. *)
+      (try
+         Eio_main.run (fun env ->
+           Dated_jsonl.set_append_guard (fun append ->
+             Eio.Fiber.yield ();
+             append ());
+           Fun.protect
+             ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ()))
+             (fun () ->
+               Eio.Switch.run (fun sw ->
+                 Eio.Cancel.sub (fun walk ->
+                   let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+                     incr calls;
+                     Eio.Cancel.cancel walk (Failure "cancel vision candidate");
+                     Eio.Fiber.check ();
+                     failwith "a cancelled context did not raise at its check"
+                   in
+                   ignore (Vt.run_vision ~complete ~sw ~clock:env#clock ~net:env#net
+                             ~tool_use_id:"call-vision-cancel"
+                             ~query:"inspect" ~media_type:"image/png"
+                             ~bytes:"\x89PNG\r\n\x1a\nprovider-cancel" ())))));
+         failwith "provider cancellation was swallowed"
+       with
+       | Eio.Cancel.Cancelled _ -> ());
+      assert (!calls = 1);
+      let rows = vision_candidate_rows () in
+      assert (List.length rows = 2);
+      let events =
+        List.map
+          (fun row -> row_input_fields row |> row_string_field "result")
+          rows
+      in
+      assert (events = [ "started"; "cancelled" ]);
+      let cancelled_row = List.nth rows 1 in
+      let fields = row_input_fields cancelled_row in
+      assert (row_string_field "runtime_id" fields = "p1.vision-a");
+      assert (row_string_field "reason" fields = "parent_cancelled");
+      assert (row_top_string cancelled_row "tool_use_id" = "call-vision-cancel")))
+
 let test_fallback_reference_projection_is_explicitly_unread () =
   let image source_type data =
     Agent_core.Types.Image { source_type; data; media_type = "image/png" }
@@ -2229,7 +2382,8 @@ let test_browser_screenshot_reaches_vision_reader () =
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))
 
 let test_browser_screenshot_requires_keeper_owner () =
-  let result = Masc.Tool_misc_browser_lane.handle_read ~tool_name:"masc_browser_read" ~start_time:0.
+  let result = Masc.Tool_misc_browser_lane.handle_read
+      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:0.
       (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
   match result with
   | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
@@ -2419,6 +2573,8 @@ let () =
   test_fallback_read_receives_the_walks_excluded_runtimes ();
   test_cancelled_fallback_read_can_retry_without_cached_failure ();
   test_vision_candidate_cancellation_does_not_failover ();
+  test_candidate_rows_join_parent_tool_call ();
+  test_cancelled_candidate_leaves_start_and_cancelled_rows ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();

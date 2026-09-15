@@ -22,7 +22,9 @@ type 'a board_read =
 type comment_state =
   [ `Never
   | `No_new_external
-  | `New_external of int * string * string
+  | `New_external of Board.Comment_id.t list * string * string
+    (** The external comments after the keeper's latest comment, oldest first,
+        then the author and a preview of the newest one. *)
   ]
 
 type comment_status = comment_state board_read

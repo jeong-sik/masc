@@ -9,18 +9,21 @@
        [operator_digest_cache] surface immediately (0ms), decorated
        with the default query metadata.
 
-    2. **Parameterized request** — computes on-demand with a 5s SWR
-       cache. Cache key is the colon-delimited concatenation of
+    2. **Parameterized request** — computes on-demand behind the SWR
+       cache ([standard_cache_ttl_s]). Cache key is the colon-delimited
+       concatenation of
        [actor | effective_target_type | target_id | include_workers]
        so distinct query shapes are cached independently. The compute
        closure runs [Operator_control.digest_json] inside
        [run_dashboard_compute ~mode:Offloaded_readonly] and decorates
        with [with_projection_diagnostics ~surface:"operator_digest"].
        Validation errors are surfaced as `{error, message, generated_at}`
-       JSON; the outer [Eio.Time.with_timeout] enforces
-       [dashboard_request_timeout_s] and surfaces `Error \`Timeout`
-       as `{error:"timeout", message:"Operator digest timed out
-       after 30s", generated_at}`.
+       JSON. The compute has no window of its own:
+       [Dashboard_cache.get_or_compute_with_timeout] bounds it at
+       [dashboard_request_timeout_s], and a compute that runs past that
+       is a timeout the cache raises, not a value it stores — so the key
+       keeps serving its last good digest and the repeated-timeout
+       circuit still opens.
 
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
@@ -106,57 +109,48 @@ let operator_digest_http_json ~state ~sw ~clock request =
         ""
     in
     let compute () =
-      match
-        Eio.Time.with_timeout clock Core_cache.dashboard_request_timeout_s (fun () ->
-          Ok
-            (Core_runtime.run_dashboard_compute
-               ~mode:Offloaded_readonly
-               ?net
-               ?mono_clock
-               ~sw
-               ~clock
-               ~config
-               (fun ~config ~sw ->
-                  let ctx : _ Operator_control.context =
-                    { config
-                    ; agent_name = Option.value ~default:"dashboard" actor
-                    ; sw
-                    ; clock
-                    ; proc_mgr = state.Mcp_server.proc_mgr
-                    ; net = state.Mcp_server.net
-                    ; delegated_dispatch = None
-                    ; mcp_session_id = None
-                    }
-                  in
-                  match
-                    Operator_control.digest_json
-                      ?actor
-                      ~target_type:effective_target_type
-                      ?target_id
-                      ?include_workers
-                      ctx
-                  with
-                  | Ok json -> json
-                  | Error err ->
-                    `Assoc
-                      [ "error", `String "validation_error"
-                      ; "message", `String err
-                      ; "generated_at", `String (Masc_domain.now_iso ())
-                      ])))
-      with
-      | Ok json ->
-        Core_cache.with_projection_diagnostics
-          ~surface:"operator_digest"
-          ~started_at
-          ~extra:
-            [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
-          json
-      | Error `Timeout ->
-        `Assoc
-          [ "error", `String "timeout"
-          ; "message", `String "Operator digest timed out after 30s"
-          ; "generated_at", `String (Masc_domain.now_iso ())
-          ]
+      let json =
+        Core_runtime.run_dashboard_compute
+          ~mode:Offloaded_readonly
+          ?net
+          ?mono_clock
+          ~sw
+          ~clock
+          ~config
+          (fun ~config ~sw ->
+             let ctx : _ Operator_control.context =
+               { config
+               ; agent_name = Option.value ~default:"dashboard" actor
+               ; sw
+               ; clock
+               ; proc_mgr = state.Mcp_server.proc_mgr
+               ; net = state.Mcp_server.net
+               ; delegated_dispatch = None
+               ; mcp_session_id = None
+               }
+             in
+             match
+               Operator_control.digest_json
+                 ?actor
+                 ~target_type:effective_target_type
+                 ?target_id
+                 ?include_workers
+                 ctx
+             with
+             | Ok json -> json
+             | Error err ->
+               `Assoc
+                 [ "error", `String "validation_error"
+                 ; "message", `String err
+                 ; "generated_at", `String (Masc_domain.now_iso ())
+                 ])
+      in
+      Core_cache.with_projection_diagnostics
+        ~surface:"operator_digest"
+        ~started_at
+        ~extra:
+          [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
+        json
     in
     Ok
       (Dashboard_cache.get_or_compute_with_timeout

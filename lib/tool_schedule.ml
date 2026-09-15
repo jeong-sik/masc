@@ -342,6 +342,52 @@ let request_result ~tool_name ~start_time = function
   | Error msg -> workflow_error ~tool_name ~start_time msg
 ;;
 
+(* A refusal the caller can act on carries its facts as fields, not only in
+   the sentence: which status the schedule was already in and what its last
+   wake did, or which due time was already behind the clock. The match names
+   every error so a new one is a decision here, not a silent message-only
+   row. *)
+let service_error_result ~tool_name ~start_time (err : Schedule_service.service_error) =
+  let message = Schedule_service.service_error_to_string err in
+  let refusal_fields =
+    match err with
+    | Schedule_service.Due_already_past { due_at; now } ->
+      [ "error_kind", `String "due_already_past"
+      ; "due_at_iso", `String (Masc_domain.iso8601_of_unix_seconds due_at)
+      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+      ]
+    | Schedule_service.Store_error
+        (Schedule_store.Transition_refused { schedule_id; current; attempted; last_wake })
+      ->
+      [ "error_kind", `String "transition_refused"
+      ; "schedule_id", `String schedule_id
+      ; "current_status", `String (Schedule_domain.schedule_status_to_string current)
+      ; "attempted", `String (Schedule_store.attempted_transition_to_string attempted)
+      ; ( "last_wake"
+        , match last_wake with
+          | None -> `Null
+          | Some wake -> Schedule_domain.wake_record_to_yojson wake )
+      ]
+    | Schedule_service.Store_error
+        ( Schedule_store.Schedule_already_exists
+        | Schedule_store.Schedule_not_found
+        | Schedule_store.Invalid_initial_status _
+        | Schedule_store.Running_wake_missing _
+        | Schedule_store.Schedule_not_due_candidate
+        | Schedule_store.Schedule_not_running
+        | Schedule_store.Persistence_failed _
+        | Schedule_store.Corrupt_ledger _ )
+    | Schedule_service.Invalid_request _
+    | Schedule_service.Creation_rejected _ -> []
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    ~data:(Tool_args.error_assoc (("message", `String message) :: refusal_fields))
+    message
+;;
+
 (* TEL-OK: schedule tools return [Tool_result.t] through the shared
    [Tool_dispatch] paths; [Server_bootstrap_maintenance] installs the canonical
    dispatch observer that records tool telemetry and metrics once for keeper and
@@ -389,9 +435,12 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       in
       match action, schedule_id with
       | Create_schedule, schedule_id ->
+        (* [start_time], not [requested_at]: a caller can set requested_at,
+           and the question is whether the due time is already behind the
+           clock this call runs on. *)
         Schedule_service.create
-          ctx.config ?schedule_id ~requested_at ?expires_at ~requested_by
-          ~scheduled_by ~due_at ~payload ~source ~recurrence ()
+          ctx.config ~now:start_time ?schedule_id ~requested_at ?expires_at
+          ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
           ctx.config ~schedule_id ~requested_at ?expires_at ~requested_by
@@ -399,18 +448,19 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")
     in
-    (match keeper_wake_target with
-     | None -> write_request ()
-     | Some keeper_name ->
-       ctx.admit_keeper_wake_creation
-         ctx.config
-         ~keeper_name
-         write_request)
-    |> Result.map_error Schedule_service.service_error_to_string
+    Ok
+      (match keeper_wake_target with
+       | None -> write_request ()
+       | Some keeper_name ->
+         ctx.admit_keeper_wake_creation
+           ctx.config
+           ~keeper_name
+           write_request)
   in
   match result with
   | Error msg -> workflow_error ~tool_name ~start_time msg
-  | Ok request -> request_result ~tool_name ~start_time (Ok request)
+  | Ok (Error err) -> service_error_result ~tool_name ~start_time err
+  | Ok (Ok request) -> request_result ~tool_name ~start_time (Ok request)
 ;;
 
 let handle_create = handle_write ~action:Create_schedule
@@ -425,48 +475,175 @@ let take limit items =
   loop [] limit items
 ;;
 
+let default_list_limit = 50
+let max_list_limit = 200
+
+(* One page size rule for both listings: an absent limit is the default, and
+   a given one is held inside 1..[max_list_limit]. It changes how many rows a
+   page carries, never which rows match or their order. *)
+let list_limit_of_args args =
+  match optional_int args "limit" with
+  | None -> default_list_limit
+  | Some requested -> Int.min max_list_limit (Int.max 1 requested)
+;;
+
+(* Whose rows a listing reads, once [owner] and [owner_name] are parsed. A
+   schedule names two actors -- the one that created it and the Keeper it
+   wakes -- and [Either_side] is the caller on either of them. *)
+type owner_filter =
+  | Either_side of string
+  | Wake_target of string
+  | Scheduled_by of string
+  | All_rows
+
+(* [owner] is required, so no call reads every row by leaving it out. Only the
+   two named selectors take [owner_name]; a name next to self or all is
+   refused rather than ignored, because the caller meant something by it. *)
+let owner_filter_of_args ~caller args =
+  let* kind =
+    match string_opt args "owner" with
+    | None ->
+      Error
+        (Printf.sprintf
+           "owner is required; accepted: %s"
+           (String.concat ", " Schedule_contract_values.owner_kind_strings))
+    | Some raw ->
+      Schedule_contract_values.owner_kind_of_string raw
+      |> Result.map_error Schedule_contract_values.decode_error_to_string
+  in
+  let kind_name = Schedule_contract_values.owner_kind_to_string kind in
+  match kind, string_opt args "owner_name" with
+  | Schedule_contract_values.Owner_self, None -> Ok (Either_side caller)
+  | Schedule_contract_values.Owner_all, None -> Ok All_rows
+  | Schedule_contract_values.Owner_wake_target, Some name -> Ok (Wake_target name)
+  | Schedule_contract_values.Owner_scheduled_by, Some name -> Ok (Scheduled_by name)
+  | (Schedule_contract_values.Owner_self | Schedule_contract_values.Owner_all), Some _ ->
+    Error (Printf.sprintf "owner_name is not accepted with owner=%s" kind_name)
+  | ( ( Schedule_contract_values.Owner_wake_target
+      | Schedule_contract_values.Owner_scheduled_by )
+    , None ) ->
+    Error (Printf.sprintf "owner_name is required with owner=%s" kind_name)
+;;
+
+let owner_filter_fields filter =
+  let kind, name =
+    match filter with
+    | Either_side name -> Schedule_contract_values.Owner_self, Some name
+    | Wake_target name -> Schedule_contract_values.Owner_wake_target, Some name
+    | Scheduled_by name -> Schedule_contract_values.Owner_scheduled_by, Some name
+    | All_rows -> Schedule_contract_values.Owner_all, None
+  in
+  [ "owner", `String (Schedule_contract_values.owner_kind_to_string kind)
+  ; ( "owner_name"
+    , match name with
+      | None -> `Null
+      | Some name -> `String name )
+  ]
+;;
+
+let owner_filter_matches filter (request : Schedule_domain.schedule_request) =
+  let wakes name =
+    match Schedule_payload_projection.wake_keeper_name request with
+    | Some keeper_name -> String.equal keeper_name name
+    | None -> false
+  in
+  let scheduled name = String.equal request.scheduled_by.id name in
+  match filter with
+  | Either_side name -> scheduled name || wakes name
+  | Wake_target name -> wakes name
+  | Scheduled_by name -> scheduled name
+  | All_rows -> true
+;;
+
+(* A listing row answers "which schedule is this and where does it stand".
+   The request itself -- payload, delivery route, actors, structured
+   recurrence -- is masc_schedule_get's; a row that carried it made one
+   fleet listing 140 KB. *)
+let schedule_summary_json state (request : Schedule_domain.schedule_request) =
+  let last_wake =
+    Schedule_store.last_wake_for_schedule_instance
+      state
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  in
+  let _, summary = Schedule_payload_projection.target_summary request in
+  `Assoc
+    [ "schedule_id", `String request.schedule_id
+    ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
+    ; "due_at_iso", `String (Masc_domain.iso8601_of_unix_seconds request.due_at)
+    ; ( "recurrence_summary"
+      , `String (Schedule_domain.recurrence_summary request.recurrence) )
+    ; ( "wake_target"
+      , match Schedule_payload_projection.wake_keeper_name request with
+        | None -> `Null
+        | Some keeper_name -> `String keeper_name )
+    ; "scheduled_by", `String request.scheduled_by.id
+    ; ( "summary"
+      , match summary with
+        | None -> `Null
+        | Some summary -> `String summary )
+    ; ( "last_wake_status"
+      , match last_wake with
+        | None -> `Null
+        | Some wake ->
+          `String (Schedule_domain.wake_status_to_string wake.Schedule_domain.status) )
+    ]
+;;
+
+(* Pages follow schedule_id order. The id never changes -- an update keeps it
+   -- so "every matching row whose id sorts after the cursor" names the same
+   rows whether schedules were created, updated or pruned between two calls,
+   and a cursor needs no filter of its own to stay meaningful. *)
 let handle_list ~tool_name ~start_time ctx args =
-  match status_of_arg args with
+  let parsed =
+    let* owner = owner_filter_of_args ~caller:ctx.agent_name args in
+    let* status = status_of_arg args in
+    Ok (owner, status, list_limit_of_args args, string_opt args "cursor")
+  in
+  match parsed with
   | Error msg -> workflow_error ~tool_name ~start_time msg
-  | Ok status ->
-    let raw_limit =
-      (* DET-OK: list limit is a bounded projection default for read ergonomics;
-         it does not change schedule eligibility or ordering. *)
-      optional_int args "limit" |> Option.value ~default:50
-    in
-    let limit = min 200 (max 1 raw_limit) in
+  | Ok (owner, status, limit, cursor) ->
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
-       let request_rows =
-         (match status with
-          | None -> state.Schedule_store.schedules
-          | Some expected ->
-            List.filter
-              (fun (request : Schedule_domain.schedule_request) ->
-                 request.status = expected)
-              state.schedules)
-         |> take limit
+       let after_cursor (request : Schedule_domain.schedule_request) =
+         match cursor with
+         | None -> true
+         | Some previous_last -> String.compare request.schedule_id previous_last > 0
        in
-       let schedules =
-         request_rows
-         |> List.map (fun (request : Schedule_domain.schedule_request) ->
-           let last_wake =
-             Schedule_store.last_wake_for_schedule_instance
-               state
-               ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
-               ~schedule_id:request.Schedule_domain.schedule_id
-           in
-           schedule_request_json ?last_wake request)
+       let status_matches (request : Schedule_domain.schedule_request) =
+         match status with
+         | None -> true
+         | Some expected -> request.status = expected
+       in
+       let remaining =
+         state.Schedule_store.schedules
+         |> List.filter (fun request ->
+           after_cursor request
+           && status_matches request
+           && owner_filter_matches owner request)
+         |> List.sort
+              (fun
+                  (left : Schedule_domain.schedule_request)
+                  (right : Schedule_domain.schedule_request)
+                -> String.compare left.schedule_id right.schedule_id)
+       in
+       let page = take limit remaining in
+       let next_cursor =
+         match List.rev page with
+         | (last : Schedule_domain.schedule_request) :: _
+           when List.length remaining > List.length page ->
+           [ "next_cursor", `String last.schedule_id ]
+         | _ :: _ | [] -> []
        in
        ok ~tool_name ~start_time
          (`Assoc
-           [ "status", `String "ok"
-           ; "limit", `Int limit
-           ; "payload_support"
-             , Schedule_payload_projection.support_summary_to_yojson request_rows
-           ; "schedules", `List schedules
-           ]))
+           ([ "status", `String "ok" ]
+            @ owner_filter_fields owner
+            @ [ "limit", `Int limit
+              ; "schedules", `List (List.map (schedule_summary_json state) page)
+              ]
+            @ next_cursor)))
 ;;
 
 let handle_get ~tool_name ~start_time ctx args =
@@ -497,33 +674,32 @@ let handle_get ~tool_name ~start_time ctx args =
    the arguments already carry) would be a dependency this action does not
    have. *)
 let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
-  let result =
+  let parsed =
     let* schedule_id = required_string args "schedule_id" in
     let* cancelled_by_id = required_string args "cancelled_by_id" in
     let* cancelled_by_kind =
       actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
     in
     let* reason = required_string args "reason" in
-    let* request =
-      Schedule_service.cancel config ~schedule_id
-      |> Result.map_error Schedule_service.service_error_to_string
-    in
-    Ok (request, cancelled_by_id, cancelled_by_kind, reason)
+    Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason)
   in
-  match result with
+  match parsed with
   | Error msg -> workflow_error ~tool_name ~start_time msg
-  | Ok (request, cancelled_by_id, cancelled_by_kind, reason) ->
-    ok ~tool_name ~start_time
-      (`Assoc
-        [ "status", `String "ok"
-        ; "schedule", schedule_request_json request
-        ; ( "cancelled_by"
-          , `Assoc
-              [ "id", `String cancelled_by_id
-              ; "kind", `String (Schedule_domain.actor_kind_to_string cancelled_by_kind)
-              ] )
-        ; "reason", `String reason
-        ])
+  | Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason) ->
+    (match Schedule_service.cancel config ~schedule_id with
+     | Error err -> service_error_result ~tool_name ~start_time err
+     | Ok request ->
+       ok ~tool_name ~start_time
+         (`Assoc
+           [ "status", `String "ok"
+           ; "schedule", schedule_request_json request
+           ; ( "cancelled_by"
+             , `Assoc
+                 [ "id", `String cancelled_by_id
+                 ; "kind", `String (Schedule_domain.actor_kind_to_string cancelled_by_kind)
+                 ] )
+           ; "reason", `String reason
+           ]))
 ;;
 
 (* Notes append to the store directly (task-381): the note tool owns the
@@ -568,12 +744,7 @@ let handle_notes_list ~tool_name ~start_time ctx args =
   match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok schedule_id ->
-    let raw_limit =
-      (* DET-OK: read-only list pagination default, mirroring handle_list;
-         it does not change what is computed or the oldest-first order. *)
-      optional_int args "limit" |> Option.value ~default:50
-    in
-    let limit = min 200 (max 1 raw_limit) in
+    let limit = list_limit_of_args args in
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->

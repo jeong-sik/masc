@@ -135,8 +135,13 @@ let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
     in
     let mode = if lightweight_summary then Inline_shared else Offloaded_readonly in
     let compute () =
+      (* A snapshot that finished as its window closed is the snapshot. *)
       match
-        Eio.Time.with_timeout clock Core_cache.dashboard_request_timeout_s (fun () ->
+        Watched_work.run
+          ~watcher:(fun () ->
+            Eio.Time.sleep clock Core_cache.dashboard_request_timeout_s;
+            Error `Timeout)
+          (fun () ->
           Ok
             (Core_runtime.run_dashboard_compute
                ~mode

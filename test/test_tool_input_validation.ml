@@ -274,7 +274,7 @@ let plan_args input =
       , `List
           [ `Assoc
               [ "id", `String "n"
-              ; "tool", `String "keeper_time_now"
+              ; "tool", `String "keeper_lane_status"
               ; "input", input
               ]
           ] )
@@ -290,8 +290,8 @@ let test_plan_accepts_an_output_reference () =
         (plan_args
            (`Assoc
              [ "kind", `String "output"
-             ; "node", `String "clock"
-             ; "pointer", `String "/now_iso"
+             ; "node", `String "lane"
+             ; "pointer", `String "/profile"
              ]))
       ()
   with

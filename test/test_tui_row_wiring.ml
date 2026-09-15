@@ -312,6 +312,29 @@ let test_the_schedule_subject_is_measured_not_given_the_line () =
    halves of the seam: the route publishes the resolved value, and the table
    plus selected-row context read it while Keeper assignment moves out of the
    space-constrained table column. *)
+(* The Logs header carries the floor the reader set with [l] and [v]. Both
+   keys write the one field and refetch, so on a read that brought nothing
+   back the rows -- the only other thing that moves -- are not there: pressing
+   either redrew a frame identical to the one before it. The note was computed
+   for both arms and reached only the arm that had a snapshot.
+
+   Two halves. The failed-read arm names the note, and the note says the floor
+   once: [verbose] was the floor being DEBUG, spelled a second time on the row
+   that drops the connection badge below eighty columns. *)
+let test_the_logs_header_says_the_floor_the_reader_set () =
+  Alcotest.(check bool) "the read that failed still carries what was set" true
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_system_logs" ~callees:[]
+       ~identifiers:[ "set_filter_note" ]
+     > 0);
+  (* Twice, one per arm: the loaded header names it directly and the failed
+     one through [set_filter_note]. A count of one is the state this replaced
+     -- computed for both, reaching the arm that had a snapshot. *)
+  Alcotest.(check int) "both arms reach the note" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"render_system_logs" ~callees:[]
+       ~identifiers:[ "filter_note" ])
+
 let test_repositories_show_the_server_resolved_checkout_path () =
   let producer = "lib/server/server_routes_http_routes_repositories.ml" in
   Alcotest.(check int) "the route names one resolved path field" 1
@@ -689,6 +712,8 @@ let () =
             test_a_lane_mark_says_what_its_colour_says
         ; Alcotest.test_case "the schedule subject is measured" `Quick
             test_the_schedule_subject_is_measured_not_given_the_line
+        ; Alcotest.test_case "the Logs header says the floor that was set" `Quick
+            test_the_logs_header_says_the_floor_the_reader_set
         ; Alcotest.test_case "a labelled field does not bracket its reading" `Quick
             test_a_labelled_field_does_not_bracket_its_missing_reading
         ; Alcotest.test_case "the roster title says whether it is live" `Quick

@@ -752,7 +752,13 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
        Unix.close fd;
        Unix._exit 0
      with
-     | _ -> Unix._exit 2)
+     | e ->
+       (* The parent reads only the exit code, so the child says what went
+          wrong before it goes. Without this the failure is
+          "durable-lock child failed: exit 2" and names no cause: the ENOENT
+          #36638 fixed took a temporary print in here to find. *)
+       prerr_endline ("durable-lock child: " ^ Printexc.to_string e);
+       Unix._exit 2)
   | child ->
     Unix.close ready_write;
     let ready = Bytes.create 1 in

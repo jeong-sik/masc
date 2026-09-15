@@ -27,6 +27,7 @@
   time_compat
   masc.time_codec
   masc_core
+  masc_log
   masc_string_util
   masc.skill_reference
   uuidm)

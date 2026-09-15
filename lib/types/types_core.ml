@@ -853,7 +853,9 @@ let task_of_yojson json =
       | handoff_json ->
           (match task_handoff_context_of_yojson handoff_json with
            | Ok handoff_context -> Some handoff_context
-           | Error _ -> None)
+           | Error error ->
+             Log.warn "task.handoff_context corrupt, dropped: %s" error;
+             None)
     in
     let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
     let reclaim_policy =
@@ -862,7 +864,9 @@ let task_of_yojson json =
       | reclaim_policy_json ->
           (match task_reclaim_policy_of_yojson reclaim_policy_json with
            | Ok policy -> Some policy
-           | Error _ -> None)
+           | Error error ->
+             Log.warn "task.reclaim_policy corrupt, dropped: %s" error;
+             None)
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match

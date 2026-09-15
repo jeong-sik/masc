@@ -3090,6 +3090,12 @@ let context_branch ~index ~last =
    together. *)
 let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 9
 
+(* The estimated-token cell a row gains when the turn's bytes-per-token is
+   known: two spaces, the approximation sign, a seven-cell figure and
+   " tok". Zero when the ratio is absent, so the name column keeps the
+   cells. *)
+let context_flow_token_cells = 2 + 1 + 7 + 4
+
 (* The longest component name the record can carry ("Keeper instructions",
    "Redacted thinking") sits inside this, so the column is as wide as the
    names rather than as wide as the terminal. *)
@@ -3179,12 +3185,33 @@ let context_composition_lines ~cols ~turn_back
       (Keeper_chat.terminal_safe_text record.trace_id)
       Ansi.reset
   in
+  (* Provider-counted input tokens over the serialized body of the same
+     record, so attributed bytes below can be read in the unit the window
+     is sized in. Only a per-request count divides cleanly: a
+     conversation-cumulative figure puts the whole conversation over one
+     request's bytes. [None] on a lane whose body never reaches masc
+     (the official clients assemble their own wire). *)
+  let tokens_per_wire_byte (turn : Turn_record.t) =
+    match turn.usage.scope with
+    | Runtime_usage_scope.Conversation_cumulative
+    | Runtime_usage_scope.Usage_scope_unavailable -> None
+    | Runtime_usage_scope.Per_request -> (
+        match turn.request_wire_observation, turn.usage.input_tokens with
+        | Some { Turn_record.body_bytes; _ }, Some tokens
+          when body_bytes > 0 && tokens > 0 ->
+            Some (float tokens /. float body_bytes)
+        | Some _, Some _ | Some _, None | None, Some _ | None, None -> None)
+  in
+  let estimate_tokens ~tokens_per_byte bytes =
+    int_of_float (Float.round (float bytes *. tokens_per_byte))
+  in
+  (* The byte figure is second: the window is sized in tokens, and the
+     tokens the provider counted are the line above. *)
   let wire_headline =
     match record.request_wire_observation with
     | Some observation ->
-        Printf.sprintf "  %s%s%s  %sprepared request  ·  %s%s" Ansi.bold
+        Printf.sprintf "  %s%s prepared request  ·  %s%s" Ansi.dim
           (Inspector.format_bytes observation.body_bytes)
-          Ansi.reset Ansi.dim
           (Keeper_chat.terminal_safe_text observation.runtime_profile)
           Ansi.reset
     | None ->
@@ -3385,9 +3412,28 @@ let context_composition_lines ~cols ~turn_back
         (* Wide enough for the longest component name and no wider: the share
            and the byte count belong beside the name they describe, not at the
            far edge of a 140-column overlay. *)
+        let tokens_per_byte = tokens_per_wire_byte attributed in
+        let token_cells =
+          match tokens_per_byte with
+          | Some _ -> context_flow_token_cells
+          | None -> 0
+        in
         let label_width =
           min context_flow_label_cells
-            (max 10 (width - source_width - context_flow_row_chrome_cells))
+            (max 10
+               (width - source_width - context_flow_row_chrome_cells
+              - token_cells))
+        in
+        (* The same bytes in the unit the window is sized in, from this
+           turn's own bytes-per-token; drawn only when that ratio exists,
+           and marked as an estimate because it is one. *)
+        let token_cell bytes =
+          match tokens_per_byte with
+          | Some ratio ->
+              Printf.sprintf "  \xe2\x89\x88%7s tok"
+                (Inspector.format_tokens
+                   (estimate_tokens ~tokens_per_byte:ratio bytes))
+          | None -> ""
         in
         let rows =
           List.concat_map
@@ -3424,6 +3470,7 @@ let context_composition_lines ~cols ~turn_back
                     ; Printf.sprintf " %6s  " share_text
                     ; Ansi.dim
                     ; Printf.sprintf "%9s" (Inspector.format_bytes component.bytes)
+                    ; token_cell component.bytes
                     ; Ansi.reset
                     ])
                 grouped)
@@ -3444,7 +3491,25 @@ let context_composition_lines ~cols ~turn_back
                     and the prepared-request line as this turn's size."
                    (Inspector.format_bytes total)
                    (Inspector.format_bytes observation.body_bytes))
-          | Some _ | None -> []
+              @ (match tokens_per_byte, attributed.Turn_record.usage.input_tokens with
+                 | Some ratio, Some tokens ->
+                     prose
+                       (Printf.sprintf
+                          "\xe2\x89\x88 tok beside each row is its bytes at this \
+                           turn's %.2f bytes per provider-counted token (%s tokens \
+                           over %s on the wire): an estimate, not a count."
+                          (1. /. ratio)
+                          (Inspector.format_tokens tokens)
+                          (Inspector.format_bytes observation.body_bytes))
+                 | Some _, None | None, Some _ | None, None ->
+                     prose
+                       "No token estimate: this turn reported no per-request \
+                        input count to divide its wire bytes by.")
+          | Some _ -> []
+          | None ->
+              prose
+                "No token estimate: this lane's request bytes were not \
+                 observed, so nothing here can be converted to tokens."
         in
         (* The arrow says the rows above are what the request below is made
            of. Drawn only when both readings are the same turn: where the
@@ -3553,9 +3618,10 @@ let context_composition_lines ~cols ~turn_back
   @ component_lines @ [ "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
-          ~caption:"bytes prepared before dispatch"
+          ~caption:"tokens the provider counted, then the bytes prepared"
     ]
-  @ (wire_headline :: token_lines)
+  @ token_lines
+  @ [ wire_headline ]
   @ cache_lines
   @ [ "" ]
   @ [ "  "

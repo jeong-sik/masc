@@ -406,6 +406,12 @@ blocking_pr_lints() {
   # the image's switch stayed on 5.5.0, which no workflow builds, so the image
   # was unbuildable for a day before anyone ran the build by hand.
   run_lint "Sandbox OCaml version" bash scripts/check-sandbox-ocaml-version.sh
+  # Third drift of the same family: dune-project carries
+  # (generate_opam_files true), so masc.opam is generated — opam solve reads
+  # the generated file, not dune-project. #36410 edited dune-project's ocaml
+  # constraint without regenerating masc.opam and the drift passed every
+  # gate; this compares the generated file with its source at PR time.
+  run_lint "Opam file regenerated" bash scripts/check-opam-file-regenerated.sh
   run_lint "Checkpoint legacy purge" \
     bash scripts/check-checkpoint-installation-legacy-purge.sh
   run_lint "Checkpoint legacy purge regression" \

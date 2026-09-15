@@ -5095,6 +5095,7 @@
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_theme_contrast.inc)
+(include stanzas/test_tui_termios_returns_the_keys.inc)
 
 (include stanzas/test_tui_file_icon.inc)
 (include stanzas/test_tui_memory_mark.inc)

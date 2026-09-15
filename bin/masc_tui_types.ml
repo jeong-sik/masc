@@ -1609,8 +1609,9 @@ let observer_replay_description = function
 
    That rate held while every event was something a keeper did. A chat stream
    sends one frame per token, so the two budgets below are separate: this one
-   is spent only on events the Acting screen's [Actions] filter shows, and the
-   stream frames, heartbeats and snapshots share the smaller one. Trimming by
+   is spent on events the Acting screen's [Actions] filter shows and on the
+   turn observations the Turns fold reads, and the stream frames, heartbeats
+   and snapshots share the smaller one. Trimming by
    arrival alone let a single long reply spend all 1000 and leave the screen
    holding about a second. *)
 let acting_retained_entries = 1000
@@ -5395,7 +5396,7 @@ type state = {
   mutable observer_cursor: Sse_wire.observer_cursor option;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
-  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] *)
+  mutable acting: Masc_tui_acting.entry list;  (** newest first, at most [acting_retained_entries] + [acting_retained_quiet] *)
   mutable acting_dropped: int;  (** events that fell off the end of [acting] *)
   mutable acting_undecodable: int;  (** frames the feed reader could not read *)
   mutable acting_undecodable_last: string option;  (** why, for the most recent one *)

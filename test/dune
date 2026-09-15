@@ -5992,6 +5992,8 @@
 
 (include stanzas/test_browser_composition.inc)
 
+(include stanzas/test_shipped_skills.inc)
+
 (rule
  (alias runtest-test_setup_cli)
  (deps test_setup_cli.py ../bin/main_eio.exe

@@ -33,6 +33,10 @@ type preserve_thinking_control_format =
           what makes replay conditional; no consumer re-derives the condition
           from a provider identity. *)
 
+type uncontrolled_reasoning =
+  | Provider_default_reasoning
+  | Provider_enables_reasoning
+
 type reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay

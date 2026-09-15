@@ -476,7 +476,16 @@ let render_overview (state : state) =
          (* The runtime event feed rides the same tail. "live N" counts the
             frames this stream has delivered; a closed feed keeps its count
             and says why it closed, so a stream that dropped after a thousand
-            events and one that never opened do not read alike. *)
+            events and one that never opened do not read alike.
+
+            Both states put the count straight after the state word, because
+            the count is the same quantity in both and the pair is what tells
+            a reader what the number counts. The closed arm read "closed after
+            N", and a bare number behind "after" reads as a duration -- how
+            long it lasted, not how much it carried -- while its own sibling
+            one frame earlier had used that number as a count. Dropping the
+            word also returns six cells to a row this comment already guards
+            from the reason string. *)
          let observer_summary =
            match state.observer with
            | Observer_off -> ""
@@ -485,7 +494,7 @@ let render_overview (state : state) =
            | Observer_closed { events; _ } ->
                (* The reason is in TUI Session Events and on the Activity status
                   row; here it would push the count off a narrow row. *)
-               Printf.sprintf "  feed: closed after %d" events
+               Printf.sprintf "  feed: closed %d" events
          in
          (* Neither name is padded to a column. Both are fixed for the
             session, so nothing to their right moves between frames, and
@@ -4761,10 +4770,12 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      | Some error ->
        wrap (Theme.bad ())
          ("Admission error: " ^ Terminal_text.single_line error))
-  @ wrap Ansi.dim
-      "TOML spec: slots = required non-empty catalog-ref array; cli_slots = optional official-client runtime-id array."
-  @ wrap Ansi.dim
-      "Lane configuration is TOML. Run Input/Output is retained JSON evidence. Press e to open this section in the preview-checked runtime.toml editor."
+  (* The file's shape and the editor [e] opens are the same two sentences on
+     every lane, so they cost four of this pane's rows to say what no lane
+     answers. They are under [?] with the key that acts on them, the move the
+     Keeper columns and the Memory ST words already made. What stays here is
+     what this lane answers: the section it configures is on the Config row
+     above, and the evidence line below says what its runs retain. *)
   @ wrap Ansi.reset output_meaning
   @ wrap Ansi.dim evidence_contract
 
@@ -4822,13 +4833,22 @@ let render_lanes_overview (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  (* The two key hints this heading carried -- "o / A:Lane Add-ons" and
+     "a:append slot" -- were the key table's own words, byte for byte
+     ([b Navigate "o / A" "Lane Add-ons"] and [b Act "a" "append slot"] in
+     masc_tui_keys.ml), so the footer and the [?] sheet were already saying
+     them. They cost 32 cells of a row whose own fact is when the standalone
+     snapshot was read, and the frame cuts from the tail: at 80 columns the
+     row read "observed 16:4", at 72 "obser", and at 66 the fact was gone
+     while both copies stood. What the footer may drop and the sheet still
+     answers does not get to push a reading off the row that carries it. *)
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · o / A:Lane Add-ons · a:append slot"
+    | None -> "  Standalone LLM lanes"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · o / A:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -11293,8 +11313,10 @@ let render_acting (state : state) =
     | Observer_off -> "feed: off"
     | Observer_opening -> "feed: opening"
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
+    (* Same shape as the Overview row: the count sits straight after the state
+       word, so it reads as the count its "live N" sibling above uses. *)
     | Observer_closed { events; reason; _ } ->
-        Printf.sprintf "feed: closed after %d (%s)" events
+        Printf.sprintf "feed: closed %d (%s)" events
           (Terminal_text.single_line reason)
   in
   (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
@@ -13968,6 +13990,23 @@ let render_config (state : state) =
            let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
            let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
            let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
+           (* On a workspace that follows the convention the masc root is the
+              base path with one segment added, so drawing it whole spends the
+              base path's cells saying the base path again. Under /var/folders
+              both were cut to "/var/fold\xe2\x80\xa6" and neither could be read.
+              Named against the label beside it the nested case costs twelve
+              cells and the base keeps the rest. A root that is not under the
+              base is the reading worth the room, and still draws whole. *)
+           let masc =
+             let prefix = base ^ "/" in
+             let prefix_len = String.length prefix in
+             if String.length masc > prefix_len
+                && String.starts_with ~prefix masc
+             then
+               "<base>/"
+               ^ String.sub masc prefix_len (String.length masc - prefix_len)
+             else masc
+           in
            let labels = "  base " ^ "   masc " ^ "   binary " in
            let room =
              framed_inner_width cols

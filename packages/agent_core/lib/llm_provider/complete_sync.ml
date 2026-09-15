@@ -27,7 +27,7 @@ let run_with_body_deadline body_deadline f =
   match body_deadline with
   | Http_client.Unbounded -> Body_completed (f ())
   | Http_client.Bounded (clock, timeout_s) ->
-    (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+    (match Under_deadline.run clock timeout_s f with
      | Ok result -> Body_completed result
      | Error `Timeout -> Body_deadline_exceeded timeout_s)
 ;;
@@ -70,14 +70,14 @@ let parse_sync_response
        | Error message ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None }))
+              { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_responses ->
       (match Backend_openai_responses.parse_response_result body with
        | Ok response -> Ok response
        | Error message ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None }))
+              { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_chat ->
       (match
          Backend_openai_parse.parse_openai_response_result
@@ -88,7 +88,7 @@ let parse_sync_response
        | Error (Backend_openai_parse.Provider_error message) ->
          Error
            (Http_client.HttpError
-              { code = 400; body = message; retry_after_header = None })
+              { code = 400; body = Http_client.Received message; retry_after_header = None })
        | Error (Backend_openai_parse.Empty_completion empty) ->
          Error (Http_client.empty_completion_error ~stop_reason:empty.stop_reason))
     | Provider_http_codec.Gemini_generate_content ->
@@ -110,7 +110,10 @@ let parse_sync_response
   | Backend_gemini.Gemini_api_error message ->
     Error
       (Http_client.HttpError
-         { code = 400; body = "Gemini API error: " ^ message; retry_after_header = None })
+         { code = 400
+         ; body = Http_client.Received ("Gemini API error: " ^ message)
+         ; retry_after_header = None
+         })
   | Backend_glm.Glm_api_error error ->
     (match error.origin with
      | Backend_glm.Response_parse -> provider_parse_failure ~parser:"glm" error.message
@@ -141,14 +144,17 @@ let parse_sync_response
           in
           Error
             (Http_client.HttpError
-               { code = semantic_code; body; retry_after_header = None })))
+               { code = semantic_code
+               ; body = Http_client.Received body
+               ; retry_after_header = None
+               })))
   | exn ->
     Reserved_exn.reraise_if_reserved exn;
     let message = Printexc.to_string exn in
     Error
       (Http_client.HttpError
          { code = 500
-         ; body = "Unexpected parsing exception: " ^ message
+         ; body = Http_client.Received ("Unexpected parsing exception: " ^ message)
          ; retry_after_header = None
          })
 ;;
@@ -307,11 +313,12 @@ let complete_http
             (Http_client.HttpError
                { code = 0
                ; body =
-                   Printf.sprintf
-                     "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
-                     body_len
-                     body_str.[0]
-                     body_str.[body_len - 1]
+                   Http_client.Received
+                     (Printf.sprintf
+                        "pre-flight: unbalanced JSON body (%d bytes, first=%C last=%C)"
+                        body_len
+                        body_str.[0]
+                        body_str.[body_len - 1])
                ; retry_after_header = None
                })
         , None ))
@@ -359,9 +366,18 @@ let complete_http
             url
             body_len;
           let latency_counter = start_latency_counter ?clock () in
+          (* The provider's connect budget bounds the wait for the response
+             headers here as it does on the streaming path: connection,
+             request and status line under one window. The sync path
+             dispatched without it, and without the clock, so a server that
+             accepted the request and never answered held a sync call for as
+             long as the socket stayed open unless the caller declared a body
+             deadline as well. *)
           let post_sync_call () =
             Http_client.dispatch_sync_request
               ?cache:connection_cache
+              ?clock
+              ?connect_timeout_s:config.connect_timeout_s
               ~net
               request
               ()
@@ -468,7 +484,7 @@ let complete_http
               Error
                 (Http_client.HttpError
                    { code
-                   ; body
+                   ; body = Http_client.Received body
                    ; retry_after_header = response.retry_after_header
                    }))
         in

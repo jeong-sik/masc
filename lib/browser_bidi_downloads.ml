@@ -63,7 +63,16 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
         let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
         let addr = match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
           | addr :: _ -> addr | [] -> failwith "BiDi loopback address unavailable" in
-        let flow = Eio.Time.with_timeout_exn clock command_timeout (fun () -> Eio.Net.connect ~sw:session_sw net addr) in
+        (* A socket connected as the deadline passed is the socket; dropping
+           it would leave it open on the session switch behind a failed setup. *)
+        let flow =
+          match
+            Watched_work.run
+              ~watcher:(fun () -> Eio.Time.sleep clock command_timeout; Error `Timeout)
+              (fun () -> Ok (Eio.Net.connect ~sw:session_sw net addr))
+          with
+          | Ok flow -> flow
+          | Error `Timeout -> raise Eio.Time.Timeout in
         let on_message (message : Message.t) =
           if !failure <> None then () else
           let result = match message.kind with
@@ -111,8 +120,15 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
             Hashtbl.add pending id resolver;
             Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string
               (`Assoc ["id",`Int id;"method",`String method_;"params",params]));
-            (try Eio.Time.with_timeout_exn clock command_timeout (fun () -> Eio.Promise.await reply)
-             with Eio.Time.Timeout ->
+            (* A reply that arrived as the deadline passed is the reply: the
+               session is interrupted only for a command that got none. *)
+            (match
+               Watched_work.run
+                 ~watcher:(fun () -> Eio.Time.sleep clock command_timeout; Error `Timeout)
+                 (fun () -> Ok (Eio.Promise.await reply))
+             with
+             | Ok reply -> reply
+             | Error `Timeout ->
                disconnect ("BiDi command timed out: " ^ method_); Error ("BiDi command timed out: " ^ method_)) in
         let* _ = command "session.subscribe" (`Assoc ["events",`List (List.map (fun (_, name) -> `String name)
           Browser_downloads.subscribed_methods)]) in

@@ -30,7 +30,7 @@ let test_429_without_hint_stays_none () =
     (Some None)
     (retry_after_of_outcome (KRA.core_error_to_runtime_outcome (rate_limited None)))
 
-(* [Retry.Timeout] spans Admission, Queue, First_token and Capacity_backpressure
+(* [Retry.Timeout] spans Queue, First_token and Capacity_backpressure
    waits, none of which touched a socket. Routing them to
    [NetworkError { kind = Timeout }] labelled them ETIMEDOUT and dropped the
    phase; [TimeoutError] is the constructor that carries it. A [None] here

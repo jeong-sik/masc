@@ -74,7 +74,6 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
-  | Repeating_generation
   | Oversized_payload
 
 let cli_startup_failure_reason_to_string = function
@@ -94,7 +93,6 @@ let provider_wire_error_kind_to_string = function
   | Malformed_payload -> "malformed_payload"
   | Unknown_event -> "unknown_event"
   | Incomplete_stream -> "incomplete_stream"
-  | Repeating_generation -> "repeating_generation"
   | Oversized_payload -> "oversized_payload"
 ;;
 
@@ -130,12 +128,30 @@ type provider_failure_kind =
      kept typed so consumers reach their compaction/shrink path instead of
      seeing a generic invalid-request. *)
   | Context_overflow of { limit : int option }
+  (* agent-core boundary: the model's own generation repeated itself and the
+     stream was ended for it. The bytes arrived intact, so this is not a wire
+     error: the same model called through another provider repeats the same
+     way, and a caller rotating candidates needs to know that it is the model,
+     not the connection, that failed. *)
+  | Repeating_generation of
+      { shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      }
   | Unknown_provider_failure of { reason : string option }
+
+type refusal_body =
+  | Received of string
+  | Not_received_in_window
+
+let refusal_body_text = function
+  | Received body -> body
+  | Not_received_in_window -> ""
 
 type http_error =
   | HttpError of
       { code : int
-      ; body : string
+      ; body : refusal_body
       ; retry_after_header : float option
       }
   | NetworkError of
@@ -209,6 +225,12 @@ let provider_failure_kind_to_string = function
   | Context_overflow { limit = Some limit } ->
     Printf.sprintf "context_overflow:limit_%d" limit
   | Context_overflow { limit = None } -> "context_overflow"
+  | Repeating_generation { shape; occurrences; unit_bytes } ->
+    Printf.sprintf
+      "repeating_generation:%s:%dx%d"
+      (Types.repeating_shape_to_string shape)
+      occurrences
+      unit_bytes
   | Unknown_provider_failure { reason = Some reason } ->
     Printf.sprintf "unknown_provider_failure:%s" reason
   | Unknown_provider_failure { reason = None } -> "unknown_provider_failure"
@@ -2116,18 +2138,18 @@ let post_sync_once_after_validation
      of guessing a kind; the message is diagnostics only, per the note on
      [provider_failure_to_string] telling consumers to branch on the kind and never
      parse the string. *)
-  let fail_exn exn =
+  let http_error_of_exn exn =
     match classify_network_exn exn with
-    | Some error -> Error error
+    | Some error -> error
     | None ->
       release_connection ();
       Reserved_exn.reraise_if_reserved exn;
-      Error
-        (ProviderFailure
-           { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
-           ; message = "unclassified transport exception"
-           })
+      ProviderFailure
+        { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
+        ; message = "unclassified transport exception"
+        }
   in
+  let fail_exn exn = Error (http_error_of_exn exn) in
   let total_started_at =
     match body_deadline with
     | Unbounded -> None
@@ -2156,7 +2178,7 @@ let post_sync_once_after_validation
     match headers_deadline with
     | None -> f ()
     | Some (clock, timeout_s, owner) ->
-      (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
+      (match Under_deadline.run clock timeout_s f with
        | Ok result -> result
        | Error `Timeout ->
          Error
@@ -2233,35 +2255,60 @@ let post_sync_once_after_validation
       , response_status
       , response_header_evidence
       , retry_after_header ) ->
-    let body_result =
+    let body_outcome =
       try
         match body_deadline, total_started_at with
-        | Unbounded, None -> read_response_body response_body
+        | Unbounded, None ->
+          (match read_response_body response_body with
+           | Ok body -> `Body body
+           | Error error -> `Failed error)
         | Bounded (clock, timeout_s), Some (_, started_at) ->
           let elapsed = Eio.Time.now clock -. started_at in
           let remaining = timeout_s -. elapsed in
           if remaining <= 0.0
-          then Error (total_deadline_error timeout_s)
+          then `Deadline_passed timeout_s
           else (
             match
-              Eio.Time.with_timeout clock remaining (fun () ->
-                Ok (read_response_body response_body))
+              Under_deadline.run clock remaining (fun () ->
+                read_response_body response_body)
             with
-            | Ok result -> result
-            | Error `Timeout -> Error (total_deadline_error timeout_s))
+            | Ok (Ok body) -> `Body body
+            | Ok (Error error) -> `Failed error
+            | Error `Timeout -> `Deadline_passed timeout_s)
         | Unbounded, Some _ | Bounded _, None ->
           invalid_arg "Http_client.post_sync_once: inconsistent total deadline state"
       with
       | Eio.Time.Timeout as exn ->
         release_connection ();
         raise exn
-      | exn -> fail_exn exn
+      | exn -> `Failed (http_error_of_exn exn)
     in
-    (match body_result with
-     | Error error ->
+    let response_of body =
+      { response =
+          { status = response_status
+          ; body
+          ; retry_after_header
+          ; content_type = content_type_of_response_headers (Cohttp.Response.headers response)
+          }
+      ; response_header_evidence
+      }
+    in
+    (match body_outcome with
+     | `Failed error ->
        release_connection ();
        fail error
-     | Ok response_body ->
+     | `Deadline_passed timeout_s when Cohttp.Code.is_success response_status ->
+       (* The body is the answer; without it there is none. *)
+       release_connection ();
+       fail (total_deadline_error timeout_s)
+     | `Deadline_passed _ ->
+       (* A refusing status line is the provider's answer, and it is already
+          in hand with its headers: a body that does not arrive in time does
+          not turn the refusal into silence. The connection has unread
+          bytes on it and is not parked. *)
+       release_connection ();
+       Ok (response_of "")
+     | `Body response_body ->
        let release_result =
          match
            cache, response_connection_is_reusable ~request_headers:header response
@@ -2281,17 +2328,7 @@ let post_sync_once_after_validation
         | Error error ->
           release_connection ();
           fail error
-        | Ok () ->
-          Ok
-            { response =
-                { status = response_status
-                ; body = response_body
-                ; retry_after_header
-                ; content_type =
-                    content_type_of_response_headers (Cohttp.Response.headers response)
-                }
-            ; response_header_evidence
-            }))
+        | Ok () -> Ok (response_of response_body)))
 ;;
 
 let dispatch_sync_request
@@ -2432,7 +2469,7 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
         ~request_headers:headers_with_length
         ~request_body:body
         ~response_body:body_str;
-      Error (HttpError { code; body = body_str; retry_after_header }))
+      Error (HttpError { code; body = Received body_str; retry_after_header }))
 ;;
 
 let track_connection_eof connection =
@@ -2503,10 +2540,14 @@ type pre_header_budget =
    accepts the request and never answers never reaches the reader. Two
    steps the window cannot end: [getaddrinfo] runs in a systhread with no
    cancellation, so a closed window is observed once the lookup returns,
-   and the resolver's own timeout is the bound until then; and the
-   process's first https connection loads the system trust store
-   ([Api_common.tls_client_config], cached after that) synchronously on
-   this domain, so no timer runs until it is back. *)
+   and the resolver's own timeout is the bound until then; and an https
+   connection loads the system trust store ([Api_common.tls_client_config])
+   synchronously on this domain, so no timer runs until it is back. The
+   load is cached once it succeeds; a load that fails is made again,
+   synchronously, by every https connection until one succeeds. On a
+   connection that loads the store the two steps are one stretch, the
+   load and then the lookup with no suspension between them, so the
+   window is observed after their sum, not after the longer. *)
 let pre_header_deadline
       ~(connect : 'clock explicit_deadline)
       ~(first_event : 'clock explicit_deadline)
@@ -2579,7 +2620,7 @@ let with_post_stream
      second full one: the budget is one window from here to the first
      token. Without a clock no budget is armed anywhere and the elapsed time
      is not read. *)
-  let opened_at = Option.map Eio.Time.now clock in
+  let window_opened = Option.map (fun clock -> clock, Eio.Time.now clock) clock in
   Eio.Switch.run
   @@ fun sw ->
   (* When a cache is active, bind the transport to the cache's long-lived
@@ -2619,15 +2660,20 @@ let with_post_stream
         | Unbounded -> None
         | Bounded (clock, timeout_s) -> Some (clock, Eio.Time.now clock +. timeout_s)
       in
+      (* A connection handed back as the window closes is the connection:
+         the window's verdict stands only when nothing had returned. The
+         timeout is raised as [Eio.Time.Timeout] so [catch_network] names it
+         as it names any window's. *)
       let under_the_window f =
         match closes_at with
         | None -> f ()
         | Some (clock, closes_at) ->
-          Eio.Time.with_timeout_exn clock (closes_at -. Eio.Time.now clock) f
+          (match Under_deadline.run clock (closes_at -. Eio.Time.now clock) f with
+           | Ok answer -> answer
+           | Error `Timeout -> raise Eio.Time.Timeout)
       in
-      (* Held outside the window: when the window closes in the same
-         scheduler pass as the fiber returns, [Fiber.first] keeps the timeout
-         and drops what the fiber returned, connection included. *)
+      (* Held outside the window for the cancellation that comes from
+         outside it, at the handoff. *)
       let connection = ref None in
       let close_connection () = Option.iter Eio.Resource.close !connection in
       let* answer =
@@ -2700,31 +2746,36 @@ let with_post_stream
         (* A refusal's body is the rest of the provider's answer, read under
            what the window has left. The status line and its headers are
            already the answer: a body that does not arrive in time does not
-           turn a refusal into silence, so the refusal is returned with what
-           was received and no body. A refusal's connection is never reused. *)
+           turn a refusal into silence, so the refusal is returned with the
+           status and headers received and its body [Not_received_in_window]
+           -- which a consumer must not read as a body the provider left
+           empty, the reason it carried being unread. A refusal's connection
+           is never reused. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
         Fun.protect
           ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
           (fun () ->
              let read_body () =
                match read_response_body resp_body with
-               | Ok refusal_body -> Ok (Ok refusal_body)
-               | Error err -> Ok (Error err)
+               | Ok refusal_body -> Ok refusal_body
+               | Error err -> Error err
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
                | exception exn ->
                  (match classify_network_exn exn with
-                  | Some e -> Ok (Error e)
-                  | None when !transport_eof_seen -> Ok (Error (eof_error exn))
+                  | Some e -> Error e
+                  | None when !transport_eof_seen -> Error (eof_error exn)
                   | None -> raise exn)
              in
+             (* No guard on a window already spent: [Under_deadline.run]
+                keeps the read's outcome whenever the read finished, and a
+                body cohttp already buffered with the headers finishes
+                without suspending. A read that does suspend ends at the
+                window as it did. *)
              let body_result =
                match closes_at with
-               | None -> read_body ()
+               | None -> Ok (read_body ())
                | Some (clock, closes_at) ->
-                 let left_s = closes_at -. Eio.Time.now clock in
-                 if Float.compare left_s 0.0 <= 0
-                 then Error `Timeout
-                 else Eio.Time.with_timeout clock left_s read_body
+                 Under_deadline.run clock (closes_at -. Eio.Time.now clock) read_body
              in
              match body_result with
              | Ok (Ok refusal_body) ->
@@ -2735,9 +2786,9 @@ let with_post_stream
                  ~request_headers:headers_with_length
                  ~request_body:body
                  ~response_body:refusal_body;
-               refusal refusal_body
+               refusal (Received refusal_body)
              | Ok (Error err) -> Error err
-             | Error `Timeout -> refusal "")
+             | Error `Timeout -> refusal Not_received_in_window)
       | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
         (try
            (* EOF proves the body was drained; it does not prove the connection
@@ -2787,9 +2838,9 @@ let with_post_stream
      successfully, ensuring the reader is no longer using the flow. *)
   let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
   let pre_header_elapsed_s =
-    match clock, opened_at with
-    | Some clock, Some opened_at -> Eio.Time.now clock -. opened_at
-    | None, _ | _, None -> 0.0
+    match window_opened with
+    | Some (clock, opened_at) -> Eio.Time.now clock -. opened_at
+    | None -> 0.0
   in
   let body_result =
     try Ok (f ~pre_header_elapsed_s reader) with
@@ -3069,10 +3120,18 @@ let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
 ;;
 
 (* Run [read] inside what is left of the budget measured from [anchor],
-   taking the anchor now when none is set. Already past the deadline: raise
-   what [with_timeout_exn] would, rather than arming a non-positive duration
-   and depending on a scheduler race to produce it. *)
-let read_within_budget ~clock ~anchor ~seconds read =
+   taking the anchor now when none is set, and raise [Eio.Time.Timeout] when
+   the budget ends it.
+
+   A read that started inside the budget and finished stands, even when it
+   finished in the pass the budget ran out: what it read had been asked for
+   in time. A read that starts once the budget has run out stands only when
+   it took nothing new from [reader]'s flow -- the lines that had already
+   arrived, such as the delimiter that came with a first token. Taking new
+   bytes then is a timeout even when the flow hands them over: a submitted
+   read can still complete after its fiber was cancelled, so a stream that
+   kept sending would otherwise outlast a total budget line by line. *)
+let read_within_budget ~clock ~anchor ~seconds ~reader read =
   let anchored_at =
     match !anchor with
     | Some t -> t
@@ -3082,9 +3141,14 @@ let read_within_budget ~clock ~anchor ~seconds read =
       t
   in
   let remaining = anchored_at +. seconds -. Eio.Time.now clock in
-  if Float.compare remaining 0. <= 0
-  then raise Eio.Time.Timeout
-  else Eio.Time.with_timeout_exn clock remaining read
+  let received () = Eio.Buf_read.consumed_bytes reader + Eio.Buf_read.buffered_bytes reader in
+  let received_before = received () in
+  match Under_deadline.run clock remaining read with
+  | Error `Timeout -> raise Eio.Time.Timeout
+  | Ok line ->
+    if Float.compare remaining 0. > 0 || received () = received_before
+    then line
+    else raise Eio.Time.Timeout
 ;;
 
 (* A payload line was read under [budget]: a gap starts again, a total does
@@ -3135,7 +3199,7 @@ let read_sse
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
   (* SSE keepalive comments carry no payload. Skipping them inside the
-     SAME [with_timeout_exn] window preserves the armed deadline so a
+     SAME budgeted read preserves the armed deadline so a
      provider that emits only keepalives still trips it when no real event
      arrives.
      Agent Core contract: the wait for the consumer's first [Output] is the
@@ -3189,7 +3253,7 @@ let read_sse
     let parsed =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -3328,7 +3392,7 @@ let read_ndjson
     let line =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader (fun () ->
           Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is

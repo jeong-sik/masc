@@ -155,4 +155,14 @@ module For_testing : sig
   (** Observe completed serialization before publication; restore the previous
       hook on return or exception. Tests using this process-wide hook must not
       overlap unrelated cache work. *)
+
+  val compute_under_timeout :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    timeout_sec:float ->
+    key:string ->
+    (unit -> 'a) ->
+    'a
+  (** The window one cache compute runs under: a compute that finished as the
+      window closed is the answer; the window raises [Compute_timeout] only
+      when the compute has not finished. *)
 end

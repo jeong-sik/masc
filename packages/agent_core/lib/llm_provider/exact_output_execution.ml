@@ -187,7 +187,7 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
            (Provider_error
               (Http_client.HttpError
                  { code = raw.status
-                 ; body = raw.body
+                 ; body = Http_client.Received raw.body
                  ; retry_after_header = raw.retry_after_header
                  }))
        | Ok receipt ->

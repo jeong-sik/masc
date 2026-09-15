@@ -10250,7 +10250,6 @@ def keeper_lanes_ia_interaction(
             "Config: [runtime.exact_output_lanes.board_attention_exact]",
             "Catalog attempts (admitted order): 1 glm-coding.glm-5-turbo",
             "Then CLI (after catalog exhaustion): (none)",
-            "Lane configuration is TOML. Run Input/Output is retained JSON evidence.",
             "Output meaning: the accepted candidate judgment JSON.",
             "Evidence: structured-output generation, not a MASC tool loop;",
         ):
@@ -13188,9 +13187,17 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         _base_path: str,
     ) -> None:
         # The fixture closes the stream right after its one frame, so the
-        # row the test can rely on is the closed one; it keeps the count.
+        # row the test can rely on is the closed one. What this scenario is
+        # about is the MCP session and the subscription under it, so it waits
+        # for the row to exist and not for the number on it: the count and
+        # where it sits are read by test_tui_feed_row_counts_events.py, which
+        # names masc_tui_render.ml and is selected by a change to the row.
+        # Spelling the number here made a wording change to the row a change
+        # to this file, and editing this file puts the whole walk inside the
+        # gate's twelve-minute step alongside every other suite the change
+        # selects.
         wait_for_output(
-            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+            process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         initialize = [body for path, body in requests if path == "/mcp"]
         if len(initialize) != 1:
@@ -13280,7 +13287,7 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         _base_path: str,
     ) -> None:
         wait_for_output(
-            process, master_fd, output, b"feed: closed after 1", start=0, timeout=10.0
+            process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
         send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")

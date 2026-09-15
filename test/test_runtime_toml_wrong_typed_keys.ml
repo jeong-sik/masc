@@ -137,6 +137,10 @@ let cases =
       "reasoning-effort = 1"
       "models.m.reasoning-effort: reasoning-effort must be a string"
   ; model_case
+      "models.m.reasoning-uncontrolled = 1"
+      "reasoning-uncontrolled = 1"
+      "models.m.reasoning-uncontrolled: reasoning-uncontrolled must be a boolean"
+  ; model_case
       "models.m.capabilities.supports-tool-choice = 1"
       "[models.m.capabilities]\nsupports-tool-choice = 1"
       "models.m.capabilities.supports-tool-choice: supports-tool-choice must be a boolean"

@@ -172,6 +172,13 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+val yielded_pre_first_token : session_id:string -> run_result
+(** A synthesized [run_result] for a turn that abandoned its provider attempt
+    before the first streaming event because a person queued behind it (the
+    pre-first-token gap; RFC-0441). [turns_used = 0], no checkpoint,
+    [stop_reason = Yielded_to_durable_stimulus] so downstream treats it as a
+    durable-stimulus yield and re-runs the source wake fresh next cycle. *)
+
 (** {1 Label resolution} *)
 
 val label_resolution_error_to_string :
@@ -337,12 +344,12 @@ module For_testing : sig
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
   (** Fail closed when a streaming deadline (inter-line idle or first-event,
-      RFC-AC-037) is configured but no clock resolves. *)
+      RFC-AC-037) is configured but [clock] is [None]. The runtime passes the
+      clock in {!Eio_context}, the one the keeper driver's watchdog reads. *)
   val decide_clock_for_idle :
     stream_idle_timeout_s:float option ->
     first_event_timeout_s:float option ->
-    process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
-    ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+    clock:float Eio.Time.clock_ty Eio.Resource.t option ->
     (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result
 
   val required_modalities_of_content_blocks :

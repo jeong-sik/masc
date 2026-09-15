@@ -340,7 +340,7 @@ let generate
      | Ok { status; body = response_body; retry_after_header; _ } ->
        Error
          (Http_client.HttpError
-            { code = status; body = response_body; retry_after_header }))
+            { code = status; body = Http_client.Received response_body; retry_after_header }))
 ;;
 
 let test_caps task = { Capabilities.default_capabilities with task }

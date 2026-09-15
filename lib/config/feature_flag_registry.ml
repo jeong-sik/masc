@@ -149,9 +149,9 @@ let runtime_value flag =
 let runtime_value_strict flag =
   get_bool_strict ~default:flag.default flag.env_name
 
-(** Source: "env", "boot_override", or "default". *)
+(** Source label: "env", "boot_override", or "default". *)
 let runtime_source flag =
-  Config_boot_overrides.source flag.env_name
+  Config_boot_overrides.source_to_string (Config_boot_overrides.source flag.env_name)
 
 
 (** Lookup the runtime value of a flag using its registry default. *)

@@ -80,8 +80,8 @@ let default_config ~cwd ~model =
    update. Silence inside a tool step is the protocol, not a client that has
    gone away, and an idle deadline there would measure how long the tool took,
    which [timeout_s] must not cap. The wall-clock ceiling still bounds that
-   phase: [Runtime_wall_clock.cap_window] turns [None] into the remaining
-   budget. *)
+   phase: [Runtime_wall_clock.cap_window] makes [None] the remaining
+   budget, so the window handed to the read is always a number. *)
 type read_phase =
   | Awaiting_admission
   | Model_turn
@@ -889,14 +889,14 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
            |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =
-           with_optional_timeout clock read_timeout_s (fun () ->
+           with_idle_timeout clock read_timeout_s (fun () ->
              Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              with_optional_timeout clock callback_timeout_s (fun () ->
+              with_idle_timeout clock callback_timeout_s (fun () ->
                 apply_event
                   config
                   ~conversation_mode

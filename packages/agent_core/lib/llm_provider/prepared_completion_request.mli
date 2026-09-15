@@ -75,6 +75,7 @@ val measure
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
   -> next_stage:next_stage
+  -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> serialized

@@ -122,6 +122,11 @@ val with_call_timeout : float -> t -> t
     clock on the underlying request. @since 0.231.15 *)
 val with_admission_timeout : float -> t -> t
 
+(** Set the cell bounded permit waits write
+    ({!Agent_types.options.permit_wait}) as such a wait begins and ends, on
+    every route. *)
+val with_permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t -> t -> t
+
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 val with_description : string -> t -> t

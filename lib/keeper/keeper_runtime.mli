@@ -82,11 +82,37 @@ val bootable_keeper_names : Workspace.config -> string list
     keepers remain visible through configured-name/config-error surfaces and
     are still inspected by bootstrap, but never appear executable here. *)
 
-val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion_reason option
+val autoboot_exclusion_reason
+  :  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot
+  -> Workspace.config
+  -> string
+  -> autoboot_exclusion_reason option
 (** Per-keeper pause/autoboot policy exclusion, or [None] when policy admits
     the keeper. [None] does not assert configuration validity; callers that
     need executable admission use {!bootable_keeper_names}. Single-keeper
-    projection of {!autoboot_excluded_keeper_reasons}. *)
+    projection of {!autoboot_excluded_keeper_reasons}.
+
+    This is the one answer to "should this keeper be running": the boot path
+    skips a keeper it names, and any other reader asking the same question
+    asks here rather than re-deriving it. A reader that derived it from the
+    activation mode alone saw an operator-paused keeper as one that should be
+    running, and reported the work it still owned as a fleet fault
+    (2026-09-15, one paused keeper degraded the fleet until a person
+    intervened).
+
+    [profile_snapshot] is a caller's already-read profile table, for a reader
+    answering for the whole fleet in one pass. *)
+
+val autoboot_exclusion_reason_of_reads
+  :  meta:Keeper_meta_contract.keeper_meta option
+  -> profile:(Keeper_types_profile.keeper_profile_defaults, 'e) result
+  -> autoboot_exclusion_reason option
+(** The rule {!autoboot_exclusion_reason} applies, over a meta and profile the
+    caller already read — for a reader that holds both and must not answer
+    from a second read of either. The meta decides first: a paused keeper is
+    [Paused] whatever the profile says. A profile that did not load gives
+    [None], so the boot path reaches the keeper and reports the error; a
+    reader for which that is the unsafe direction checks [profile] itself. *)
 
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)

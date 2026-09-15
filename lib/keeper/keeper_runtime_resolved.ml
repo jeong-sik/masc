@@ -19,18 +19,13 @@ type t = {
   provider_call_deadline_sec : float field;
 }
 
-(** Exhaustive boundary for the labels emitted by
-    {!Config_boot_overrides.source}. Unknown labels are an internal contract
-    violation and must not be displayed as a fabricated default source. *)
+(* The layer {!Config_boot_overrides.source} names, as this module's
+   source; a boot override is the runtime file's value. *)
 let source_of_env_name name : source =
   match Config_boot_overrides.source name with
-  | "env" -> Env
-  | "boot_override" -> Toml
-  | "default" -> Default
-  | label ->
-    raise
-      (Env_config_core.Config_error
-         (Printf.sprintf "unknown config source for %s: %S" name label))
+  | Config_boot_overrides.Env -> Env
+  | Config_boot_overrides.Boot_override -> Toml
+  | Config_boot_overrides.Default -> Default
 
 let source_to_string = function
   | Env -> "env"

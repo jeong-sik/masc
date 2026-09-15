@@ -118,6 +118,12 @@ type try_provider_ctx =
        pre-#28417 elapsed ceiling. That is the conservative direction: it can
        fire early on a healthy turn, never late on a wedged one. *)
     provider_progress_probe : (unit -> provider_progress_sample option) option
+  ; (* Reads whether a person's chat operation is queued behind this turn.
+       Injected (not read from [Keeper_registry] here) so the preemption verdict
+       stays a pure function of its inputs. Present only on the autonomous lane;
+       [None] disables first-token-wait preemption and the attempt keeps the
+       full first-event/idle bounds (RFC-0441 pre-first-token gap). *)
+    person_queued_probe : (unit -> bool) option
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
@@ -396,6 +402,48 @@ let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
     ~lease_phase
 ;;
 
+(* First-token-wait preemption (RFC-0441 pre-first-token gap). A person queued
+   behind an autonomous turn whose provider has produced nothing has no tool
+   boundary to be yielded at, so the attempt is abandoned and the slot goes to
+   the person. It must fire only pre-first-token: once any streaming event
+   arrives, the tool-boundary yield ([cooperative_yield_probe]) owns the
+   handover. This is not a forced cancel of a productive turn -- the attempt
+   produced nothing and re-runs fresh. *)
+let preempt_pre_first_token ~first_event_seen ~person_queued =
+  (not first_event_seen) && person_queued
+;;
+
+(* Matches the stall watchdog's cadence family: a person waits O(1s), not the
+   ~600s first-event failsafe floor. *)
+let person_queued_poll_interval_sec = 1.0
+
+(* Blocks until a person is queued while the attempt is still pre-first-token,
+   then returns to win the race. Once the first event lands ([first_event_seen])
+   it never returns, ceding the verdict to the attempt and stall fibers.
+   [person_queued] is contracted not to raise (the injection site maps a failed
+   read to [false]), so a transient read never cancels the attempt it watches.
+
+   [person_queued ()] reads the owner registry, which may schedule (an Eio mutex
+   is a scheduling point), so the attempt fiber can flip [first_event_seen] while
+   it runs. [first_event_seen] is therefore re-read AFTER the probe returns --
+   [let queued] fixes that order -- and the read and the verdict have no
+   scheduling point between them, so a turn that produced its first event during
+   the probe is not preempted. Winning after a first event would only re-run a
+   just-started attempt (a yield, not lost work), but the re-read keeps the
+   "a responding turn is never preempted" property exact. *)
+let rec await_person_queued_preemption ~clock ~first_event_seen ~person_queued =
+  Eio.Time.sleep clock person_queued_poll_interval_sec;
+  if Atomic.get first_event_seen
+  then await_person_queued_preemption ~clock ~first_event_seen ~person_queued
+  else
+    let queued = person_queued () in
+    if preempt_pre_first_token
+         ~first_event_seen:(Atomic.get first_event_seen)
+         ~person_queued:queued
+    then ()
+    else await_person_queued_preemption ~clock ~first_event_seen ~person_queued
+;;
+
 let rejected_body_bytes = function
   | Agent_core.Error.Api
       (InvalidRequest
@@ -407,6 +455,7 @@ let rejected_body_bytes = function
               ( Json_parse_error
               | Attempt_rejected
               | Request_body_refused_by_provider _
+              | Refusal_body_not_received
               | Unknown_invalid_request )
           ; _
           }
@@ -1127,6 +1176,22 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
       observe_provider_lease ~now:Time_compat.now
         ~on_yield:ctx.on_yield ~on_resume:ctx.on_resume
     in
+    (* First-token-wait preemption arming. [first_event_seen] flips on the first
+       streaming event of any kind -- a conservative "the provider has produced
+       something" signal so a turn that is actually responding is never
+       preempted (a post-first-event stall is owned by the stall watchdog and
+       the idle bound). Only wrap [on_event] when the probe is present so the
+       non-autonomous lanes keep their exact callback and 2-way race. *)
+    let first_event_seen = Atomic.make false in
+    let effective_on_event =
+      match ctx.person_queued_probe with
+      | None -> ctx.on_event
+      | Some _ ->
+        Some
+          (fun ev ->
+            Atomic.set first_event_seen true;
+            Option.iter (fun f -> f ev) ctx.on_event)
+    in
     let run_attempt_switch () =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
@@ -1138,7 +1203,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~net:ctx.net
                 ~config
                 ~checkpoint
-                ?on_event:ctx.on_event
+                ?on_event:effective_on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -1150,7 +1215,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~net:ctx.net
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:ctx.on_event
+                ?on_event:effective_on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -1162,7 +1227,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~net:ctx.net
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:ctx.on_event
+                ?on_event:effective_on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -1193,19 +1258,66 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
            elapsed fallback and the progress comparison must not read two
            different clocks. *)
         let attempt_started_at = Time_compat.now () in
+        let attempt_fiber () = `Attempt_finished (run_attempt_switch ()) in
+        let stall_fiber () =
+          await_attempt_stall
+            ~clock
+            ~threshold_sec
+            ~attempt_started_at
+            ~lease_phase
+            ~probe:ctx.provider_progress_probe;
+          `Attempt_stalled
+        in
         (match
-           Eio.Fiber.first
-             (fun () -> `Attempt_finished (run_attempt_switch ()))
-             (fun () ->
-               await_attempt_stall
-                 ~clock
-                 ~threshold_sec
-                 ~attempt_started_at
-                 ~lease_phase
-                 ~probe:ctx.provider_progress_probe;
-               `Attempt_stalled)
+           (let combine_attempt_outcomes a b =
+              (* A finished attempt stands even when it resolved in the same
+                 scheduler pass the watchdog polled it stalled, or a person
+                 queued: a provider answer that arrived must not be discarded
+                 as a stall or a preemption and retried (#36340). *)
+              match a, b with
+              | `Attempt_finished _, _ -> a
+              | _, `Attempt_finished _ -> b
+              | `Attempt_preempted, _ -> a
+              | _, `Attempt_preempted -> b
+              | `Attempt_stalled, `Attempt_stalled -> a
+            in
+            match ctx.person_queued_probe with
+            | None ->
+              Eio.Fiber.first ~combine:combine_attempt_outcomes
+                attempt_fiber stall_fiber
+            | Some person_queued ->
+              (* Third racer, autonomous-only: abandon a pre-first-token
+                 attempt when a person queues (RFC-0441 gap). [Eio.Fiber.any]
+                 cancels the losing siblings, unwinding the attempt's inner
+                 [attempt_sw] and its in-flight request exactly as the stall
+                 racer does; an outer cancellation still propagates because no
+                 branch catches it. The same tie rule as the [None] arm keeps a
+                 finished attempt over a simultaneous stall or preemption. *)
+              Eio.Fiber.any ~combine:combine_attempt_outcomes
+                [ attempt_fiber
+                ; stall_fiber
+                ; (fun () ->
+                    await_person_queued_preemption
+                      ~clock ~first_event_seen ~person_queued;
+                    `Attempt_preempted)
+                ])
          with
          | `Attempt_finished attempt_result -> attempt_result
+         | `Attempt_preempted ->
+           (* Synthesized zero-turn durable-stimulus yield: nothing was
+              produced, no checkpoint, source wake stays pending and re-runs
+              fresh. Not an error, so no provider rotation and no failure
+              telemetry. *)
+           (* [ctx.session_id] is the turn's trace id, always present on the
+              autonomous lane where preemption is armed; the [None] arm names a
+              deterministic fallback for this zero-turn yield's cosmetic id
+              rather than defaulting an unknown input. *)
+           let session_id =
+             match ctx.session_id with
+             | Some id -> id
+             | None -> ctx.runtime_id
+           in
+           Ok (Runtime_agent.yielded_pre_first_token ~session_id)
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
@@ -1227,12 +1339,16 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
       | None ->
-        (* A process with no clock cannot count the threshold down, and an
-           attempt with no bound is the hang this deadline exists to end.
-           The server installs its clock at boot before any turn, so a turn
-           that gets here is a wiring fault; it is refused the way
-           [Keeper_identity_gate] refuses a call it cannot bound: typed, and
-           nothing was sent. *)
+        (* A process with no clock in [Eio_context] cannot count the
+           threshold down. It could not run the attempt either:
+           [Runtime_agent.build] reads the same [Eio_context.get_clock_opt]
+           and refuses a stream-idle budget it has no clock to arm, and the
+           driver always declares one. This arm refuses that condition one
+           layer earlier, in the name of the deadline it could not set; the
+           two read one clock source, so neither can run what the other
+           refuses. The server installs its clock at boot before any turn,
+           so a turn that gets here is a wiring fault; typed, and nothing
+           was sent. *)
         Error
           (Agent_core.Error.Config
              (Agent_core.Error.InvalidConfig

@@ -302,8 +302,8 @@ let model_tool_name ~(provider : Provider.t) ~remote_name =
 ;;
 
 type call_phase =
-  | Before_send
-  | After_send
+  | Session_open
+  | Tool_call
 
 type call_error =
   | Precondition of string
@@ -342,18 +342,18 @@ type call_proof =
 let call_proof_of_call_error : call_error -> call_proof = function
   | Precondition _ | Transient_precondition _ -> Effect_never_began
   (* A session that never came up carries proof the call was not sent. *)
-  | Mcp { phase = Before_send; _ } -> Effect_never_began
+  | Mcp { phase = Session_open; _ } -> Effect_never_began
   (* The server refused the token; auth precedes the tool run. *)
-  | Mcp { phase = After_send; error = Mcp_client.Unauthorized _ } -> Effect_never_began
-  | Mcp { phase = After_send; error = Mcp_client.Rpc { code; _ } }
+  | Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ } -> Effect_never_began
+  | Mcp { phase = Tool_call; error = Mcp_client.Rpc { code; _ } }
     when rpc_rejects_before_execution code -> Effect_never_began
-  (* After the call went to the transport, no failure proves anything: a
-     transport error here may be the connection step of the tools/call
-     itself, and an HTTP status, a JSON-RPC code the server sends after
-     running, or an answer that does not parse all follow a request the
-     service may have applied. *)
+  (* Once the tools/call was handed to the transport, no other failure
+     proves anything: a transport error here may be the connection step of
+     the tools/call itself, and an HTTP status, any other JSON-RPC code, or
+     an answer that does not parse all follow a request the service may
+     have applied. *)
   | Mcp
-      { phase = After_send
+      { phase = Tool_call
       ; error =
           Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
           | Mcp_client.Transport _
@@ -587,7 +587,7 @@ let run_call_once ~transports ~base_path ~keeper_name
       (* A session that never came up carries proof the call was not sent;
          an error after [call_tool] does not, and the two must stay apart
          because replay reads the phase as the effect's disposition. *)
-      | Error error -> Error (Mcp { phase = Before_send; error })
+      | Error error -> Error (Mcp { phase = Session_open; error })
       | Ok client -> (
         match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
         | Error error when is_method_not_found_error error -> (
@@ -607,7 +607,7 @@ let run_call_once ~transports ~base_path ~keeper_name
                     method-not-found for %s failed: %s"
                    provider.Provider.id remote_name
                    (Mcp_client.error_to_string rediscovery_error));
-              Error (Mcp { phase = After_send; error })
+              Error (Mcp { phase = Tool_call; error })
             | Ok tools ->
               let fresh =
                 { provider_id = provider.Provider.id
@@ -640,11 +640,11 @@ let run_call_once ~transports ~base_path ~keeper_name
                 (* Rediscovery proved that the old offer was stale.  Retrying
                    a name the server no longer advertises would be a second
                    predictable failure, not recovery. *)
-                Error (Mcp { phase = After_send; error })
+                Error (Mcp { phase = Tool_call; error })
               else
                 match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
                 | Error retry_error ->
-                  Error (Mcp { phase = After_send; error = retry_error })
+                  Error (Mcp { phase = Tool_call; error = retry_error })
                 | Ok result -> Ok result)
           | Error problem ->
             Log.Keeper.emit Log.Warn ~keeper_name
@@ -652,9 +652,9 @@ let run_call_once ~transports ~base_path ~keeper_name
                  "keeper_identity_tools: %s catalog could not be read while \
                   investigating method-not-found for %s: %s"
                  provider.Provider.id remote_name problem);
-            Error (Mcp { phase = After_send; error })
-          | Ok None | Ok (Some _) -> Error (Mcp { phase = After_send; error }))
-        | Error error -> Error (Mcp { phase = After_send; error })
+            Error (Mcp { phase = Tool_call; error })
+          | Ok None | Ok (Some _) -> Error (Mcp { phase = Tool_call; error }))
+        | Error error -> Error (Mcp { phase = Tool_call; error })
         | Ok result -> Ok result)))
 ;;
 

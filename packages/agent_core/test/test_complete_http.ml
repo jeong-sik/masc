@@ -611,7 +611,7 @@ let test_complete_http_empty_error_body_has_context () =
     in
     match Complete.complete ~sw ~net:env#net ~config ~messages () with
     | Ok _ -> fail "expected Error"
-    | Error (Http_client.HttpError { code; body; _ }) ->
+    | Error (Http_client.HttpError { code; body = Http_client.Received body; _ }) ->
       check int "status 404" 404 code;
       check
         string
@@ -863,7 +863,8 @@ let test_complete_stream_openai_responses_ok () =
          | Http_client.TimeoutError { message; _ }
          | Http_client.ProviderTerminal { message; _ }
          | Http_client.ProviderFailure { message; _ } -> message
-         | Http_client.HttpError { code; body; _ } -> Printf.sprintf "HTTP %d: %s" code body
+         | Http_client.HttpError { code; body; _ } ->
+           Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
          | Http_client.AcceptRejected { reason } -> reason)
   with
   | Exit -> ()
@@ -1275,7 +1276,7 @@ let test_complete_transport_http_metrics_error () =
       make_transport
         (Error
            (Http_client.HttpError
-              { code = 429; body = "rate limited"; retry_after_header = None }))
+              { code = 429; body = Http_client.Received "rate limited"; retry_after_header = None }))
     in
     match Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics () with
     | Ok _ -> fail "expected Error"
@@ -1460,14 +1461,21 @@ let anthropic_sse_frame_delta text =
     text
 ;;
 
-let anthropic_sse_frame_stop =
-  "event: content_block_stop\n\
-   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
-   event: message_delta\n\
+let anthropic_sse_frame_block_stop =
+  "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+;;
+
+let anthropic_sse_frame_usage_only =
+  "event: message_delta\n\
    data: \
-   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n\
-   event: message_stop\n\
-   data: {\"type\":\"message_stop\"}\n\n"
+   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+;;
+
+let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+(* The tail every Anthropic turn ends with, in the order the wire sends it. *)
+let anthropic_sse_frame_stop =
+  anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only ^ anthropic_sse_frame_message_stop
 ;;
 
 let anthropic_sse_frame_thinking_block_start =
@@ -2589,11 +2597,7 @@ let test_complete_stream_stops_reading_a_repeating_generation () =
     (match result with
      | Error
          (Http_client.ProviderFailure
-            { kind =
-                Http_client.Provider_wire_error
-                  { kind = Http_client.Repeating_generation; _ }
-            ; _
-            }) -> ()
+            { kind = Http_client.Repeating_generation _; _ }) -> ()
      | Error _ ->
        fail "a repeating generation must be reported as one, not as a timeout"
      | Ok _ -> fail "three identical paragraphs must not finalize as an answer");
@@ -2647,11 +2651,7 @@ let test_complete_stream_stops_reading_a_chanting_reasoning_block () =
     (match result with
      | Error
          (Http_client.ProviderFailure
-            { kind =
-                Http_client.Provider_wire_error
-                  { kind = Http_client.Repeating_generation; _ }
-            ; _
-            }) -> ()
+            { kind = Http_client.Repeating_generation _; _ }) -> ()
      | Error _ ->
        fail "a chanting reasoning block must be reported as a repeat, not as a timeout"
      | Ok _ -> fail "a reasoning block chanting one unit must not finalize as an answer");
@@ -2778,21 +2778,15 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
   | Exit -> ()
 ;;
 
-(* A frame that projects nothing the classifier names -- a usage-bearing
-   message_delta on its own, the shape of an OpenAI-compatible usage-only
-   final chunk -- must not put the stream back to "awaiting the first
-   delta" once output has been seen: a stall after it is an idle gap in the
-   state the last production left, and the phase, the message and the
-   telemetry all say so. (A content_block_stop is not such a frame: the
-   classifier names it a tool-call completion.) *)
-let anthropic_sse_frame_usage_only =
-  "event: message_delta\n\
-   data: \
-   {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
-;;
-
-let anthropic_sse_frame_message_stop = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-
+(* The frames after the last delta project nothing the classifier names as
+   a production: the text block's stop closes a block that is not a tool
+   call, and the usage-bearing message_delta is the shape of an
+   OpenAI-compatible usage-only final chunk. Neither may put the stream back
+   to "awaiting the first delta" or forward to "streaming a tool call": a
+   stall after them is an idle gap in the state the last production left,
+   and the phase, the message and the telemetry all say so. This is the
+   wire order of every Anthropic turn whose proxy holds the socket after the
+   final block. *)
 let timeout_telemetry telemetry =
   List.filter_map
     (function
@@ -2815,7 +2809,7 @@ let test_complete_stream_idle_after_output_keeps_the_production_state () =
         [ 0.0, anthropic_sse_frame_message_start
         ; 0.0, anthropic_sse_frame_content_block_start
         ; 0.0, anthropic_sse_frame_delta "hello"
-        ; 0.0, anthropic_sse_frame_usage_only
+        ; 0.0, anthropic_sse_frame_block_stop ^ anthropic_sse_frame_usage_only
         ; 0.5, anthropic_sse_frame_message_stop
         ]
     in

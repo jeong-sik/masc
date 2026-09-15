@@ -1157,6 +1157,15 @@ let parse_model (id : string) (tbl : Otoml.t)
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
+    let reasoning_uncontrolled_result =
+      typed_find_or
+        "a boolean"
+        path
+        tbl
+        "reasoning-uncontrolled"
+        Otoml.get_boolean
+        ~default:false
+    in
     let turn_timeout_result = turn_timeout_opt_field ~path tbl in
     let wall_clock_ceiling_result = wall_clock_ceiling_opt_field ~path tbl in
     let max_prompt_bytes_result =
@@ -1175,6 +1184,22 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_k = top_k_result in
     let* min_p = min_p_result in
     let* reasoning_effort = reasoning_effort_result in
+    let* reasoning_uncontrolled = reasoning_uncontrolled_result in
+    (* A row that names an effort and also says it sends no control asks for
+       two different requests, and nothing downstream can honour both. Letting
+       one silently win is how a lane ends up reasoning while the config reads
+       as if it does not, which is the confusion this key exists to remove. *)
+    let* () =
+      match reasoning_effort, reasoning_uncontrolled with
+      | Some _, true ->
+        Error
+          (error
+             (path ^ ".reasoning-uncontrolled")
+             "reasoning-uncontrolled cannot sit on a model that also declares \
+              reasoning-effort: one sends the declared effort, the other sends \
+              no control at all")
+      | Some _, false | None, (true | false) -> Ok ()
+    in
     let* turn_timeout_s = turn_timeout_result in
     let* wall_clock_ceiling_s = wall_clock_ceiling_result in
     let* max_prompt_bytes = max_prompt_bytes_result in
@@ -1194,6 +1219,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; top_k
         ; min_p
         ; reasoning_effort
+        ; reasoning_uncontrolled
         ; turn_timeout_s
         ; wall_clock_ceiling_s
         ; max_prompt_bytes

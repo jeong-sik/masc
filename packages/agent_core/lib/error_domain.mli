@@ -54,6 +54,11 @@ type provider_error =
     (** provider, wire format, wire failure kind, detail *)
   | `Provider_reported_error of string * string option * string
     (** provider, provider-owned subtype, detail *)
+  | `Repeating_generation of
+      string * Llm_provider.Types.repeating_shape * int * int * string
+    (** provider, repeated shape, occurrences, unit bytes, detail — the model
+        repeated itself and the stream was ended; not a wire fault, and not
+        retryable on the same model *)
   | `Payment_required of string
     (** HTTP 402 — hard billing/quota exhaustion, distinct from
         [`Invalid_request]. Always non-retryable. *)

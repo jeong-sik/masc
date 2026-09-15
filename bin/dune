@@ -6,7 +6,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc masc.config masc.workspace_connection masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
+ (libraries masc.browser_host masc.masc_log eio eio_main unix))
 
 (executable
  (name masc_reliable_change_g1_check)
@@ -552,12 +552,14 @@
  ; masc_tui_memory_mark the marks the Memory roster's ST column draws,
  ; masc_tui_planning_proof_mark the marks Planning's JUDGE column draws and
  ; masc_tui_keeper_chat_transcript the marks and phrases on a chat's tool
- ; rows; the sheet this module builds is where a reader looks up what one
+ ; rows and masc_tui_file_icon the marks the Code tree draws beside a
+ ; file; the sheet this module builds is where a reader looks up what one
  ; means.
  (libraries
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_board_kind_mark
+  masc_tui_file_icon
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
   masc_tui_keeper_chat_transcript))

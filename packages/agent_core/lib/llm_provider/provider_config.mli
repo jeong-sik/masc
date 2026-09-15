@@ -88,6 +88,12 @@ type t =
   ; reasoning_effort : Reasoning_effort.t option
     (** Explicit effort value for provider wires that accept categorical
         reasoning effort. [None] omits the field. *)
+  ; reasoning_uncontrolled : bool
+    (** Declared intent to send no thinking control at all and take whatever
+        the provider does on its own. Only a wire that turns reasoning on when
+        the request carries no control asks for this: there, silence and this
+        declaration produce the same request, and nothing else says which one
+        was meant. [false] elsewhere and by default. *)
   ; clear_thinking : bool option
   ; tool_stream : bool
   ; tool_choice : Types.tool_choice option
@@ -243,6 +249,7 @@ val make
   -> ?enable_thinking:bool
   -> ?preserve_thinking:bool
   -> ?reasoning_effort:Reasoning_effort.t
+  -> ?reasoning_uncontrolled:bool
   -> ?clear_thinking:bool
   -> ?tool_stream:bool
   -> ?tool_choice:Types.tool_choice
@@ -466,6 +473,14 @@ type reasoning_effort_request_rejection =
       ; model_id : string
       ; accepted : reasoning_effort list option
       }
+  | Reasoning_undeclared_on_auto_enabling_wire of
+      { provider_kind : provider_kind
+      ; model_id : string
+      }
+      (** The wire enables reasoning when no control is sent, the model
+          reasons, and the request declared neither an effort nor
+          [reasoning_uncontrolled]. Both of those are admitted; only saying
+          nothing is not. *)
 
 val reasoning_effort_request_rejection_to_message
   :  reasoning_effort_request_rejection

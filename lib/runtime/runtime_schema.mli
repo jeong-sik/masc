@@ -157,6 +157,12 @@ type model_spec =
   ; top_p : float option
   ; top_k : int option
   ; min_p : float option
+  ; reasoning_uncontrolled : bool
+        (** [reasoning-uncontrolled] — this lane deliberately sends no thinking
+            control and takes the provider's own default. A wire that enables
+            reasoning without a control refuses a reasoning-capable row that
+            declares neither this nor an effort: the two requests are identical
+            and only this says the silence was meant. Default [false]. *)
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
   ; turn_timeout_s : float option

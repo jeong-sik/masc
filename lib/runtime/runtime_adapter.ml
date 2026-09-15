@@ -603,6 +603,10 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
                left reasoning on every turn. Official-client runtimes read the
                same field through Runtime_inference.resolve_reasoning_effort. *)
             ?reasoning_effort:spec.reasoning_effort
+            (* Paired with the effort above: on a wire that turns reasoning on when the
+               request carries no control, one of the two has to be said. This is the
+               row saying it rides the provider default on purpose. *)
+            ~reasoning_uncontrolled:spec.reasoning_uncontrolled
             ?keep_alive
             ?num_ctx
             ?repeat_penalty
@@ -649,6 +653,10 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
                left reasoning on every turn. Official-client runtimes read the
                same field through Runtime_inference.resolve_reasoning_effort. *)
             ?reasoning_effort:spec.reasoning_effort
+            (* Paired with the effort above: on a wire that turns reasoning on when the
+               request carries no control, one of the two has to be said. This is the
+               row saying it rides the provider default on purpose. *)
+            ~reasoning_uncontrolled:spec.reasoning_uncontrolled
             ?keep_alive
             ?num_ctx
             ?repeat_penalty

@@ -63,6 +63,12 @@ type t =
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; reasoning_effort : Reasoning_effort.t option
+  ; reasoning_uncontrolled : bool
+    (* Declared intent to send no thinking control at all and ride whatever
+       the provider does on its own. Only a wire that enables reasoning by
+       itself asks for this: there, silence and this declaration produce the
+       same request, and the difference between them is whether anybody meant
+       it. *)
   ; clear_thinking : bool option
   ; tool_stream : bool
   ; tool_choice : Types.tool_choice option
@@ -106,6 +112,7 @@ let make
       ?enable_thinking
       ?preserve_thinking
       ?reasoning_effort
+      ?(reasoning_uncontrolled = false)
       ?clear_thinking
       ?(tool_stream = false)
       ?tool_choice
@@ -167,6 +174,7 @@ let make
   ; enable_thinking
   ; preserve_thinking
   ; reasoning_effort
+  ; reasoning_uncontrolled
   ; clear_thinking
   ; tool_stream
   ; tool_choice
@@ -548,11 +556,11 @@ let reasoning_effort_request_rejection_to_message = function
       (reasoning_effort_to_string Reasoning_effort.None_)
   | Reasoning_undeclared_on_auto_enabling_wire { provider_kind; model_id } ->
     Printf.sprintf
-      "%s model %S declares no reasoning effort, and this wire turns reasoning \
-       on when the request carries none: the model would reason on every turn \
-       while nothing in the configuration says so. Declare a reasoning effort \
-       for this model (%S to keep it off), or bind it to a wire whose default \
-       is the provider's own"
+      "%s model %S says nothing about reasoning, and this wire turns reasoning \
+       on when the request carries no control: the model would reason on every \
+       turn while the configuration reads as silent on it. Declare a reasoning \
+       effort for this model (%S keeps it off), or declare that this lane rides \
+       the provider's own default on purpose"
       (string_of_provider_kind provider_kind)
       model_id
       (reasoning_effort_to_string Reasoning_effort.None_)
@@ -588,13 +596,22 @@ let validate_reasoning_effort_request_typed (config : t) =
        no way to tell reasoning-on from undeclared. Found 2026-09-15 while
        reading why one ollama /v1 lane reasoned on every turn; eight model rows
        on that wire carried no effort at the time. *)
-    (match caps.Capabilities.uncontrolled_reasoning, caps.Capabilities.supports_reasoning with
-     | Capabilities.Provider_enables_reasoning, true ->
+    (match
+       ( caps.Capabilities.uncontrolled_reasoning
+       , caps.Capabilities.supports_reasoning
+       , config.reasoning_uncontrolled )
+     with
+     | Capabilities.Provider_enables_reasoning, true, false ->
        Error
          (Reasoning_undeclared_on_auto_enabling_wire
             { provider_kind = config.kind; model_id = config.model_id })
-     | Capabilities.Provider_enables_reasoning, false
-     | Capabilities.Provider_default_reasoning, (true | false) -> Ok ())
+     (* Said out loud, it is a choice like any other: the request carries no
+        control and the provider's own default decides. Only silence is
+        refused, so nothing this wire could express before becomes
+        unsayable. *)
+     | Capabilities.Provider_enables_reasoning, true, true
+     | Capabilities.Provider_enables_reasoning, false, _
+     | Capabilities.Provider_default_reasoning, (true | false), _ -> Ok ())
   | Some effort ->
     let explicit_disable_on_categorical_wire =
       match caps.Capabilities.thinking_control_format, config.enable_thinking with

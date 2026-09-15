@@ -33,3 +33,44 @@ let resolve ~(config : Workspace_utils_backend_setup.config) producer =
              detail)
       | Error detail -> Error detail)
 ;;
+
+(* The same question asked without writing anything.
+
+   [read_meta_file_path_presence] is not a pure read: a meta whose enumerated
+   fields are off-canon is repaired in place, which is a durable atomic rewrite
+   and an fsync of another Keeper's file (#28844). Under the backlog lock that
+   is not slowness, it is correctness — the lock is a lease with a wall-clock
+   expiry, and an fsync widens the window where it expires while still held.
+   Against a writer that keeps corrupting the file, that write repeats every
+   interval.
+
+   So the in-lock answer comes from the read-only decoder, and every case that
+   is not "there is no file" answers "routable". That is the direction that
+   costs nothing: the release is skipped and the obligation is kept, and the
+   next interval asks again through {!resolve}, which may repair, route or
+   report. Releasing a task on a guess would not be recoverable the same way. *)
+let has_no_queue_without_writing
+      ~(config : Workspace_utils_backend_setup.config)
+      producer
+  =
+  match
+    Keeper_registry_lookup.find_by_name_in_base_path
+      ~base_path:config.Workspace.base_path
+      producer
+  with
+  | Some _ -> false
+  | None ->
+    let name = String.trim producer in
+    if String.equal name ""
+    then true
+    else (
+      match
+        Keeper_meta_store.read_meta_file_path_read_only
+          ~ownership_root:config.Workspace.base_path
+          (Keeper_types_profile.keeper_meta_path config name)
+      with
+      | Ok None -> true
+      | Ok (Some _) -> false
+      | Error (Keeper_meta_store.Unreadable _ | Keeper_meta_store.Not_current _) ->
+        false)
+;;

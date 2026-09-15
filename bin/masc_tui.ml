@@ -6614,9 +6614,12 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
         | exn -> Error (Printexc.to_string exn)
       in
       let memory_result =
+        (* The subject, because the row that draws this one does not add it:
+           every other failure of this read names itself and an exception
+           string does not. *)
         try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error ("memory journal: " ^ Printexc.to_string exn)
       in
       enqueue_async mailbox
         (Keeper_chat_history_loaded

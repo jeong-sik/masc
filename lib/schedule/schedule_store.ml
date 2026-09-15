@@ -413,9 +413,10 @@ let write_state config state =
      domain each time: four of them within a second when a schedule fired.
      Yojson prints that document compact in 15 ms where the pretty printer
      takes 107 ms. *)
-  let content =
+  let* content =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       Workspace_utils.encode_json_compact (state_to_yojson state))
+    |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in
   let* () =
     Workspace_utils.write_encoded_json_result config (schedules_path config) content

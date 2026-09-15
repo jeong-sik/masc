@@ -1476,6 +1476,58 @@ let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
   check int "and it holds the schedule" 1 (List.length (read_state config).schedules)
 ;;
 
+(* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
+   is not finite is refused where the request is made, not by a later write of
+   the whole ledger. *)
+let test_a_schedule_time_that_is_not_finite_is_refused () =
+  let request ?expires_at ~requested_at ~due_at () =
+    create_request ~schedule_id:"not-finite" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at ~due_at ?expires_at
+      ~payload:(payload_json ()) ~source:Operator_request ()
+  in
+  let refused label = function
+    | Ok _ -> fail (label ^ " was accepted")
+    | Error (_ : string) -> ()
+  in
+  refused "an infinite due time" (request ~requested_at:100.0 ~due_at:Float.infinity ());
+  refused "a NaN request time" (request ~requested_at:Float.nan ~due_at:200.0 ());
+  refused "an infinite expiry"
+    (request ~requested_at:100.0 ~due_at:200.0 ~expires_at:Float.neg_infinity ())
+;;
+
+let rec with_due_at value = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, field) ->
+           if String.equal key "due_at" then key, value else key, with_due_at value field)
+         fields)
+  | `List items -> `List (List.map (with_due_at value) items)
+  | json -> json
+;;
+
+(* A ledger an older build wrote with an infinite time still loads, but it has
+   no compact encoding: the write fails as [Persistence_failed] and leaves both
+   files as they were, instead of raising out of the store. *)
+let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ~schedule_id:"written-before" ()));
+  let ledger = Workspace_core.read_json config (schedules_path config) in
+  Workspace_core.write_text config (schedules_path config)
+    (Yojson.Safe.pretty_to_string (with_due_at (`Float Float.infinity) ledger));
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match insert_request config (make_request ~schedule_id:"written-after" ()) with
+   | Error (Persistence_failed _) -> ()
+   | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "a ledger with an infinite time was written");
+  check string "the primary is untouched" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "the mirror is untouched" mirror_before
+    (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -1501,6 +1553,10 @@ let () =
             test_recovers_from_last_good;
           test_case "a mutation encodes the ledger once on the pool" `Quick
             test_a_mutation_encodes_the_ledger_once_on_the_pool;
+          test_case "a schedule time that is not finite is refused" `Quick
+            test_a_schedule_time_that_is_not_finite_is_refused;
+          test_case "a ledger that cannot be encoded fails the write" `Quick
+            test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence;
         ] );
       ( "corruption",
         [

@@ -128,7 +128,10 @@ let json_to_pretty_utf8 json =
 
 type encoded_json = string
 
-let encode_json_compact json = json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string
+let encode_json_compact json =
+  match json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string with
+  | text -> Ok text
+  | exception Yojson.Json_error message -> Error message
 
 let write_encoded_json_local path (content : encoded_json) =
   try

@@ -78,13 +78,16 @@ val write_json : config -> string -> Yojson.Safe.t -> unit
 (** Result-returning variant that reports backend and local mirror failures. *)
 val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) result
 
-(** A document encoded for {!write_encoded_json_result}: UTF-8 repaired, then
-    compact JSON. Encoding is most of the work of writing a large document, so
-    a caller that writes one document to two paths, or wants the encoding off
-    its fiber, encodes it once itself. *)
+(** A document encoded for {!write_encoded_json_result}: UTF-8 repaired JSON
+    text. Encoding is most of the work of writing a large document, so a caller
+    that writes one document to two paths, or wants the encoding off its fiber,
+    encodes it once itself. *)
 type encoded_json = private string
 
-val encode_json_compact : Yojson.Safe.t -> encoded_json
+val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
+(** Compact encoding. [Error] when the document holds a float compact JSON has
+    no spelling for (NaN, an infinity); the pretty writer behind
+    {!write_json_result} spells those, this one refuses them. *)
 
 (** {!write_json_result} for a document already encoded: the same backend
     routing and local mirror. *)

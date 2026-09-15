@@ -1367,6 +1367,66 @@ let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
   check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
+(* A cancelled caller leaves an answer that waits for the child, and not only
+   for the command above. [begin_stopping] commits the stop, stops the running
+   child and answers when that child ends. The child below ends only when the
+   case releases it, so a caller held until the answer cannot leave first. The
+   child is released before any verdict, so a held caller fails the case instead
+   of hanging it. *)
+let test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"cancel-while-stopping"
+         ~initial_meta:(Some (make_meta "cancel-while-stopping")))
+  in
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let release_child, resolve_release_child = Eio.Promise.create () in
+  let turn_done, resolve_turn_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_child_started ();
+         (* The stop fails the child switch; only the case ends this child. *)
+         Eio.Cancel.protect (fun () -> Eio.Promise.await release_child)));
+    Eio.Promise.resolve resolve_turn_done ());
+  Eio.Promise.await child_started;
+  let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+  let caller_left, resolve_caller_left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Promise.resolve resolve_cancel_context context;
+         ignore (Owner.begin_stopping owner))
+     with
+     | Eio.Cancel.Cancelled _ -> ());
+    Eio.Promise.resolve resolve_caller_left ());
+  let context = Eio.Promise.await cancel_context in
+  let left =
+    Eio.Time.with_timeout clock turn_unwind_budget_s (fun () ->
+      (* The owner commits the stop in the step that parks the answer. *)
+      while not (Owner.projection owner).stopping do
+        Eio.Time.sleep clock 0.001
+      done;
+      Eio.Cancel.cancel context (Failure "cancel while the stop waits for the child");
+      Eio.Promise.await caller_left;
+      Ok ())
+  in
+  Eio.Promise.resolve resolve_release_child ();
+  (match left with
+   | Ok () -> ()
+   | Error `Timeout -> fail "a caller of a stop waiting for the child could not leave");
+  Eio.Promise.await turn_done;
+  check bool "the slot is free again" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
 let test_cooling_retry_readiness_refreshes_on_wake () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let now = ref 42.0 in
@@ -4682,6 +4742,10 @@ let () =
             "an interrupt ends a turn waiting on its own owner"
             `Quick
             test_an_interrupt_ends_a_turn_waiting_on_its_own_owner
+        ; test_case
+            "a cancelled caller leaves a stop that waits for the child"
+            `Quick
+            test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child
         ; test_case "retry deadline crossing automatically wakes" `Quick
             test_retry_deadline_crossing_automatically_wakes
         ; test_case "runtime-deferred child drains the same original operation" `Quick

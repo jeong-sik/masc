@@ -425,10 +425,45 @@ let measurer_counts_the_same_bytes_as_to_string () =
     (measure repeated)
 ;;
 
+(* 요청마다 [Complete_common.transmitted_history] 가 메시지 레코드를 전부 새로
+   만든다. 캐시가 레코드 주소로 맞추면 두 번째 요청부터 전부 다시 인코딩하고,
+   표에 히스토리가 요청 수만큼 쌓인다. live 체크포인트처럼 [name] 과
+   [tool_call_id] 가 없는 메시지로, 새로 만든 레코드가 앞 요청의 측정을 쓰는지 본다. *)
+let rebuilt_records_reuse_measurements () =
+  let envelope_free role text : Types.message =
+    { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  let history =
+    List.init 200 (fun i ->
+      envelope_free
+        (if i mod 2 = 0 then Types.Assistant else Types.Tool)
+        (Printf.sprintf "message %d" i))
+  in
+  let raw_measurements = ref 0 in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing.memoize_message_measurement
+      (fun message ->
+         incr raw_measurements;
+         measure_message_bytes message)
+  in
+  let request () =
+    List.iter
+      (fun (message : Types.message) ->
+         ignore (measure_message_bytes { message with content = message.content }))
+      history
+  in
+  request ();
+  request ();
+  request ();
+  Alcotest.(check int)
+    "three requests encode each message once"
+    (List.length history)
+    !raw_measurements
+;;
+
 (* The production pipeline measures the raw history, rewrites only atoms below
    that cut, then measures the planned list. This fixture makes every atom
-   eligible so the per-projection identity cache must reuse every candidate
-   measurement without retaining independently allocated equal messages. *)
+   eligible so the memo must reuse every candidate measurement. *)
 let projection_reuses_candidate_measurements () =
   let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
@@ -463,7 +498,7 @@ let projection_reuses_candidate_measurements () =
     (* The window's synthetic preamble. *)
   in
   Alcotest.(check int)
-    "each original, candidate, and preamble identity is encoded once"
+    "each original, candidate, and preamble is encoded once"
     expected_unique_measurements
     !raw_measurements
 ;;
@@ -726,6 +761,10 @@ let () =
             "the measurer counts the same bytes as to_string"
             `Quick
             measurer_counts_the_same_bytes_as_to_string
+        ; Alcotest.test_case
+            "rebuilt records reuse earlier measurements"
+            `Quick
+            rebuilt_records_reuse_measurements
         ] )
     ]
 ;;

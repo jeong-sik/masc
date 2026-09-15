@@ -421,6 +421,12 @@ module For_testing : sig
       switch release. For serial test scopes; preserves the prior observer. *)
 
   val mailbox_depth : t -> int
+
+  (** The race {!request} runs to hand a command to the mailbox: [`Enqueued]
+      once the mailbox has taken it, even when [closed] resolved in the same
+      scheduler pass; [`Closed] only when it had not. *)
+  val enqueue_unless_closed :
+    'a Eio.Stream.t -> 'a -> closed:unit Eio.Promise.t -> [ `Enqueued | `Closed ]
 end
 
 val direct_gate_state : t -> operation_id:Chat_operation.Operation_id.t ->

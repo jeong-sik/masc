@@ -219,8 +219,16 @@ let test_no_body_names_what_masc_handed_over () =
   let rows = lines (record ~wire:None ~scope:per_request ()) in
   Alcotest.(check bool) "the band names the client" true
     (says "the runtime client assembled the request itself; masc handed it the" rows);
+  (* The history band below reports its own unobserved window on this
+     fixture, which is a different reading. The claim under test is about the
+     request band, so read only the rows above that band. *)
+  let request_band =
+    match index_of "HOW FAR BACK" rows with
+    | Some stop -> List.filteri (fun index _ -> index < stop) rows
+    | None -> rows
+  in
   Alcotest.(check bool) "and never calls it unobserved" false
-    (says "not observed" rows)
+    (says "not observed" request_band)
 
 let with_window measurement turn =
   { turn with

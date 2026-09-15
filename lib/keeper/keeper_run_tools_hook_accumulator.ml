@@ -16,6 +16,13 @@ type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; history_pairs_at_setup : int option
+    (* How many matched tool-call pairs the checkpoint history held when this
+       run was set up, on the autonomous lane -- the lane whose seed is read
+       from that history. [None] on a lane whose seed is scope-bound, which
+       has no history count to move a boundary to. Read by
+       [Keeper_repetition_judged.pairs_judged_by] when a repetition yield
+       records where the next seed stops. *)
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -56,10 +63,11 @@ type hook_outputs =
       Keeper_contract_classifier.actionable_signal option
   }
 
-let create ~meta ~tool_surface ~historical_tool_calls =
+let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
   { meta
   ; tool_calls = []
   ; historical_tool_calls
+  ; history_pairs_at_setup
   ; current_turn = 0
   ; tool_surface
   ; requested_tool_names = []

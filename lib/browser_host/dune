@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+; The Firefox native-messaging host, as a library so its exchanges with the
+; extension and the server can be driven under a mock clock; the
+; masc-browser-host executable is its command line.
+(library
+ (name browser_host)
+ (public_name masc.browser_host)
+ (modules browser_host)
+ (libraries masc masc.config masc.workspace_connection masc_core masc.masc_log
+  masc.watched_work masc.masc_random_id eio eio.unix cohttp cohttp-eio yojson uri unix))

@@ -3221,6 +3221,269 @@ let test_attempt_loop_reports_pre_dispatch_refusal_disposition () =
       ("missing.test_model", 1)
       (terminal.origin_runtime_id, terminal.origin_attempt)
 
+(* A generation that repeated itself is the model's failure, not the
+   provider's: the same model behind another provider repeats the same way.
+   After the repeat the walk refuses every later candidate on that model
+   before dispatch and lands on a different model. *)
+let repeating_generation_error ~provider =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.RepeatingGeneration
+       { provider
+       ; shape = Llm_provider.Types.Repeated_reasoning_cycle
+       ; occurrences = 3
+       ; unit_bytes = 749
+       ; detail = "reasoning repeated one 749-byte unit 3 times verbatim"
+       })
+
+let flash_or_plus = function
+  | "ollama_cloud.flash" | "glm_coding.flash" -> Some "glm-5.3-flash"
+  | "glm_coding.plus" -> Some "glm-5.3"
+  | other -> Alcotest.failf "unexpected candidate %s" other
+
+let test_repeating_generation_leaves_the_model_not_only_the_provider () =
+  let attempt_errors = ref [] in
+  let refusal = ref None in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"lane.glm"
+      ~runtime_id_of:Fun.id
+      ~model_of:flash_or_plus
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_attempt_error:(fun ~runtime_id ~attempt ~dispatch error ->
+        if runtime_id = "glm_coding.flash" then refusal := Some error;
+        attempt_errors := !attempt_errors @ [ runtime_id, attempt, dispatch ])
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "ollama_cloud.flash" ->
+          attempt_without_effect
+            (Error (repeating_generation_error ~provider:"ollama_cloud"))
+            None
+        | "glm_coding.flash" ->
+          Alcotest.fail "the same model behind another provider must not be dispatched"
+        | "glm_coding.plus" -> attempt_without_effect (Ok (completed_run_result ())) None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "ollama_cloud.flash"; "glm_coding.flash"; "glm_coding.plus" ]
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error e -> Alcotest.failf "the different model must serve the turn, got %s" (Agent_core.Error.to_string e));
+  Alcotest.(check (list (triple string int dispatch_disposition)))
+    "the repeat is the dispatched candidate's answer; the same model is refused before dispatch"
+    [ "ollama_cloud.flash", 0, Masc.Keeper_attempt_dispatch.Dispatched
+    ; "glm_coding.flash", 1, Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    ]
+    !attempt_errors;
+  match !refusal with
+  | Some
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { reason = Agent_core.Retry.Attempt_rejected; message })) ->
+    Alcotest.(check bool) "the refusal names the model and where it repeated" true
+      (contains ~needle:"glm-5.3-flash" message
+       && contains ~needle:"ollama_cloud.flash" message)
+  | Some e -> Alcotest.failf "the refusal must be a typed pre-dispatch rejection, got %s" (Agent_core.Error.to_string e)
+  | None -> Alcotest.fail "the refused candidate must reach the attempt observer"
+
+(* When every remaining candidate runs the model that repeated, the lane's
+   error is the repeat that was observed, not the walk's own refusal. *)
+let test_repeat_on_the_only_model_reports_the_repeat () =
+  let lane_terminal = ref None in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"lane.flash-only"
+      ~runtime_id_of:Fun.id
+      ~model_of:flash_or_plus
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "ollama_cloud.flash" ->
+          attempt_without_effect
+            (Error (repeating_generation_error ~provider:"ollama_cloud"))
+            None
+        | other -> Alcotest.failf "candidate %s must not be dispatched" other)
+      [ "ollama_cloud.flash"; "glm_coding.flash" ]
+  in
+  (match result with
+   | Error (Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration { provider; _ })) ->
+     Alcotest.(check string) "the lane reports the observed repeat" "ollama_cloud" provider
+   | Error e -> Alcotest.failf "expected the observed repeat, got %s" (Agent_core.Error.to_string e)
+   | Ok _ -> Alcotest.fail "no candidate could serve the turn");
+  match !lane_terminal with
+  | None -> Alcotest.fail "the lane must report which candidate's error it returned"
+  | Some (terminal : Driver.lane_terminal_error) ->
+    Alcotest.(check (pair string int))
+      "the lane error originates from the candidate that repeated"
+      ("ollama_cloud.flash", 0)
+      (terminal.origin_runtime_id, terminal.origin_attempt)
+
+(* The live runtime.toml declares one [models.*] row per provider for the same
+   model, so their ids differ while the served name is the same. The default
+   identity reads the registry's api-name: the walk leaves "glm-5.3-flash"
+   behind whichever id the second provider gave it, and lands on the
+   candidate whose served name differs. *)
+let runtime_toml_same_model_twice =
+  {|
+[runtime]
+default = "ollama_cloud.ollama-cloud-flash"
+
+[runtime.lanes.glm]
+candidates = [ "ollama_cloud.ollama-cloud-flash", "glm_coding.flash", "glm_coding.plus" ]
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.glm_coding]
+display-name = "GLM Coding"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.ollama-cloud-flash]
+api-name = "glm-5.3-flash"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.flash]
+api-name = "glm-5.3-flash"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.plus]
+api-name = "glm-5.3"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[ollama_cloud.ollama-cloud-flash]
+is-default = true
+max-concurrent = 1
+max-request-body-bytes = 65536
+
+[glm_coding.flash]
+max-concurrent = 1
+max-request-body-bytes = 65536
+
+[glm_coding.plus]
+max-concurrent = 1
+max-request-body-bytes = 65536
+|}
+
+let test_registry_identity_is_the_served_name_not_the_model_id () =
+  with_runtime_config runtime_toml_same_model_twice (fun () ->
+    let dispatched = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"glm"
+        ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+          dispatched := !dispatched @ [ candidate ];
+          match candidate with
+          | "ollama_cloud.ollama-cloud-flash" ->
+            attempt_without_effect
+              (Error (repeating_generation_error ~provider:"ollama_cloud"))
+              None
+          | "glm_coding.plus" -> attempt_without_effect (Ok (completed_run_result ())) None
+          | other -> Alcotest.failf "candidate %s must not be dispatched" other)
+        [ "ollama_cloud.ollama-cloud-flash"; "glm_coding.flash"; "glm_coding.plus" ]
+    in
+    (match result with
+     | Ok _ -> ()
+     | Error e -> Alcotest.failf "the differently named model must serve the turn, got %s" (Agent_core.Error.to_string e));
+    Alcotest.(check (list string))
+      "the second provider's row for the same served name is never dispatched"
+      [ "ollama_cloud.ollama-cloud-flash"; "glm_coding.plus" ]
+      !dispatched)
+
+(* A refused tail does not get to speak over what the walk saw before it:
+   an overflow observed anywhere in the rotation still outranks the repeat
+   (#26530), so the failure route reaches the compaction path. *)
+let test_overflow_seen_before_a_repeat_outranks_the_refused_tail () =
+  let lane_terminal = ref None in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"lane.overflow-then-repeat"
+      ~runtime_id_of:Fun.id
+      ~model_of:(function
+        | "wide.plus" -> Some "glm-5.3"
+        | "ollama_cloud.flash" | "glm_coding.flash" -> Some "glm-5.3-flash"
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "wide.plus" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.ContextOverflow
+                     { message = "prompt exceeds the window"; limit = Some 32768 })))
+            None
+        | "ollama_cloud.flash" ->
+          attempt_without_effect
+            (Error (repeating_generation_error ~provider:"ollama_cloud"))
+            None
+        | other -> Alcotest.failf "candidate %s must not be dispatched" other)
+      [ "wide.plus"; "ollama_cloud.flash"; "glm_coding.flash" ]
+  in
+  (match result with
+   | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit = Some 32768; _ })) -> ()
+   | Error e -> Alcotest.failf "the observed overflow must outrank the repeat, got %s" (Agent_core.Error.to_string e)
+   | Ok _ -> Alcotest.fail "no candidate could serve the turn");
+  match !lane_terminal with
+  | None -> Alcotest.fail "the lane must report which candidate's error it returned"
+  | Some (terminal : Driver.lane_terminal_error) ->
+    Alcotest.(check (pair string int))
+      "the lane error originates from the overflowing candidate"
+      ("wide.plus", 0)
+      (terminal.origin_runtime_id, terminal.origin_attempt)
+
+(* When the same-run retry is denied after a repeat, the next cycle starts
+   from the deferred hint with no memory of this walk. The hint therefore
+   names no candidate on the model that repeated; with no other model left,
+   there is no hint at all. *)
+let test_deferred_hint_after_a_repeat_names_a_different_model () =
+  let walk candidates =
+    let deferred = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+        ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+        ~runtime_id:"lane.glm"
+        ~runtime_id_of:Fun.id
+        ~model_of:flash_or_plus
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+          match candidate with
+          | "ollama_cloud.flash" ->
+            attempt_without_effect
+              (Error (repeating_generation_error ~provider:"ollama_cloud"))
+              None
+          | other -> Alcotest.failf "candidate %s must not be dispatched" other)
+        candidates
+    in
+    (match result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)) -> ()
+     | Error e -> Alcotest.failf "the denied walk ends on the repeat, got %s" (Agent_core.Error.to_string e)
+     | Ok _ -> Alcotest.fail "the same-run retry was denied");
+    List.rev !deferred
+  in
+  (match walk [ "ollama_cloud.flash"; "glm_coding.flash"; "glm_coding.plus" ] with
+   | [ hint ] ->
+     Alcotest.(check (list string))
+       "the hint skips the same model and names the different one"
+       [ "glm_coding.plus" ]
+       (Driver.deferred_runtime_ids hint)
+   | hints -> Alcotest.failf "expected one deferred hint, got %d" (List.length hints));
+  Alcotest.(check int)
+    "no different model left means no hint"
+    0
+    (List.length (walk [ "ollama_cloud.flash"; "glm_coding.flash" ]))
+
 let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
   let deferred = ref [] in
@@ -3810,6 +4073,26 @@ let () =
             "pre-dispatch refusal reaches the observer as rejected_before_dispatch"
             `Quick
             test_attempt_loop_reports_pre_dispatch_refusal_disposition;
+          Alcotest.test_case
+            "a repeating generation leaves the model, not only the provider"
+            `Quick
+            test_repeating_generation_leaves_the_model_not_only_the_provider;
+          Alcotest.test_case
+            "a repeat on the only model reports the repeat"
+            `Quick
+            test_repeat_on_the_only_model_reports_the_repeat;
+          Alcotest.test_case
+            "the registry identity is the served name, not the model id"
+            `Quick
+            test_registry_identity_is_the_served_name_not_the_model_id;
+          Alcotest.test_case
+            "an overflow seen before a repeat outranks the refused tail"
+            `Quick
+            test_overflow_seen_before_a_repeat_outranks_the_refused_tail;
+          Alcotest.test_case
+            "the deferred hint after a repeat names a different model"
+            `Quick
+            test_deferred_hint_after_a_repeat_names_a_different_model;
           Alcotest.test_case
             "checkpoint denial defers exact frozen suffix once"
             `Quick

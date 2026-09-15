@@ -128,10 +128,6 @@ type provider_wire_error_kind =
   | Malformed_payload
   | Unknown_event
   | Incomplete_stream
-  | Repeating_generation
-  (** The generation repeated one paragraph past the threshold and was ended
-        by this client. Bytes and framing are both fine; what ended is the
-        answer, not the transport. *)
   | Oversized_payload
   (** One payload unit — a joined SSE event, or a single line — exceeded the
         byte limit this client reads under. Distinct from
@@ -195,6 +191,16 @@ type provider_failure_kind =
       only the consumer's context recovery (compaction/shrink) can make
       progress. [limit] is the provider-reported token limit when the
       envelope carries one. *)
+  | Repeating_generation of
+      { shape : Types.repeating_shape
+      ; occurrences : int
+      ; unit_bytes : int
+      }
+      (** The model's generation repeated one unit — a paragraph of the
+          answer, or a reasoning cycle — past the threshold and this client
+          ended the stream. Bytes and framing were fine, so this is not a
+          [Provider_wire_error]: what failed is the model, and the same model
+          reached through another provider repeats the same way. *)
   | Unknown_provider_failure of { reason : string option }
 
 (** Transport-level error. *)
@@ -613,8 +619,9 @@ val post_stream
     first token. A refusing status line is the provider's answer: its body
     is read under what the window has left, and a body that does not
     arrive in time still yields [HttpError] with the status and the
-    Retry-After received and an empty body, not a timeout. A window that
-    closes as the connection is handed back closes that connection too.
+    Retry-After received and an empty body, not a timeout. A connection
+    handed back as the window closes is the connection: the window's
+    verdict stands only when nothing had returned.
     With neither budget supplied the phase is unbounded. Two steps run
     outside the window's reach: DNS resolution, in a systhread the window
     cannot cancel (a closed window is observed once the lookup returns, and

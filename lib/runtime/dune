@@ -7,6 +7,7 @@
  (private_modules embedded_antigravity_context)
  (libraries
   masc.apple_keychain
+  masc.watched_work
   masc.egress_host
   masc.build_version
   masc.embedded_config

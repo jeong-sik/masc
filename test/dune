@@ -5085,6 +5085,7 @@
 (include stanzas/test_tui_overview_transport_row.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
+(include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)
 
@@ -5462,6 +5463,13 @@
  (name test_browser_lane_watched_work)
  (modules test_browser_lane_watched_work)
  (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat))
+
+; Mock clock as the native host's clock: a reply that lands as the extension
+; window closes is the reply, not the host's timeout.
+(test
+ (name test_browser_host)
+ (modules test_browser_host)
+ (libraries alcotest eio eio.mock yojson masc.browser_host))
 
 (include stanzas/test_browser_native_host.inc)
 
@@ -6144,6 +6152,13 @@
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+; Mock clock orders the timer's wake-up ahead of the read's: the official
+; client lanes' idle window keeps a line that arrived as it passed.
+(test
+ (name test_runtime_official_client_json)
+ (modules test_runtime_official_client_json)
+ (libraries masc.runtime alcotest eio eio.mock))
 
 ; Mock clock orders a watcher's wake-up ahead of the work's: the work's
 ; outcome stands.

@@ -1371,9 +1371,28 @@ let run_turn
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        let turn_result =
+         (* A repetition yield is the judgment on the calls it saw. On the
+            lane seeded from the checkpoint history, record where those
+            calls end so the next seed starts past them; the checkpoint
+            AGENT_CORE takes after this probe carries the record. A
+            scope-bound lane has no history count and records nothing. *)
+         let record_repetition_judged () =
+           match s.acc.history_pairs_at_setup with
+           | Some history_pairs_at_setup ->
+             Keeper_repetition_judged.record shared_context
+               (Keeper_repetition_judged.pairs_judged_by ~history_pairs_at_setup
+                  s.acc.tool_calls)
+           | None -> ()
+         in
          let on_official_client_tool_boundary () =
-           official_client_tool_boundary ~repetition_execution
-             ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+           match
+             official_client_tool_boundary ~repetition_execution
+               ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+           with
+           | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
+             record_repetition_judged ();
+             stop
+           | (Ok (Some _) | Ok None | Error _) as other -> other
          in
          let cooperative_yield_probe =
            Some
@@ -1383,13 +1402,20 @@ let run_turn
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
-                  native_tool_boundary
-                    ~keeper_name:meta.name
-                    ~repetition_execution
-                    ~terminal_effect_state:(s.terminal_effect_state ())
-                    ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
-                    ~assistant_turn_texts:s.acc.assistant_turn_texts
-                    ~autonomous_yield_requested
+                  (match
+                     native_tool_boundary
+                       ~keeper_name:meta.name
+                       ~repetition_execution
+                       ~terminal_effect_state:(s.terminal_effect_state ())
+                       ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                       ~assistant_turn_texts:s.acc.assistant_turn_texts
+                       ~autonomous_yield_requested
+                   with
+                   | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
+                     record_repetition_judged ();
+                     decision
+                   | (Ok (Runtime_agent.Yield _) | Ok Runtime_agent.Continue | Error _) as other
+                     -> other)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->

@@ -38,10 +38,10 @@ type fit_error = Prepared_completion_request.fit_error =
 
 let prepare_request = Prepared_completion_request.prepare
 let admit_request_body = Prepared_completion_request.admit_serialized_body
-type measurement_next_stage = Prepared_completion_request.next_stage =
-  | Completion of { call_timeout_s : float option }
+type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_stage =
+  | Completion of { call_window : 'clock Deadline_window.t }
   | Stream of
-      { admission_timeout_s : float option
+      { admission_window : 'clock Deadline_window.t
       ; first_event_timeout_s : float option
       }
 

@@ -40,14 +40,6 @@ describe('linkedRuntimeState', () => {
     expect(linkedRuntimeState(keeper)).toBe('offline')
   })
 
-  // 이 픽스처는 예전에 status='inactive' 하나로 offline 을 주장했다.
-  // 그 한 단어가 stale·degraded·zombie 를 함께 가리켰기 때문에, 하트비트만
-  // 늦은 키퍼가 죽은 키퍼와 같은 화면을 받았다.
-  it('health=stale 은 조용해진 것이지 끊긴 것이 아니다', () => {
-    const keeper = makeKeeper({ diagnostic: { health_state: 'stale' } } as Partial<Keeper>)
-    expect(linkedRuntimeState(keeper)).toBe('online')
-  })
-
   it('health=healthy 면 online', () => {
     const keeper = makeKeeper({ diagnostic: { health_state: 'healthy' } } as Partial<Keeper>)
     expect(linkedRuntimeState(keeper)).toBe('online')

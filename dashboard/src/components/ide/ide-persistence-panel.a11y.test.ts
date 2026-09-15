@@ -36,7 +36,6 @@ describe('IdePersistencePanel a11y', () => {
       name: 'sangsu',
       status: 'online',
       phase: 'Running',
-      last_heartbeat: '2026-05-06T00:00:00Z',
     }]
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu',

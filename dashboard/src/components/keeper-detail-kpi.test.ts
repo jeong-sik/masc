@@ -31,18 +31,6 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
 }
 
 describe('KpiGrid', () => {
-  it('renders live heartbeat', () => {
-    const keeper = {
-      name: 'sangsu',
-      status: 'active',
-      last_heartbeat: '2026-07-29T10:00:00Z',
-    } as Keeper
-
-    render(h(KpiGrid, { keeper }))
-
-    expect(screen.getByText('하트비트')).toBeInTheDocument()
-  })
-
   it('surfaces latest keeper tok/sec in the detail KPI grid', () => {
     const keeper = {
       name: 'sangsu',

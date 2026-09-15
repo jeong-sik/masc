@@ -32,10 +32,7 @@ import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
 import { isAbortError } from './lib/async-state'
-import {
-  keeperFreshnessTs,
-  normalizeKeepers,
-} from './keeper-store-normalize'
+import { normalizeKeepers } from './keeper-store-normalize'
 import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
 import {
   keeperIdentityKeys,
@@ -148,10 +145,6 @@ export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
 export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
-
-// --- Keeper heartbeat tracking (name -> last heartbeat timestamp ms) ---
-
-export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 
 // --- Cross-zone keeper filter (Phase 2 · I0-B) ---
 // Empty set means "all keepers". Components that consume the filter
@@ -358,7 +351,6 @@ import type { AgentCoreAgentEvent, AgentCoreHealthSummary } from './types/agent-
 
 import {
   AGENT_CORE_AGENT_EVENT_BUFFER,
-  keeperHeartbeatStaleMs,
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
@@ -634,21 +626,6 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
     map.set(key, snapshot)
   }
   return map
-})
-
-// Heartbeat staleness threshold — value from config/constants.ts
-
-export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
-  const now = Date.now()
-  const stale = new Set<string>()
-  const hb = keeperHeartbeats.value
-  for (const k of keepers.value) {
-    const lastTs = keeperFreshnessTs(k, hb)
-    if (lastTs != null && (now - lastTs) > keeperHeartbeatStaleMs(k.heartbeat_stale_after_s)) {
-      stale.add(k.name)
-    }
-  }
-  return stale
 })
 
 // --- Refresh orchestration ---

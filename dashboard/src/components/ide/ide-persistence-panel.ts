@@ -8,7 +8,6 @@ import {
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import type { Keeper } from '../../types'
-import { relativeTime } from '../../lib/format-time'
 import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import {
   openIdeContextRouteLink,
@@ -184,7 +183,6 @@ export function IdePersistencePanel({
 
   const phase = diagram?.current_phase ?? keeper?.phase ?? null
   const lifecycleState = lifecycleStateFromKeeperPhase(phase)
-  const lastHeartbeat = keeper?.last_heartbeat ?? null
 
   return html`
     <section
@@ -230,11 +228,6 @@ export function IdePersistencePanel({
             ${statusDot.label}
           </span>
         ` : null}
-        <span style=${{ marginLeft: 'auto' }}>
-          <span aria-label="최근 하트비트" title=${lastHeartbeat ?? undefined}>
-            하트비트 ${relativeTime(lastHeartbeat)}
-          </span>
-        </span>
       </header>
 
       ${error

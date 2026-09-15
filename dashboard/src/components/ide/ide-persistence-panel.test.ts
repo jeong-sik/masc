@@ -50,7 +50,6 @@ describe('IdePersistencePanel', () => {
       name: 'sangsu',
       status: 'online',
       phase: 'Running',
-      last_heartbeat: '2026-05-06T00:00:00Z',
     }]
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu',
@@ -69,32 +68,17 @@ describe('IdePersistencePanel', () => {
     expect(screen.getByTestId('ide-persistence-lifecycle')).toBeTruthy()
   })
 
-  it.each(['Running', 'Restarting', 'Failing'] as const)('reports heartbeat rather than invented save state for %s', async phase => {
+  it.each(['Running', 'Restarting', 'Failing'] as const)('does not invent a save state for %s', async phase => {
     activeKeeperName.value = 'sangsu'
-    keepers.value = [{ name: 'sangsu', status: 'online', phase,
-      last_heartbeat: '2026-05-06T00:00:00Z' }]
+    keepers.value = [{ name: 'sangsu', status: 'online', phase, }]
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu', current_phase: phase, mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
     render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
-    expect(screen.getByLabelText('최근 하트비트').getAttribute('title')).toBe('2026-05-06T00:00:00Z')
     expect(screen.queryByText('저장됨')).toBeNull()
     expect(screen.queryByText('동기화 중')).toBeNull()
     expect(screen.queryByText('충돌')).toBeNull()
-  })
-
-  it('does not substitute creation or update time for an absent heartbeat', async () => {
-    activeKeeperName.value = 'sangsu'
-    keepers.value = [{ name: 'sangsu', status: 'online', phase: 'Running',
-      created_at: '2026-05-06T00:00:00Z', updated_at: '2026-05-07T00:00:00Z' }]
-    fetchKeeperStateDiagramMock.mockResolvedValue({
-      keeper: 'sangsu', current_phase: 'Running', mermaid: 'graph TD',
-    } satisfies KeeperStateDiagramResponse)
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
-    await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
-    expect(screen.getByLabelText('최근 하트비트').textContent).toContain('정보 없음')
-    expect(screen.getByLabelText('최근 하트비트').hasAttribute('title')).toBe(false)
   })
 
   it('falls back to the explicit keeper name when no active keeper is selected', async () => {

@@ -390,24 +390,24 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Provider runtime request timed out after 45.0s.')
   }, 30_000)
 
-  it('surfaces snapshot diagnostic summaries for inactive keepers', async () => {
+  it('surfaces snapshot diagnostic summaries for offline keepers', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue({
       ...executionResponse,
       keepers: [
         {
-          name: 'keeper-stale',
-          status: 'inactive',
-          keepalive_running: true,
+          name: 'keeper-down',
+          status: 'offline',
+          keepalive_running: false,
           context_ratio: 0.22,
           total_turns: 11,
           last_latency_ms: 1200,
           last_activity_ago_s: 640,
           last_model_used: 'gpt-5.4',
           diagnostic: {
-            health_state: 'stale',
+            health_state: 'offline',
             next_action_path: 'recover',
             last_reply_status: 'stale',
-            summary: 'Keepalive heartbeat is stale; probe or recover before the next turn.',
+            summary: 'Keeper is not in a healthy reply state. Probe or recover before relying on automation.',
           },
         },
       ],
@@ -426,9 +426,9 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('keeper-stale')
-    expect(container.textContent).toContain('Keepalive heartbeat is stale; probe or recover before the next turn.')
-    expect(container.textContent).toContain('1 주의')
+    expect(container.textContent).toContain('keeper-down')
+    expect(container.textContent).toContain('Keeper is not in a healthy reply state. Probe or recover before relying on automation.')
+    expect(container.textContent).toContain('1 오프라인')
   }, 30_000)
 
   it('keeps unknown model while using tool audit data when quality rows are sparse', async () => {
@@ -484,7 +484,7 @@ describe('FleetTelemetryPanel', () => {
         context_ratio: 0.3,
         total_turns: 5,
         last_model_used: 'unknown',
-        last_heartbeat: '2026-04-24T17:54:00Z',
+        tool_audit_at: '2026-04-24T17:54:00Z',
         active_model: 'gpt-5.4',
         metrics_series: [
           { ...metricSeriesPoint, model_used: 'unknown' },
@@ -500,8 +500,8 @@ describe('FleetTelemetryPanel', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.model).toBe('unknown')
     expect(rows[0]).toMatchObject({
-      activity_label: '하트비트',
-      activity_source: 'heartbeat',
+      activity_label: '마지막 행동',
+      activity_source: 'autonomous_action',
       last_activity_ago_s: 360,
     })
   })

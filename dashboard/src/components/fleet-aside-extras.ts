@@ -109,13 +109,12 @@ export function FleetQueueSection({ keeper }: { keeper: Keeper }) {
   const rows = entry?.waiting_on ?? []
   const draining = keeper.phase === 'Draining'
 
-  const heartbeatError = keeper.heartbeat_observation_error?.trim() || null
   const interval = finiteCount(keeper.keeper_keepalive_interval_s)
   const wakes = keeper.keepalive_running === true && interval != null && interval > 0
   // keepalive_running 이 false 로 보고된 경우만 "꺼짐" 을 단정한다. 필드
   // 부재(미보고)는 꺼짐이 아니라 미관측이므로 heartbeat 행을 생략한다.
   const heartbeatKnownOff = keeper.keepalive_running === false
-  const hasHeartbeat = heartbeatError != null || wakes || heartbeatKnownOff
+  const hasHeartbeat = wakes || heartbeatKnownOff
 
   if (rows.length === 0 && !hasHeartbeat) return null
 
@@ -137,13 +136,9 @@ export function FleetQueueSection({ keeper }: { keeper: Keeper }) {
             `)}
           </div>
         ` : null}
-        ${heartbeatError != null ? html`
-          <div class="fl-q-hb off">하트비트 기록 읽기 실패 · ${heartbeatError}</div>
-        ` : wakes ? html`
+        ${wakes ? html`
           <div class="fl-q-hb" title="keepalive 주기 (keeper_keepalive_interval_s)">
-            <span class="fl-q-hb-dot"></span>${interval}초마다 깨어남${keeper.last_heartbeat
-              ? html` · 마지막 <${TimeAgo} timestamp=${keeper.last_heartbeat} />`
-              : null}
+            <span class="fl-q-hb-dot"></span>${interval}초마다 깨어남
           </div>
         ` : html`
           <div class="fl-q-hb off">깨어나지 않음 · ${PHASE_LABEL_KO[keeperDisplayStatus(keeper)]}</div>

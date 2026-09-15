@@ -1592,26 +1592,31 @@ let handle_keeper_get_subroutes state req request reqd =
                  ])
               reqd
           | Some turn_ref ->
+            (* One provider input resolves hundreds of blob artifacts (212
+               messages and 57 tool schemas for a live keeper turn): each is
+               read, hashed and parsed, and the answer is the whole request.
+               On the scheduler domain that took 2-10 s per call while the
+               context inspector asked for several turns at once. The
+               resolution and the JSON tree run as one pool job, and the body
+               is printed and compressed on the pool too. *)
+            let config = Mcp_server.workspace_config state in
             (match
-               Keeper_provider_input_snapshot.read_resolved
-                 ~config:(Mcp_server.workspace_config state)
-                 ~keeper:name
-                 ~turn_ref
+               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                 Keeper_provider_input_snapshot.read_resolved
+                   ~config
+                   ~keeper:name
+                   ~turn_ref
+                 |> Result.map (fun resolved ->
+                   match Keeper_provider_input_snapshot.resolved_to_json resolved with
+                   | `Assoc fields ->
+                     `Assoc
+                       (( "dashboard_surface"
+                        , `String "/api/v1/keepers/:name/provider-input" )
+                        :: fields)
+                   | json -> json))
              with
-             | Ok resolved ->
-               Http.Response.json_value
-                 ~compress:true
-                 ~request:req
-                 (match
-                    Keeper_provider_input_snapshot.resolved_to_json resolved
-                  with
-                  | `Assoc fields ->
-                    `Assoc
-                      (( "dashboard_surface"
-                       , `String "/api/v1/keepers/:name/provider-input" )
-                       :: fields)
-                  | json -> json)
-                 reqd
+             | Ok json ->
+               Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
              | Error
                  (Keeper_provider_input_snapshot.Snapshot_not_found _ as error)
                ->

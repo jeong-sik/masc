@@ -6699,6 +6699,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
+  supersede_context_inspector_load state None;
   state.context_inspector_generation <- state.context_inspector_generation + 1;
   state.context_inspector_loading <- true;
   let generation = state.context_inspector_generation in
@@ -6722,8 +6723,16 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
+      (* The replaced read is cancelled where it waits, which closes its
+         connection; its answer was already discarded by generation, and the
+         server stops writing a body nobody reads. *)
+      let superseded, supersede = Eio.Promise.create () in
+      supersede_context_inspector_load state
+        (Some (fun () -> ignore (Eio.Promise.try_resolve supersede ())));
       Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
+          Eio.Fiber.first
+            (fun () -> run ())
+            (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
       let error = Error "Eio switch is unavailable" in
@@ -17808,6 +17817,7 @@ and is loaded on demand through keeper_skill.
            in
            let close () =
              state.context_inspector_open <- false;
+             supersede_context_inspector_load state None;
              state.context_inspector_exact <- None;
              state.context_inspector_scroll <- 0;
              state.context_inspector_detail_scroll <- 0;

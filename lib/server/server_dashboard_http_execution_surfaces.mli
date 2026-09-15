@@ -123,24 +123,25 @@ val install_task_mutation_cache_invalidation :
 
 module For_testing : sig
   val execution_publication_generation : unit -> int
-  val begin_execution_publication_attempt : unit -> int
 
   val publish_execution_success_if_current :
     generation:int -> Yojson.Safe.t -> bool
 
-  val publish_execution_error_if_current : generation:int -> exn -> bool
-
   type execution_attempt
+  (** One forced-refresh attempt at publishing the execution surface: the
+      generation it began under, and whether it published an answer. *)
 
   val begin_execution_attempt : unit -> execution_attempt
 
   val publish_execution_attempt_success : execution_attempt -> Yojson.Safe.t -> bool
 
   val publish_execution_attempt_failure : execution_attempt -> exn -> bool
-  (** One forced-refresh attempt. It publishes a failure only while it has
-      published no answer: the light body refresh that follows a published
-      answer, and the window around the whole attempt, must not replace what
-      this generation already answered. *)
+  (** Publishes [exn] only while this attempt has published no answer. What an
+      attempt does after publishing -- refreshing the light body, and the
+      window around the whole attempt -- must not replace the answer this
+      attempt already recorded. Another attempt on the same generation is a
+      different attempt and is not covered by this; see the concurrent-force
+      note in the implementation. *)
 
   val cached_representation :
     config:Workspace.config -> Httpun.Request.t ->

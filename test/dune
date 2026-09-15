@@ -6189,6 +6189,7 @@
  (libraries alcotest masc.runtime masc.agent_core masc.agent_core.llm_provider))
 
 (include stanzas/test_prerequisite_terminal.inc)
+(include stanzas/test_process_group_terminal_stdin.inc)
 (include stanzas/test_workspace_connection.inc)
 
 (test

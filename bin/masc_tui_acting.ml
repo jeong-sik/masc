@@ -74,23 +74,46 @@ let visible filter (event : Observer.event) =
 
    So the budget is per class, using the same predicate the screen filters
    with -- what [Actions] shows gets [actions] slots, everything else gets
-   [quiet]. Both classes keep their newest and the rest is counted, not
-   silently forgotten. Entries arrive newest-first and stay in that order. *)
+   [quiet]. Every class keeps its newest and the rest is counted, not
+   silently forgotten. Entries arrive newest-first and stay in that order.
+
+   A turn observation is the exception. No scope but [Everything] draws it,
+   yet the Turns fold reads it to number the calls it reports. Counted with
+   the quiet class, it would be trimmed by token-sized stream frames long
+   before those calls, and the turn it named would split back into
+   unnumbered rows. It gets a budget of its own the size of [actions]. Each
+   provider call it numbers also sends a turn-start and a turn-ready frame,
+   both actions, so observations fill their budget more slowly than actions
+   fill theirs and outlast the calls they number. *)
+type retention_class = Retain_action | Retain_observation | Retain_quiet
+
+let retention_class (event : Observer.event) =
+  match event with
+  | Observer.Keeper_turn_observation _ -> Retain_observation
+  | Observer.Agent_core _ | Observer.Keeper_heartbeat _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_waiting_inventory_changed _
+  | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
+      if visible Actions event then Retain_action else Retain_quiet
+
 let retain ~actions ~quiet ~event_of entries =
-  let rec walk kept n_actions n_quiet dropped = function
+  let rec walk kept n_actions n_observations n_quiet dropped = function
     | [] -> (List.rev kept, dropped)
-    | entry :: older ->
-        let is_action = visible Actions (event_of entry) in
-        let used = if is_action then n_actions else n_quiet in
-        let budget = if is_action then actions else quiet in
-        if used >= budget then walk kept n_actions n_quiet (dropped + 1) older
-        else
-          walk (entry :: kept)
-            (if is_action then n_actions + 1 else n_actions)
-            (if is_action then n_quiet else n_quiet + 1)
-            dropped older
+    | entry :: older -> (
+        match retention_class (event_of entry) with
+        | Retain_action when n_actions < actions ->
+            walk (entry :: kept) (n_actions + 1) n_observations n_quiet dropped older
+        | Retain_observation when n_observations < actions ->
+            walk (entry :: kept) n_actions (n_observations + 1) n_quiet dropped
+              older
+        | Retain_quiet when n_quiet < quiet ->
+            walk (entry :: kept) n_actions n_observations (n_quiet + 1) dropped older
+        | Retain_action | Retain_observation | Retain_quiet ->
+            walk kept n_actions n_observations n_quiet (dropped + 1) older)
   in
-  walk [] 0 0 0 entries
+  walk [] 0 0 0 0 entries
 
 type glyph =
   | Call_started
@@ -160,11 +183,14 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:"?" e.Observer.tool in
   let glyph, label, detail =
     match e.Observer.kind with
+    (* The wire's [turn] is the agent session's ordinal for the provider
+       call, not the keeper's turn number that [turn N] means everywhere else
+       on this surface, so a flat row does not print it; the event evidence
+       shows it under its own name. *)
     | Observer.Tool_called ->
         ( Call_started
         , (if is_skill_tool tool then "skill call" else "call")
-        , Printf.sprintf "%s%s \xc2\xb7 %s" tool (batch_text e.Observer.batch)
-            (turn_text e.Observer.turn) )
+        , Printf.sprintf "%s%s" tool (batch_text e.Observer.batch) )
     | Observer.Tool_completed ->
         ( Call_returned
         , (if is_skill_tool tool then "skill returned" else "returned")
@@ -173,10 +199,9 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
              | Some ms -> " \xc2\xb7 " ^ elapsed_text ms
              | None -> "")
             (batch_text e.Observer.batch) )
-    | Observer.Turn_started -> (Turn_boundary, "turn start", turn_text e.Observer.turn)
-    | Observer.Turn_ready -> (Turn_boundary, "turn ready", turn_text e.Observer.turn)
-    | Observer.Turn_completed ->
-        (Turn_boundary, "turn end", turn_text e.Observer.turn)
+    | Observer.Turn_started -> (Turn_boundary, "turn start", "")
+    | Observer.Turn_ready -> (Turn_boundary, "turn ready", "")
+    | Observer.Turn_completed -> (Turn_boundary, "turn end", "")
     | Observer.Agent_started -> (Turn_boundary, "agent start", "")
     | Observer.Agent_completed -> (Turn_settled, "agent done", "")
     | Observer.Agent_failed -> (Failure, "agent failed", "")
@@ -351,12 +376,13 @@ let row_of_entry ~duration_ms entry =
    pass through as the rows they already were -- when [visible Turns]
    shows them at all; what the scope hides stays hidden.
 
-   Attribution: events that carry a turn number key the chunk directly.
-   Ledger events carry none, and the two planes interleave (a settle can
-   arrive before the wire's turn-end for the same turn), so a turn-less
-   member attaches to the keeper's most recently touched chunk. That can
-   misfile a ledger row that lands after the next turn's ready — a display
-   blemish, never a stored fact. *)
+   Attribution: a chunk is one keeper turn. The wire and ledger members state
+   the agent session's ordinal for their provider call; a settle states the
+   keeper turn; a turn observation names both, and {!fold_chunks} files each
+   member through them. A member whose call no retained observation names
+   is filed by its ordinal and the keeper's open turn, which can misfile a
+   row across a session restart -- a display blemish, never a stored
+   fact. *)
 
 type chunk_tool = {
   ct_tool : string;
@@ -675,18 +701,23 @@ let attach ~fits ~apply chunks =
 
    [keeper_turn] is the member's keeper turn when known -- a settle carries
    it, a session-numbered member gets it from the observation table -- and
-   [session] is the agent session's ordinal the member states. A member
-   whose keeper turn is known joins the chunk with that number, or stamps
-   the keeper's open turn if that turn has no number yet, or opens a chunk.
-   A member with only an ordinal joins the chunk that already holds that
-   ordinal; failing that, a chunk holding no ordinal yet (a settle that
-   landed before its turn's wire replay); failing that, the keeper's open
-   turn when that turn is known by number -- a keeper runs one turn at a
-   time, and the call in flight has no observation until its response comes
-   back -- and otherwise opens a chunk of its own. A member stating nothing
-   lands on the newest chunk. Telemetry only refreshes a chunk that exists:
-   a keeper the feed knows nothing else about gains no row from it
-   (#32208). *)
+   [session] is the agent session's ordinal the member states. The first
+   rule that finds a chunk wins; otherwise the member opens one, telemetry
+   excepted.
+
+   - A settle joins the chunk with its number, else the newest chunk if that
+     one is unsettled; [apply_member] then stamps the settle's number on it.
+   - A wire or ledger member with a keeper turn joins the chunk with that
+     number, else the newest chunk if it is unsettled and still unnumbered.
+   - A wire or ledger member with only an ordinal joins the newest chunk that
+     already holds the ordinal; else the newest chunk if it holds no ordinal
+     yet, settled or not (a settle that landed before its turn's wire
+     replay); else the newest chunk if it is unsettled and numbered -- a
+     keeper runs one turn at a time, and the call in flight has no
+     observation until its response is collected.
+   - A member stating neither lands on the newest chunk.
+   - Telemetry only refreshes the newest chunk: a keeper the feed knows
+     nothing else about gains no row from it (#32208). *)
 let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
   let absorb chunk =
     let chunk = apply_member chunk ~at member in
@@ -761,7 +792,10 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
    zero again, so one keeper can observe the same ordinal twice in the ring.
    A member takes the observation nearest to it in feed position: the
    frames of one call sit around that call's observation, and a new session
-   starts between calls, not inside one.
+   starts between calls, not inside one. This assumes the relay delay of a
+   frame is shorter than a session restart; an old session's frame that
+   arrives after the new session's observation of the same ordinal is
+   filed under the new turn.
 
    [traces] resolves agent-core correlation ids to keeper names, exactly as
    the flat view does. The ring holds up to [acting_retained_entries] rows
@@ -934,7 +968,7 @@ let evidence_fields (entry : entry) =
       ; field "Correlation ID" e.correlation
       ; field "Runtime agent" e.agent
       ; field "Task ID" e.task
-      ; number "Turn" e.turn
+      ; number "Agent session turn" e.turn
       ; field "Batch index / size" (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
       ; some "Input/output" "not carried by this observer event"
       ; some "Skill receipt" "not carried by this observer event"
@@ -957,7 +991,7 @@ let evidence_fields (entry : entry) =
       [ some "Source" "keeper_tool_call observer event"
       ; some "Keeper" call.kt_keeper
       ; some "Tool name" call.kt_tool
-      ; number "Turn" call.kt_turn
+      ; number "Agent session turn" call.kt_turn
       ; (match call.kt_disposition with
          | None -> field "Disposition" None
          | Some (Ok disposition) ->

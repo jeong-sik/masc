@@ -41,7 +41,7 @@ let run_cmd cli_base_path =
   Crypto_rng.ensure_default ();
   Eio_guard.enable ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Eio.Switch.run @@ fun sw ->
+  Server_session_switch.run @@ fun sw ->
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in

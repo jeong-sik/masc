@@ -65,7 +65,6 @@ Implementation status as of 2026-06-06:
 | `masc_llm_provider_streaming_inter_chunk_seconds` | histogram | provider, model |
 | `masc_llm_provider_cache_hits_total` | counter | provider, model |
 | `masc_llm_provider_cache_misses_total` | counter | provider, model |
-| `masc_llm_provider_circuit_state` | gauge | provider, model |
 
 ### 2.2 OTel Span Events And Attributes
 

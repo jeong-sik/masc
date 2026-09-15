@@ -19,8 +19,39 @@ let owner_of_string text =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "driver record is not an object"
 
-let argv ~driver ~port =
-  [ driver; "--host"; "127.0.0.1"; "--port"; string_of_int port; "--websocket-port"; "0" ]
+(* The driver binds the same loopback address the MASC HTTP server binds, so
+   only this machine can reach it. Naming the constant keeps the two from
+   drifting apart, which is what SSOT rule R2 is for. *)
+let profile_root ~masc_root =
+  Filename.concat (Filename.concat masc_root "browser-lane") "profiles"
+
+let argv ~driver ~port ~profile_root =
+  [ driver
+  ; "--host"
+  ; Masc_network_defaults.masc_http_default_host
+  ; "--port"
+  ; string_of_int port
+  ; "--websocket-port"
+  ; "0"
+  ; "--profile-root"
+  ; profile_root
+  ]
+
+(* geckodriver passes the profile to the browser as [-profile <dir>], and its
+   own command names the root as [--profile-root <root>] without a trailing
+   separator, so the driver never matches. *)
+let browsers_using_profile_root ~profile_root ~process_table =
+  let marker = " -profile " ^ Filename.concat profile_root "" in
+  String.split_on_char '\n' process_table
+  |> List.filter_map (fun line ->
+    let line = String.trim line in
+    match String.index_opt line ' ' with
+    | None -> None
+    | Some space ->
+      let command = String.sub line space (String.length line - space) in
+      match int_of_string_opt (String.sub line 0 space) with
+      | Some pid when String_util.contains_substring command marker -> Some pid
+      | Some _ | None -> None)
 
 let leftover owner ~command =
   match command with

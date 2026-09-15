@@ -235,7 +235,7 @@ describe('parseExactLaneRunResponse', () => {
   })
 
   it('keeps per-side source failures without substituting an execution failure', () => {
-    const error = { code: 'invalid_record', message: 'Record 3: malformed', line: 3, detail: 'malformed' }
+    const error = { code: 'invalid_payload', message: 'output.json is not JSON: malformed' }
     const run = parseExactLaneRunResponse(detailFixture({
       output: { superseded: 'not usable' },
       payload_availability: { input: { state: 'available' }, output: { state: 'unavailable', error } },
@@ -258,8 +258,7 @@ describe('parseExactLaneRunResponse', () => {
     { input: { state: 'mystery' }, output: { state: 'available' } },
     { input: { state: 'available' }, output: { state: 'unavailable' } },
     { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'unknown', message: 'not known' } } },
-    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'invalid_record', message: 'bad', line: 0, detail: 'bad' } } },
-    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'invalid_record', message: 'bad', line: 1 } } },
+    { input: { state: 'available' }, output: { state: 'unavailable', error: { code: 'invalid_payload', message: 'bad', line: 1 } } },
   ])('rejects missing or malformed payload availability %#', availability => {
     expect(() => parseExactLaneRunResponse(detailFixture({ payload_availability: availability }))).toThrow()
   })

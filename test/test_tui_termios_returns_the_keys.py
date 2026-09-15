@@ -57,7 +57,6 @@ def run(executable: str) -> None:
                 environment["PATH"] = h.path_without_masc(environment.get("PATH", ""))
                 environment.update({
                     "MASC_BASE_PATH": base_path,
-                    "MASC_BASE_PATH_INPUT": base_path,
                     "MASC_HOST": "127.0.0.1",
                     "MASC_TUI_SYNC": "off",
                     "TERM": "xterm-256color",

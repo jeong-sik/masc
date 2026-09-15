@@ -258,7 +258,15 @@ let start_with ~sw ~base_path ~enabled ~prepare =
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
       unsubscribe ();
       Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.remove owners base_path));
-    Eio.Fiber.fork ~sw (fun () ->
+    (* A daemon, because the switch is this owner's whole life and the loop
+       parks on [owner.wake] whenever the backlog is empty. Nothing wakes it on
+       the way down: the release hook below sets [stopped] and drops the
+       resolver without resolving it, and release hooks run only after every
+       ordinary fiber has finished. [Switch.run] joins ordinary fibers when its
+       body returns a value, so as an ordinary fiber this loop would hold the
+       server's shutdown open. The daemon is cancelled instead, and a review
+       cancelled mid-run already records itself. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec drain () =
         let next = Stdlib.Mutex.protect owner.mutex (fun () ->
           if owner.stopped then `Stop
@@ -274,7 +282,8 @@ let start_with ~sw ~base_path ~enabled ~prepare =
            | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
           Stdlib.Mutex.protect owner.mutex (fun () -> owner.in_flight <- false);
           drain () in
-      drain ()))
+      drain ();
+      `Stop_daemon))
 
 let start ~sw ~base_path =
   let enabled () = match Runtime_exact_output_registry.current () with

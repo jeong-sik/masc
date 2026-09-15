@@ -7080,19 +7080,26 @@ value = {surface="dashboard", content="must not run"}
         check string "aggregate effect evidence is unchanged"
           (if unknown_write then "effect_outcome_unknown" else "proven_post_effect")
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
-        let recoverable = observe && not break_receipt && not break_evidence && not terminal && not unknown_write in
-        check bool "only acknowledged ordinary read failures preserve the provider turn"
-          recoverable (Option.is_none result.abort_turn);
-        if recoverable then (
+        (* BrowserGoto and BrowserRead both return a failure to the model when
+           called directly, so the composition does too once every settled
+           node is acknowledged and no terminal node is in the graph. *)
+        let returns_to_model = observe && not break_receipt && not break_evidence && not terminal in
+        check bool "an acknowledged failure whose nodes' own calls return keeps the provider turn"
+          returns_to_model (Option.is_none result.abort_turn);
+        if returns_to_model then (
           (match bundle.terminal_effect_state () with
            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
-           | _ -> fail "read failure called the terminal failure hook");
-          let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
-            (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
-                     "expectedUrl",`String "https://example.org/next"]) in
-          check bool "next read succeeds in the same materialized provider turn" true retried.success;
-          check int "navigation is never replayed" 1 !navigations;
-          check int "only the failed read is retried" 2 !reads)
+           | _ -> fail "a failure the model can act on called the terminal failure hook");
+          if unknown_write then (
+            check int "the navigation with an unknown outcome ran once" 1 !navigations;
+            check int "the read after it never ran" 0 !reads)
+          else (
+            let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
+              (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
+                       "expectedUrl",`String "https://example.org/next"]) in
+            check bool "next read succeeds in the same materialized provider turn" true retried.success;
+            check int "navigation is never replayed" 1 !navigations;
+            check int "only the failed read is retried" 2 !reads))
         else match bundle.terminal_effect_state () with
           | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
             if break_evidence then (
@@ -7104,6 +7111,98 @@ value = {surface="dashboard", content="must not run"}
               check bool "canonical failed result is not a schema refusal" false
                 (String_util.contains_substring failure.diagnostic "does not match Tool_result.to_json"))
           | _ -> fail "unsafe or unobserved composition escaped its terminal fence"))
+;;
+
+(* #36662: the navigation completes (a post effect), then the second node
+   fails with an unknown outcome. Called directly, BrowserInteract hands that
+   failure back to the model and BrowserAct ends the turn
+   (Keeper_tool_failure_boundary). The composition does the same, whatever the
+   aggregate says. Neither node is read-only, so #35703's read exception
+   cannot be what decides. *)
+let test_composition_failure_after_navigation_follows_the_failed_node ~second () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-node-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let name, second_node =
+        match second with
+        | `Interact ->
+          ( "navigate-then-interact"
+          , {|tool = "BrowserInteract"
+after = ["navigate"]
+[compositions.nodes.input]
+kind = "literal"
+value = {lane="automation", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
+|} )
+        | `Act ->
+          ( "navigate-then-act"
+          , {|tool = "BrowserAct"
+after = ["navigate"]
+[compositions.nodes.input]
+kind = "literal"
+value = {lane="automation", tabId=7, action="click", selector="#next"}
+|} )
+      in
+      let declaration =
+        Printf.sprintf {|[[compositions]]
+name = "%s"
+execution = "inline"
+[[compositions.nodes]]
+id = "navigate"
+tool = "BrowserGoto"
+[compositions.nodes.input]
+kind = "literal"
+value = {tabId=7, url="https://example.org/next"}
+[[compositions.nodes]]
+id = "second"
+%s|} name second_node
+      in
+      let skill_catalog = skill_catalog_of_composition ~name declaration in
+      let navigations = ref 0 and seconds = ref 0 in
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_goto _ ->
+          incr navigations;
+          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+            "url",`String "https://example.org/next";"title",`String "Observed page"]])
+        | Browser_lane.Page_interact _ | Browser_lane.Page_act _ ->
+          incr seconds;
+          Browser_lane.Refused "the page went away mid-action"
+        | _ -> fail "unexpected browser effect in node boundary fixture"));
+      let turn_ctx_cell = Some (Masc.Keeper_tool_call_log.create_turn_ctx_cell ()) in
+      let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
+      Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
+      (fun () ->
+        let projected = match Masc.Keeper_official_client_host.dynamic_tools
+          ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
+          ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"node-boundary-test"
+          ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
+          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~context:(Some (Agent_core.Context.create_sync ()))
+          ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
+          ~raw_trace_run:None () with
+          | Ok tools -> tools | Error error -> fail (Agent_core.Error.to_string error) in
+        let tool = match List.find_opt
+          (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+             String.equal tool.name ("keeper_compose_" ^ name)) projected with
+          | Some tool -> tool | None -> fail ("missing materialized tool: " ^ name) in
+        let result = tool.call ~call_id:("node-boundary-" ^ name) (`Assoc []) in
+        check bool "the composition reports its failure" false result.success;
+        check int "the navigation ran once" 1 !navigations;
+        check int "the second node ran once" 1 !seconds;
+        let payload = parse_json result.content in
+        check string "the completed navigation keeps the aggregate post-effect"
+          "proven_post_effect"
+          Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
+        match second, bundle.terminal_effect_state (), result.abort_turn with
+        | `Interact, Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
+        | `Interact, _, _ ->
+          fail "a failed interaction ended the turn though a direct BrowserInteract hands it back"
+        | `Act, Masc.Keeper_tools_agent_core.Terminal_effect_failed _,
+          Some (Masc.Keeper_official_client_host.Terminal_tool_boundary _) -> ()
+        | `Act, _, _ ->
+          fail "a failed browser action left the turn open though a direct BrowserAct ends it"))
 ;;
 
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
@@ -9591,16 +9690,20 @@ let () =
            ]);
       test_case "durable ordinary read failure permits same-turn read retry" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
-      test_case "no observer cannot authorize read recovery" `Quick
+      test_case "no observer keeps a failed read composition fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:false ~break_receipt:false ~terminal:false ~unknown_write:false);
       test_case "missing read receipt keeps composition fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:true ~terminal:false ~unknown_write:false);
-      test_case "terminal graph cannot use ordinary read recovery" `Quick
+      test_case "a terminal graph keeps its fence after a failed read" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:true ~unknown_write:false);
       test_case "recovery evidence persistence failure keeps the turn fenced" `Quick
         (test_composition_read_failure_preserves_same_turn ~break_evidence:true ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
-      test_case "unknown navigation remains fenced" `Quick
+      test_case "unknown navigation returns to the model like a direct BrowserGoto" `Quick
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
+      test_case "failed interaction after navigation returns to the model" `Quick
+        (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Interact);
+      test_case "failed browser action after navigation closes the loop" `Quick
+        (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Act);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "literal input failure runs no composition node" `Quick

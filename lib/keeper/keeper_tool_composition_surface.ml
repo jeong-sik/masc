@@ -1564,10 +1564,19 @@ module For_testing = struct
   let cancel_result = cancel_result
 end
 
-(* This is same-turn read recovery, not permission to replay a graph after
-   provider restart. Only acknowledged atomic settlements can preserve the
-   provider loop; the failed result and its aggregate effect evidence stay intact. *)
-let recoverable_read_failure ~plan ~committed (failure : Executor.failure) =
+(* A composition failure goes back to the model when every failed node, called
+   directly, would have gone back: its handler's boundary
+   (Keeper_tool_failure_boundary) with the effect disposition that node
+   reported. A node read-only for the input it ran with also goes back whatever
+   its handler, as #35703 let a failed read go back: it left nothing a retry
+   would repeat.
+
+   This is same-turn continuation, not permission to replay a graph after a
+   provider restart. Only acknowledged atomic settlements keep the provider
+   loop open, so every settled node needs a committed receipt, and a graph
+   holding a terminal, nested or async node keeps its terminal fence. The
+   failed result and its aggregate effect evidence stay intact. *)
+let failure_returns_to_model ~plan ~committed (failure : Executor.failure) =
   let ordinary_atomic descriptor =
     match descriptor.Keeper_tool_descriptor.execution, descriptor.tool_kind with
     | Ordinary _, Atomic_tool -> true
@@ -1575,18 +1584,25 @@ let recoverable_read_failure ~plan ~committed (failure : Executor.failure) =
     | Ordinary _, (Composition_tool | Async_composition_tool) -> false
   in
   let descriptor node_id = Keeper_tool_plan.descriptor plan node_id in
-  let readonly (node : Executor.node_result) =
+  let failed_node_returns (node : Executor.node_result) =
     match descriptor node.node_id with
-    | Some d -> ordinary_atomic d
-                && Keeper_tool_descriptor.readonly_for_input d ~input:node.input = Some true
     | None -> false
+    | Some d ->
+      let disposition =
+        match node.failure_effect_disposition with
+        | Some disposition -> disposition
+        | None -> Tool_result.Effect_outcome_unknown
+      in
+      ordinary_atomic d
+      && (Keeper_tool_descriptor.readonly_for_input d ~input:node.input = Some true
+          || not (Keeper_tool_failure_boundary.ends_turn d.Keeper_tool_descriptor.runtime_handler disposition))
   in
   let eligible (node : Executor.node_result) =
     List.exists (fun id -> id = node.execution_id) committed
     && node.output_validation_error = None
     && match node.result with
        | Tool_result.Completed _ -> true
-       | Tool_result.Failed _ -> readonly node
+       | Tool_result.Failed _ -> failed_node_returns node
        | Tool_result.Deferred _ -> false
   in
   List.for_all (fun (node : Keeper_tool_plan.node) ->
@@ -1595,7 +1611,7 @@ let recoverable_read_failure ~plan ~committed (failure : Executor.failure) =
   && match failure.cause with
      | Executor.Tool_did_not_complete node ->
        (match node.result with
-        | Tool_result.Failed _ -> readonly node && eligible node
+        | Tool_result.Failed _ -> eligible node
           && List.exists (fun (settled : Executor.node_result) -> settled.execution_id = node.execution_id) failure.settled
           && List.for_all eligible failure.settled
         | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
@@ -1877,12 +1893,14 @@ let make_tools_with_authority
                    ; _
                    } as failure) ->
                 (* The aggregate is computed from every settled sibling and all
-                   earlier batches.  It is the boundary authority: a selected
-                   Deferred cause must not hide an earlier committed write or
-                   a sibling's unknown/post-effect failure.  Composition
-                   execution has no persisted cursor, so only an entirely
-                   proven-pre-effect defer may remain resumable. *)
-                if not (recoverable_read_failure ~plan ~committed:!committed_receipts failure) then
+                   earlier batches, so a selected Deferred cause cannot hide an
+                   earlier committed write or a sibling's unknown/post-effect
+                   failure.  It fences the turn unless every failed node's own
+                   boundary sends the failure back to the model
+                   ([failure_returns_to_model]).  Composition execution has no
+                   persisted cursor, so only an entirely proven-pre-effect
+                   defer may remain resumable. *)
+                if not (failure_returns_to_model ~plan ~committed:!committed_receipts failure) then
                 Option.iter
                   (fun mark_failed ->
                      let diagnostic =
@@ -1941,7 +1959,7 @@ let make_tools_with_authority
              record_skill_composition_evidence
                ~on_publication_failure:(fun detail ->
                  match execution with
-                 | Error failure when recoverable_read_failure ~plan ~committed:!committed_receipts failure ->
+                 | Error failure when failure_returns_to_model ~plan ~committed:!committed_receipts failure ->
                    Option.iter (fun mark_failed -> mark_failed
                      { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure;
                        effect_disposition = failure.effect_disposition;

@@ -4526,31 +4526,45 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
 ;;
 
 (* The one failure a memory call used to end the turn on was a proven
-   post-effect one. No store here produces it, so the bundle's own rule is
-   checked for every disposition, beside a file write that still ends the
-   turn once its change is applied. *)
+   post-effect one. No store here produces it, so the callback the bundle hands
+   every ordinary handler is driven directly with each disposition, beside a
+   file write whose applied change still ends the turn. *)
 let test_a_failed_memory_call_never_ends_the_turn () =
-  let ends_turn = Masc.Keeper_tools_agent_core_bundle.For_testing.ordinary_failure_ends_turn in
+  let failure disposition =
+    { Masc.Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
+    ; effect_disposition = disposition
+    ; diagnostic = "memory store failed"
+    }
+  in
+  let marks handler disposition =
+    let marked = ref 0 in
+    Masc.Keeper_tools_agent_core_bundle.For_testing.ordinary_on_failed
+      ~mark_terminal_effect_failed:(fun (_ : Masc.Keeper_tools_agent_core.terminal_effect_failure) ->
+        incr marked)
+      handler
+      (failure disposition);
+    !marked
+  in
   List.iter
     (fun (label, handler) ->
        List.iter
          (fun disposition ->
-            check bool
+            check int
               (Printf.sprintf
                  "a %s failure with %s keeps the turn"
                  label
                  (Tool_result.failure_effect_disposition_to_string disposition))
-              false
-              (ends_turn handler disposition))
+              0
+              (marks handler disposition))
          [ Tool_result.Proven_pre_effect
          ; Tool_result.Proven_post_effect
          ; Tool_result.Effect_outcome_unknown
          ])
     [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
-  check bool
+  check int
     "an applied file write ends the turn"
-    true
-    (ends_turn KTD.Tool_write_file Tool_result.Proven_post_effect)
+    1
+    (marks KTD.Tool_write_file Tool_result.Proven_post_effect)
 ;;
 
 let with_openai_tool_call_server ?second_response ~tool_name ~tool_input f =

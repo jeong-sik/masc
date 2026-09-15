@@ -665,7 +665,7 @@ let test_reader_gone_releases_every_parked_publisher () =
   Eio.Switch.run @@ fun sw ->
   let bus = Masc.Keeper_chat_events.create () in
   let reader_context = ref None in
-  let backpressure = Eio.Promise.create () in
+  let backpressure, _never_resolved = Eio.Promise.create () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Cancel.sub (fun context ->
       reader_context := Some context;

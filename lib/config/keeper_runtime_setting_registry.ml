@@ -337,7 +337,7 @@ let all =
       ~env_name:Env_config_keeper.KeeperContext.window_tokens_env_key
       ~exposure:(Toml_and_env "turn.context_window_tokens")
       ~value_kind:Integer
-      ~default:(string_of_int Env_config_keeper.KeeperContext.window_tokens_default)
+      ~default:"(none)"
       ~consumers:
         [ "Keeper_runtime_resolved"
         ; "Keeper_turn_driver_try_provider model input window"

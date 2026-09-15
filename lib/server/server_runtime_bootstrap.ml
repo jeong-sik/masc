@@ -684,11 +684,20 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      an operator can tell the compiled default from a declared value. *)
   Keeper_runtime_resolved.(
     let window = (current ()).context_window_tokens in
-    Log.Runtime.info
-      ~category:Log.Boundary
-      "keeper context window resolved: %d tokens per request (source: %s)"
-      window.value
-      (source_to_string window.source));
+    match window.value with
+    | Some tokens ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper context window resolved: %d tokens per request (source: %s)"
+        tokens
+        (source_to_string window.source)
+    | None ->
+      Log.Runtime.error
+        ~category:Log.Boundary
+        "keeper context window undeclared: every AGENT_CORE-lane candidate is \
+         refused before dispatch until runtime.toml [turn] declares \
+         context_window_tokens (env %s); restart after declaring it"
+        Env_config_keeper.KeeperContext.window_tokens_env_key);
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
     ~invalidate_full_health_snapshot:

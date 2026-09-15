@@ -29,23 +29,23 @@ let test_density_of_refuses_a_zero_side () =
     (Option.is_some (Window.density_of ~input_tokens:1 ~measured_bytes:1))
 ;;
 
-(* 85K tokens against a request that measured 400,000 bytes for 100,000
+(* 100K tokens against a request that measured 400,000 bytes for 100,000
    tokens: four bytes per token, so the window is 340,000 bytes. *)
 let test_capacity_is_the_window_read_through_the_density () =
   match
     Window.capacity
-      (Window.declared ~window_tokens:85_000)
+      (Window.declared ~window_tokens:100_000)
       (Some (density ~input_tokens:100_000 ~measured_bytes:400_000))
   with
   | Window.Measured { capacity_bytes; window_tokens; _ } ->
-    check int "window tokens carried" 85_000 window_tokens;
-    check int "capacity bytes" 340_000 capacity_bytes
+    check int "window tokens carried" 100_000 window_tokens;
+    check int "capacity bytes" 400_000 capacity_bytes
   | Window.Unmeasured _ -> fail "a density was supplied"
 ;;
 
 let test_no_density_is_unmeasured_not_a_guess () =
-  match Window.capacity (Window.declared ~window_tokens:85_000) None with
-  | Window.Unmeasured { window_tokens } -> check int "window tokens carried" 85_000 window_tokens
+  match Window.capacity (Window.declared ~window_tokens:100_000) None with
+  | Window.Unmeasured { window_tokens } -> check int "window tokens carried" 100_000 window_tokens
   | Window.Measured _ -> fail "no density was supplied"
 ;;
 
@@ -57,39 +57,39 @@ let test_tokens_of_bytes_inverts_the_density () =
 ;;
 
 (* The briefing's ceiling is a share of the window, in the bytes the cut
-   measures: half of 85K tokens at four bytes per token is 170,000 bytes. *)
+   measures: half of 100K tokens at four bytes per token is 200,000 bytes. *)
 let test_share_bytes_is_the_windows_share_through_the_density () =
   let d = density ~input_tokens:100_000 ~measured_bytes:400_000 in
-  check (option int) "half the window as bytes" (Some 170_000)
-    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 (Some d));
+  check (option int) "half the window as bytes" (Some 200_000)
+    (Window.share_bytes ~window_tokens:100_000 ~share_percent:50 (Some d));
   check (option int) "no density, no byte figure" None
-    (Window.share_bytes ~window_tokens:85_000 ~share_percent:50 None)
+    (Window.share_bytes ~window_tokens:100_000 ~share_percent:50 None)
 ;;
 
 (* A halved window keeps the declaration beside it, and returning to the
    declared size is [Declared] again rather than a shrink of itself. *)
 let test_with_tokens_keeps_the_declaration_visible () =
-  let declared = Window.declared ~window_tokens:85_000 in
-  let shrunk = Window.with_tokens declared ~window_tokens:42_500 in
-  check int "shrunk size" 42_500 shrunk.Window.window_tokens;
-  check int "declared size survives the shrink" 85_000 (Window.declared_tokens shrunk);
+  let declared = Window.declared ~window_tokens:100_000 in
+  let shrunk = Window.with_tokens declared ~window_tokens:50_000 in
+  check int "shrunk size" 50_000 shrunk.Window.window_tokens;
+  check int "declared size survives the shrink" 100_000 (Window.declared_tokens shrunk);
   check string "source names the shrink" "shrunk_after_overflow"
     (Window.source_to_string shrunk.Window.source);
-  let restored = Window.with_tokens shrunk ~window_tokens:85_000 in
+  let restored = Window.with_tokens shrunk ~window_tokens:100_000 in
   check string "the declared size is declared again" "declared"
     (Window.source_to_string restored.Window.source);
-  let twice = Window.with_tokens shrunk ~window_tokens:21_250 in
-  check int "a second shrink still names the original declaration" 85_000
+  let twice = Window.with_tokens shrunk ~window_tokens:25_000 in
+  check int "a second shrink still names the original declaration" 100_000
     (Window.declared_tokens twice)
 ;;
 
 let test_to_json_carries_window_declared_and_source () =
-  let shrunk = Window.with_tokens (Window.declared ~window_tokens:85_000) ~window_tokens:42_500 in
+  let shrunk = Window.with_tokens (Window.declared ~window_tokens:100_000) ~window_tokens:50_000 in
   match Window.to_json shrunk with
   | `Assoc fields ->
-    check (option int) "window_tokens" (Some 42_500)
+    check (option int) "window_tokens" (Some 50_000)
       (match List.assoc_opt "window_tokens" fields with Some (`Int n) -> Some n | _ -> None);
-    check (option int) "declared_tokens" (Some 85_000)
+    check (option int) "declared_tokens" (Some 100_000)
       (match List.assoc_opt "declared_tokens" fields with Some (`Int n) -> Some n | _ -> None);
     check (option string) "source" (Some "shrunk_after_overflow")
       (match List.assoc_opt "source" fields with Some (`String s) -> Some s | _ -> None)

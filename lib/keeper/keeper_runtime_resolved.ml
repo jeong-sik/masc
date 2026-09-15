@@ -17,7 +17,7 @@ type t = {
   first_event_timeout_sec : float field;
   body_timeout_override_sec : float option field;
   provider_call_deadline_sec : float field;
-  context_window_tokens : int field;
+  context_window_tokens : int option field;
 }
 
 (* The layer {!Config_boot_overrides.source} names, as this module's
@@ -144,9 +144,9 @@ let freeze_from_current () =
         source = Failsafe_floor;
       }
   in
-  (* The transmission window is a compiled default or the operator's value,
-     never a floor: [Env_config_keeper.KeeperContext.window_tokens] always
-     answers, and the source says which layer answered. *)
+  (* The transmission window is the operator's value or nothing: no floor
+     and no compiled figure. [None] is carried as such, and the AGENT_CORE
+     lane refuses its candidates until the key is declared. *)
   let context_window_tokens =
     {
       value = Env_config_keeper.KeeperContext.window_tokens ();
@@ -220,6 +220,10 @@ let option_float_to_yojson = function
   | Some value -> `Float value
   | None -> `Null
 
+let option_int_to_yojson = function
+  | Some value -> `Int value
+  | None -> `Null
+
 let to_yojson (runtime : t) =
   `Assoc
     [
@@ -227,7 +231,7 @@ let to_yojson (runtime : t) =
       ("first_event_timeout_sec", field_to_yojson float_to_yojson runtime.first_event_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("provider_call_deadline_sec", field_to_yojson float_to_yojson runtime.provider_call_deadline_sec);
-      ("context_window_tokens", field_to_yojson (fun tokens -> `Int tokens) runtime.context_window_tokens);
+      ("context_window_tokens", field_to_yojson option_int_to_yojson runtime.context_window_tokens);
     ]
 
 let stream_idle_timeout_sec () =

@@ -118,6 +118,21 @@ val of_json : Yojson.Safe.t -> (t, Error.t) result
 (** Serialize checkpoint to a JSON string. *)
 val to_string : t -> string
 
+(** Encodings of the messages written by earlier saves of one checkpoint
+    lineage. One memo serves one sequence of saves; it is not safe to use from
+    two saves at once. *)
+type encoding_memo
+
+val create_encoding_memo : unit -> encoding_memo
+
+(** [to_string_with_encoding_memo memo cp] returns the bytes of [to_string cp]
+    and raises [Invalid_argument] where {!to_json} does. A message that is the
+    same record as one in the previous successful call reuses that call's
+    validated encoding; every other message is encoded, validated against the
+    v11 contract, and decoded once. After a success, [memo] holds exactly the
+    messages of [cp]. *)
+val to_string_with_encoding_memo : encoding_memo -> t -> string
+
 (** Deserialize checkpoint from a JSON string under the same current-only
     contract as {!of_json}. *)
 val of_string : string -> (t, Error.t) result

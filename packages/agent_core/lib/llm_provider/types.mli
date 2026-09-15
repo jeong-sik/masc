@@ -433,6 +433,27 @@ type message =
   }
 [@@deriving show]
 
+(** Messages as hash-table keys.
+
+    [equal] is [Stdlib.compare left right = 0]. It raises on functional or
+    abstract values; [message] holds neither, and a field of such a type would
+    have to change this module. [0.0] and [-0.0] inside a raw JSON payload
+    ([ToolUse.input], [ToolResult.json], [reasoning_detail.raw], [metadata])
+    compare equal while encoding one byte apart, so a table that must return
+    the exact bytes of its key pairs [hash] with physical equality instead.
+
+    [hash] reads the role, [name], [tool_call_id], and each content block's
+    strings through a bounded sample (length, bytes at a fixed stride, last
+    byte). Its cost grows with the number of blocks, not with their size.
+    Both [equal left right] and [left == right] imply
+    [hash left = hash right]. *)
+module Message_value : sig
+  type t = message
+
+  val equal : t -> t -> bool
+  val hash : t -> int
+end
+
 (** {1 Response Types} *)
 
 type stop_reason =

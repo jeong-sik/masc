@@ -114,18 +114,17 @@ val save_json_durable_atomic
   -> Yojson.Safe.t
   -> (unit, durable_write_error) result
 
-(** Strict durable JSON write whose value is constructed and encoded through
-    the process executor pool when it is available. [json_source] must be a
-    pure closure. This keeps large queue snapshots from monopolizing the Eio
-    scheduler while preserving the same atomic publication and ownership
-    contract; blocking filesystem operations still run in a systhread. [pretty]
-    has the same meaning as on {!save_json_durable_atomic}. *)
-val save_json_durable_atomic_from
+(** Strict durable write whose bytes are produced through the process executor
+    pool when it is available. [encoded_source] must be a pure closure; an
+    exception it raises becomes a [Payload_encode] failure. This keeps large
+    checkpoint encodes from monopolizing the Eio scheduler while preserving the
+    same atomic publication and ownership contract; blocking filesystem
+    operations still run in a systhread. *)
+val save_encoded_durable_atomic_from
   :  ?ownership_root:string
   -> ?temp_dir:string
-  -> ?pretty:bool
   -> string
-  -> (unit -> Yojson.Safe.t)
+  -> (unit -> string)
   -> (unit, durable_write_error) result
 
 val durable_write_error_to_string : durable_write_error -> string
@@ -180,16 +179,6 @@ module For_testing : sig
     -> ?pretty:bool
     -> string
     -> Yojson.Safe.t
-    -> (unit, durable_write_error) result
-
-  val save_json_durable_atomic_from
-    :  before_stage:(durable_write_stage -> unit)
-    -> ?before_directory_fsync:(string -> unit)
-    -> ?ownership_root:string
-    -> ?temp_dir:string
-    -> ?pretty:bool
-    -> string
-    -> (unit -> Yojson.Safe.t)
     -> (unit, durable_write_error) result
 
   val remove_file_durable

@@ -34,7 +34,7 @@ These must be migrated to the same `Workspace.config.base_path` source.
 
 ### A third env-read surface: `Host_config.from_env` / `base_path_source_opt`
 
-`Host_config.host ()` (`lib/host_config/host_config.ml:60`, aliased as `from_env` at `:108`) reads the workspace path via `Env_config_core.base_path_source_opt ()` (`:68`). This is a sibling reader to `base_path ()`: it resolves `MASC_BASE_PATH` / `MASC_BASE_PATH_INPUT` from env at every call (it is not memoized). Runtime callers such as `voice_config`, `keeper_voice_local`, `tool_library`, `config_dir_resolver`, `server_routes_http_runtime_health_helpers`, and `server_dashboard_http_runtime_info.ml:1368,1606` therefore also read the stale boot-time base_path after `set_workspace_config`. This is the same #21798 leak class and is in scope for this RFC.
+`Host_config.host ()` (`lib/host_config/host_config.ml:60`, aliased as `from_env` at `:108`) reads the workspace path via `Env_config_core.base_path_source_opt ()` (`:68`). This is a sibling reader to `base_path ()`: it resolves `MASC_BASE_PATH` from env at every call (it is not memoized). Runtime callers such as `voice_config`, `keeper_voice_local`, `tool_library`, `config_dir_resolver`, `server_routes_http_runtime_health_helpers`, and `server_dashboard_http_runtime_info.ml:1368,1606` therefore also read the stale boot-time base_path after `set_workspace_config`. This is the same #21798 leak class and is in scope for this RFC.
 
 ## 2. Proposal
 

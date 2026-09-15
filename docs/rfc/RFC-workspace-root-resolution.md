@@ -75,8 +75,8 @@ stdio 서버)이 이 함수만 부른다. `MASC_BASE_PATH_INPUT` 은 지운다.
    직접 읽는 곳이 lib 13곳·bin 4곳, `Host_config` 의 `base_path` 를 읽는 곳이 19곳이다. 누가 마지막으로
    썼는지가 결과를 정한다(#30904).
 5. **workspace 판정이 제각각이다.** 기록은 `<path>/.masc` 가 있으면 쓰는데
-   (`env_config_core.ml:495`), `<home>/.masc/skills` 는 사용자 skill 경로라
-   `~/.masc` 는 workspace 가 아니어도 존재한다.
+   (`env_config_core.ml:495`), 사용자 skill 경로가 홈 디렉터리 아래 `.masc/skills` 라서
+   홈 디렉터리의 `.masc` 는 workspace 가 아니어도 존재한다.
 6. **기본값 기록이 비대화형 실행에서도 일어난다.** installer 는 매번, `masc setup --no-tui`
    도 매번 기록한다(`main_eio.ml:3187`). 반대로 설정 화면에서 "Choose another directory"
    를 고른 경우엔 `init` 에 `--record-default` 가 없어(`install-runtime-setup.py:1950`)

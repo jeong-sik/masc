@@ -3412,7 +3412,12 @@ let context_composition_lines ~cols ~turn_back
         (* Wide enough for the longest component name and no wider: the share
            and the byte count belong beside the name they describe, not at the
            far edge of a 140-column overlay. *)
-        let tokens_per_byte = tokens_per_wire_byte attributed in
+        (* Nothing to convert when nothing was attributed: a ratio over
+           zero bytes would still print a figure beside every row and the
+           sentence naming the ratio is only drawn under attributed bytes. *)
+        let tokens_per_byte =
+          if total > 0 then tokens_per_wire_byte attributed else None
+        in
         let token_cells =
           match tokens_per_byte with
           | Some _ -> context_flow_token_cells
@@ -3501,10 +3506,23 @@ let context_composition_lines ~cols ~turn_back
                           (1. /. ratio)
                           (Inspector.format_tokens tokens)
                           (Inspector.format_bytes observation.body_bytes))
-                 | Some _, None | None, Some _ | None, None ->
-                     prose
-                       "No token estimate: this turn reported no per-request \
-                        input count to divide its wire bytes by.")
+                 | Some _, None | None, Some _ | None, None -> (
+                     match attributed.Turn_record.usage.scope with
+                     | Runtime_usage_scope.Usage_scope_unavailable ->
+                         prose
+                           "No token estimate: the provider did not say \
+                            whether its input count covers this request or \
+                            the conversation, so it is not divided by this \
+                            request's bytes."
+                     | Runtime_usage_scope.Conversation_cumulative ->
+                         prose
+                           "No token estimate: a count across the whole \
+                            conversation is not divided by one request's bytes."
+                     | Runtime_usage_scope.Per_request ->
+                         prose
+                           "No token estimate: this turn reported no \
+                            per-request input count to divide its wire bytes \
+                            by."))
           | Some _ -> []
           | None ->
               prose

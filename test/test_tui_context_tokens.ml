@@ -105,7 +105,41 @@ let test_no_estimate_from_a_cumulative_count () =
       (record ~wire:(Some 560_513)
          ~scope:Runtime_usage_scope.Conversation_cumulative)
   in
+  Alcotest.(check bool) "the rows are still drawn" true
+    (Option.is_some (find "Tool schemas" rows));
+  Alcotest.(check bool) "the count is named as the conversation's" true
+    (Option.is_some (find "tokens counted across the conversation" rows));
   Alcotest.(check bool) "a cumulative count is never divided by one request" false
+    (List.exists (contains "\xe2\x89\x88") rows);
+  Alcotest.(check bool) "the prose says why" true
+    (Option.is_some (find "count across the whole conversation is not divided" rows))
+
+(* The band above prints a count of unknown scope as if it were this
+   request's; the rows do not divide by it, and the prose says so rather
+   than claiming the count was missing. *)
+let test_no_estimate_from_a_count_of_unknown_scope () =
+  let rows =
+    lines
+      (record ~wire:(Some 560_513)
+         ~scope:Runtime_usage_scope.Usage_scope_unavailable)
+  in
+  Alcotest.(check bool) "the rows are still drawn" true
+    (Option.is_some (find "Tool schemas" rows));
+  Alcotest.(check bool) "no row divides by a count of unknown scope" false
+    (List.exists (contains "\xe2\x89\x88") rows);
+  Alcotest.(check bool) "the prose names the unknown scope" true
+    (Option.is_some (find "did not say whether its input count covers" rows))
+
+let test_no_estimate_beside_zero_attributed_bytes () =
+  let turn = record ~wire:(Some 560_513) ~scope:Runtime_usage_scope.Per_request in
+  let turn =
+    { turn with
+      input_components =
+        Some [ { component = Turn_record.Tool_schemas; bytes = 0 } ]
+    }
+  in
+  let rows = lines turn in
+  Alcotest.(check bool) "a zero-byte row gets no figure to explain" false
     (List.exists (contains "\xe2\x89\x88") rows)
 
 let test_the_request_band_leads_with_tokens () =
@@ -126,6 +160,10 @@ let () =
             test_no_estimate_without_a_wire_body
         ; Alcotest.test_case "no estimate from a cumulative count" `Quick
             test_no_estimate_from_a_cumulative_count
+        ; Alcotest.test_case "no estimate from a count of unknown scope" `Quick
+            test_no_estimate_from_a_count_of_unknown_scope
+        ; Alcotest.test_case "no estimate beside zero attributed bytes" `Quick
+            test_no_estimate_beside_zero_attributed_bytes
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with tokens" `Quick

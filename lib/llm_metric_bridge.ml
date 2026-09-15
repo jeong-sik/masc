@@ -46,8 +46,6 @@ let inc_counter ?(delta = 1.0) name ~labels =
   Otel_metric_store.inc_counter name ~labels ~delta ()
 ;;
 
-let set_gauge name ~labels value = Otel_metric_store.set_gauge name ~labels value
-
 let observe_seconds name ~labels seconds =
   Otel_metric_store.observe_histogram name ~labels seconds
 ;;

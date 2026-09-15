@@ -68,7 +68,9 @@ let test_a_test_binary_does_not_write_the_operators_default () =
            failf "a test binary wrote %s as the operator's default" path
          | EC.No_record_location -> fail "HOME is set, so a location exists"
          | EC.Record_failed { record; reason } ->
-           failf "refused for the wrong reason: %s (%s)" record reason))
+           failf "refused for the wrong reason: %s (%s)" record reason
+         | EC.Not_a_workspace { path } ->
+           failf "refused for the wrong reason: %s holds no .masc/config" path))
 
 let test_record_then_read () =
   with_config_home (fun config_home ->

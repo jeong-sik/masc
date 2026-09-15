@@ -106,8 +106,18 @@ let pending_lazy_tasks () =
 
 (* ── Transitions (with product-state invariant checking) ── *)
 
+(* The workspace path exactly as the operator gave it, before normalization.
+   Kept beside the snapshot, not in the environment: MASC_BASE_PATH carries the
+   canonical owner, so a reader of the env can no longer recover the spelling. *)
+let input_base_path_cell : string option Atomic.t = Atomic.make None
+
+let note_input_base_path value = Atomic.set input_base_path_cell value
+
+let input_base_path () = Atomic.get input_base_path_cell
+
 let reset () =
-  Atomic.set state (initial_state ())
+  Atomic.set state (initial_state ());
+  Atomic.set input_base_path_cell None
 
 let mark_blocking () =
   update (fun current ->

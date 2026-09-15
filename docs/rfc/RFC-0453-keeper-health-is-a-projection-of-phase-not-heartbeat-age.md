@@ -27,7 +27,7 @@ related: ["0380", "0089"]
 
 `keeper_health_state` 는 keeper 의 metrics 원장에서 가장 최근 `record_kind=heartbeat` 줄을 읽고, 그 나이가 `keepalive_interval_s + 60s`(기본 360s)를 넘으면 `KH_stale` 을 냈다. 이 줄은 keepalive 루프가 **턴을 끝낸 뒤** 한 번 쓴다. 턴이 6분 넘게 걸리면 keeper 가 일하는 도중에 `stale` 이 된다.
 
-실측(2026-09-15 06:55Z 기준 직전 24시간, `~/me/.masc`, 살아 있는 keeper 13개). 방법: 각 keeper 의 heartbeat 줄을 시간순으로 놓고, 이웃한 두 줄 사이 간격에서 360초를 넘긴 부분을 모두 더해 24시간으로 나눴다. 05:08Z 에 같은 방법으로 잰 값도 keeper 별로 ±3%p 안에 있었다.
+실측(2026-09-15 06:55Z 기준 직전 24시간, 운영 workspace 의 `.masc`(`MASC_BASE_PATH`), 살아 있는 keeper 13개). 방법: 각 keeper 의 heartbeat 줄을 시간순으로 놓고, 이웃한 두 줄 사이 간격에서 360초를 넘긴 부분을 모두 더해 24시간으로 나눴다. 05:08Z 에 같은 방법으로 잰 값도 keeper 별로 ±3%p 안에 있었다.
 
 | keeper | heartbeat 줄 수 | 360s 넘긴 간격 | `stale` 로 읽힌 비율 | 가장 긴 간격 |
 |---|---:|---:|---:|---:|
@@ -113,8 +113,9 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 - [ ] **PR-A1** 서버 + TUI: `keeper_health` 세 값, persisted snapshot 모듈·wire 키 삭제, TUI 마크, 테스트, 이 RFC.
 - [ ] **PR-A2** (A1 위): `Surface_inactive`, `klc_inactive` 삭제 (`keeper_surface_status` 가 더는 만들지 않는다).
 - [ ] **PR-B2** (A2 병합 뒤, 대시보드): keeper `status` 를 읽는 자리의 `'inactive'` 토큰 삭제 — `keeper-store-normalize.ts`, `lib/unified-status.ts`, `runtime-counts.ts`, `lib/keeper-operational-state.ts`, `lib/monitoring-runtime.ts`, `lib/keeper-classifiers.ts`. agent status 의 `inactive`(`lib/agent-status.ts`, `types/core.ts` Agent) 는 다른 어휘라 그대로 둔다.
-- [ ] **PR-C** (A1 위): continuity 축 정리. `keepalive_recovery_window_s` 는 "heartbeat 증거가 아직 안 쓰였을 60초 동안 판정 보류" 용이었다. 증거 판정이 사라지면 `Continuity_recovering` 은 근거가 없고 `keeper_continuity` 는 `keepalive_running` 하나와 같다. 함께: `lib/workspace/heartbeat.ml`(MCP 시절 타이머 표, `start` 호출자 0, `stop_by_agent` 는 항상 0 반환)과 `heartbeats_stopped` 필드.
-- [ ] **PR-D** TUI Activity pane: chunk 를 keeper 턴 id 로 묶는다. agent-core `turn` 은 provider 호출 순번이라 keeper 턴 하나가 호출 수만큼 `unsettled` 줄로 쪼개진다. `run_id` 는 키로 못 쓴다 — `Sink_degraded` 면 이벤트마다 새 `evt-…` 가 찍히고(오늘 실측 goo-yang-bong 577건), provider 로테이션마다 갈린다. 대신 서버 브리지가 agent-core 프레임에 registry 의 `current_turn_observation.turn_id` 를 `keeper_turn` 으로 찍고, `keeper_tool_call` 도 같은 값을 싣는다. TUI 는 `(keeper, keeper_turn)` 으로만 묶는다.
+- [ ] **PR-C1**: continuity 축 정리. 세 값 위에서 `continuity_state` 는 `keepalive_running` 과 "기동 뒤 60초 안인가"(`keepalive_recovery_window_s`) 만 말했다. `health_state=offline` 은 keepalive 가 안 도는 경우와 같아서 `recovering` 으로 가는 다른 길은 없었다. 그 60초 판정과 `recovering`/`not_running` 요약 문구 덮어쓰기, wire `continuity_state`, 대시보드 칩·라벨을 지운다. 요약은 `keeper_diagnostic_summary` 하나만 남는다. `keepalive_started_at` 사실 필드(`masc_keeper_audit`)는 남긴다.
+- [ ] **PR-C2**: `lib/workspace/heartbeat.ml`(MCP 시절 타이머 표, `start` 를 부르는 프로덕션 코드 0, `stop_by_agent` 는 늘 0 반환)과 `heartbeats_stopped` 필드. 이 모듈을 부르는 테스트가 5개 파일이라 따로 낸다.
+- [ ] **PR-D** TUI Activity pane: chunk 를 keeper 턴으로 묶는다. agent-core `turn` 은 provider 호출 순번이라 keeper 턴 하나가 호출 수만큼 `unsettled` 줄로 쪼개졌다. `run_id` 는 키로 못 쓴다 — `Sink_degraded` 면 이벤트마다 새 `evt-…` 가 찍히고, provider 로테이션마다 갈린다. 서버 브리지가 프레임에 keeper 턴을 찍는 안도 버렸다 — `Keeper_event_bridge` 는 서버 부트에서 bus 를 비동기로 비우므로 relay 시점의 registry `current_turn_observation` 이 이미 다음 턴이거나 비어 있을 수 있다. 대신 서버가 LLM 호출마다 이미 내는 `keeper_turn_observation`(`name`, 세션 `turn`, `total_turns`)을 TUI 가 디코드해 keeper 별 (세션 순번 → keeper 턴 = `total_turns + 1`) 표를 만들고, agent-core 프레임과 `keeper_tool_call` 의 세션 `turn` 을 그 표로 keeper 턴에 붙인다. `total_turns + 1` 은 registry 의 `turn_id` 정의이자 settle 의 번호다(둘 다 settle 이 올리기 전의 `meta.runtime.usage.total_turns` 를 읽는다). observation 이 아직 없는 호출(응답 전)은 keeper 가 턴을 하나씩만 돌리므로 열린 keeper 턴에 붙고, observation 이 전혀 없는 피드는 세션 순번으로만 묶인다. 줄에는 keeper 번호 또는 `turn ?` 만 그린다. 서버 코드는 바꾸지 않는다.
 
 ## 7. 후속 (이번 범위 밖)
 
@@ -124,4 +125,4 @@ heartbeat 나이 판정이 없어도 아래가 이미 답한다. 나이 판정�
 
 ## 8. 건드리지 않는 것
 
-keepalive 루프(`keeper_heartbeat_loop.ml`), in-turn pulse, `Workspace.heartbeat` presence, phase FSM, `fiber_health_of`, heartbeat 원장 줄 쓰기, SSE `keeper_heartbeat` 이벤트, `keeper_keepalive_interval_s`/`keeper_snapshot_interval_s` 설정 표시, `~/me/.masc` 런타임 데이터. TLA+ specs 에는 keeper health 규칙이 없다(`KeeperHeartbeat.tla` 는 stale 을 모델링하지 않는다).
+keepalive 루프(`keeper_heartbeat_loop.ml`), in-turn pulse, `Workspace.heartbeat` presence, phase FSM, `fiber_health_of`, heartbeat 원장 줄 쓰기, SSE `keeper_heartbeat` 이벤트, `keeper_keepalive_interval_s`/`keeper_snapshot_interval_s` 설정 표시, 운영 workspace 의 런타임 데이터. TLA+ specs 에는 keeper health 규칙이 없다(`KeeperHeartbeat.tla` 는 stale 을 모델링하지 않는다).

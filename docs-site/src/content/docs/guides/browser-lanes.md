@@ -47,25 +47,21 @@ UUID, so discover and select it again.
 
 ## Setup: automation
 
-Start geckodriver on loopback:
-
-```bash
-geckodriver --host 127.0.0.1 --port 4444
-```
-
-Set the following in the resolved configuration directory's `runtime.toml`, then
-restart MASC:
+Set the geckodriver executable in the resolved configuration directory's
+`runtime.toml`, then restart MASC:
 
 ```toml
 [browser]
-webdriver_url = "http://127.0.0.1:4444"
+geckodriver = "/absolute/path/to/geckodriver"
 # Optional: select an installed Firefox or Zen executable.
 # binary = "/path/to/Zen.app/Contents/MacOS/zen"
 ```
 
-`webdriver_url` must be a loopback HTTP origin. `binary` must be an absolute path
-and requires `webdriver_url`. When omitted, geckodriver discovers the browser;
-set it explicitly to select Firefox or Zen. Changing it does not select a live
+MASC starts that geckodriver on a free loopback port and stops it when the
+server stops, so there is no driver to run and no port to choose.
+`geckodriver` must be an absolute path. `binary` must be an absolute path and
+requires `geckodriver`. When omitted, geckodriver discovers the browser; set it
+explicitly to select Firefox or Zen. Changing it does not select a live
 connection. Automation opens headless by default.
 
 ## Keeper and MCP tools

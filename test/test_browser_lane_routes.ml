@@ -16,8 +16,7 @@ let with_workspace f =
   let token_file = Filename.concat lane "token" in
   (* The route reads its token file under the process's base path; this test
      executable owns that setting for its one scenario. *)
-  List.iter (fun key -> Unix.putenv key base)
-    [ Env_config_core.base_path_input_env_key; Env_config_core.base_path_env_key ];
+  Unix.putenv Env_config_core.base_path_env_key base;
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists token_file then Sys.remove token_file;

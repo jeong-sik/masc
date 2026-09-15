@@ -159,7 +159,7 @@ def run(args):
             # controls. Retain the existing HOME value for credential discovery.
             env = {key: value for key, value in os.environ.items()
                    if key in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE")}
-            env.update(MASC_BASE_PATH=str(base), MASC_BASE_PATH_INPUT=str(base), MASC_OTEL_ENABLED="0")
+            env.update(MASC_BASE_PATH=str(base), MASC_OTEL_ENABLED="0")
 
             def command(*argv):
                 # Login stdout can contain credentials. Never export command output.

@@ -194,6 +194,50 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
          (D.task_status_to_string task_status));
     reconcile config ~delivered:0 ~retained:0)
 
+(* A rejection returns work to [InProgress], so that is the state every case
+   above starts from. [Claimed] reaches the same release through the same arm
+   and nothing had walked it: a task claimed but not started, whose claimer is
+   gone, is stuck exactly as hard. *)
+let test_a_claimed_task_is_released_too () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-claimed" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    let tasks =
+      List.map
+        (fun (task : D.task) ->
+           { task with
+             task_status =
+               D.Claimed { assignee = producer; claimed_at = "2026-09-09T00:00:00Z" }
+           })
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks };
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    match only_task config with
+    | { task_status = D.Todo; _ } -> ()
+    | { task_status; _ } ->
+      Alcotest.failf "a claimed task with no actor must be released, found %s"
+        (D.task_status_to_string task_status))
+
+(* The releaser is read off the obligation's authority, and an operator's
+   verdict is recorded as an operator's release. A system verdict is what every
+   other case here carries, so this is the other half of that mapping. *)
+let test_an_operator_verdict_releases_as_the_operator () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-operator-verdict" in
+    prepare_submission config verification_id;
+    commit config ~authority:human ~verification_id (D.Verdict_rejected { reason });
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    match only_task config with
+    | { task_status = D.Todo; handoff_context = Some handoff; _ } ->
+      Alcotest.(check (option string)) "the operator who decided is the releaser"
+        (Some "repair-operator") handoff.updated_by
+    | { task_status; _ } ->
+      Alcotest.failf "an operator's rejection releases too, found %s"
+        (D.task_status_to_string task_status))
+
 (* The status is half the guard and the assignee is the other half. A task
    that stayed [InProgress] but changed hands belongs to whoever holds it now,
    and releasing it would take work away from an agent that is still there. *)
@@ -518,6 +562,10 @@ let () =
           `Quick test_release_leaves_a_task_that_moved_on
       ; Alcotest.test_case "a task held by someone else is left alone"
           `Quick test_a_task_held_by_someone_else_is_not_released
+      ; Alcotest.test_case "a claimed task is released too"
+          `Quick test_a_claimed_task_is_released_too
+      ; Alcotest.test_case "an operator verdict releases as the operator"
+          `Quick test_an_operator_verdict_releases_as_the_operator
       ; Alcotest.test_case "a queue that appears before the lock keeps the task"
           `Quick test_a_queue_that_appears_before_the_lock_keeps_the_task
       ; Alcotest.test_case "a failed release keeps the obligation"

@@ -14,7 +14,7 @@ status: Draft
 Two state spaces carry the workspace base path, and they are never synchronized at runtime:
 
 - **Write path**: `Mcp_server.set_workspace_config` (`lib/mcp_server.ml:492`) performs `Atomic.set state.workspace_config config`. It does not call `Unix.putenv MASC_BASE_PATH`.
-- **Read path**: `Env_config_core.base_path ()` (`lib/config/env_config_core.ml:376`) reads `MASC_BASE_PATH` / `MASC_BASE_PATH_INPUT` via `raw_value_opt` (env → `Sys.getenv_opt` → `Config_boot_overrides`). It never consults the `Workspace.config` Atomic.
+- **Read path**: `Env_config_core.base_path ()` (`lib/config/env_config_core.ml:376`) reads `MASC_BASE_PATH` via `raw_value_opt` (env → `Sys.getenv_opt` → `Config_boot_overrides`). It never consults the `Workspace.config` Atomic.
 
 Runtime workspace switches (`lib/mcp_tool_runtime_workspace.ml:100,104`, reached via the `masc_start` tool route `lib/mcp_tool_runtime.ml:122`) therefore leave every `base_path ()` call site reading the **stale boot-time env** instead of the switched workspace. This is a silent cross-workspace data leak — the same read/write source-asymmetry class as #21798.
 
@@ -34,7 +34,7 @@ These must be migrated to the same `Workspace.config.base_path` source.
 
 ### A third env-read surface: `Host_config.from_env` / `base_path_source_opt`
 
-`Host_config.host ()` (`lib/host_config/host_config.ml:60`, aliased as `from_env` at `:108`) reads the workspace path via `Env_config_core.base_path_source_opt ()` (`:68`). This is a sibling reader to `base_path ()`: it resolves `MASC_BASE_PATH` / `MASC_BASE_PATH_INPUT` from env at every call (it is not memoized). Runtime callers such as `voice_config`, `keeper_voice_local`, `tool_library`, `config_dir_resolver`, `server_routes_http_runtime_health_helpers`, and `server_dashboard_http_runtime_info.ml:1368,1606` therefore also read the stale boot-time base_path after `set_workspace_config`. This is the same #21798 leak class and is in scope for this RFC.
+`Host_config.host ()` (`lib/host_config/host_config.ml:60`, aliased as `from_env` at `:108`) reads the workspace path via `Env_config_core.base_path_source_opt ()` (`:68`). This is a sibling reader to `base_path ()`: it resolves `MASC_BASE_PATH` from env at every call (it is not memoized). Runtime callers such as `voice_config`, `keeper_voice_local`, `tool_library`, `config_dir_resolver`, `server_routes_http_runtime_health_helpers`, and `server_dashboard_http_runtime_info.ml:1368,1606` therefore also read the stale boot-time base_path after `set_workspace_config`. This is the same #21798 leak class and is in scope for this RFC.
 
 ## 2. Proposal
 

@@ -100,11 +100,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ~keepalive_running
                  ~history_items:[]
                  ~now_ts
-               |> Keeper_status_runtime.augment_keeper_diagnostic_json
-                    ~keepalive_running
-                    ~keepalive_started_at:
-                      (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-                    ~now_ts
              in
              let status =
                Keeper_status_runtime.keeper_surface_status ~diagnostic

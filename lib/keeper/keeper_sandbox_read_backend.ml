@@ -116,10 +116,13 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ command_argv
 
 let container_name_of meta =
-  Printf.sprintf "masc-keeper-read-%s-%d-%d"
-    (Workspace_utils.safe_filename meta.name)
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_read
+       { keeper_name = meta.name
+         (* DET-OK: pid and wall-clock ms make a one-shot name unique per run. *)
+       ; pid = Unix.getpid ()
+       ; started_ms = int_of_float (Unix.gettimeofday () *. 1000.0)
+       })
 
 (* One runner, two ways of getting the endpoint. A turn hands in the lane's
    [endpoint], which may start the guest it owns; a caller with no turn hands
@@ -344,7 +347,9 @@ let run_command_with_capture ?turn_sandbox_factory
         | Ok seccomp_args ->
           let host_root = host_playground_root ~config ~meta in
           let croot = container_root ~meta in
-          let container_name = container_name_of meta in
+          let container_name =
+            Keeper_sandbox_container_name.to_string (container_name_of meta)
+          in
           let uid = Unix.getuid () in
           let gid = Unix.getgid () in
           match

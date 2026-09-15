@@ -80,9 +80,9 @@ type 'clock next_stage =
 
 val measure
   :  ?connection_cache:Http_client.cache
-  -> ?clock:_ Eio.Time.clock
+  -> ?clock:'clock Eio.Time.clock
   -> ?timeout_s:float
-  -> next_stage:_ Eio.Time.clock next_stage
+  -> next_stage:'clock Eio.Time.clock next_stage
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -434,7 +434,6 @@ run_mode() {
         if (.keepalive_running == false and .activation_mode == "autonomous") then
           (.diagnostic | type == "object")
           and (.diagnostic.quiet_reason != "disabled")
-          and (.diagnostic.continuity_state != "desired_offline")
         else
           true
         end

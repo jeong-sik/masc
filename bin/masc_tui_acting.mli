@@ -139,14 +139,14 @@ type wire_tool = {
 type chunk = {
   ck_keeper : string;
   ck_turn : int option;
-      (** What the row shows: the settle's number once the turn settled, the
-          agent session's before that. *)
-  ck_session_turn : int option;
-      (** The same turn as the agent session numbers it. The turn markers,
-          the wire and the keeper ledger all write this plane; only the
-          settle is on the keeper's own lifetime plane. One live turn was
-          1157 here and 719 on its settle (2026-09-07), so a member is only
-          ever matched against the plane it was written on. *)
+      (** The keeper's own number for the turn, from its settle or from the
+          observation of any provider call inside it; [None] until either
+          has arrived, and the row says so. *)
+  ck_session_turns : int list;
+      (** The agent session's ordinals for the provider calls this turn has
+          absorbed, oldest first. The turn markers, the wire and the keeper
+          ledger number their frames by the call; a row that states an
+          ordinal no observation has named yet is filed by this list. *)
   ck_at : float;  (** newest member's arrival — the chunk's feed position *)
   ck_wire_tools : wire_tool list;  (** oldest-first, from the agent-core wire *)
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)

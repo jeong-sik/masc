@@ -40,18 +40,21 @@ let rec ensure_dir path =
     Unix.mkdir path 0o755)
 
 (* Monotonically increasing counter to disambiguate managed containers
-   created within the same millisecond by the same process.  Mirrors
-   {!Keeper_turn_sandbox_runtime.container_counter}. *)
+   created within the same millisecond by the same process, as the one-shot
+   counter in {!Keeper_sandbox_docker_container_name} does for turns. *)
 let managed_container_counter : int Atomic.t = Atomic.make 0
 
-let managed_container_name ~(meta : keeper_meta) ~(network_label : string) =
+let managed_container_name ~(meta : keeper_meta) ~(network_mode : network_mode) =
   let seq = Atomic.fetch_and_add managed_container_counter 1 in
-  Printf.sprintf "masc-keeper-managed-%s-%s-%d-%d-%d"
-    (Workspace_utils.safe_filename meta.name)
-    (Workspace_utils.safe_filename network_label)
-    (Unix.getpid ())
-    (now_ms ())
-    seq
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_managed
+       { keeper_name = meta.name
+       ; network_mode
+         (* DET-OK: pid and wall-clock ms make a managed name unique per run. *)
+       ; pid = Unix.getpid ()
+       ; started_ms = now_ms ()
+       ; seq
+       })
 
 let configured_effective_network network_mode = network_mode
 
@@ -158,7 +161,8 @@ let start_managed_container
                   let uid = Unix.getuid () in
                   let gid = Unix.getgid () in
                   let container_name =
-                    managed_container_name ~meta ~network_label
+                    Keeper_sandbox_container_name.to_string
+                      (managed_container_name ~meta ~network_mode)
                   in
                   let argv =
                     Keeper_sandbox_runtime.docker_command_argv ()

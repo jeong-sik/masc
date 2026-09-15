@@ -92,6 +92,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_hooks_agent_core.mli` - hook-observation
 - `lib/keeper/keeper_tool_activity.ml` - hook-observation
 - `lib/keeper/keeper_tool_activity.mli` - hook-observation
+- `lib/keeper/keeper_sandbox_container_name.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_container_name.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_containment.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_control.ml` - sandbox-runtime

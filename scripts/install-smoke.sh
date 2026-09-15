@@ -271,7 +271,7 @@ PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"
 mkdir -p "$work/outside-checkout"
 cd "$work/outside-checkout"
-env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_BASE_PATH_INPUT="$base" MASC_OTEL_ENABLED=0 \
+env -u MASC_ASSETS_DIR MASC_BASE_PATH="$base" MASC_OTEL_ENABLED=0 \
   "$prefix/masc" --base-path "$base" --host 127.0.0.1 --port "$PORT" >"$log" 2>&1 &
 PID=$!
 

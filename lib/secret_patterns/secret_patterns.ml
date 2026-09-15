@@ -26,8 +26,8 @@ let is_sensitive_key key =
   List.exists (String.equal lower) sensitive_keys
 
 (** URL credential pattern — ://user:pass@ *)
-let url_credential_re =
-  Re.compile (Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@'])
+let url_credential = Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@']
+let url_credential_re = Re.compile url_credential
 
 (** Common secret-bearing value patterns — structural prefixes only.
 
@@ -45,14 +45,14 @@ let url_credential_re =
     once at init, not rebuilt on every [redact_text] call. [Re] is thread-safe
     (see file header), so sharing compiled regexes across fibers/domains is
     safe — [url_credential_re] already does this. *)
-let bearer_re =
-  Re.compile (Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])])
+let bearer = Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])]
+let bearer_re = Re.compile bearer
 
-let sk_re =
-  Re.compile (Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])])
+let sk = Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])]
+let sk_re = Re.compile sk
 
-let awsakia_re =
-  Re.compile (Re.seq [Re.bow; Re.str "AKIA"; Re.repn Re.alnum 16 (Some 16); Re.eow])
+let awsakia = Re.seq [Re.bow; Re.str "AKIA"; Re.repn Re.alnum 16 (Some 16); Re.eow]
+let awsakia_re = Re.compile awsakia
 
 (* GitHub token prefixes, per the official token-format table
    (docs.github.com "About authentication to GitHub", checked 2026-08-17):
@@ -67,20 +67,21 @@ let awsakia_re =
    Lengths are deliberately unconstrained — GitHub documents the 40-char
    assumption as already broken by the stateless format, and a masking layer
    must not leak a token because it is longer or shorter than expected. *)
-let github_token_re =
-  Re.compile
-    (Re.seq
-       [ Re.bow
-       ; Re.alt
-           [ Re.str "github_pat_"
-           ; Re.str "ghp_"
-           ; Re.str "gho_"
-           ; Re.str "ghu_"
-           ; Re.str "ghs_"
-           ; Re.str "ghr_"
-           ]
-       ; Re.rep1 (Re.alt [ Re.alnum; Re.set "_-." ])
-       ])
+let github_token =
+  Re.seq
+    [ Re.bow
+    ; Re.alt
+        [ Re.str "github_pat_"
+        ; Re.str "ghp_"
+        ; Re.str "gho_"
+        ; Re.str "ghu_"
+        ; Re.str "ghs_"
+        ; Re.str "ghr_"
+        ]
+    ; Re.rep1 (Re.alt [ Re.alnum; Re.set "_-." ])
+    ]
+
+let github_token_re = Re.compile github_token
 
 (** A PEM private key block, header to footer.
 
@@ -134,7 +135,7 @@ let redact_pem_blocks s = Re.replace_string pem_private_key_re ~by:"[REDACTED]" 
     automatically. The [sk-] body allows [-] so modern [sk-proj-...] keys are
     matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
     at both ends so a 17-char run is not truncated to its first 16 chars. *)
-let secret_res () =
+let secret_res =
   [ url_credential_re
   ; bearer_re
   ; sk_re
@@ -142,11 +143,23 @@ let secret_res () =
   ; github_token_re
   ]
 
+(* A text matches [Re.alt] of the patterns exactly when it matches one of them,
+   and a replacement pass that finds no match returns its input. So when this
+   scan finds nothing, every pass in [secret_res] would leave the text as it
+   is, and [redact_text] skips them: one scan instead of five for the text that
+   carries no secret. When the scan finds a match the passes run in their
+   order. One alternation pass would not give the same text: it takes leftmost
+   matches across patterns, so a [Bearer] value holding [://user] and then a
+   tab before [@] would cover [Bearer ...://user] and leave the tab and the
+   password visible, where the ordered passes redact the URL credential
+   first. *)
+let any_secret_re = Re.compile (Re.alt [ url_credential; bearer; sk; awsakia; github_token ])
+
 let redact_text (s : string) : string =
-  List.fold_left
-    (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
-    (redact_pem_blocks s)
-    (secret_res ())
+  let s = redact_pem_blocks s in
+  if Re.execp any_secret_re s
+  then List.fold_left (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc) s secret_res
+  else s
 
 let rec redact_json_strings = function
   | `String s -> `String (redact_text s)

@@ -181,7 +181,6 @@ harness_mint_admin_token() {
   if ! token_json="$(
     env -u MCP_TOKEN -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
       MASC_BASE_PATH="$base_path" \
-      MASC_BASE_PATH_INPUT="$base_path" \
       "$server_exe" login \
       --base-path "$base_path" \
       --host 127.0.0.1 \
@@ -219,7 +218,6 @@ harness_start_server() {
   harness_seed_server_config "$repo_root" "$base_path"
   (
     export MASC_BASE_PATH="$base_path"
-    export MASC_BASE_PATH_INPUT="$base_path"
     unset MCP_TOKEN
     unset MCP_AUTH_TOKEN
     unset MASC_ADMIN_TOKEN

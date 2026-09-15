@@ -740,11 +740,6 @@ const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_repl
     'never', 'awaiting_reply', 'delivered', 'fresh', 'stale', 'error', 'unknown',
   ])
 
-const KEEPER_CONTINUITY_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['continuity_state']>> =
-  new Set<NonNullable<KeeperDiagnostic['continuity_state']>>([
-    'not_running', 'recovering', 'healthy', 'disabled', 'offline',
-  ])
-
 // Generic typed-parse helper. Returns the input value typed as `T` if
 // `set` accepts it, else `null`. Callers compose with `?? <default>`
 // for the fallback. This pattern is repeated 3 times in other dashboard
@@ -782,7 +777,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
-    continuity_state: membershipParse(KEEPER_CONTINUITY_STATES, asString(raw.continuity_state)),
   }
 }
 

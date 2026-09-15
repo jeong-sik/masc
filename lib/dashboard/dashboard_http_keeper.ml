@@ -659,10 +659,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                  ~keepalive_running
 	                  ~history_items:conversation_items
 	                  ~now_ts
-	                |> Keeper_status_runtime.augment_keeper_diagnostic_json
-	                     ~keepalive_running
-	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
-                     ~now_ts
               in
               let runtime_trust =
                 if compact

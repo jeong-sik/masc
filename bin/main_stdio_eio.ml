@@ -20,7 +20,6 @@ let run_cmd cli_base_path =
       (Server_base_path_guard.startup_root ~cli_base_path)
   in
   let normalized_base_path = workspace.Workspace_root.root in
-  Unix.putenv "MASC_BASE_PATH_INPUT" workspace.Workspace_root.requested;
   Unix.putenv
     "MASC_BASE_PATH_RESOLUTION_SOURCE"
     (Workspace_root.source_label workspace.Workspace_root.source);

@@ -43,11 +43,14 @@ let%test "run_with_body_deadline does not relabel a nested timeout exception" =
       ~clock:(Some (Eio.Stdenv.clock env))
       ~timeout_s:(Some 1.0)
   with
-  | Error _ -> false
   | Ok deadline ->
     (match run_with_body_deadline deadline (fun () -> raise Eio.Time.Timeout) with
      | exception Eio.Time.Timeout -> true
      | (exception _) | Body_completed _ | Body_deadline_exceeded _ -> false)
+  (* A refused budget is the resolver's failure, not a relabeling one: say so
+     rather than report it under this test's name with no reason. *)
+  | Error (Http_client.AcceptRejected { reason }) -> failwith reason
+  | Error _ -> failwith "run_with_body_deadline: the test deadline was refused"
 ;;
 
 let provider_parse_failure ?parser message =

@@ -93,6 +93,10 @@ let summary = function
         (match t.Observer.tc_cost_usd with
          | Some c -> Printf.sprintf "%.4f" c
          | None -> "-")
+  | Observer.Event (Observer.Keeper_turn_observation o) ->
+      Printf.sprintf "observation(%s,call=%s,completed=%s)" o.Observer.to_keeper
+        (match o.Observer.to_session_turn with Some n -> string_of_int n | None -> "-")
+        (match o.Observer.to_total_turns with Some n -> string_of_int n | None -> "-")
   | Observer.Event (Observer.Keeper_composite_changed { keeper; _ }) ->
       "composite(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
@@ -170,6 +174,21 @@ let keeper_tool_call_frame =
 let keeper_tool_call_frame_without_turn =
   "data: {\"type\":\"keeper_tool_call\",\"name\":\"largo\",\"tool_name\":\"Read\",\
    \"duration_ms\":8,\"disposition\":\"completed\",\"ts_unix\":1787507570.02}\n\n"
+
+(* Shape from keeper_hooks_agent_core.ml: the hook's per-call report names
+   the keeper, the agent session's ordinal for the call and the keeper turns
+   completed before it. *)
+let turn_observation_frame =
+  "data: {\"type\":\"keeper_turn_observation\",\"usage_projection\":\"raw_observation\",\
+   \"response_id\":null,\"name\":\"largo\",\"turn\":1157,\"model_used\":null,\
+   \"input_tokens\":73877,\"output_tokens\":358,\"cost_usd\":0.0258,\
+   \"tool_calls_made\":2,\"cache_read_tokens\":null,\"cache_n\":null,\
+   \"prompt_n\":null,\"total_turns\":718,\"ts_unix\":1787505649.0}\n\n"
+
+let test_a_turn_observation_names_the_call_and_the_completed_count () =
+  check (list string) "the keeper, the session ordinal and the completed count"
+    [ "observation(largo,call=1157,completed=718)" ]
+    (List.map summary (decode_all [ turn_observation_frame ]))
 
 let test_keeper_events_decode_by_name () =
   check (list string)
@@ -313,6 +332,12 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
        ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
        ; waiting_inventory_frame; operator_digest_frame
        ; transport_health_frame; fusion_run_status_frame
+       (* A turn observation numbers a provider call inside a keeper turn and
+          carries no transcript. It was absent from this list when the frame
+          was added, and the reader silently stopped being exhaustive. Every
+          frame this suite can build belongs here, so the next one cannot
+          skip the question. *)
+       ; turn_observation_frame
        ]);
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])
@@ -552,5 +577,7 @@ let () =
             test_streaming_telemetry_names_no_agent
         ; test_case "a frame this cannot read says why" `Quick
             test_a_frame_this_cannot_read_says_why
+        ; test_case "a turn observation names the call and the completed count"
+            `Quick test_a_turn_observation_names_the_call_and_the_completed_count
         ] )
     ]

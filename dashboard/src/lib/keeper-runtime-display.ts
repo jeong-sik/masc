@@ -289,10 +289,7 @@ function attentionReasonForPause(value: string | null | undefined): string | nul
 }
 
 function diagnosticStateLabel(keeper: Keeper): string | null {
-  const health = codeLabel(keeper.diagnostic?.health_state)
-  const continuity = codeLabel(keeper.diagnostic?.continuity_state)
-  if (health && continuity && health !== continuity) return `${health}/${continuity}`
-  return health ?? continuity
+  return codeLabel(keeper.diagnostic?.health_state)
 }
 
 function transientProviderRuntimeText(value: string | null | undefined): boolean {

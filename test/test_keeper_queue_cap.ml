@@ -81,7 +81,7 @@ protocol = "openai-compatible-http"
 endpoint = %S
 [models.sample]
 api-name = "busy-model"
-max-context = 8192
+max-context = 200000
 streaming = true
 [busy.sample]
 max-concurrent = 1

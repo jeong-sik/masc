@@ -7,7 +7,7 @@
     the list reads back. *)
 module D = Masc_domain
 module W = Workspace_core
-module Attention = Operator_task_attention
+module Attention = Masc.Operator_task_attention
 module Store = Workspace_verification_store
 
 let () = Mirage_crypto_rng_unix.use_default ()

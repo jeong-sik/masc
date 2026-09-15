@@ -335,7 +335,7 @@ let test_attention_empty () =
 let test_attention_grades_the_operators_tasks () =
   let items =
     Dashboard_attention.detect_operator_tasks
-      [ Operator_task_attention.Cancel_claim
+      [ Masc.Operator_task_attention.Cancel_claim
           { task_id = "task-348"
           ; assignee = "goo-yang-bong"
           ; submitted_at = "2026-09-08T23:28:19Z"
@@ -343,12 +343,12 @@ let test_attention_grades_the_operators_tasks () =
               Workspace_verification_store.Cancellation_reason_stated
                 "the issue this answers was closed upstream"
           }
-      ; Operator_task_attention.Held_without_actor
+      ; Masc.Operator_task_attention.Held_without_actor
           { task_id = "task-1486"
           ; assignee = "codex-mcp-client"
           ; since = "2026-09-04T00:00:00Z"
           }
-      ; Operator_task_attention.Producer_record_unreadable
+      ; Masc.Operator_task_attention.Producer_record_unreadable
           { task_id = "task-900"
           ; producer = "half-written-keeper"
           ; since = "2026-09-05T00:00:00Z"

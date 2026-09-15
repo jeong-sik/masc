@@ -39,8 +39,9 @@ val wake_approved_producer :
   authority:Masc_domain.completion_authority ->
   delivery
 (** Commit the typed approval stimulus to the producer's durable queue and
-    then attempt a live wake. Identity resolution matches
-    [Completion_authority_wakeup]: a live registry entry's exact [agent_name]
-    binding is authoritative; a stopped producer is resolved from persisted
-    Keeper metadata; an absent or ambiguous binding is an explicit typed
-    delivery failure, not a silent drop. *)
+    then attempt a live wake. The producer is resolved by
+    {!Keeper_producer_route}, as for a rejection: a live registry entry, then
+    a Keeper meta file at the producer's name. Neither is
+    [Unroutable_producer]; a meta file this binary cannot decode is
+    [Producer_identity_lookup_failed]. Both are logged by the caller, not
+    dropped silently. *)

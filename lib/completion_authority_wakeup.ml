@@ -16,23 +16,6 @@ type delivery =
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
-let producer_keeper_name
-      ~(config : Workspace_utils_backend_setup.config)
-      producer
-  =
-  match
-    Keeper_registry_lookup.find_by_name_in_base_path
-      ~base_path:config.Workspace.base_path
-      producer
-  with
-  | Some entry -> Ok (Some entry.name)
-  | None ->
-    (match Keeper_meta_store.read_meta config producer with
-     | Ok (Some _) -> Ok (Some producer)
-     | Ok None -> Ok None
-     | Error detail -> Error detail)
-;;
-
 let wake_rejected_producer
       ~(config : Workspace_utils_backend_setup.config)
       ~producer
@@ -41,12 +24,12 @@ let wake_rejected_producer
       ~reason
       ~authority
   =
-  match producer_keeper_name ~config producer with
+  match Keeper_producer_route.resolve ~config producer with
   | Error detail ->
     Producer_identity_lookup_failed { producer; task_id; detail }
-  | Ok None ->
+  | Ok Keeper_producer_route.No_keeper ->
     Unroutable_producer { producer; task_id }
-  | Ok (Some keeper_name) ->
+  | Ok (Keeper_producer_route.Keeper keeper_name) ->
     let rejection : Keeper_event_queue.completion_authority_rejection =
       { car_task_id = task_id
       ; car_verification_id = verification_id
@@ -93,7 +76,7 @@ let wake_rejected_producer
             { keeper_name; detail = Printexc.to_string exn }))
 
 
-type recovery_report = { delivered : int; retained : int }
+type recovery_report = { delivered : int; unroutable : int; retained : int }
 
 let reconcile_pending ~config =
   match Workspace_task_rejection_outbox.pending config with
@@ -104,40 +87,53 @@ let reconcile_pending ~config =
         match wake_rejected_producer ~config ~producer:item.producer
                 ~task_id:item.task_id ~verification_id:item.verification_id
                 ~reason:item.reason ~authority:item.authority with
-        | Signaled _ -> Ok ()
+        | Signaled _ -> Ok `Queued
         | Durable_deferred { keeper_name; _ } ->
           Log.Misc.warn
             "completion repair queued; Keeper wake deferred task_id=%s keeper=%s"
             item.task_id keeper_name;
-          Ok ()
+          Ok `Queued
         | Durable_wake_failed { keeper_name; detail } ->
           Log.Misc.error
             "completion repair queued; live wake failed task_id=%s keeper=%s detail=%s"
             item.task_id keeper_name detail;
-          Ok ()
-        | Unroutable_producer { producer; _ } ->
-          Error ("producer Keeper is unavailable: " ^ producer)
+          Ok `Queued
+        (* No Keeper carries this name and none has a meta file under it, so
+           no queue will ever be read for it: an MCP client that submitted
+           the Task is the usual producer here. Retrying cannot create one.
+           The verdict and its reason already stand on the Task (the rejection
+           handoff committed with it), so the delivery obligation ends here
+           instead of being retried every interval for good. *)
+        | Unroutable_producer _ -> Ok `No_keeper
         | Producer_identity_lookup_failed { detail; _ }
         | Durable_queue_failed { detail; _ } -> Error detail
       in
       let acknowledged =
         match queued with
         | Error _ as error -> error
-        | Ok () ->
-          Workspace_task_rejection_outbox.acknowledge config
-            ~task_id:item.task_id ~verification_id:item.verification_id
+        | Ok outcome ->
+          Result.map
+            (fun () -> outcome)
+            (Workspace_task_rejection_outbox.acknowledge config
+               ~task_id:item.task_id ~verification_id:item.verification_id)
       in
       match acknowledged with
-      | Ok () ->
+      | Ok `Queued ->
         Log.Misc.info
           "completion repair delivered task_id=%s verification_id=%s producer=%s"
           item.task_id item.verification_id item.producer;
         { report with delivered = report.delivered + 1 }
+      | Ok `No_keeper ->
+        Log.Misc.warn
+          "completion rejection has no Keeper to deliver to; the verdict stays \
+           on the Task task_id=%s verification_id=%s producer=%s"
+          item.task_id item.verification_id item.producer;
+        { report with unroutable = report.unroutable + 1 }
       | Error detail ->
         Log.Misc.error
           "completion repair remains pending task_id=%s verification_id=%s producer=%s detail=%s"
           item.task_id item.verification_id item.producer detail;
         { report with retained = report.retained + 1 }
     in
-    Ok (List.fold_left deliver { delivered = 0; retained = 0 } pending)
+    Ok (List.fold_left deliver { delivered = 0; unroutable = 0; retained = 0 } pending)
 ;;

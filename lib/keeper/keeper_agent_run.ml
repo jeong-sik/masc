@@ -1445,10 +1445,10 @@ let run_turn
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
          let last_persisted_checkpoint_ref = ref None in
-         (* The stage saves of this turn write one growing history. The memo
-            keeps each saved message's encoding, so a stage encodes only the
-            messages the previous stage did not write; the first save of the
-            turn encodes the whole history. *)
+         (* The stage saves of this turn and its finalize save write one
+            growing history. The memo keeps each saved message's encoding, so a
+            save encodes only the messages the previous save did not write; the
+            first save of the turn encodes the whole history. *)
          let checkpoint_encoding_memo = Agent_core.Checkpoint.create_encoding_memo () in
          (* masc#28885: typed pre_tool_use rejects recorded by the
             official-client host during this turn. Flushed into the
@@ -1859,6 +1859,7 @@ let run_turn
                              ~result
                              ~last_persisted_checkpoint:
                                !last_persisted_checkpoint_ref
+                             ~checkpoint_encoding_memo
                              ~final_agent_core_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0

@@ -559,16 +559,23 @@ let message_measurer () =
     Buffer.length buffer
 ;;
 
-(* The measured byte count is a pure function of the message value, so the memo
-   is keyed by value. Each request passes its history through
+(* The memo is keyed by message value. Each request passes its history through
    [Complete_common.transmitted_history], which allocates a new record for every
-   message ([Reasoning_history_projection.project]); a physical-identity key
-   would miss on every request and add the whole history to the table again.
+   message ([Reasoning_history_projection.project]), so the key has to survive a
+   rebuilt record.
+
+   Messages equal under [Stdlib.compare] encode to the same bytes with one
+   exception: a float zero inside a raw JSON payload ([ToolUse.input],
+   [ToolResult.json], [reasoning_detail.raw], [metadata]): [0.0] and [-0.0]
+   compare equal, and [-0.0] encodes one byte longer. Two such messages in one
+   attempt share the first measurement, a difference of one byte per zero that
+   [unmeasured_request_reserve_divisor] already absorbs.
 
    [Stdlib.compare] returns at once for physically equal values, and a
    projected record still points at the same content blocks, so a hit walks the
-   block list rather than the bodies. The message type holds no functional
-   values, so [compare] cannot raise. *)
+   block list rather than the bodies. It raises on functional or abstract
+   values; [Agent_core.Types.message] holds neither today, and a field of such a
+   type would have to change this key. *)
 module Message_value = struct
   type t = Agent_core.Types.message
 
@@ -576,12 +583,12 @@ module Message_value = struct
 
   let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
 
-  (* A string contributes its length, at most [string_hint_samples] evenly
-     spaced bytes, and its last byte, so the hash stays independent of
-     tool-result body size. [Hashtbl.hash] would hash every byte of the first
-     strings it reaches. A short string contributes every byte: ids such as
-     [call_00000123] share their length and most of their bytes, so a few
-     fixed positions would give them a handful of hash values. *)
+  (* A string contributes its length, bytes at a fixed stride of
+     [length / string_hint_samples] (fewer than [2 * string_hint_samples] of
+     them), and its last byte, so the hash stays independent of tool-result body
+     size. [Hashtbl.hash] would hash every byte of the first strings it reaches.
+     A string shorter than [2 * string_hint_samples] contributes every byte: ids
+     such as [call_00000123] share their length and most of their bytes. *)
   let string_hint_samples = 32
 
   let string_hint value =
@@ -1898,6 +1905,7 @@ module For_testing = struct
   let observe_request_wire_error = observe_request_wire_error
   let message_measurer = message_measurer
   let memoize_message_measurement = memoize_message_measurement
+  let message_measurement_hash = Message_value.hash
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
 end

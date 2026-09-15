@@ -1335,6 +1335,39 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
+type init_skills = { changed : int; skill_failed : bool }
+
+(* Every package's verdict is printed. A package that was not reconciled
+   fails the command; packages kept for operator review do not. *)
+let init_builtin_skills_reconcile = function
+  | Error error ->
+    Printf.eprintf "init: builtin Skills were not reconciled: %s\n"
+      (Builtin_skill_package.error_message error);
+    { changed = 0; skill_failed = true }
+  | Ok reports ->
+    List.fold_left (fun tally report ->
+      Printf.printf "%s\n" (Builtin_skill_package.report_to_string report);
+      match report with
+      | Builtin_skill_package.Bundled
+          { result = Ok (Builtin_skill_package.Install_missing
+                        | Builtin_skill_package.Adopt_identical
+                        | Builtin_skill_package.Replace_recorded _); _ }
+      | Builtin_skill_package.Retired
+          { result = Ok (Builtin_skill_package.Retire_recorded _); _ } ->
+        { tally with changed = tally.changed + 1 }
+      | Builtin_skill_package.Bundled
+          { result = Ok (Builtin_skill_package.Up_to_date
+                        | Builtin_skill_package.Keep_modified _
+                        | Builtin_skill_package.Keep_untracked_different _
+                        | Builtin_skill_package.Keep_uninspectable _); _ }
+      | Builtin_skill_package.Retired
+          { result = Ok (Builtin_skill_package.Keep_retired_modified _
+                        | Builtin_skill_package.Keep_retired_uninspectable _); _ } -> tally
+      | Builtin_skill_package.Bundled { result = Error _; _ }
+      | Builtin_skill_package.Retired { result = Error _; _ } ->
+        { tally with skill_failed = true })
+      { changed = 0; skill_failed = false } reports
+
 let init_cmd_exit base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
@@ -1362,10 +1395,12 @@ let init_cmd_exit base_path force scope record_default =
            Embedded_config.file_list))
   in
   let skills = match scope with
-    | Config_only -> 0
-    | All | Skills_only -> Server_runtime_config_root_bootstrap.refresh_builtin_skills ~base_path in
-  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed or updated (root=%s)\n"
-    result.written result.skipped result.failed skills target_root;
+    | Config_only -> { changed = 0; skill_failed = false }
+    | All | Skills_only ->
+      init_builtin_skills_reconcile
+        (Server_runtime_config_root_bootstrap.reconcile_builtin_skills ~base_path) in
+  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) changed (root=%s)\n"
+    result.written result.skipped result.failed skills.changed target_root;
   (* A seeded workspace is the one thing a later bare `masc` needs to know
      about, and until now nothing wrote it down: the operator had to re-supply
      --base-path or MASC_BASE_PATH on every command. Recorded on success only,
@@ -1376,7 +1411,7 @@ let init_cmd_exit base_path force scope record_default =
      throwaway workspace, and a default recorded from one of those points the
      next process at a directory that is about to vanish. Only a person asks:
      the installer and `masc setup` on a terminal, and the setup journey. *)
-  if record_default && result.failed = 0 then (
+  if record_default && result.failed = 0 && not skills.skill_failed then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
       Printf.printf "default workspace recorded: %s\n" path
@@ -1401,7 +1436,7 @@ let init_cmd_exit base_path force scope record_default =
       Printf.printf
         "default workspace not recorded: a test executable does not write the \
          operator's default\n");
-  if result.failed > 0 then 1 else 0
+  if result.failed > 0 || skills.skill_failed then 1 else 0
 
 let init_cmd =
   let doc =
@@ -1410,8 +1445,11 @@ let init_cmd =
      Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
      -- it does not autoboot, so it waits until a model and a sandbox exist. \
      The same split the server makes when it creates a config root itself. \
-     Existing config files are kept unless --force; recorded, unmodified Skill packages are updated. Operator edits and \
-     packages without installation receipts are preserved."
+     Existing config files are kept unless --force. Builtin Skill packages are \
+     reconciled with this binary: missing ones are installed, unmodified recorded \
+     ones are updated or, when no longer shipped, moved aside, and packages whose \
+     files already match are recorded. Operator edits and packages without \
+     installation receipts are kept, and each package's result is printed."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info
@@ -1440,14 +1478,11 @@ let skills_refresh_exit base_path name apply expected_revision expected_bundle_r
       | (None, _) | (Some _, None) ->
         prerr_endline "--apply requires --expected-revision and --expected-bundle-revision from a reviewed package"; 1
       | Some installed_revision, Some bundled_revision ->
-        (match Builtin_skill_package.install ~base_path
-                 ~request:(Builtin_skill_package.Replace_if_revisions { installed_revision; bundled_revision }) package with
-         | Ok (Builtin_skill_package.Updated { backup }) ->
+        (match Builtin_skill_package.replace_reviewed ~base_path
+                 ~installed_revision ~bundled_revision package with
+         | Ok (Builtin_skill_package.Replaced { backup }) ->
            Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
-         | Ok Builtin_skill_package.Current -> print_endline "Package is current"; 0
-         | Ok (Builtin_skill_package.Installed | Builtin_skill_package.Already_present
-               | Builtin_skill_package.Preserved _ | Builtin_skill_package.Preserved_uninspectable _) ->
-           prerr_endline "Package was not replaced"; 1
+         | Ok Builtin_skill_package.Already_current -> print_endline "Package is current"; 0
          | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
     else if Option.is_some expected_revision || Option.is_some expected_bundle_revision then (
       prerr_endline "Expected revisions require --apply"; 1)

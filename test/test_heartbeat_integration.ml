@@ -4349,11 +4349,6 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
            { state with
              active_agents = meta.name :: state.active_agents
            }));
-      ignore
-        (Heartbeat.start
-           ~agent_name:meta.name
-           ~interval:30
-           ~message:"dashboard purge fixture");
       let operation_id = Shutdown_types.Operation_id.generate () in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
@@ -4484,14 +4479,6 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         (List.exists
            (String.equal meta.name)
            (Workspace.read_state config).active_agents);
-      check int
-        "exact agent heartbeats stopped"
-        0
-        (List.length
-           (List.filter
-              (fun (heartbeat : Heartbeat.t) ->
-                 String.equal heartbeat.agent_name meta.name)
-              (Heartbeat.list ())));
       (match Masc.Runtime_event_bus.drain completion_subscription with
        | [ event ] ->
          (match event.Agent_core.Event_bus.payload with

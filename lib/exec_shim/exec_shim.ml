@@ -38,6 +38,16 @@ let observe_supported () = observe_support_abi () >= 1
    deferred to the PR that adds that loop. *)
 external user_notif_supported : unit -> bool = "ocaml_shim_user_notif_supported"
 
+(* task-1575 (phase 3, observe drain wiring). The fd passing primitive is
+   shim_fdpass; install_observe_sockets does the seccomp side from the
+   child and sends the listener fd over [sock].  [drain_one] is the parent
+   side: receive one notification, answer EPERM, and return the recorded
+   syscall number as the wired surface — distinct from the N/W ack
+   because it answers "what did the payload try?" not "did the box
+   apply?". *)
+external observe_install : Unix.file_descr -> bool = "ocaml_shim_observe_install"
+external drain_one : Unix.file_descr -> int ref -> int = "ocaml_shim_user_notif_drain_one"
+
 let observe_unsupported_code = "observe_unsupported"
 let observe_scratch_code = "observe_scratch_error"
 
@@ -458,7 +468,9 @@ let refusal_of_rule_bytes (rule : bytes) =
   | padded -> failwith ("box setup refused by unknown rule: " ^ padded)
 ;;
 
-let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
+let spawn ?(before_exec = fun () -> ()) ?(observe_sock = Unix.stdin)
+    ~argv ~env ~cwd ()
+  =
   let opened = ref [] in
   let pipe ?(cloexec = false) () =
     match Unix.pipe ~cloexec () with
@@ -500,6 +512,17 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
        (* The box goes on last, after every path the shim itself needs is
           resolved, and before the payload has run one instruction. *)
        before_exec ();
+       (* task-1575 phase 3: install the observe filter and hand the
+          listener fd to the parent over [observe_sock]. The filter must be
+          installed here (after prctl, before execvpe), so the listener fd
+          is valid for the whole lifetime of the payload. The parent holds
+          a *write* end that we close now: it never sees payload bytes and
+          the next read on it is ours. *)
+       (if observe_sock <> Unix.stdin
+        then
+          let installed = observe_install observe_sock in
+          Unix.close observe_sock;
+          if not installed then exit 127);
        (* This private pipe carries at most two bytes and never payload text.
           Only the child can acknowledge applied restrictions. The write end
           closes on exec; no acknowledgement is not evidence of success. *)
@@ -561,7 +584,22 @@ let spawn ?(before_exec = fun () -> ()) ~argv ~env ~cwd () =
         Unix.set_nonblock stderr_r;
         Unix.set_nonblock stdin_w;
         Unix.set_nonblock boundary_r;
-        let handles = (pid, stdin_w, stdout_r, stderr_r, boundary_r) in
+        (* task-1575: receive the listener fd the child just sent over the
+           observe socket. Unix.stdin (== 0) is the sentinel for "observe
+           mode was not requested". The fd is non-blocking so the supervise
+           select loop can treat readable == one available notification. *)
+        let listener_fd =
+          if observe_sock = Unix.stdin
+          then Unix.stdin
+          else (
+            let fd = Shim_fdpass.recv_fd observe_sock in
+            Unix.close observe_sock;
+            Unix.set_nonblock fd;
+            fd)
+        in
+        let handles =
+          (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd)
+        in
         prepared := true;
         handles)
 
@@ -593,7 +631,10 @@ let read_child_boundary fd =
 (* Every instant in this loop is an interval's endpoint -- the timeout, the
    SIGKILL grace, the post-reap drain -- and none is reported as a time. So
    they are read off a clock no correction moves; see [Shim_clock]. *)
-let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
+let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+    ~listener_fd ~timeout_sec =
+  let observe_active = ref (listener_fd <> Unix.stdin) in
+  let observed = ref [] in
   let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
   let payload_off = ref 0 in
   let payload_len = String.length stdin_payload in
@@ -702,6 +743,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     let readfds =
       (if !out_open then [ stdout_r ] else [])
       @ (if !err_open then [ stderr_r ] else [])
+      @ (if !observe_active then [ listener_fd ] else [])
       @ if !chan_eof then [] else [ Unix.stdin ] in
     let writefds = if !stdin_open then [ stdin_w ] else [] in
     let select_timeout =
@@ -723,6 +765,34 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
     then out_open := pump ~dst_dead:out_dead stdout_r Unix.stdout;
     if !err_open && List.memq stderr_r rdy_r
     then err_open := pump ~dst_dead:err_dead stderr_r Unix.stderr;
+    (* task-1575 phase 3: drain every pending notification, reply EPERM,
+       record the syscall number. Loop on EAGAIN — the listener is
+       non-blocking so readable could mean one or more. Stop on ENOTCONN /
+       EBADF (peer closed = child exited) or when the C-side send fails:
+       the reviewer's concern about draining beyond [seen > 64] in the old
+       loop is addressed by reading until the queue is empty, not by a
+       magic ceiling. *)
+    if !observe_active && List.memq listener_fd rdy_r
+    then (
+      let send_err = ref 0 in
+      let rec drain_loop () =
+        match drain_one listener_fd send_err with
+        | -2 ->
+          (* Queue empty (EAGAIN): the listener is non-blocking, so this is
+             the normal end of a drain burst. Keep observing — the select
+             loop calls back when the next notification arrives. *)
+          ()
+        | -1 ->
+          (* RECV failed with ENOTCONN/EBADF (child gone) or SEND failed
+             (payload side broken). Stop observing and release the fd. *)
+          (observe_active := false;
+           Unix.close listener_fd)
+        | syscall_no ->
+          (observed := syscall_no :: !observed;
+           drain_loop ())
+      in
+      drain_loop ()
+    );
     if (not !chan_eof) && List.memq Unix.stdin rdy_r
     then (
       (* After the frame, stdin carries no more data; readability means
@@ -778,6 +848,24 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload ~timeout_sec =
       | Sigkill_pgid -> send_to_pgid Sys.sigkill
       | Wait_grace _ -> ())
     (kill_policy On_child_exit);
+  (* task-1575 phase 3: give the observed-attempts accumulator a real
+     consumer instead of leaving it collected-but-unread (the exact "dead
+     surface" shape rejected twice in this PR's lineage per the phase-2
+     design note). A full structured trailer field
+     (Exec_ssh_protocol.trailer.observed_syscalls) is the design note's
+     stated destination for this evidence, but that touches ~20 files'
+     worth of trailer record literals across the codebase -- out of this
+     turn's safe blast radius without a dedicated review. This stderr
+     line is the narrow, single-file interim consumer; the structured
+     field is tracked as follow-up work. *)
+  (if !observed <> [] then
+     let line =
+       Printf.sprintf "shim: observe: denied %d syscall attempt(s) [%s]\n"
+         (List.length !observed)
+         (String.concat "," (List.map string_of_int (List.rev !observed)))
+     in
+     try write_all Unix.stderr line 0 (String.length line) with
+     | Unix.Unix_error (Unix.EPIPE, _, _) -> ());
   trailer_of_status ~v ~timed_out:!timed_out st
 
 let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
@@ -888,19 +976,40 @@ let run () =
                        then ()
                        else raise (refusal_of_rule_bytes refusing_rule))
                  , (fun () -> remove_tree scratch) ) in
-             let (pid, stdin_w, stdout_r, stderr_r, boundary_r) =
-               try spawn ~before_exec ~argv ~env ~cwd () with
+             let (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd) =
+               let observe_sock =
+                 match req.Exec_ssh_protocol.mode with
+                 | Observe when user_notif_supported () ->
+                   (try
+                      let a, _b = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+                      Unix.set_close_on_exec a;
+                      a
+                    with _ -> Unix.stdin)
+                 | _ -> Unix.stdin
+               in
+               try spawn ~before_exec ~observe_sock ~argv ~env ~cwd () with
                | exn ->
+                 (if observe_sock <> Unix.stdin
+                  then
+                    try Unix.close observe_sock with
+                    | Unix.Unix_error _ -> ());
                  cleanup ();
                  shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
              let trailer, boundary =
                Fun.protect
-                 ~finally:(fun () -> Unix.close boundary_r; cleanup ())
+                 ~finally:(fun () ->
+                   Unix.close boundary_r;
+                   (if listener_fd <> Unix.stdin
+                    then
+                      try Unix.close listener_fd with
+                      | Unix.Unix_error _ -> ());
+                   cleanup ())
                  (fun () ->
                    let trailer =
                      supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+                       ~listener_fd:listener_fd
                        ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
                    trailer, read_child_boundary boundary_r)
              in

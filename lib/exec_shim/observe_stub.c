@@ -462,9 +462,10 @@ CAMLprim value ocaml_shim_user_notif_drain(value vlistener)
     resp.id = req.id;
     resp.error = -EPERM;
     resp.flags = 0;
-    ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp);
+    if (ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp) != 0) break;
     seen++;
-    if (seen > 64) break;  /* belt for a stuck payload; never the expected shape */
+    /* No magic ceiling: RECV returning EAGAIN (non-blocking listener) or
+       ENOTCONN (child gone) ends the loop. */
   }
   CAMLreturn(Val_int(seen));
 }
@@ -508,5 +509,44 @@ report:
   (void) refusing_rule; (void) vdeny_fs; (void) vdeny_net;
   unix_error(ENOSYS, "restrict_self", Nothing);
   CAMLreturn(Val_unit);
+#endif
+}
+
+/* One iteration of the supervisor drain (task-1575 phase 3 wiring).
+   Returns the syscall number from the next pending notification, replies
+   EPERM, and reports the send status to the caller through [vno_send]:
+   0 when the reply was delivered, errno when ioctl failed.  Single-call
+   drain so the cap on outstanding notifications moves to the OCaml loop
+   (reviewer concern: drain until EAGAIN, not a magic ceiling). */
+CAMLprim value ocaml_shim_user_notif_drain_one(value vlistener, value vno_send)
+{
+  CAMLparam2(vlistener, vno_send);
+#ifdef __linux__
+  int fd = Int_val(vlistener);
+  struct shim_seccomp_notif req;
+  struct shim_seccomp_notif_resp resp;
+  memset(&req, 0, sizeof(req));
+  if (ioctl(fd, SECCOMP_IOCTL_NOTIF_RECV, &req) != 0)
+  {
+    int e = errno;
+    Store_field(vno_send, 0, Val_int(e));
+    /* -2: queue empty (EAGAIN) — the caller keeps observing. -1: the
+       child is gone (ENOTCONN/EBADF) — the caller stops. */
+    CAMLreturn(Val_int((e == EAGAIN || e == EWOULDBLOCK) ? -2 : -1));
+  }
+  memset(&resp, 0, sizeof(resp));
+  resp.id = req.id;
+  resp.error = -EPERM;
+  resp.flags = 0;
+  if (ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp) != 0)
+  {
+    Store_field(vno_send, 0, Val_int(errno));
+    CAMLreturn(Val_int(-1));
+  }
+  Store_field(vno_send, 0, Val_int(0));
+  CAMLreturn(Val_int((int) req.data.nr));
+#else
+  Store_field(vno_send, 0, Val_int(ENOSYS));
+  CAMLreturn(Val_int(-1));
 #endif
 }

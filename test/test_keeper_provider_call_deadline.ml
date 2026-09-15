@@ -81,6 +81,9 @@ let sample ?(awaiting_approval = false) ~last_progress_at ~active_tool_count () 
 let threshold_sec = 900.0
 let attempt_started_at = 1_000_000.0
 
+(* The attempt never waited for its admission permit. *)
+let no_wait = Llm_provider.Provider_admission.Before_any_wait
+
 let test_a_progressing_attempt_is_not_stalled () =
   (* Live, 2026-08-12 13:59:44Z: the attempt was cancelled 6 seconds after a
      successful masc_transition, with 30+ tool calls inside the window. Its
@@ -93,6 +96,7 @@ let test_a_progressing_attempt_is_not_stalled () =
        ~now
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:(sample ~last_progress_at:(now -. 6.0) ~active_tool_count:0 ()))
 ;;
 
@@ -106,6 +110,7 @@ let test_a_wedged_attempt_is_stalled () =
        ~now
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:(sample ~last_progress_at:(now -. 3_900.0) ~active_tool_count:0 ()))
 ;;
 
@@ -120,6 +125,7 @@ let test_a_tool_in_flight_is_not_a_stall () =
        ~now
        ~threshold_sec:60.0
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:(sample ~last_progress_at:(now -. 200.0) ~active_tool_count:1 ()))
 ;;
 
@@ -130,6 +136,7 @@ let test_the_threshold_boundary_is_exclusive () =
        ~now
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:
          (sample ~last_progress_at:(now -. threshold_sec) ~active_tool_count:0 ()))
 ;;
@@ -143,12 +150,89 @@ let test_a_missing_sample_falls_back_to_elapsed () =
        ~now:(attempt_started_at +. threshold_sec +. 1.0)
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:None);
   check bool "no sample, elapsed within the threshold, is not a stall" false
     (Try_provider.attempt_stalled
        ~now:(attempt_started_at +. 500.0)
        ~threshold_sec
        ~attempt_started_at
+       ~permit_wait:no_wait
+       ~sample:None)
+;;
+
+let test_a_bounded_permit_wait_is_not_a_stall () =
+  (* A turn queued behind another keeper's stream refreshes no progress
+     signal while it waits, and the wait has a deadline of its own, the
+     admission bound; the watchdog stands down so that bound alone ends it,
+     as [Queue], instead of the two racing for the same threshold. Only
+     bounded waits write the cell, so the fallback with no sample stands
+     down too without leaving anything unbounded. *)
+  let now = attempt_started_at +. threshold_sec +. 1.0 in
+  let waiting = Llm_provider.Provider_admission.Waiting_for_permit in
+  check bool "queued past the threshold, with a sample, is not a stall" false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:waiting
+       ~sample:(sample ~last_progress_at:(now -. threshold_sec -. 1.0) ~active_tool_count:0 ()));
+  check bool "queued past the threshold, with no sample, is not a stall" false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:waiting
+       ~sample:None)
+;;
+
+let test_the_watchdog_counts_from_the_end_of_the_permit_wait () =
+  (* The wait's end is the instant the attempt's own budgets start from: a
+     stream granted late runs under its first-event budget from the grant.
+     The watchdog counts from that instant too, so a long queue is not
+     charged to the provider the moment the permit comes; the silence that
+     is a stall is the silence after the grant. *)
+  let settled_at = attempt_started_at +. threshold_sec -. 1.0 in
+  let settled = Llm_provider.Provider_admission.Wait_settled_at settled_at in
+  let stale_sample = sample ~last_progress_at:attempt_started_at ~active_tool_count:0 () in
+  let just_after_the_grant = settled_at +. threshold_sec -. 1.0 in
+  check bool "a threshold of silence before the grant is not a stall after it" false
+    (Try_provider.attempt_stalled
+       ~now:just_after_the_grant
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:settled
+       ~sample:stale_sample);
+  check bool "nor is it with no sample" false
+    (Try_provider.attempt_stalled
+       ~now:just_after_the_grant
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:settled
+       ~sample:None);
+  let a_threshold_after_the_grant = settled_at +. threshold_sec +. 1.0 in
+  check bool "a threshold of silence after the grant is a stall" true
+    (Try_provider.attempt_stalled
+       ~now:a_threshold_after_the_grant
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:settled
+       ~sample:stale_sample);
+  check bool "and with no sample" true
+    (Try_provider.attempt_stalled
+       ~now:a_threshold_after_the_grant
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:settled
+       ~sample:None);
+  (* A wait that settled before the attempt's own anchor changes nothing. *)
+  let settled_early = Llm_provider.Provider_admission.Wait_settled_at (attempt_started_at -. 1.0) in
+  check bool "a settle instant before the attempt started is not an anchor" true
+    (Try_provider.attempt_stalled
+       ~now:(attempt_started_at +. threshold_sec +. 1.0)
+       ~threshold_sec
+       ~attempt_started_at
+       ~permit_wait:settled_early
        ~sample:None)
 ;;
 
@@ -218,6 +302,7 @@ let test_an_approval_wait_is_not_a_provider_stall () =
        ~now
        ~threshold_sec:60.0
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:
          (sample
             ~awaiting_approval:true
@@ -236,6 +321,7 @@ let test_the_same_silence_stalls_once_the_wait_settles () =
        ~now
        ~threshold_sec:60.0
        ~attempt_started_at
+       ~permit_wait:no_wait
        ~sample:
          (sample
             ~awaiting_approval:false
@@ -250,7 +336,7 @@ let test_yielded_provider_ignores_missing_tool_observation () =
     check bool "main provider yielded; missing tool mirror is not a stall" false
       (Try_provider.provider_lease_stalled
          ~lease_phase:Try_provider.Provider_yielded ~now ~threshold_sec
-         ~attempt_started_at ~sample:observation))
+         ~attempt_started_at ~permit_wait:no_wait ~sample:observation))
     [None; sample ~last_progress_at:attempt_started_at ~active_tool_count:0 ()]
 ;;
 
@@ -296,11 +382,11 @@ let test_resumed_provider_gets_its_own_progress_window () =
     check bool "time spent in the tool is excluded after resume" false
       (Try_provider.provider_lease_stalled ~lease_phase
          ~now:(resumed_at +. threshold_sec) ~threshold_sec
-         ~attempt_started_at ~sample:observation);
+         ~attempt_started_at ~permit_wait:no_wait ~sample:observation);
     check bool "silent main provider still times out after resume" true
       (Try_provider.provider_lease_stalled ~lease_phase
          ~now:(resumed_at +. threshold_sec +. 1.0) ~threshold_sec
-         ~attempt_started_at ~sample:observation))
+         ~attempt_started_at ~permit_wait:no_wait ~sample:observation))
     [None; sample ~last_progress_at:attempt_started_at ~active_tool_count:0 ()]
 ;;
 
@@ -310,7 +396,7 @@ let test_resumed_provider_retains_later_stream_progress () =
   check bool "fresh stream progress takes precedence over resume time" false
     (Try_provider.provider_lease_stalled
        ~lease_phase:(Try_provider.Provider_active_since resumed_at)
-       ~now ~threshold_sec ~attempt_started_at
+       ~now ~threshold_sec ~attempt_started_at ~permit_wait:no_wait
        ~sample:(sample ~last_progress_at:(now -. 1.0) ~active_tool_count:0 ()))
 ;;
 
@@ -378,6 +464,12 @@ let () =
             test_the_threshold_boundary_is_exclusive
         ; test_case "a missing sample falls back to elapsed" `Quick
             test_a_missing_sample_falls_back_to_elapsed
+        ; test_case "a bounded permit wait is not a stall" `Quick
+            test_a_bounded_permit_wait_is_not_a_stall
+        ; test_case
+            "the watchdog counts from the end of the permit wait"
+            `Quick
+            test_the_watchdog_counts_from_the_end_of_the_permit_wait
         ] )
     ; ( "wall_clock_timeout_integration"
       , [ test_case "carries the Wall_clock phase" `Quick

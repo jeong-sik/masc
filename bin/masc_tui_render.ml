@@ -7166,11 +7166,20 @@ let activity_tab_strip ~cols ~on_logs ~after =
 (* [after] is what the caller draws past this title on the same row -- the
    clock and the badge -- so the strip can leave room for it. *)
 let activity_title ~cols ~on_logs ~after reading =
-  Printf.sprintf "%s  %s  \xc2\xb7  %s"
-    (screen_title " MASC Activity")
-    (activity_tab_strip ~cols ~on_logs
-       ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after))
-    reading
+  let strip =
+    activity_tab_strip ~cols ~on_logs
+      ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after)
+  in
+  (* The dot is the strip's, not the row's. It was a literal in this format
+     string, so when the row ran out of width and the strip drew nothing the
+     dot stayed: at 56 columns the title read "MASC Activity    \xc2\xb7  (0 rows
+     \xc2\xb7 0 events held)", a separator with its left side missing. A strip that
+     draws nothing takes its separator with it. *)
+  let strip_part =
+    if Masc_tui_message_layout.display_width strip = 0 then ""
+    else Printf.sprintf "  %s  \xc2\xb7" strip
+  in
+  Printf.sprintf "%s%s  %s" (screen_title " MASC Activity") strip_part reading
 
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in

@@ -207,9 +207,15 @@ let handle_execute_output_stream ~sw ~clock request reqd =
                  let rec loop () =
                    if not !closed
                    then (
+                     (* An event taken as the heartbeat came due is that
+                        event: it has left the subscriber, and a heartbeat
+                        written in its place would drop it from the stream. *)
                      match
-                       Eio.Time.with_timeout clock execute_output_heartbeat_s (fun () ->
-                         Ok (Dashboard_execute_output.take_event subscriber))
+                       Watched_work.run
+                         ~watcher:(fun () ->
+                           Eio.Time.sleep clock execute_output_heartbeat_s;
+                           Error `Timeout)
+                         (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
                      with
                      | Ok event ->
                        if

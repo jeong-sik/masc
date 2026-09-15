@@ -984,7 +984,7 @@ let run () =
                       let a, _b = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
                       Unix.set_close_on_exec a;
                       a
-                    with _ -> Unix.stdin)
+                    with Unix.Unix_error _ -> Unix.stdin)
                  | _ -> Unix.stdin
                in
                try spawn ~before_exec ~observe_sock ~argv ~env ~cwd () with

@@ -36,12 +36,7 @@ let test_block_id_unknown_rejected () =
    purpose: a round after tool results carries no clock, and letting it ride
    would end every tool round's request with a User message again. *)
 let test_block_id_post_tool_round_classes () =
-  List.iter
-    (fun (block, expected) ->
-      check bool
-        (Printf.sprintf "post-tool class of %s" (Prompt_block_id.to_string block))
-        expected
-        (Prompt_block_id.injected_on_post_tool_round block))
+  let pinned =
     [ (Prompt_block_id.Keeper_instructions, true)
     ; (Prompt_block_id.Dynamic_context, false)
     ; (Prompt_block_id.Temporal_summary, false)
@@ -49,6 +44,23 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Operator_note, true)
     ; (Prompt_block_id.Skill_compositions, false)
     ]
+  in
+  List.iter
+    (fun (block, expected) ->
+      check bool
+        (Printf.sprintf "post-tool class of %s" (Prompt_block_id.to_string block))
+        expected
+        (Prompt_block_id.injected_on_post_tool_round block))
+    pinned;
+  (* The table is written by hand, so a constructor added to [all_known]
+     without a row here would pass unpinned. *)
+  List.iter
+    (fun block ->
+      check bool
+        (Printf.sprintf "post-tool class of %s is pinned" (Prompt_block_id.to_string block))
+        true
+        (List.exists (fun (row, _) -> Prompt_block_id.equal row block) pinned))
+    Prompt_block_id.all_known
 
 (* ── TurnRecord codec ─────────────────────────────────── *)
 

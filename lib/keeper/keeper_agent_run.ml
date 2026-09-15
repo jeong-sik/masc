@@ -253,8 +253,8 @@ let repeated_exact_tool_call ~threshold tool_calls =
     else None
 ;;
 
-(* Constitution exception (named bound + rationale): the same repetition count
-   as the two axes above, on the one key they cannot use.
+(* Constitution exception (named bound + rationale): a repetition count like
+   the two axes above (3 each there, 5 here), on the one key they cannot use.
 
    [same_exact_tool_call] requires the output fingerprint to match, and that is
    deliberate -- an unchanged output is the proof that the world did not move.
@@ -276,10 +276,12 @@ let repeated_exact_tool_call ~threshold tool_calls =
    identical (tool, input) pair were ordinary work (keeper_tasks_list 101,
    keeper_spawn_read 40, masc_board_post_get 60, Execute 33), while 35 of the
    36 runs reaching 5 were that clock-reading tool under the two keepers that
-   were looping. The Keeper surface has had no clock-reading tool since
-   #36472, so the runs that put the line at 5 cannot recur and the count has
-   not been measured against the tools that remain. A yield here persists a
-   checkpoint and resumes, so a run that reaches it costs one resume. *)
+   were looping. The Keeper surface has no dedicated clock tool now, and a
+   round after tool results carries no [Temporal] line, so a Keeper that wants
+   the time mid-turn runs [Execute date] -- the same shape, and this axis still
+   catches it. The count has not been measured against the calls that remain
+   (masc #36503). A yield here persists a checkpoint and resumes, so a run that
+   reaches it costs one resume. *)
 let repeated_tool_call_input_yield_threshold = 5
 
 let same_tool_call_input

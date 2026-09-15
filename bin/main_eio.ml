@@ -1364,7 +1364,9 @@ let init_builtin_skills_reconcile = function
                         | Builtin_skill_package.Adopt_with_release_permissions
                         | Builtin_skill_package.Replace_recorded _); _ }
       | Builtin_skill_package.Retired
-          { result = Ok (Builtin_skill_package.Retire_recorded _); _ } ->
+          { result = Ok (Builtin_skill_package.Retire_recorded _); _ }
+      | Builtin_skill_package.Interrupted
+          { result = Ok (Builtin_skill_package.Move_finished _); _ } ->
         { tally with changed = tally.changed + 1 }
       | Builtin_skill_package.Bundled
           { result = Ok (Builtin_skill_package.Up_to_date
@@ -1377,16 +1379,21 @@ let init_builtin_skills_reconcile = function
           { result = Ok (Builtin_skill_package.Retire_pending _
                         | Builtin_skill_package.Keep_retired_modified _
                         | Builtin_skill_package.Keep_retired_uninspectable _); _ }
+      | Builtin_skill_package.Interrupted
+          { result = Ok (Builtin_skill_package.Move_never_started
+                        | Builtin_skill_package.Move_completed); _ }
       | Builtin_skill_package.Unfinished _ -> tally
       | Builtin_skill_package.Bundled { result = Error _; _ }
-      | Builtin_skill_package.Retired { result = Error _; _ } ->
+      | Builtin_skill_package.Retired { result = Error _; _ }
+      | Builtin_skill_package.Interrupted { result = Error _; _ } ->
         { tally with skill_failed = true })
       { changed = 0; skill_failed = false } reports
 
 (* Says once which lock the installer waits for, so an installation stopped
-   while holding it shows up instead of a silent pause. *)
+   while holding it shows up instead of a silent pause. Standard error, because
+   the installer script keeps standard output for its own summary. *)
 let print_skill_lock_wait lock =
-  Printf.printf "waiting for another Skill installation to release %s\n%!" lock
+  Printf.eprintf "waiting for another Skill installation to release %s\n%!" lock
 
 let init_cmd_exit base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1505,7 +1512,7 @@ let skills_refresh_exit base_path name apply expected_revision expected_bundle_r
         (match Builtin_skill_package.replace_reviewed ~on_wait:print_skill_lock_wait ~base_path
                  ~installed_revision ~bundled_revision package with
          | Ok (Builtin_skill_package.Replaced { backup }) ->
-           Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
+           Printf.printf "Updated %s; previous package: %s\nThe next replacement or retirement of %s, including masc init, replaces that backup; copy it elsewhere to keep your changes.\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup name; 0
          | Ok Builtin_skill_package.Already_current -> print_endline "Package is current"; 0
          | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
     else if Option.is_some expected_revision || Option.is_some expected_bundle_revision then (

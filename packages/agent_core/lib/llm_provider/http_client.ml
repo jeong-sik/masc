@@ -3212,18 +3212,14 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* Only a payload line renews a gap budget; a total budget runs to the
-       first token whatever arrives in between. The switch to the inter-token
-       budget is not made here: a data field is provider bytes, not
-       necessarily model output, and only the consumer can tell an opening
-       frame from a token. [dispatch_event] moves [phase] when [on_data]
-       reports [Output].
-       [Sse_comment] is already filtered inside [inner]; the only non-field
-       line [inner] can return is [Sse_blank]. *)
-    (match parsed with
-     | Sse_data _ -> renew_after_payload ~anchor:budget_anchor budget
-     | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
-     | Sse_comment -> () (* unreachable: filtered in [inner] *));
+    (* Nothing renews a budget here. A data field is provider bytes, not model
+       output -- a keep-alive carries one, and renewing on it let a provider
+       hold an open stream for the whole turn while producing nothing. Only
+       the consumer can tell production from a keep-alive, so renewal happens
+       per dispatched event in [dispatch_event]: before the first output any
+       event renews a gap standing in for the first-event bound, after it only
+       production does. A total budget is not renewed at all: it runs to the
+       first output whatever arrives in between. *)
     parsed
   in
   let current_event_type = ref None in
@@ -3238,6 +3234,12 @@ let read_sse
         in
         Buffer.clear data_buffer;
         data_seen := false;
+        let renew_gap () =
+          renew_after_payload
+            ~anchor:budget_anchor
+            (armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout)
+        in
+        let phase_before_dispatch = !phase in
         (match continuation with
          | Continue Output ->
            enter_after_first_output
@@ -3245,8 +3247,22 @@ let read_sse
              ~anchor:budget_anchor
              ~first_event_timeout
              ~body_timeout
-             ~idle_timeout
-         | Continue Prelude | Stop -> ());
+             ~idle_timeout;
+           (* Production is what an inter-token gap measures between, so this
+              is where that gap starts again. [renew_after_payload] leaves a
+              total budget alone. *)
+           renew_gap ()
+         | Continue Prelude ->
+           (* Before the first output there is no production to measure
+              between: a gap standing in for the first-event bound is the wait
+              for the provider to send anything, and any event it sends
+              renews it. Demanding production there would turn that gap into a
+              total. After the first output the gap measures between
+              productions, and a keep-alive is not one. *)
+           (match phase_before_dispatch with
+            | Before_first_output -> renew_gap ()
+            | After_first_output -> ())
+         | Stop -> ());
         continuation)
       else Continue Prelude
     in

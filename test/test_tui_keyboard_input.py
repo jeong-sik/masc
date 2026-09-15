@@ -17017,9 +17017,10 @@ KEYBOARD_FAMILY = ScenarioFamily(
 )
 
 # Each family has one dune rule that names it after the binary, except the
-# keyboard walk, whose rule names none. test_tui_keyboard_scenario_selection.py
-# holds this table and test/dune to each other, so a family no rule runs, or a
-# rule naming no family, fails there instead of sitting outside CI.
+# keyboard walk, whose rule names none, and each rule is on the runtest alias.
+# test_tui_keyboard_scenario_selection.py reads those rules from test/dune and
+# test/stanzas/*.inc and fails on a family with no rule, a rule naming no
+# family, or a rule off runtest that its exception list does not name.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),

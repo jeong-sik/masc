@@ -4100,7 +4100,8 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
-  dune)
+  dune
+  (glob_files stanzas/*.inc))
  (action
   (run python3 %{dep:test_tui_keyboard_scenario_selection.py})))
 

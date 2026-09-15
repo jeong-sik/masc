@@ -25,7 +25,8 @@ import test_tui_keyboard_input as h
 
 # scripts/ci/run-edited-tests.sh runs a suite when a pull request changes a
 # path the suite names. The choice lives in the harness, and the rule check
-# below reads the dune file beside it.
+# below reads the dune file beside it. It also reads test/stanzas/*.inc, which
+# a glob declares in dune but no single path here can name.
 SOURCE_MODULES = (
     "test/test_tui_keyboard_input.py",
     "test/dune",
@@ -34,11 +35,24 @@ SOURCE_MODULES = (
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE / "test_tui_keyboard_input.py"
 DUNE = HERE / "dune"
+STANZAS = HERE / "stanzas"
 USAGE_ERROR = 2
+
+# Families whose rule is deliberately off the runtest alias, each with the
+# reason test/dune gives beside the rule. A family wired back onto runtest
+# has to leave this list, and a new family off runtest has to join it.
+OFF_RUNTEST = {
+    "memory-journal": "stops on the Linux runner waiting for journal:full (run 34072434219)",
+}
 
 # Any rule whose alias belongs to the harness, however it is written.
 KEYBOARD_ALIAS = re.compile(
     r"\(rule\s*\(alias runtest-test_tui_keyboard_input(?:-[a-z0-9-]+)?\)"
+)
+# The runtest edge for one of those aliases.
+KEYBOARD_ON_RUNTEST = re.compile(
+    r"\(alias\s*\(name runtest\)\s*"
+    r"\(deps \(alias runtest-test_tui_keyboard_input(?:-(?P<family>[a-z0-9-]+))?\)\)\)"
 )
 # The shape each of those rules has: the harness and the binary as deps, then
 # the same two and at most one family name as operands.
@@ -48,6 +62,13 @@ KEYBOARD_RULE = re.compile(
     r"\(action\s*\(run\s+python3\s+%\{dep:test_tui_keyboard_input\.py\}\s+"
     r"%\{dep:\.\./bin/masc_tui\.exe\}(?:\s+(?P<family>[a-z0-9-]+))?\)\)\)"
 )
+
+
+def rule_files_text() -> str:
+    """test/dune and every stanza it can include: where a dune rule may live."""
+    return "\n".join(
+        path.read_text() for path in (DUNE, *sorted(STANZAS.glob("*.inc")))
+    )
 
 
 def unused_interaction(*_args: object) -> None:
@@ -212,8 +233,8 @@ class ScenarioSelectionTest(unittest.TestCase):
         self.assertIsInstance(failure.code, str)
         self.assertIn(repr("planned"), str(failure.code))
 
-    def test_every_family_has_one_rule_and_every_rule_names_a_family(self) -> None:
-        text = DUNE.read_text()
+    def test_every_family_has_one_rule_on_runtest_and_every_rule_names_a_family(self) -> None:
+        text = rule_files_text()
         rules = [match.groupdict() for match in KEYBOARD_RULE.finditer(text)]
         self.assertTrue(rules, "no rule in test/dune runs test_tui_keyboard_input.py")
         self.assertEqual(
@@ -233,6 +254,14 @@ class ScenarioSelectionTest(unittest.TestCase):
         self.assertEqual(
             sum(rule["family"] is None for rule in rules), 1,
             "the keyboard walk is the one rule that names no family",
+        )
+        on_runtest = [match["family"] for match in KEYBOARD_ON_RUNTEST.finditer(text)]
+        self.assertEqual(len(on_runtest), len(set(on_runtest)), "a lane is on runtest twice")
+        self.assertIn(None, on_runtest, "the keyboard walk is not on runtest")
+        self.assertEqual(
+            sorted(set(named) - set(on_runtest)),
+            sorted(OFF_RUNTEST),
+            "families off the runtest alias differ from the ones OFF_RUNTEST explains",
         )
 
 

@@ -157,14 +157,15 @@ module For_testing : sig
   (** Newest-first tool calls; [Some (tool, streak)] when the last [threshold]+
       calls share a tool name and input fingerprint, whatever their outputs did.
 
-      The axis {!repeated_exact_tool_call} cannot answer for a tool whose
-      result is a clock: its output moves on every call while nothing advances,
-      so the output fingerprint it uses as no-progress proof never matches.
-      This one drops the output and requires the repeats to be adjacent
-      instead. A call whose handler declared [Keeper_tool_outcome.Progress]
-      ends the streak and is never the latest of one: a tool that moves a
-      world by a fixed amount looks like a clock on this axis and is the
-      opposite thing; the clock declares nothing. *)
+      The axis {!repeated_exact_tool_call} cannot answer for a call whose
+      output moves on every call while nothing advances (a clock read, for
+      one), so the output fingerprint it uses as no-progress proof never
+      matches. This one drops the output and requires the repeats to be
+      adjacent instead. A call whose handler declared
+      [Keeper_tool_outcome.Progress] ends the streak and is never the latest
+      of one: a tool that moves a world by a fixed amount has that same shape
+      on this axis and is the opposite thing; a call that declares nothing
+      stays in the streak. *)
   val repeated_tool_call_input
     :  threshold:int
     -> tool_call_detail list

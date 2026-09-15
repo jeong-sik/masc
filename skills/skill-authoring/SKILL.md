@@ -12,7 +12,7 @@ description: "Decides whether recurring work belongs in a Tool, a composition Sk
 | A capability that does not exist yet, a schema, permission or typed error contract, or a call to an outside system | A Tool |
 | A fixed chain of tool calls with no judgement between the steps | A composition Skill |
 | A judgement at a fork, a known trap, or an order of steps that needs reading | An instruction Skill |
-| Something the runtime already puts in every request (the current time arrives as `[Temporal]`) | Nothing |
+| Something the runtime already puts in the turn's first request (the current time arrives there as `[Temporal]`; a request after tool results does not repeat it) | Nothing |
 | A procedure that steps around a tool or harness defect | No Skill. Fix the defect |
 
 A Skill that works around a defect turns the defect into the documented way of working,

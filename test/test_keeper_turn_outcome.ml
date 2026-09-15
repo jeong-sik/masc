@@ -398,24 +398,28 @@ let tool_call ?(input = Some "input") ?(output = Some "output") ?typed_outcome t
   ; output_fingerprint = output
   }
 
-(* The clock axis. [repeated_exact_tool_call] needs the output fingerprint to
-   stand still as proof that nothing advanced, so a tool whose result is a
-   timestamp escapes it by construction: live, one keeper made 280 of a turn's
-   281 tool calls to keeper_time_now and neither the tool axis nor the text
-   axis saw it (masc #33021). This axis drops the output and requires the
-   repeats to be adjacent instead. *)
+(* The moving-result axis. [repeated_exact_tool_call] needs the output
+   fingerprint to stand still as proof that nothing advanced, so a call whose
+   result is a timestamp escapes it by construction: live, one keeper made 280
+   of a turn's 281 tool calls to a clock read and neither the tool axis nor the
+   text axis saw it (masc #33021). This axis drops the output and requires the
+   repeats to be adjacent instead. The clock read here is one shell command
+   run again. *)
 let test_repeated_tool_call_input_boundary () =
   let detect =
     Masc.Keeper_agent_run.For_testing.repeated_tool_call_input ~threshold:5
   in
   let clock n =
     List.init n (fun i ->
-      tool_call ~output:(Some (Printf.sprintf "11:07:%02dZ" i)) "keeper_time_now")
+      tool_call
+        ~input:(Some "date -u")
+        ~output:(Some (Printf.sprintf "11:07:%02dZ" i))
+        "Execute")
   in
   check
     (option (pair string int))
     "a moving result no longer hides the loop"
-    (Some ("keeper_time_now", 5))
+    (Some ("Execute", 5))
     (detect (clock 5));
   check
     (option (pair string int))
@@ -453,7 +457,7 @@ let test_repeated_tool_call_input_boundary () =
     (option (pair string int))
     "missing fingerprints never guess"
     None
-    (detect (List.init 5 (fun _ -> tool_call ~input:None "keeper_time_now")));
+    (detect (List.init 5 (fun _ -> tool_call ~input:None "Execute")));
   (* The emulator step has a clock's shape on this axis -- identical input,
      a different frame every time -- and is the opposite thing: the frames
      ran. Its handler declares [Progress] beside the observation, and the

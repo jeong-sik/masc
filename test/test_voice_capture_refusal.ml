@@ -75,7 +75,6 @@ let with_explicit_voice_config contents f =
   with_temp_dir "voice-capture-refusal-" @@ fun root ->
   without_env "MASC_CONFIG_DIR" @@ fun () ->
   with_env "MASC_BASE_PATH" root @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" root @@ fun () ->
   let path = Voice_config.config_path () in
   mkdir_p (Filename.dirname path);
   write_file path contents;

@@ -185,7 +185,6 @@ let test_inputs_from_env_honors_base_path_override_opt_in () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let inputs = Config_dir_resolver.inputs_from_env () in
   check (option string) "inputs preserve base env" (Some base)
     inputs.env_base_path;
@@ -203,7 +202,6 @@ let test_inputs_from_env_survives_deleted_cwd () =
   let _config = make_config_root (Filename.concat base Common.masc_dirname) in
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
   let saved_cwd = Sys.getcwd () in
   Unix.chdir doomed;
   Fun.protect
@@ -446,7 +444,6 @@ let test_current_working_dir_survives_deleted_cwd () =
   Unix.mkdir home 0o755;
   Unix.mkdir doomed 0o755;
   with_env "MASC_BASE_PATH" None @@ fun () ->
-  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "HOME" (Some home) @@ fun () ->
   Config_dir_resolver.reset ();
   let saved_cwd = Sys.getcwd () in
@@ -471,22 +468,21 @@ let test_base_path_or_cwd_anchors_relative_env_to_cwd () =
   let cwd = Filename.concat root "cwd" in
   Unix.mkdir cwd 0o755;
   with_env "MASC_BASE_PATH" (Some "relative-root") (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      Config_dir_resolver.reset ();
-      let saved_cwd = Sys.getcwd () in
-      Unix.chdir cwd;
-      Fun.protect
-        ~finally:(fun () ->
-          Unix.chdir saved_cwd;
-          Config_dir_resolver.reset ())
-        (fun () ->
-          (* The resolver anchors relative base_path to [Sys.getcwd ()],
-             which returns the symlink-canonical cwd (on macOS the temp dir
-             [/var/…] resolves to [/private/var/…]). Canonicalize the known
-             cwd so the expected value matches the resolver's real anchor. *)
-          check string "base_path_or_cwd anchors relative env under cwd"
-            (Filename.concat (Unix.realpath cwd) "relative-root")
-            (Config_dir_resolver.base_path_or_cwd ()))))
+    Config_dir_resolver.reset ();
+    let saved_cwd = Sys.getcwd () in
+    Unix.chdir cwd;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.chdir saved_cwd;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        (* The resolver anchors relative base_path to [Sys.getcwd ()],
+           which returns the symlink-canonical cwd (on macOS the temp dir
+           [/var/…] resolves to [/private/var/…]). Canonicalize the known
+           cwd so the expected value matches the resolver's real anchor. *)
+        check string "base_path_or_cwd anchors relative env under cwd"
+          (Filename.concat (Unix.realpath cwd) "relative-root")
+          (Config_dir_resolver.base_path_or_cwd ())))
 
 let test_base_path_or_cwd_falls_back_to_cwd () =
   with_env "MASC_BASE_PATH" None (fun () ->

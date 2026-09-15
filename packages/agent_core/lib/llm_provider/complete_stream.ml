@@ -1181,7 +1181,10 @@ let complete_stream_http
           match http_codec with
           | Provider_http_codec.Glm_chat ->
             (match err with
-             | Http_client.HttpError { body; _ } ->
+             (* Only a body that arrived carries the envelope's code; a
+                refusal whose body the caller's window cut has none to read
+                and keeps the classification the status alone supports. *)
+             | Http_client.HttpError { body = Http_client.Received body; _ } ->
                (match Backend_glm.check_glm_error body with
                 | Some
                     { Backend_glm.error_class = Backend_glm.Glm_context_overflow
@@ -1191,6 +1194,7 @@ let complete_stream_http
                   Http_client.ProviderFailure
                     { kind = Http_client.Context_overflow { limit = None }; message }
                 | Some _ | None -> err)
+             | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
              | Http_client.NetworkError _
              | Http_client.TimeoutError _
              | Http_client.AcceptRejected _

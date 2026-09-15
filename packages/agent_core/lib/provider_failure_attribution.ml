@@ -49,7 +49,7 @@ let invalid_request ?(reason_kind = Retry.Unknown_invalid_request) reason =
 let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider err =
   match err with
   | Http.HttpError { code; body; retry_after_header } ->
-    Error.Api (Retry.classify_error ~retry_after_header ~status:code ~body)
+    Error.Api (Retry.classify_refusal ~retry_after_header ~status:code ~body)
   | Http.NetworkError { message; kind } ->
     Error.Api (Retry.NetworkError { message; kind })
   | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error ?provider err)
@@ -228,7 +228,11 @@ let attribution_of_http_error ~binding = function
        through the typed capacity vocabulary (not the generic [Http_status]
        catch-all) so the retry_after evidence survives into attribution
        instead of being visible only in the classified [Retry.api_error]. *)
-    let retry_after = Retry.resolve_retry_after ~body ~header:retry_after_header in
+    let retry_after =
+      Retry.resolve_retry_after
+        ~body:(Http.refusal_body_text body)
+        ~header:retry_after_header
+    in
     let kind =
       Http.Capacity_exhausted
         { scope = Http.Failure_scope_unknown; retry_after; model = None }

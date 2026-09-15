@@ -197,11 +197,26 @@ type provider_failure_kind =
       envelope carries one. *)
   | Unknown_provider_failure of { reason : string option }
 
+(** The body of a refusing response. [Received] is what the provider sent,
+    empty when it sent nothing. [Not_received_in_window] is a body the
+    caller's own window closed on before it arrived: the status line and its
+    headers are the answer, and the reason they carried is unread. The two
+    are not the same fact -- a provider code that names a recoverable cause
+    is absent from one and unknown in the other -- so they are not the same
+    value. *)
+type refusal_body =
+  | Received of string
+  | Not_received_in_window
+
+(** The text a refusal carried, empty when none arrived. For rendering; a
+    decision reads the variant. *)
+val refusal_body_text : refusal_body -> string
+
 (** Transport-level error. *)
 type http_error =
   | HttpError of
       { code : int
-      ; body : string
+      ; body : refusal_body
       ; retry_after_header : float option
         (** Parsed [Retry-After] response header (RFC 9110 S10.2.3), resolved
           to a delay in seconds relative to when the response was observed.
@@ -613,9 +628,9 @@ val post_stream
     first token. A refusing status line is the provider's answer: its body
     is read under what the window has left, and a body that does not
     arrive in time still yields [HttpError] with the status and the
-    Retry-After received and an empty body, not a timeout. A connection
-    handed back as the window closes is the connection: the window's
-    verdict stands only when nothing had returned.
+    Retry-After received and the body [Not_received_in_window], not a
+    timeout. A connection handed back as the window closes is the
+    connection: the window's verdict stands only when nothing had returned.
     With neither budget supplied the phase is unbounded. Two steps run
     outside the window's reach: DNS resolution, in a systhread the window
     cannot cancel (a closed window is observed once the lookup returns, and

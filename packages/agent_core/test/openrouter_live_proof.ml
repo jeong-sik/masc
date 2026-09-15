@@ -121,7 +121,7 @@ let () =
     let described =
       match (e : Llm_provider.Http_client.http_error) with
       | Llm_provider.Http_client.HttpError { code; body; _ } ->
-        Printf.sprintf "HTTP %d: %s" code body
+        Printf.sprintf "HTTP %d: %s" code (Llm_provider.Http_client.refusal_body_text body)
       | Llm_provider.Http_client.NetworkError { message; _ } -> "network: " ^ message
       | Llm_provider.Http_client.TimeoutError { message; _ } -> "timeout: " ^ message
       | Llm_provider.Http_client.AcceptRejected { reason } -> "rejected: " ^ reason

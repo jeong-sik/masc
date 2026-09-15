@@ -8,6 +8,7 @@ type invalid_request_reason =
       ; limit_bytes : int
       }
   | Request_body_refused_by_provider of { status : int }
+  | Refusal_body_not_received
   | Unknown_invalid_request
 
 type input_capacity_reason =
@@ -67,6 +68,7 @@ let invalid_request_reason_to_string = function
     Printf.sprintf "request_body_too_large(actual=%d,limit=%d)" actual_bytes limit_bytes
   | Request_body_refused_by_provider { status } ->
     Printf.sprintf "request_body_refused_by_provider(status=%d)" status
+  | Refusal_body_not_received -> "refusal_body_not_received"
   | Unknown_invalid_request -> "unknown"
 ;;
 
@@ -133,6 +135,13 @@ let is_retryable = function
      | Http_client.Unknown -> true)
   | InvalidRequest { reason = Json_parse_error; _ } ->
     (* Malformed JSON from model output is transient — retry may produce valid JSON. *)
+    true
+  | InvalidRequest { reason = Refusal_body_not_received; _ } ->
+    (* The status is the provider's answer; the reason it carried is unread,
+       because the caller's own window closed on the body. Nothing here says
+       the request itself is what the provider refused, and the next attempt
+       opens a fresh window that may read the answer. A determinate refusal
+       -- one whose body arrived -- still ends the attempt. *)
     true
   | InvalidRequest _ -> false
   | AuthError _ | AuthorizationError _ | ContextOverflow _ | InputCapacity _ | NotFound _
@@ -348,6 +357,24 @@ let classify_error ~retry_after_header ~status ~body : api_error =
   | unhandled_status ->
     let (_ : int) = unhandled_status in
     InvalidRequest { message; reason = Unknown_invalid_request }
+;;
+
+(* The refusal a transport reports, classified. A body that arrived is
+   classified from what it says; a body the caller's own window closed on
+   before it arrived is classified from the status alone, as a refusal whose
+   cause is unread -- reading an absent body as an empty one would file it
+   as a cause the provider named. *)
+let classify_refusal ~retry_after_header ~status ~(body : Http_client.refusal_body) : api_error =
+  match body with
+  | Http_client.Received body -> classify_error ~retry_after_header ~status ~body
+  | Http_client.Not_received_in_window ->
+    InvalidRequest
+      { message =
+          Printf.sprintf
+            "HTTP %d; the refusal body did not arrive before the caller's window closed"
+            status
+      ; reason = Refusal_body_not_received
+      }
 ;;
 
 [@@@coverage off]

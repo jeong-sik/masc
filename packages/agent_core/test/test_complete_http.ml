@@ -1275,7 +1275,7 @@ let test_complete_transport_http_metrics_error () =
       make_transport
         (Error
            (Http_client.HttpError
-              { code = 429; body = "rate limited"; retry_after_header = None }))
+              { code = 429; body = Http_client.Received "rate limited"; retry_after_header = None }))
     in
     match Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics () with
     | Ok _ -> fail "expected Error"

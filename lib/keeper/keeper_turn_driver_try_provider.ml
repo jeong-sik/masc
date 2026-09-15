@@ -407,6 +407,7 @@ let rejected_body_bytes = function
               ( Json_parse_error
               | Attempt_rejected
               | Request_body_refused_by_provider _
+              | Refusal_body_not_received
               | Unknown_invalid_request )
           ; _
           }

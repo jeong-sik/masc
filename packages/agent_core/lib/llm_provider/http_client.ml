@@ -132,10 +132,18 @@ type provider_failure_kind =
   | Context_overflow of { limit : int option }
   | Unknown_provider_failure of { reason : string option }
 
+type refusal_body =
+  | Received of string
+  | Not_received_in_window
+
+let refusal_body_text = function
+  | Received body -> body
+  | Not_received_in_window -> ""
+
 type http_error =
   | HttpError of
       { code : int
-      ; body : string
+      ; body : refusal_body
       ; retry_after_header : float option
       }
   | NetworkError of
@@ -2447,7 +2455,7 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
         ~request_headers:headers_with_length
         ~request_body:body
         ~response_body:body_str;
-      Error (HttpError { code; body = body_str; retry_after_header }))
+      Error (HttpError { code; body = Received body_str; retry_after_header }))
 ;;
 
 let track_connection_eof connection =
@@ -2725,8 +2733,10 @@ let with_post_stream
            what the window has left. The status line and its headers are
            already the answer: a body that does not arrive in time does not
            turn a refusal into silence, so the refusal is returned with the
-           status and headers received and no body. A refusal's connection is
-           never reused. *)
+           status and headers received and its body [Not_received_in_window]
+           -- which a consumer must not read as a body the provider left
+           empty, the reason it carried being unread. A refusal's connection
+           is never reused. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
         Fun.protect
           ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
@@ -2762,9 +2772,9 @@ let with_post_stream
                  ~request_headers:headers_with_length
                  ~request_body:body
                  ~response_body:refusal_body;
-               refusal refusal_body
+               refusal (Received refusal_body)
              | Ok (Error err) -> Error err
-             | Error `Timeout -> refusal "")
+             | Error `Timeout -> refusal Not_received_in_window)
       | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
         (try
            (* EOF proves the body was drained; it does not prove the connection

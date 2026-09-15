@@ -199,22 +199,22 @@ let test_closed_ownership_matrix () =
     "401 with identity is credential pool"
     Attribution.Credential_pool
     with_credential
-    (Http.HttpError { code = 401; body = "auth"; retry_after_header = None });
+    (Http.HttpError { code = 401; body = Http.Received "auth"; retry_after_header = None });
   check_ownership
     "401 without identity fails local"
     Attribution.Unclassified
     without_credential
-    (Http.HttpError { code = 401; body = "auth"; retry_after_header = None });
+    (Http.HttpError { code = 401; body = Http.Received "auth"; retry_after_header = None });
   check_ownership
     "402 with identity is credential pool"
     Attribution.Credential_pool
     with_credential
-    (Http.HttpError { code = 402; body = "payment"; retry_after_header = None });
+    (Http.HttpError { code = 402; body = Http.Received "payment"; retry_after_header = None });
   check_ownership
     "402 without identity fails local"
     Attribution.Unclassified
     without_credential
-    (Http.HttpError { code = 402; body = "payment"; retry_after_header = None });
+    (Http.HttpError { code = 402; body = Http.Received "payment"; retry_after_header = None });
   (* 429 is handled by its own dedicated test below (test_429_capacity_evidence):
      it is no longer part of the generic "ambiguous" catch-all — it now routes
      through the typed capacity vocabulary instead of [Http_status]. *)
@@ -224,13 +224,13 @@ let test_closed_ownership_matrix () =
          (Printf.sprintf "ambiguous HTTP %d" code)
          Attribution.Unclassified
          with_credential
-         (Http.HttpError { code; body = "ambiguous"; retry_after_header = None }))
+         (Http.HttpError { code; body = Http.Received "ambiguous"; retry_after_header = None }))
     [ 403 ];
   check_ownership
     "binding HTTP 404"
     Attribution.Runtime_binding
     with_credential
-    (Http.HttpError { code = 404; body = "binding"; retry_after_header = None });
+    (Http.HttpError { code = 404; body = Http.Received "binding"; retry_after_header = None });
   List.iter
     (fun code ->
        check_ownership
@@ -238,7 +238,7 @@ let test_closed_ownership_matrix () =
          Attribution.Unclassified
          with_credential
          (Http.HttpError
-            { code; body = "ambiguous server failure"; retry_after_header = None }))
+            { code; body = Http.Received "ambiguous server failure"; retry_after_header = None }))
     [ 500; 503 ];
   List.iter
     (fun kind ->
@@ -364,7 +364,7 @@ let test_429_capacity_evidence () =
   let body_only =
     Http.HttpError
       { code = 429
-      ; body = {|{"error":{"retry_after":7.0,"message":"slow down"}}|}
+      ; body = Http.Received {|{"error":{"retry_after":7.0,"message":"slow down"}}|}
       ; retry_after_header = None
       }
   in
@@ -387,7 +387,7 @@ let test_429_capacity_evidence () =
   let header_fallback =
     Http.HttpError
       { code = 429
-      ; body = {|{"error":"too many concurrent requests"}|}
+      ; body = Http.Received {|{"error":"too many concurrent requests"}|}
       ; retry_after_header = Some 15.0
       }
   in

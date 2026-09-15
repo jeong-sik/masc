@@ -1629,7 +1629,7 @@ let execution_error_cause = function
       { http_status = code
       ; refusal =
           provider_refusal_of_api_error
-            (Retry.classify_error ~retry_after_header ~status:code ~body)
+            (Retry.classify_refusal ~retry_after_header ~status:code ~body)
       }
   (* No HTTP status was produced, so there is no response to classify. *)
   | Exec.Provider_error _ -> Completion_failed

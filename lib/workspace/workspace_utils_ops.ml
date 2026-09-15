@@ -126,14 +126,19 @@ let read_json_local_result_exn path =
 let json_to_pretty_utf8 json =
   json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
 
-let write_json_local path json =
+type encoded_json = string
+
+let encode_json_compact json = json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string
+
+let write_encoded_json_local path (content : encoded_json) =
   try
     mkdir_p (Filename.dirname path);
-    let content = json_to_pretty_utf8 json in
     Fs_compat.save_file_atomic path content
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
+
+let write_json_local path json = write_encoded_json_local path (json_to_pretty_utf8 json)
 
 (* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =
@@ -249,10 +254,9 @@ let should_dual_write_local (config : config) =
 
 type write_json_commit = { mirror_error : string option }
 
-let write_json_commit_result config path json =
+let write_encoded_json_commit_result config path (content : encoded_json) =
   match key_of_path config path with
   | Some key ->
-      let content = json_to_pretty_utf8 json in
       (match backend_set config ~key ~value:content with
        | Error error ->
          Error
@@ -264,7 +268,7 @@ let write_json_commit_result config path json =
          let mirror_error =
            if should_dual_write_local config
            then
-             match write_json_local path json with
+             match write_encoded_json_local path content with
              | Ok () -> None
              | Error message ->
                Some
@@ -276,16 +280,22 @@ let write_json_commit_result config path json =
          in
          Ok { mirror_error })
   | None ->
-      write_json_local path json
+      write_encoded_json_local path content
       |> Result.map_error (fun msg ->
            Printf.sprintf "local write failed for %s: %s" path msg)
       |> Result.map (fun () -> { mirror_error = None })
 
-let write_json_result config path json =
-  match write_json_commit_result config path json with
+let write_json_commit_result config path json =
+  write_encoded_json_commit_result config path (json_to_pretty_utf8 json)
+
+let write_encoded_json_result config path content =
+  match write_encoded_json_commit_result config path content with
   | Error message -> Error message
   | Ok { mirror_error = None } -> Ok ()
   | Ok { mirror_error = Some message } -> Error message
+
+let write_json_result config path json =
+  write_encoded_json_result config path (json_to_pretty_utf8 json)
 
 let write_json config path json =
   match write_json_result config path json with

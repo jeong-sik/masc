@@ -208,6 +208,58 @@ let test_wrong_turn_is_not_substituted () =
     | Ok _ -> fail "a different turn snapshot was substituted")
 ;;
 
+(* The scan reads the store newest first. A live store is 79-231 MB of
+   snapshots, and reading past the turn asked for decodes every one of them to
+   answer a question the order already settles. The unreadable oldest row is
+   the proof: a scan that reaches it reports that row instead of the missing
+   turn. *)
+let test_a_scan_stops_at_an_older_turn_of_the_same_trace () =
+  with_workspace (fun config ->
+    let store = Keeper_types_support.keeper_provider_input_store config keeper in
+    Dated_jsonl.append store (`Assoc [ "schema", `String "broken" ]);
+    write config 5;
+    write config 6;
+    let missing = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:9 in
+    (match Snapshot.read_resolved ~config ~keeper ~turn_ref:missing with
+     | Error (Snapshot.Snapshot_not_found actual) ->
+       check string
+         "the turn asked for is the one reported missing"
+         (Ids.Turn_ref.to_string missing)
+         (Ids.Turn_ref.to_string actual)
+     | Error error ->
+       failf
+         "the scan read past the newest turn: %s"
+         (Snapshot.read_error_to_string error)
+     | Ok _ -> fail "a different turn snapshot was substituted");
+    ignore (read config 5))
+;;
+
+(* Another trace's turn numbers say nothing about this trace's, so a lower
+   turn under a different trace must not end the scan. *)
+let test_another_trace_does_not_end_the_scan () =
+  with_workspace (fun config ->
+    write config 5;
+    Snapshot.write_best_effort
+      ~config
+      ~keeper
+      ~trace_id:"trace-provider-input-restarted"
+      ~absolute_turn:1
+      ~runtime_profile:"local"
+      ~wire
+      ~system_prompt:"exact system prompt"
+      ~messages:[ message ]
+      ~tools:[ tool ];
+    let wanted = Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn:5 in
+    match Snapshot.read_resolved ~config ~keeper ~turn_ref:wanted with
+    | Ok resolved ->
+      check string
+        "the older trace's turn is still found"
+        (Ids.Turn_ref.to_string wanted)
+        (Ids.Turn_ref.to_string resolved.rv_snapshot.turn_ref)
+    | Error error ->
+      failf "the scan stopped too early: %s" (Snapshot.read_error_to_string error))
+;;
+
 let test_message_payload_matches_the_serialised_message () =
   let bytes =
     Keeper_context_core_message_json.message_to_json message |> Yojson.Safe.to_string
@@ -245,6 +297,14 @@ let () =
             "a missing turn is not substituted"
             `Quick
             test_wrong_turn_is_not_substituted
+        ; test_case
+            "a scan stops at an older turn of the same trace"
+            `Quick
+            test_a_scan_stops_at_an_older_turn_of_the_same_trace
+        ; test_case
+            "another trace's turn does not end the scan"
+            `Quick
+            test_another_trace_does_not_end_the_scan
         ] )
     ]
 ;;

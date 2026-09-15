@@ -1324,7 +1324,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
    because the stop was built with usage = None. The result frame never
    arrives after a host stop, so the sum of the assistant frames seen so far
    is the turn's measurement, deduplicated by message id. *)
-let test_host_stop_carries_the_assistant_usage_sum () =
+(* The newest counted frame is the id-less one; the sibling that repeats
+   msg-usage-a is dropped, so it can never become "newest". *)
+let test_host_stop_carries_the_newest_assistant_usage () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
@@ -1354,10 +1356,11 @@ let test_host_stop_carries_the_assistant_usage_sum () =
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error (Runtime_claude_code.Stopped_by_host { usage = Some usage; _ }) ->
-        check int "input tokens summed, sibling counted once, id-less counted" 301
+        check int "the newest frame's input, not the turn's sum" 1
           usage.input_tokens;
-        check int "output tokens summed" 31 usage.output_tokens;
-        check int "cache read carried" 5 usage.cache_read_input_tokens;
+        check int "the newest frame's output" 1 usage.output_tokens;
+        check int "its cache read, not an earlier frame's" 0
+          usage.cache_read_input_tokens;
         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens
       | Error (Runtime_claude_code.Stopped_by_host { usage = None; _ }) ->
         fail "host stop dropped the assistant usage"
@@ -2301,8 +2304,8 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
-        ; test_case "host stop carries the assistant usage sum" `Quick
-            test_host_stop_carries_the_assistant_usage_sum
+        ; test_case "host stop carries the newest assistant usage" `Quick
+            test_host_stop_carries_the_newest_assistant_usage
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

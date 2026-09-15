@@ -3188,17 +3188,40 @@ let context_composition_lines ~cols ~turn_back
   let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
   (* The count the provider made leads the band; the estimate from the
      prepared body follows it, with the bytes it was read from. *)
-  let wire_headline =
+  let wire_lines =
     match record.request_wire_observation with
     | Some observation ->
-        Printf.sprintf "  %s%s tok prepared request (%s)  ·  %s%s" Ansi.dim
-          (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
-          (Inspector.format_bytes observation.body_bytes)
-          (Keeper_chat.terminal_safe_text observation.runtime_profile)
-          Ansi.reset
+        [ Printf.sprintf "  %s%s tok prepared request  ·  %s%s" Ansi.dim
+            (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
+            (Keeper_chat.terminal_safe_text observation.runtime_profile)
+            Ansi.reset
+        ]
     | None ->
-        Printf.sprintf "  %sProvider request bytes were not observed%s"
-          (Theme.bad ()) Ansi.reset
+        (* No body was serialized here, which is the ordinary case on a lane
+           whose client assembles the request itself, not a failure to
+           observe one. What masc handed that client is the composition
+           above, when it belongs to this turn; a resumed client session
+           already holds the earlier turns, so that figure is a ceiling on
+           what went out and not a count of it. *)
+        let handed =
+          match selection.Inspector.attributed with
+          | Some { Inspector.record = attributed; components; _ }
+            when attributed.Turn_record.absolute_turn = record.absolute_turn ->
+              let total =
+                List.fold_left
+                  (fun sum (component : Turn_record.input_component) ->
+                    sum + component.bytes)
+                  0 components
+              in
+              Printf.sprintf
+                "; masc handed it the %s tok of prompt, tools and history \
+                 above, which a resumed session already held in part"
+                (Masc_tui_token_scale.format_estimate scale total)
+          | Some _ | None -> ""
+        in
+        prose
+          ("No body was serialized here: the runtime client assembled the \
+            request itself" ^ handed ^ ".")
   in
   let token_lines =
     match record.usage.scope with
@@ -3227,6 +3250,16 @@ let context_composition_lines ~cols ~turn_back
     | Runtime_usage_scope.Per_request
     | Runtime_usage_scope.Usage_scope_unavailable -> (
         match record.usage.input_tokens, record.context_window with
+        (* A figure above the window is not one request's input: a request
+           that size would have been refused. Drawing it as an occupancy
+           would print 375% of a window. *)
+        | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
+            fact
+              (Printf.sprintf
+                 "%s tokens counted this turn, more than the %s-token window: \
+                  not one request's count"
+                 (Inspector.format_tokens tokens)
+                 (Inspector.format_tokens maximum))
         | Some tokens, Some maximum when maximum > 0 ->
             fact
               (Printf.sprintf
@@ -3276,23 +3309,44 @@ let context_composition_lines ~cols ~turn_back
         let share =
           if total <= 0 then 0. else float transmitted /. float total *. 100.
         in
+        (* What the newest run is depends on what was measured. A wire shape
+           is the body that went out. A durable shape is the history masc
+           holds, projected the same way: on a lane whose client assembles
+           the request it is what masc could hand over, and a resumed client
+           session already holds the earlier turns, so "sent" would claim a
+           transmission nothing observed. *)
+        let measured, label, reach_prose =
+          match window.measurement with
+          | Turn_record.Wire_shape ->
+              ( "wire shape"
+              , Context_bars.sent_pointer_label
+              , Printf.sprintf
+                  "%d older atoms stayed behind. A cut falls between atoms, so \
+                   a tool result and the call it answers either both travel \
+                   or neither does."
+                  (max 0 (total - transmitted)) )
+          | Turn_record.Durable_shape ->
+              ( "durable shape"
+              , "in reach this turn"
+              , Printf.sprintf
+                  "%d older atoms stayed behind. Measured on the durable \
+                   history masc holds, not on a body that went out: on a lane \
+                   whose client assembles the request, these atoms are what \
+                   masc could hand over, and a resumed client session already \
+                   holds the earlier ones. A cut falls between atoms, so a \
+                   tool result and the call it answers stay together."
+                  (max 0 (total - transmitted)) )
+        in
         [ Printf.sprintf "  %s%d of %d atoms%s  ·  %.1f%%  ·  %s%s%s" Ansi.bold
-            transmitted total Ansi.reset share Ansi.dim
-            (match window.measurement with
-             | Turn_record.Wire_shape -> "wire shape"
-             | Turn_record.Durable_shape -> "durable shape")
-            Ansi.reset
+            transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
               ~sent_style:(Theme.info ())
-        ; "  " ^ Context_bars.reach_pointer ~width:bar_width ~transmitted ~total
+        ; "  "
+          ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
+              ~total
         ]
-        @ prose
-            (Printf.sprintf
-               "%d older atoms stayed behind. A cut falls between atoms, so a \
-                tool result and the call it answers either both travel or \
-                neither does."
-               (max 0 (total - transmitted)))
+        @ prose reach_prose
     | None ->
         [ (Theme.bad ())
           ^ "  Conversation history window was not observed" ^ Ansi.reset
@@ -3394,11 +3448,6 @@ let context_composition_lines ~cols ~turn_back
         (* Wide enough for the longest component name and no wider: the share
            and the byte count belong beside the name they describe, not at the
            far edge of a 140-column overlay. *)
-        (* The attributed row may be an older turn than the readings above,
-           so it reads its bytes at its own scale. *)
-        let row_scale =
-          Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows attributed
-        in
         let label_width =
           min context_flow_label_cells
             (max 10 (width - source_width - context_flow_row_chrome_cells))
@@ -3407,7 +3456,7 @@ let context_composition_lines ~cols ~turn_back
            was read from stand once under the rows, beside the basis. *)
         let token_cell bytes =
           Printf.sprintf "\xe2\x89\x88%6s tok"
-            (Inspector.format_tokens (Masc_tui_token_scale.estimate row_scale bytes))
+            (Inspector.format_tokens (Masc_tui_token_scale.estimate scale bytes))
         in
         let rows =
           List.concat_map
@@ -3449,34 +3498,37 @@ let context_composition_lines ~cols ~turn_back
                 grouped)
             by_source
         in
-        (* Attributed bytes and serialized bytes are compared on the same turn, never
-           across two. They still disagree: on 2026-09-01 the attributed total
-           ran about a fifth above the serialized-body figure across 1,556 turns, and the
-           cause is not identified. Printing the gap is what keeps an operator
-           from reading these bytes as the volume shipped. *)
+        (* Attributed and serialized figures are compared on the same turn,
+           never across two, and they measure different things: the rows
+           count the content of each block, the request counts the JSON it
+           was wrapped in. On 2026-09-01 the attributed total ran about a
+           fifth above the body across 1,556 turns. Naming both is what keeps
+           an operator from reading the rows as the volume shipped. *)
         let against_wire =
           (match attributed.Turn_record.request_wire_observation with
            | Some observation when total > 0 && observation.body_bytes > 0 ->
                prose
                  (Printf.sprintf
-                    "%s tok (%s) attributed here against %s tok (%s) in the \
-                     serialized request, and the gap is unexplained. Read the \
-                     shares as proportions and the prepared-request line as \
-                     this turn's size."
-                    (Masc_tui_token_scale.format_estimate row_scale total)
-                    (Inspector.format_bytes total)
-                    (Masc_tui_token_scale.format_estimate row_scale observation.body_bytes)
-                    (Inspector.format_bytes observation.body_bytes))
-           | Some _ -> []
+                    "%s tok attributed here, %s tok in the serialized request. \
+                     The rows count content and the request counts the JSON \
+                     around it, so the two are compared on one turn and not \
+                     expected to match. Read the shares as proportions and the \
+                     prepared-request line as this turn's size."
+                    (Masc_tui_token_scale.format_estimate scale total)
+                    (Masc_tui_token_scale.format_estimate scale observation.body_bytes))
+           | Some _ ->
+               prose
+                 (Printf.sprintf
+                    "%s tok attributed here; the serialized request recorded \
+                     no size to set it against."
+                    (Masc_tui_token_scale.format_estimate scale total))
            | None ->
                prose
                  (Printf.sprintf
-                    "%s tok (%s) attributed here; this lane's request bytes \
-                     were not observed, so there is no serialized figure to \
-                     set it against."
-                    (Masc_tui_token_scale.format_estimate row_scale total)
-                    (Inspector.format_bytes total)))
-          @ prose (Masc_tui_token_scale.note row_scale)
+                    "%s tok attributed here. No body was serialized on this \
+                     lane, so there is no request figure to set it against."
+                    (Masc_tui_token_scale.format_estimate scale total)))
+          @ prose (Masc_tui_token_scale.note scale)
         in
         (* The arrow says the rows above are what the request below is made
            of. Drawn only when both readings are the same turn: where the
@@ -3588,7 +3640,7 @@ let context_composition_lines ~cols ~turn_back
           ~caption:"tokens the provider counted, then the estimate from the prepared body"
     ]
   @ token_lines
-  @ [ wire_headline ]
+  @ wire_lines
   @ cache_lines
   @ [ "" ]
   @ [ "  "
@@ -3649,6 +3701,8 @@ let context_exact_item_detail_lines ~width ~scale
       (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.format_bytes item.bytes)
       (String.sub item.sha256 0 12)
+  ; ""
+  ; Ansi.dim ^ Masc_tui_token_scale.note scale ^ Ansi.reset
   ; ""
   ; Ansi.dim ^ "RETAINED PRE-DISPATCH CONTENT" ^ Ansi.reset
   ]
@@ -4169,11 +4223,21 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
            ^ Ansi.reset)
           :: selected_detail
         in
-        Split { common = [ identity; "  " ^ joined; "" ]; left; right }
+        Split
+          { common =
+              [ identity
+              ; "  " ^ joined
+              ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+              ; ""
+              ]
+          ; left
+          ; right
+          }
       else
         let header =
           [ identity
           ; "  " ^ joined
+          ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
           ; ""
           ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
           ]

@@ -134,6 +134,9 @@ let accept_empty_no_progress_error scope =
 
 let runtime_toml_with_lane =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "primary.test_model"
 
@@ -169,6 +172,9 @@ max-request-body-bytes = 65536
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "shared_a.test_model"
 
@@ -228,6 +234,9 @@ let runtime_toml_quota_lane =
 
 let runtime_toml_official_provider_named_like_registry =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "openai.official_model"
 
@@ -245,6 +254,9 @@ max-context = 400000
 
 let runtime_toml_checkpoint_lane =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "codex.codex"
 
@@ -281,6 +293,9 @@ max-request-body-bytes = 65536
 
 let runtime_toml_thinking_lane =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "thinking.reasoning_big"
 
@@ -337,6 +352,9 @@ supports_reasoning = true
 
 let runtime_toml_media_lane_with_global_outside =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "primary.text_model"
 media_failover = [ "outsidevision.vision_model" ]
@@ -390,6 +408,9 @@ max-request-body-bytes = 65536
 
 let runtime_toml_unknown_lane_candidate =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "primary.test_model"
 
@@ -414,6 +435,9 @@ max-concurrent = 1
 
 let runtime_toml_lane_shadows_runtime =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "primary.test_model"
 
@@ -591,6 +615,9 @@ let test_resolve_assignment_missing () =
 
 let runtime_toml_assignment_to_lane =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "primary.test_model"
 
@@ -3513,6 +3540,9 @@ let test_repeat_on_the_only_model_reports_the_repeat () =
    candidate whose served name differs. *)
 let runtime_toml_same_model_twice =
   {|
+[turn]
+context_window_tokens = 8192
+
 [runtime]
 default = "ollama_cloud.ollama-cloud-flash"
 

@@ -13990,9 +13990,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                journal_targets :=
                  journal_fetch_targets
                    ~held:
-                     (List.map turn_log_request_id
-                        (List.filter turn_log_holds_the_turn
-                           (settled_logs_for_keeper state keeper_name))
+                     (journal_held_request_ids state keeper_name
                      @ List.map
                          (fun entry -> entry.sent_request.Keeper_chat.request_id)
                          state.msg_inflight

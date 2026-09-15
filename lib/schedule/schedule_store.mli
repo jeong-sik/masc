@@ -11,11 +11,31 @@ type state =
   ; notes : Schedule_domain.schedule_note list
   }
 
+(** The caller-requested transitions that only a [Scheduled] or [Due]
+    request accepts. *)
+type attempted_transition =
+  | Modify_schedule
+  | Cancel_schedule
+
+val attempted_transition_to_string : attempted_transition -> string
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
   | Invalid_initial_status of string
-  | Invalid_status_transition of string
+  | Transition_refused of
+      { schedule_id : string
+      ; current : Schedule_domain.schedule_status
+      ; attempted : attempted_transition
+      ; last_wake : Schedule_domain.wake_record option
+      }
+      (** The request is [Running] or terminal. [current] is the status the
+          store read under its lock, and [last_wake] is that instance's
+          newest wake, so a refused caller sees what already happened
+          without a second read. *)
+  | Running_wake_missing of { schedule_id : string }
+      (** A [Running] request has no running wake record to settle or
+          recover. *)
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Persistence_failed of string

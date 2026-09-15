@@ -58,3 +58,16 @@ type wake_status =
 val wake_status_to_string : wake_status -> string
 val wake_status_of_string : string -> (wake_status, decode_error) result
 val wake_status_strings : string list
+
+(** Selector for whose schedules a listing reads: the caller on either side of
+    a schedule, the Keeper a schedule wakes, the actor that scheduled it, or
+    every row. *)
+type owner_kind =
+  | Owner_self
+  | Owner_wake_target
+  | Owner_scheduled_by
+  | Owner_all
+
+val owner_kind_to_string : owner_kind -> string
+val owner_kind_of_string : string -> (owner_kind, decode_error) result
+val owner_kind_strings : string list

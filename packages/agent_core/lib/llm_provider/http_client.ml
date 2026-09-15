@@ -2652,15 +2652,20 @@ let with_post_stream
         | Unbounded -> None
         | Bounded (clock, timeout_s) -> Some (clock, Eio.Time.now clock +. timeout_s)
       in
+      (* A connection handed back as the window closes is the connection:
+         the window's verdict stands only when nothing had returned. The
+         timeout is raised as [Eio.Time.Timeout] so [catch_network] names it
+         as it names any window's. *)
       let under_the_window f =
         match closes_at with
         | None -> f ()
         | Some (clock, closes_at) ->
-          Eio.Time.with_timeout_exn clock (closes_at -. Eio.Time.now clock) f
+          (match Under_deadline.run clock (closes_at -. Eio.Time.now clock) f with
+           | Ok answer -> answer
+           | Error `Timeout -> raise Eio.Time.Timeout)
       in
-      (* Held outside the window: when the window closes in the same
-         scheduler pass as the fiber returns, [Fiber.first] keeps the timeout
-         and drops what the fiber returned, connection included. *)
+      (* Held outside the window for the cancellation that comes from
+         outside it, at the handoff. *)
       let connection = ref None in
       let close_connection () = Option.iter Eio.Resource.close !connection in
       let* answer =
@@ -2733,8 +2738,9 @@ let with_post_stream
         (* A refusal's body is the rest of the provider's answer, read under
            what the window has left. The status line and its headers are
            already the answer: a body that does not arrive in time does not
-           turn a refusal into silence, so the refusal is returned with what
-           was received and no body. A refusal's connection is never reused. *)
+           turn a refusal into silence, so the refusal is returned with the
+           status and headers received and no body. A refusal's connection is
+           never reused. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
         Fun.protect
           ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
@@ -2750,14 +2756,16 @@ let with_post_stream
                   | None when !transport_eof_seen -> Error (eof_error exn)
                   | None -> raise exn)
              in
+             (* No guard on a window already spent: [Under_deadline.run]
+                keeps the read's outcome whenever the read finished, and a
+                body cohttp already buffered with the headers finishes
+                without suspending. A read that does suspend ends at the
+                window as it did. *)
              let body_result =
                match closes_at with
                | None -> Ok (read_body ())
                | Some (clock, closes_at) ->
-                 let left_s = closes_at -. Eio.Time.now clock in
-                 if Float.compare left_s 0.0 <= 0
-                 then Error `Timeout
-                 else Under_deadline.run clock left_s read_body
+                 Under_deadline.run clock (closes_at -. Eio.Time.now clock) read_body
              in
              match body_result with
              | Ok (Ok refusal_body) ->

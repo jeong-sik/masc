@@ -247,12 +247,10 @@ let test_the_budget_covers_the_tls_handshake () =
          ~budget_s:0.5
 ;;
 
-(* The refusal body is read under what the window has left. A 429 whose
-   body never arrives used to hold the client with no bound of its own once
-   the status line was in, the reader's budgets being armed only on a 200;
-   and the status line already is the provider's answer, so when the window
-   closes the caller gets that answer -- the status and its Retry-After,
-   with no body -- and not a timeout that says the provider was silent. *)
+(* The refusal body is read under what the window has left, and the status
+   line already is the provider's answer: when the window closes the caller
+   gets that answer -- the status and its Retry-After, with no body -- and
+   not a timeout that says the provider was silent. *)
 let test_a_refusal_whose_body_never_arrives_is_still_the_refusal () =
   with_env @@ fun ~sw ~clock ~net ->
   let port = start_refusing_server ~sw ~net ~sends_body:false in

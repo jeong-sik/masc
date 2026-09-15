@@ -619,8 +619,9 @@ val post_stream
     first token. A refusing status line is the provider's answer: its body
     is read under what the window has left, and a body that does not
     arrive in time still yields [HttpError] with the status and the
-    Retry-After received and an empty body, not a timeout. A window that
-    closes as the connection is handed back closes that connection too.
+    Retry-After received and an empty body, not a timeout. A connection
+    handed back as the window closes is the connection: the window's
+    verdict stands only when nothing had returned.
     With neither budget supplied the phase is unbounded. Two steps run
     outside the window's reach: DNS resolution, in a systhread the window
     cannot cancel (a closed window is observed once the lookup returns, and

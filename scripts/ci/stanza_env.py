@@ -366,7 +366,7 @@ FIXTURE_PLAIN = """
  (action
   (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false
    (setenv MASC_BASE_PATH /tmp/test-alpha
-    (setenv MASC_BASE_PATH_INPUT /tmp/test-alpha
+    (setenv MASC_CONFIG_DIR /tmp/test-alpha/.masc/config
      (run %{test})))))
  (libraries alcotest))
 """
@@ -431,7 +431,7 @@ def self_test() -> int:
         [
             ("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
             ("MASC_BASE_PATH", "/tmp/test-alpha"),
-            ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha"),
+            ("MASC_CONFIG_DIR", "/tmp/test-alpha/.masc/config"),
         ],
     )
     check("plain values need nothing built", deps, [])
@@ -586,7 +586,7 @@ def self_test() -> int:
         check("shared-file sibling environment does not leak", env,
               [("MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED", "false"),
                ("MASC_BASE_PATH", "/tmp/test-alpha"),
-               ("MASC_BASE_PATH_INPUT", "/tmp/test-alpha")])
+               ("MASC_CONFIG_DIR", "/tmp/test-alpha/.masc/config")])
         write("stanzas/nested/group.inc", "(include ../shared.inc)")
         try:
             stanza_text("test_absent", fixture)
@@ -606,7 +606,7 @@ def self_test() -> int:
     check("coverage members are included in check-all",
           "test_types_coverage" in inline_suite_names(), True)
 
-    # The one suite test.yml used to hardcode still reads the same three.
+    # The one suite test.yml used to hardcode still reads what it hardcoded.
     real = os.path.join(stanza_dir(DEFAULT_SUITE_DIR), "test_heartbeat_integration.inc")
     if os.path.exists(real):
         with open(real, encoding="utf-8") as handle:
@@ -614,10 +614,7 @@ def self_test() -> int:
         check(
             "the real stanza reads what test.yml hardcoded",
             env,
-            [
-                ("MASC_BASE_PATH", "/tmp/test-heartbeat-integ"),
-                ("MASC_BASE_PATH_INPUT", "/tmp/test-heartbeat-integ"),
-            ],
+            [("MASC_BASE_PATH", "/tmp/test-heartbeat-integ")],
         )
 
     # A suite outside test/ reads its own directory's dune, not test/dune.

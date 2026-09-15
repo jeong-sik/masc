@@ -298,13 +298,6 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                (Format.asprintf "%a" Discord_rest_client.pp_error err)
          | Error _ -> ())
   in
-  (* After the reply is delivered the bus is read to its close, so the turn's
-     publisher never waits on a reader that already left. *)
-  let rec drain_until_closed () =
-    match Keeper_chat_events.subscribe events with
-    | Keeper_chat_events.Closed -> ()
-    | Keeper_chat_events.Next _ -> drain_until_closed ()
-  in
   let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
       ~post_attempts_left =
     let continue ?(acc_text = acc_text) ?(msg_id = msg_id)
@@ -426,13 +419,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         in
         on_send_result final_result;
         send_text_rich_embeds ?clock ~token ~channel_id acc_text;
-        drain_until_closed ()
+        Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
         external_effect_completed := true;
         continue ()
     | Event_error { message } ->
         on_send_result (send_message ~content:("Keeper error: " ^ message));
-        drain_until_closed ()
+        Keeper_chat_events.reader_gone events
     | Run_started { run_id = _; thread_id = _ } ->
         refresh_activity ();
         (* A new run's work is its own; the previous run's trail was delivered

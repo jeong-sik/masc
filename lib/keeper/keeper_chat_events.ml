@@ -173,15 +173,25 @@ type 'a next =
   | Closed
 
 (* The bus carries the turn's events and, last, the publisher's declaration
-   that no event follows. Consumers read until they take that declaration, so
-   a consumer can never leave while the publisher still has events to add —
-   the departed-consumer wedge (2026-09-13, msx-retro-mania: a mid-turn
-   [Event_error] ended the Dashboard adapter, 512 thinking deltas later the
-   single publisher fiber suspended forever in [Eio.Stream.add], and the
-   Owner turn slot was never released). *)
+   that no event follows. *)
 type item =
   | Item of published
   | End_of_turn
+
+(* Where the bus's one consumer stands. The backpressure window below only
+   means something while someone still takes: once the reader is gone,
+   suspending the publisher buys nothing and costs the turn — the
+   departed-consumer wedge (2026-09-13, msx-retro-mania: a mid-turn
+   [Event_error] ended the Dashboard adapter, 512 thinking deltas later the
+   single publisher fiber suspended forever in [Eio.Stream.add], and the
+   Owner turn slot was never released). *)
+type reader =
+  | Reading
+  (* Took [End_of_turn], so it saw every event the turn produced. *)
+  | Ended
+  (* Left before [End_of_turn]. What the turn publishes from here reaches the
+     journal through [on_publish] and goes no further. *)
+  | Gone
 
 type t =
   { stream : item Eio.Stream.t
@@ -189,7 +199,7 @@ type t =
   ; now : unit -> float
   ; mutable next_seq : int
   ; mutable closed : bool
-  ; mutable drained : bool
+  ; mutable reader : reader
   }
 
 (* Backpressure window between the single publisher fiber and the turn's
@@ -204,7 +214,7 @@ let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
   ; now
   ; next_seq = first_seq
   ; closed = false
-  ; drained = false
+  ; reader = Reading
   }
 ;;
 
@@ -245,29 +255,54 @@ let publish t event =
           "keeper_chat_events: on_publish hook failed seq=%d: %s"
           seq
           (Printexc.to_string exn)));
-  Eio.Stream.add t.stream (Item { seq; ts; event })
+  match t.reader with
+  (* The hook above already recorded this event and the bus is only the live
+     projection, so a departed reader costs the turn nothing from here. *)
+  | Ended | Gone -> ()
+  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event })
 ;;
 
 let close t =
   if not t.closed
   then (
-    (* The flag follows the sentinel. A close cancelled while the bus is full
-       has delivered nothing, so a later close must still add the sentinel;
-       a flag set first would make that retry a no-op and leave the reader
-       parked in [take] with nothing left to wake it. *)
-    Eio.Stream.add t.stream End_of_turn;
+    (match t.reader with
+     (* Nobody to tell, and a full bus would suspend this add with no take
+        left to release it. *)
+     | Ended | Gone -> ()
+     (* The flag follows the sentinel. A close cancelled while the bus is full
+        has delivered nothing, so a later close must still add the sentinel;
+        a flag set first would make that retry a no-op and leave the reader
+        parked in [take] with nothing left to wake it. *)
+     | Reading -> Eio.Stream.add t.stream End_of_turn);
     t.closed <- true)
 ;;
 
+let reader_gone t =
+  match t.reader with
+  | Ended | Gone -> ()
+  | Reading ->
+    t.reader <- Gone;
+    (* A publisher already suspended in [Eio.Stream.add] does not see the
+       field change: a parked writer wakes only from a take, which is where
+       eio calls [Waiters.wake_one t.writers] (eio 1.3 stream.ml, in [take]
+       and [take_nonblocking] alike). One take releases it, because a bus has
+       a single publisher fiber and therefore at most one parked writer. The
+       item that writer then queues is never read. Neither the field write nor
+       the take suspends, so a reader leaving under cancellation still gets
+       here. *)
+    (match Eio.Stream.take_nonblocking t.stream with
+     | Some _ | None -> ())
+;;
+
 let subscribe_published t =
-  if t.drained
-  then Closed
-  else (
-    match Eio.Stream.take t.stream with
-    | Item published -> Next published
-    | End_of_turn ->
-      t.drained <- true;
-      Closed)
+  match t.reader with
+  | Ended | Gone -> Closed
+  | Reading ->
+    (match Eio.Stream.take t.stream with
+     | Item published -> Next published
+     | End_of_turn ->
+       t.reader <- Ended;
+       Closed)
 ;;
 
 let subscribe t =
@@ -277,15 +312,15 @@ let subscribe t =
 ;;
 
 let take_nonblocking t =
-  if t.drained
-  then None
-  else (
-    match Eio.Stream.take_nonblocking t.stream with
-    | Some (Item published) -> Some published.event
-    | Some End_of_turn ->
-      t.drained <- true;
-      None
-    | None -> None)
+  match t.reader with
+  | Ended | Gone -> None
+  | Reading ->
+    (match Eio.Stream.take_nonblocking t.stream with
+     | Some (Item published) -> Some published.event
+     | Some End_of_turn ->
+       t.reader <- Ended;
+       None
+     | None -> None)
 ;;
 
 let json_opt key value =

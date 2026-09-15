@@ -599,6 +599,55 @@ let test_close_cancelled_on_a_full_bus_is_retried () =
     true
     (read = `Closed)
 
+(* A reader does not always leave on a terminal event. An operator interrupt
+   cancels the adapter where it waits, and the turn still has to be able to
+   finish: on 2026-09-13 it could not, and the turn parked in
+   [Eio.Stream.add] once the window filled and never released the Owner's
+   turn slot. Leaving is declared through the finaliser every adapter is
+   forked with, which is what [reader_gone] models here. The turn runs as a
+   daemon so a regression ends as a red assertion rather than a switch that
+   never closes around it. *)
+let test_an_interrupted_reader_does_not_strand_the_turn () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let bus = Masc.Keeper_chat_events.create () in
+  let left_by_interrupt =
+    match
+      Eio.Cancel.sub (fun context ->
+        Fun.protect
+          ~finally:(fun () -> Masc.Keeper_chat_events.reader_gone bus)
+          (fun () ->
+             Eio.Cancel.cancel context (Failure "operator interrupt");
+             (* The bus is idle, so this take waits — and a wait entered in a
+                cancelled context raises instead (eio 1.3 waiters.ml
+                [await_internal] reads the context error first). *)
+             match Masc.Keeper_chat_events.subscribe bus with
+             | Masc.Keeper_chat_events.Closed | Masc.Keeper_chat_events.Next _ -> ()))
+    with
+    | () -> false
+    | exception Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool)
+    "the interrupt reached the reader where it waited"
+    true
+    left_by_interrupt;
+  (* Twice the window: a bus that still held the publisher to a reader that
+     is gone would park it here and never let it set the flag. *)
+  let turn_finished = ref false in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    for _ = 1 to 2 * Masc.Keeper_chat_events.bus_capacity do
+      Masc.Keeper_chat_events.publish bus (E.Text_delta "still streaming")
+    done;
+    Masc.Keeper_chat_events.close bus;
+    turn_finished := true;
+    `Stop_daemon);
+  (* Nothing the turn does now suspends, so one yield carries it to its end. *)
+  Eio.Fiber.yield ();
+  Alcotest.(check bool)
+    "the turn ran to its close with no reader left"
+    true
+    !turn_finished
+
 let test_publish_after_close_is_a_publisher_defect () =
   let bus = Masc.Keeper_chat_events.create () in
   Masc.Keeper_chat_events.close bus;
@@ -996,6 +1045,10 @@ let () =
             "a close cancelled on a full bus is retried"
             `Quick
             test_close_cancelled_on_a_full_bus_is_retried
+        ; Alcotest.test_case
+            "an interrupted reader does not strand the turn"
+            `Quick
+            test_an_interrupted_reader_does_not_strand_the_turn
         ] )
     ; ( "integration"
       , [ Alcotest.test_case

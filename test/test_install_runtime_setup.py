@@ -433,6 +433,36 @@ class RuntimeSetupAdapter(unittest.TestCase):
                 SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
         self.assertEqual(error.exception.failure, {})
 
+    def test_a_killed_verification_says_how_it_ended_without_its_log(self):
+        # 2026-09-15: the child died by SIGKILL and this screen said only that
+        # runtime setup did not finish.
+        response = dict(schema='masc.runtime_setup_error.v1', kind='verification_unreadable', runtime_id='setup.runtime',
+                        error='Runtime "setup.runtime" verification returned no readable report '
+                              '(killed by SIGKILL; stdout is not JSON: Blank input data)',
+                        detail='[INFO] catalog loaded\n[INFO] overlay installed')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), 'private provider diagnostics')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertNotIsInstance(error.exception, SETUP.VerificationError)
+        self.assertIn('killed by SIGKILL', str(error.exception))
+        self.assertNotIn('catalog loaded', str(error.exception))
+        self.assertNotIn('private provider diagnostics', str(error.exception))
+
+    def test_an_error_sentence_the_terminal_cannot_show_still_names_its_kind(self):
+        response = dict(schema='masc.runtime_setup_error.v1', kind='validation_failed', runtime_id=None,
+                        error='did not pass validation\nwith a second line')
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, json.dumps(response), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(validation_failed)', str(error.exception))
+        self.assertNotIn('second line', str(error.exception))
+
+    def test_a_failure_without_the_error_schema_names_the_exit(self):
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 3, json.dumps(dict(unexpected=True)), '')):
+            with self.assertRaises(SETUP.SetupError) as error:
+                SETUP.native_setup_command('/fixture/masc', 'runtime-setup-batch', {})
+        self.assertIn('(exit 3)', str(error.exception))
+
     def test_verification_reason_prints_the_native_account_of_the_failure(self):
         with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
             SETUP.print_verification_reason(dict(code='client_not_authenticated',

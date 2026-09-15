@@ -3086,16 +3086,10 @@ let context_branch ~index ~last =
   else "  \xe2\x94\x9c "
 
 (* Everything a composition row spends outside the producer name and the
-   component name: the indent, the elbow, the shade, the share and the byte
-   count with their separators. Taken from the row below so the two move
-   together. *)
-let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 9
-
-(* The estimated-token cell a row gains when the turn's bytes-per-token is
-   known: two spaces, the approximation sign, a seven-cell figure and
-   " tok". Zero when the ratio is absent, so the name column keeps the
-   cells. *)
-let context_flow_token_cells = 2 + 1 + 7 + 4
+   component name: the indent, the elbow, the shade, the share and the
+   estimated token figure ("≈" and six cells, then " tok") with their
+   separators. Taken from the row below so the two move together. *)
+let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 11
 
 (* The longest component name the record can carry ("Keeper instructions",
    "Redacted thinking") sits inside this, so the column is as wide as the
@@ -3186,32 +3180,19 @@ let context_composition_lines ~cols ~turn_back
       (Keeper_chat.terminal_safe_text record.trace_id)
       Ansi.reset
   in
-  (* Provider-counted input tokens over the serialized body of the same
-     record, so attributed bytes below can be read in the unit the window
-     is sized in. Only a per-request count divides cleanly: a
-     conversation-cumulative figure puts the whole conversation over one
-     request's bytes. [None] on a lane whose body never reaches masc
-     (the official clients assemble their own wire). *)
-  let tokens_per_wire_byte (turn : Turn_record.t) =
-    match turn.usage.scope with
-    | Runtime_usage_scope.Conversation_cumulative
-    | Runtime_usage_scope.Usage_scope_unavailable -> None
-    | Runtime_usage_scope.Per_request -> (
-        match turn.request_wire_observation, turn.usage.input_tokens with
-        | Some { Turn_record.body_bytes; _ }, Some tokens
-          when body_bytes > 0 && tokens > 0 ->
-            Some (float tokens /. float body_bytes)
-        | Some _, Some _ | Some _, None | None, Some _ | None, None -> None)
-  in
-  let estimate_tokens ~tokens_per_byte bytes =
-    int_of_float (Float.round (float bytes *. tokens_per_byte))
-  in
-  (* The byte figure is second: the window is sized in tokens, and the
-     tokens the provider counted are the line above. *)
+  (* Every size on this screen is read in tokens: the window is sized in
+     tokens and the provider counts them, while masc measured bytes before
+     dispatch. The scale is this record's own wire body over its
+     per-request count when it has both, else the page's median, else the
+     fleet figure; the sentence under the rows names which. *)
+  let scale = Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows record in
+  (* The count the provider made leads the band; the estimate from the
+     prepared body follows it, with the bytes it was read from. *)
   let wire_headline =
     match record.request_wire_observation with
     | Some observation ->
-        Printf.sprintf "  %s%s prepared request  ·  %s%s" Ansi.dim
+        Printf.sprintf "  %s%s tok prepared request (%s)  ·  %s%s" Ansi.dim
+          (Masc_tui_token_scale.format_estimate scale observation.body_bytes)
           (Inspector.format_bytes observation.body_bytes)
           (Keeper_chat.terminal_safe_text observation.runtime_profile)
           Ansi.reset
@@ -3413,33 +3394,20 @@ let context_composition_lines ~cols ~turn_back
         (* Wide enough for the longest component name and no wider: the share
            and the byte count belong beside the name they describe, not at the
            far edge of a 140-column overlay. *)
-        (* Nothing to convert when nothing was attributed: a ratio over
-           zero bytes would still print a figure beside every row and the
-           sentence naming the ratio is only drawn under attributed bytes. *)
-        let tokens_per_byte =
-          if total > 0 then tokens_per_wire_byte attributed else None
-        in
-        let token_cells =
-          match tokens_per_byte with
-          | Some _ -> context_flow_token_cells
-          | None -> 0
+        (* The attributed row may be an older turn than the readings above,
+           so it reads its bytes at its own scale. *)
+        let row_scale =
+          Masc_tui_token_scale.of_turn ~rows:selection.Inspector.rows attributed
         in
         let label_width =
           min context_flow_label_cells
-            (max 10
-               (width - source_width - context_flow_row_chrome_cells
-              - token_cells))
+            (max 10 (width - source_width - context_flow_row_chrome_cells))
         in
-        (* The same bytes in the unit the window is sized in, from this
-           turn's own bytes-per-token; drawn only when that ratio exists,
-           and marked as an estimate because it is one. *)
+        (* The row's size in the unit the window is sized in. The bytes it
+           was read from stand once under the rows, beside the basis. *)
         let token_cell bytes =
-          match tokens_per_byte with
-          | Some ratio ->
-              Printf.sprintf "  \xe2\x89\x88%7s tok"
-                (Inspector.format_tokens
-                   (estimate_tokens ~tokens_per_byte:ratio bytes))
-          | None -> ""
+          Printf.sprintf "\xe2\x89\x88%6s tok"
+            (Inspector.format_tokens (Masc_tui_token_scale.estimate row_scale bytes))
         in
         let rows =
           List.concat_map
@@ -3475,7 +3443,6 @@ let context_composition_lines ~cols ~turn_back
                     ; Ansi.reset
                     ; Printf.sprintf " %6s  " share_text
                     ; Ansi.dim
-                    ; Printf.sprintf "%9s" (Inspector.format_bytes component.bytes)
                     ; token_cell component.bytes
                     ; Ansi.reset
                     ])
@@ -3488,47 +3455,28 @@ let context_composition_lines ~cols ~turn_back
            cause is not identified. Printing the gap is what keeps an operator
            from reading these bytes as the volume shipped. *)
         let against_wire =
-          match attributed.Turn_record.request_wire_observation with
-          | Some observation when total > 0 && observation.body_bytes > 0 ->
-              prose
-                (Printf.sprintf
-                   "%s attributed here against %s in the serialized request, \
-                    and the gap is unexplained. Read the shares as proportions \
-                    and the prepared-request line as this turn's size."
-                   (Inspector.format_bytes total)
-                   (Inspector.format_bytes observation.body_bytes))
-              @ (match tokens_per_byte, attributed.Turn_record.usage.input_tokens with
-                 | Some ratio, Some tokens ->
-                     prose
-                       (Printf.sprintf
-                          "\xe2\x89\x88 tok beside each row is its bytes at this \
-                           turn's %.2f bytes per provider-counted token (%s tokens \
-                           over %s on the wire): an estimate, not a count."
-                          (1. /. ratio)
-                          (Inspector.format_tokens tokens)
-                          (Inspector.format_bytes observation.body_bytes))
-                 | Some _, None | None, Some _ | None, None -> (
-                     match attributed.Turn_record.usage.scope with
-                     | Runtime_usage_scope.Usage_scope_unavailable ->
-                         prose
-                           "No token estimate: the provider did not say \
-                            whether its input count covers this request or \
-                            the conversation, so it is not divided by this \
-                            request's bytes."
-                     | Runtime_usage_scope.Conversation_cumulative ->
-                         prose
-                           "No token estimate: a count across the whole \
-                            conversation is not divided by one request's bytes."
-                     | Runtime_usage_scope.Per_request ->
-                         prose
-                           "No token estimate: this turn reported no \
-                            per-request input count to divide its wire bytes \
-                            by."))
-          | Some _ -> []
-          | None ->
-              prose
-                "No token estimate: this lane's request bytes were not \
-                 observed, so nothing here can be converted to tokens."
+          (match attributed.Turn_record.request_wire_observation with
+           | Some observation when total > 0 && observation.body_bytes > 0 ->
+               prose
+                 (Printf.sprintf
+                    "%s tok (%s) attributed here against %s tok (%s) in the \
+                     serialized request, and the gap is unexplained. Read the \
+                     shares as proportions and the prepared-request line as \
+                     this turn's size."
+                    (Masc_tui_token_scale.format_estimate row_scale total)
+                    (Inspector.format_bytes total)
+                    (Masc_tui_token_scale.format_estimate row_scale observation.body_bytes)
+                    (Inspector.format_bytes observation.body_bytes))
+           | Some _ -> []
+           | None ->
+               prose
+                 (Printf.sprintf
+                    "%s tok (%s) attributed here; this lane's request bytes \
+                     were not observed, so there is no serialized figure to \
+                     set it against."
+                    (Masc_tui_token_scale.format_estimate row_scale total)
+                    (Inspector.format_bytes total)))
+          @ prose (Masc_tui_token_scale.note row_scale)
         in
         (* The arrow says the rows above are what the request below is made
            of. Drawn only when both readings are the same turn: where the
@@ -3632,12 +3580,12 @@ let context_composition_lines ~cols ~turn_back
   [ identity; turn; trace; "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"where this turn's bytes came in"
+          ~caption:"where this turn's input came from, in estimated tokens"
     ]
   @ component_lines @ [ "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
-          ~caption:"tokens the provider counted, then the bytes prepared"
+          ~caption:"tokens the provider counted, then the estimate from the prepared body"
     ]
   @ token_lines
   @ [ wire_headline ]
@@ -3668,7 +3616,7 @@ type context_pane_body =
       ; right : string list
       }
 
-let context_exact_item_detail_lines ~width
+let context_exact_item_detail_lines ~width ~scale
     (item : Masc_tui_context_inspector.exact_input_item) =
   let module Inspector = Masc_tui_context_inspector in
   (* A message's text is wire JSON; its typed blocks are where the prose
@@ -3697,7 +3645,8 @@ let context_exact_item_detail_lines ~width
   in
   [ Ansi.bold ^ Theme.info () ^ "[ RETAINED ITEM ]" ^ Ansi.reset
   ; Ansi.bold ^ Inspector.exact_input_label item.kind ^ Ansi.reset
-  ; Printf.sprintf "%s  ·  sha256 %s"
+  ; Printf.sprintf "%s tok (%s)  ·  sha256 %s"
+      (Masc_tui_token_scale.format_estimate scale item.bytes)
       (Inspector.format_bytes item.bytes)
       (String.sub item.sha256 0 12)
   ; ""
@@ -3710,7 +3659,7 @@ let context_exact_item_detail_lines ~width
    this request made of" before it answers "what is item 34". Counted from the
    same items the list below draws, never from the composition tab's separate
    meter. *)
-let context_exact_input_summary ~width
+let context_exact_input_summary ~width ~scale
     (items : Masc_tui_context_inspector.exact_input_item list) =
   let module Inspector = Masc_tui_context_inspector in
   let tally = Hashtbl.create 8 in
@@ -3787,27 +3736,30 @@ let context_exact_input_summary ~width
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  %6s"
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  \xe2\x89\x88%6s tok  %6s"
           (context_source_style source)
           (context_source_glyph source)
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
-          (Masc_tui_context_inspector.format_bytes bytes)
+          (Masc_tui_context_inspector.format_tokens
+             (Masc_tui_token_scale.estimate scale bytes))
           share_text)
       ranked
   in
   ( [ "  "
       ^ Context_bars.band ~width ~title:"BY KIND"
           ~caption:
-            (Printf.sprintf "%s, %s retained" (Masc_tui_message_layout.count_noun (List.length items) "item")
+            (Printf.sprintf "%s, %s tok (%s) retained"
+               (Masc_tui_message_layout.count_noun (List.length items) "item")
+               (Masc_tui_token_scale.format_estimate scale total)
                (Masc_tui_context_inspector.format_bytes total))
     ]
     @ bar @ rows
   , total )
 
 
-let context_exact_input_lines ~cols state ~response ~response_parts
+let context_exact_input_lines ~cols ~scale state ~response ~response_parts
     (input : Masc_tui_context_inspector.provider_input) =
   let module Inspector = Masc_tui_context_inspector in
   let items = Inspector.exact_input_items input in
@@ -3823,7 +3775,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
              , None )
        | Some item ->
            let detail =
-             context_exact_item_detail_lines ~width item
+             context_exact_item_detail_lines ~width ~scale item
              |> List.map (fun line -> "  " ^ line)
            in
            Plain (detail, None))
@@ -3835,21 +3787,29 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           (Masc_domain.iso8601_of_unix_seconds input.captured_at)
       in
       let wire =
-        Printf.sprintf "  Prepared request  %s · %s · %s · %s" input.wire.provider
-          input.wire.model
+        Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"
+          input.wire.provider input.wire.model
+          (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
           (Inspector.format_bytes input.wire.body_bytes)
           (String.sub input.wire.body_sha256 0 12)
       in
-      let summary, retained = context_exact_input_summary ~width items in
+      let summary, retained =
+        context_exact_input_summary ~width ~scale items
+      in
       let against_wire =
-        if retained > 0 && input.wire.body_bytes > 0 then
-          [ Printf.sprintf "  %s%s retained here, %s in the serialized request%s"
-              Ansi.dim
-              (Inspector.format_bytes retained)
-              (Inspector.format_bytes input.wire.body_bytes)
-              Ansi.reset
-          ]
-        else []
+        (if retained > 0 && input.wire.body_bytes > 0 then
+           [ Printf.sprintf
+               "  %s%s tok (%s) retained here, %s tok (%s) in the serialized \
+                request%s"
+               Ansi.dim
+               (Masc_tui_token_scale.format_estimate scale retained)
+               (Inspector.format_bytes retained)
+               (Masc_tui_token_scale.format_estimate scale input.wire.body_bytes)
+               (Inspector.format_bytes input.wire.body_bytes)
+               Ansi.reset
+           ]
+         else [])
+        @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
       in
       (* What came back for this exact request, to the extent the turn
          record observed it. The response text lives in the chat store and
@@ -3972,7 +3932,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
              let marker, style =
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
-             let label_width = max 8 (width - 20) in
+             let label_width = max 8 (width - 22) in
              (* The list carries the producer's colour the summary above it
                 groups by, except under the selection band, whose own styling
                 owns the whole row. *)
@@ -3985,9 +3945,11 @@ let context_exact_input_lines ~cols state ~response ~response_parts
                  context_source_style (Inspector.exact_input_source item.kind)
                  ^ label ^ Ansi.reset
              in
-             Printf.sprintf "%s %s %2d %s  %s  %9s%s" style marker (index + 1)
-               (kind_letter index item) label
-               (Inspector.format_bytes item.bytes) Ansi.reset)
+             Printf.sprintf "%s %s %2d %s  %s  \xe2\x89\x88%6s tok%s" style
+               marker (index + 1) (kind_letter index item) label
+               (Inspector.format_tokens
+                  (Masc_tui_token_scale.estimate scale item.bytes))
+               Ansi.reset)
           items
       in
       let legend =
@@ -4020,7 +3982,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           match selected with
           | None -> [ Ansi.dim ^ "  Select an item with j/k" ^ Ansi.reset ]
           | Some item ->
-              context_exact_item_detail_lines ~width:right_width item
+              context_exact_item_detail_lines ~width:right_width ~scale item
         in
         (* The detail column starts at the top of its own window and keeps
            its own scroll. It used to be padded down to sit beside the
@@ -4065,7 +4027,7 @@ let context_exact_input_lines ~cols state ~response ~response_parts
           , selected )
 
 
-let context_input_map_detail_lines ~width
+let context_input_map_detail_lines ~width ~scale
     (row : Masc_tui_context_inspector.input_map_row) =
   let module Inspector = Masc_tui_context_inspector in
   let digest =
@@ -4091,7 +4053,8 @@ let context_input_map_detail_lines ~width
   in
   [ context_evidence_badge row.evidence
   ; Ansi.bold ^ Inspector.input_component_label row.component ^ Ansi.reset
-  ; Printf.sprintf "%s  ·  %s"
+  ; Printf.sprintf "%s tok (%s)  ·  %s"
+      (Masc_tui_token_scale.format_estimate scale row.bytes)
       (Inspector.format_bytes row.bytes)
       (Inspector.input_source_label row.source)
   ; Ansi.dim ^ digest ^ Ansi.reset
@@ -4105,7 +4068,7 @@ let context_input_map_detail_lines ~width
       [ ""; Ansi.dim ^ "VERIFIED TEXT" ^ Ansi.reset ] @ wrap text
 
 
-let context_input_map_lines ~cols state (record : Turn_record.t)
+let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     (provider_input : Masc_tui_context_inspector.provider_input option) =
   let module Inspector = Masc_tui_context_inspector in
   let rows = Inspector.input_map_rows record provider_input in
@@ -4115,10 +4078,11 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
        | Some ({ exact_text = Some text; _ } as row) ->
            let width = max 8 (framed_inner_width cols - 4) in
            let heading =
-             Printf.sprintf "  %s%s%s  ·  %s  ·  %s  ·  %s"
+             Printf.sprintf "  %s%s%s  ·  %s tok (%s)  ·  %s  ·  %s"
                Ansi.bold
                (Inspector.input_component_label row.component)
                Ansi.reset
+               (Masc_tui_token_scale.format_estimate scale row.bytes)
                (Inspector.format_bytes row.bytes)
                (Inspector.input_source_label row.source)
                (context_evidence_badge row.evidence)
@@ -4165,13 +4129,14 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let badge_cells = Inspector.input_evidence_badge_cells row.evidence in
-             let label_width = max 4 (width - 17 - badge_cells) in
-             Printf.sprintf "%s %s %s %s%s%s %9s %s%s"
+             let label_width = max 4 (width - 19 - badge_cells) in
+             Printf.sprintf "%s %s %s %s%s%s \xe2\x89\x88%6s tok %s%s"
                selection marker branch
                (context_component_style row.component)
                (fit_width (Inspector.input_component_label row.component) label_width)
                Ansi.reset
-               (Inspector.format_bytes row.bytes)
+               (Inspector.format_tokens
+                  (Masc_tui_token_scale.estimate scale row.bytes))
                (context_evidence_badge row.evidence)
                Ansi.reset)
           rows
@@ -4195,7 +4160,8 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
         let selected_detail =
           match List.nth_opt rows cursor with
           | None -> [ Ansi.dim ^ "  Select a block with j/k" ^ Ansi.reset ]
-          | Some row -> context_input_map_detail_lines ~width:right_width row
+          | Some row ->
+              context_input_map_detail_lines ~width:right_width ~scale row
         in
         let right =
           (Ansi.bold
@@ -4230,7 +4196,8 @@ let context_input_map_lines ~cols state (record : Turn_record.t)
                        | None -> []
                        | Some row ->
                            context_input_map_detail_lines
-                             ~width:(max 8 (framed_inner_width cols - 4)) row
+                             ~width:(max 8 (framed_inner_width cols - 4))
+                             ~scale row
                            |> List.map (fun detail -> "    " ^ detail)
                      in
                      line
@@ -4298,7 +4265,18 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         | Error _ -> None) )
                   | Error _ -> (None, None)
                 in
-                context_exact_input_lines ~cols state ~response
+                (* The request tab reads sizes at the newest turn's scale;
+                   its body is that turn's, whichever row is stepped to
+                   on the stack tab. *)
+                let scale =
+                  match reading.turn with
+                  | Ok selection ->
+                      Masc_tui_token_scale.of_turn
+                        ~rows:selection.Masc_tui_context_inspector.rows
+                        selection.Masc_tui_context_inspector.latest
+                  | Error _ -> Masc_tui_token_scale.fleet
+                in
+                context_exact_input_lines ~cols ~scale state ~response
                   ~response_parts input
             | Error detail ->
                 Plain
@@ -4355,7 +4333,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                       | Ok input -> Some input
                       | Error _ -> None
                     in
-                    context_input_map_lines ~cols state record provider_input)))
+                    let scale =
+                      Masc_tui_token_scale.of_turn
+                        ~rows:selection.Masc_tui_context_inspector.rows record
+                    in
+                    context_input_map_lines ~cols ~scale state record
+                      provider_input)))
 
 
 (* The rows a split body holds below the common summary: one pinned header

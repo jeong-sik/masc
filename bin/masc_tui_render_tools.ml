@@ -953,16 +953,17 @@ let tools_display_lines (state : state) =
                   | Some delivery ->
                     [ ( delivery.delivered_at,
                         Printf.sprintf
-                          (* The same size the Context inspector spells, and
-                             the attachment notes beside it: this cell divided
-                             by 1024 itself and so had no rung above KB, while
-                             the resource bound that caps the body is a config
-                             value rather than a guarantee. *)
-                          "%-8s delivery  %-20s %9s turn#%d %s"
+                          (* The same unit the Context inspector reads sizes
+                             in: an estimated token figure. This screen has
+                             no turn record to take a scale from, so it
+                             reads at the fleet figure. *)
+                          "%-8s delivery  %-20s \xe2\x89\x88%6s tok turn#%d %s"
                           (time_of delivery.delivered_at)
                           skill
-                          (Masc_tui_context_inspector.format_bytes
-                             delivery.content_bytes)
+                          (Masc_tui_context_inspector.format_tokens
+                             (Masc_tui_token_scale.estimate
+                                Masc_tui_token_scale.fleet
+                                delivery.content_bytes))
                           activation.agent_core_turn
                           (Terminal_text.single_line delivery.runtime_id) ) ]
                   | None -> [])

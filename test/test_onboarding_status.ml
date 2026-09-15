@@ -222,8 +222,27 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
   write (Filename.concat config "runtime.toml")
     "[providers.secret]\napi_key = \"x\"\ninvalid = [";
   let unresolved_model = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "imp history is readable again, so only the model can hold it closed" true
+    (condition Onboarding_status.Keeper_persistence unresolved_model
+     = Onboarding_status.Satisfied);
   check bool "a model binding imp needs keeps the journey" true
     (Onboarding_status.opening unresolved_model = Onboarding_status.Needs_journey)
+
+(* Only the browser lane is advisory. Pinned per id so moving a check imp needs
+   to Advisory fails here instead of silently opening a broken conversation. *)
+let only_the_browser_lane_is_advisory () =
+  List.iter (fun (id, expected) ->
+      check bool (Onboarding_status.check_id_name id) true
+        (Onboarding_status.role id = expected))
+    Onboarding_status.[ Workspace, Required_to_open;
+                        Model_connection, Required_to_open;
+                        Keeper_declaration, Required_to_open;
+                        Sandbox, Required_to_open;
+                        Keeper_persistence, Required_to_open;
+                        Browser_lane, Advisory ];
+  check bool "no workspace never opens history" true
+    (Onboarding_status.opening (Onboarding_status.inspect ~base_path:None)
+     = Onboarding_status.Needs_journey)
 
 let () = run "Onboarding observations"
   ["first use", [test_case "missing environment is an actionable state" `Quick absent_workspace;
@@ -240,4 +259,6 @@ let () = run "Onboarding observations"
                  test_case "a browser lane without --server follows the workspace" `Quick
                    browser_lane_dynamic_launcher_is_satisfied;
                  test_case "a stale browser lane does not hold imp's history closed" `Quick
-                   a_stale_browser_lane_does_not_hold_imp_history_closed]]
+                   a_stale_browser_lane_does_not_hold_imp_history_closed;
+                 test_case "only the browser lane is advisory" `Quick
+                   only_the_browser_lane_is_advisory]]

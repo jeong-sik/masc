@@ -256,7 +256,8 @@ val create :
     Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
     until full. A full stream suspends the writer fiber until a reader frees
     a slot (Eio backpressure) — the hook has already run by then, so the
-    journal still holds the event.
+    journal still holds the event. After {!reader_gone} the bus is skipped
+    altogether, so this call cannot suspend.
 
     @raise Invalid_argument after {!close}: a publish after the end of the
     turn is a publisher defect, never a delivery. *)
@@ -268,8 +269,27 @@ val publish : t -> keeper_chat_event -> unit
     added nothing and leaves the bus open, so a later close still ends the
     turn. The closed flag is set when this call returns, which can be after
     the reader has taken the sentinel; the one publisher fiber is inside this
-    call for that window, so no [publish] can land in it. *)
+    call for that window, so no [publish] can land in it. After
+    {!reader_gone} there is nobody to hand the sentinel to and this call adds
+    nothing. *)
 val close : t -> unit
+
+(** [reader_gone t] declares that the bus's consumer has stopped reading and
+    will not read again. Idempotent, suspends nowhere, and releases a
+    publisher already waiting for room.
+
+    The bus holds one turn's events for one consumer, and its bounded window
+    is backpressure on a consumer that is slower than the turn. A consumer
+    that leaves instead — a failed adapter, an unconfigured connector, an
+    operator interrupt — turns that window into a wedge: the turn fills it,
+    suspends in [publish], never returns, and never releases the Owner's turn
+    slot. Calling this on the way out replaces that with a drop: {!publish}
+    keeps feeding the journal hook, which is the durable record, and stops
+    feeding the bus, which nobody is reading.
+
+    Every consumer reaches this whatever ends it, so no consumer has to read
+    events it does not want in order to keep the turn alive. *)
+val reader_gone : t -> unit
 
 (** [subscribe t] blocks until an event is available and returns it, or
     returns [Closed] once the publisher has closed the bus and every earlier
@@ -282,7 +302,7 @@ val subscribe : t -> keeper_chat_event next
 val subscribe_published : t -> published next
 
 (** [take_nonblocking t] returns the next queued event, or [None] when the
-    bus is empty or closed. Drain/test support: it bypasses the blocking
+    bus is empty or closed. Test support: it bypasses the blocking
     [subscribe] contract and must not sit on a live read path. *)
 val take_nonblocking : t -> keeper_chat_event option
 

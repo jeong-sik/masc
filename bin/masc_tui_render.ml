@@ -11286,6 +11286,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
+      | Masc_tui_observer.Keeper_turn_observation _
       | Masc_tui_observer.Keeper_composite_changed _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _

@@ -12971,8 +12971,15 @@ def fusion_live_reload_interaction(
     return interact
 
 
+# The hook's per-call observation names the keeper turn (total_turns + 1)
+# the session-numbered call below belongs to; without it the row would say
+# "turn ?".
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
+    b"event: message\n"
+    b'data: {"type":"keeper_turn_observation","name":"alpha","turn":7,'
+    b'"total_turns":6,"ts_unix":1787505641.0}\n\n'
+    b"id: 2\n"
     b"event: message\n"
     b'data: {"type":"agent_core:tool_called","event_type":"tool_called",'
     b'"event_id":"evt-1","ts_unix":1787505641.28,"correlation_id":"trace-1",'
@@ -13266,7 +13273,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # The fixture closes the stream right after its one frame, so the
+        # The fixture closes the stream right after its two frames, so the
         # row the test can rely on is the closed one. What this scenario is
         # about is the MCP session and the subscription under it, so it waits
         # for the row to exist and not for the number on it: the count and
@@ -13287,12 +13294,13 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         payload = json.loads(initialize[0])
         if payload.get("method") != "initialize":
             raise AssertionError(f"MCP POST was not an initialize: {payload!r}")
-        # The one frame the fixture streamed is a row on the Acting surface.
-        # The default view folds it into a turn chunk: the running turn names
-        # its in-flight call.
+        # The call frame the fixture streamed is a row on the Acting surface;
+        # the observation is held but hidden. The default view folds the call
+        # into a turn chunk: the running turn names its in-flight call under
+        # the keeper's number.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
-            ("(1 row \u00b7 1 event held)".encode(), "the shown rows and held events"),
+            ("(1 row \u00b7 2 events held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
             (b"turn 7", "the turn"),
             (b"read_file", "the in-flight tool"),

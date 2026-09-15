@@ -1,7 +1,11 @@
 name = "masc_schedule_create"
 description = """
-Wake a Keeper at a later time; the way to wait instead of polling the clock.
-Create a durable Keeper wake request. For 'every day at 09:00 KST', use \
+Wake a Keeper at a later time. due_in_sec counts seconds from this call.
+Create a durable Keeper wake request. Give exactly one of due_in_sec, \
+due_at_iso or due_at_unix; a daily or cron recurrence may give none and \
+derive its first due time. A Keeper sees the current time only on its turn's \
+first request, not after a tool round, so prefer due_in_sec to an absolute \
+time computed from that reading. For 'every day at 09:00 KST', use \
 recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, \
 recurrence_timezone=Asia/Seoul. For compact calendar rules, use \
 recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. \
@@ -19,11 +23,15 @@ additional_properties = false
 defer_loading = true
 
 [[params]]
+name = "due_in_sec"
+type = "integer"
+minimum = 1
+description = "Seconds after the server runs this call."
+
+[[params]]
 name = "due_at_unix"
 type = "number"
-description = """
-Unix timestamp in seconds. Provide this, due_at_iso, or a calendar \
-recurrence (daily/cron) that can derive the first due time."""
+description = "Unix timestamp in seconds."
 
 [[params]]
 name = "due_at_iso"
@@ -31,8 +39,7 @@ type = "string"
 description = """
 RFC 3339 timestamp with Z or an explicit numeric offset, for example \
 2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC; fractional \
-seconds are accepted and truncated. Provide this, due_at_unix, or a calendar \
-recurrence (daily/cron) that can derive the first due time."""
+seconds are accepted and truncated."""
 
 [[params]]
 name = "keeper_name"
@@ -69,7 +76,9 @@ description = "Optional stable schedule id."
 [[params]]
 name = "requested_at_unix"
 type = "number"
-description = "Optional request timestamp for replay/tests."
+description = """
+Optional request timestamp for replay/tests. Recorded only; no due time \
+counts from it."""
 
 [[params]]
 name = "expires_at_unix"
@@ -147,7 +156,9 @@ description = "Requester display name."
 [[params]]
 name = "scheduled_by_id"
 type = "string"
-description = "Scheduler actor id. Defaults to caller agent name."
+description = """
+Scheduler actor id. Defaults to the caller's name; required when the \
+endpoint cannot name the caller."""
 
 [[params]]
 name = "scheduled_by_kind"

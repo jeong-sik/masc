@@ -9,7 +9,9 @@ name = "owner"
 type = "string"
 required = true
 enum = ["self", "wake_target", "scheduled_by", "all"]
-description = "self: rows you scheduled or that wake you."
+description = """
+self: rows you scheduled or that wake you. Refused with error_kind \
+caller_unidentified when the endpoint cannot name you."""
 
 [[params]]
 name = "owner_name"
@@ -19,12 +21,15 @@ description = "Required with wake_target or scheduled_by."
 [[params]]
 name = "status"
 type = "string"
-enum = ["scheduled", "due", "running", "succeeded", "failed", "cancelled", "expired"]
+enum = ["scheduled", "due", "running", "succeeded", "failed", "cancelled", "expired", "active"]
+description = "active: every status that is not terminal."
 
 [[params]]
 name = "limit"
 type = "integer"
-description = "Defaults to 50, capped at 200."
+minimum = 1
+maximum = 200
+description = "Defaults to 50."
 
 [[params]]
 name = "cursor"

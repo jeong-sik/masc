@@ -1,18 +1,11 @@
----
-name: slack-web
-description: Navigate Slack Web channels and collect messages or threads through Browser Lane, choosing channel search or message search and preserving the observed collection scope.
----
-
 # Slack Web에서 채널과 메시지 읽기
 
-Slack Web에서 채널을 찾거나 메시지를 수집할 때 쓴다. Available 목록의
-`browser-lanes` instruction을 함께 읽어 연결·참조·조작 계약을 따른다.
-identity와 선택 revision은 현재 목록에서 가져온다. 이 스킬은 instruction이며
-composition 도구를 선언하지 않는다.
-현재 목록과 같은 revision의 browser-lanes 본문을 이미 읽었고 그 지침을 가지고
-있다면 다시 호출하지 않는다.
+Slack Web에서 채널을 찾거나 메시지를 수집할 때 browser-lanes 본문과 함께 읽는다.
+연결·참조·조작 계약은 browser-lanes 본문을 따른다. 이 참조는 composition 도구를
+선언하지 않는다. 채널 검색과 메시지 검색 중 요청에 맞는 쪽을 고르고, 관측한 수집
+범위를 유지한다.
 
-## 사이트와 도구 Skill을 필요할 때 합친다
+## 사이트 지침과 도구를 필요할 때 합친다
 
 현재 BrowserRead 스키마에 `regions`와 `scope`가 있으면 먼저 의미 영역을 읽고,
 실제 메시지 영역의 documentId/nodeId로 `mode=scene`의 scope를 지정한다.
@@ -21,7 +14,7 @@ composition 도구를 선언하지 않는다.
 
 composition은 현재 도구 목록의 `keeper_compose_<name>` 호출 도구로 사용한다.
 `keeper_skill`의 Available instruction 목록에는 composition이 없으므로 거기서
-읽거나 재로딩하지 않는다. 사이트별 판단 지침만 instruction Skill에서 읽는다.
+읽거나 재로딩하지 않는다. 사이트별 판단 지침은 이 참조에서 읽는다.
 
 채널 링크 클릭 응답의 tabId는 원래 탭이다. 새 탭 여부와 목적지 탭을 BrowserTabs로
 확인하고 그 탭을 읽는다. 클릭 반환이나 URL 변경만으로 채널 로딩 완료를 선언하지
@@ -84,7 +77,7 @@ output template은 실제 데이터 전달에 사용한다. read → 판단 → 
 
 도구 호출을 묶는 것만으로 DOM 응답이 작아지지는 않는다. 필요한 영역·대상만
 반환하는 도구 계약이 없다면 그 제한을 남긴다. 존재하지 않는 scope/selector
-읽기 인자나 임의 JavaScript 실행을 이 스킬에서 만들어내지 않는다.
+읽기 인자나 임의 JavaScript 실행을 이 참조를 근거로 만들어내지 않는다.
 
 검색 문법: [Slack 공식 검색 안내](https://slack.com/help/articles/202528808-Search-in-Slack).
 
@@ -92,7 +85,8 @@ output template은 실제 데이터 전달에 사용한다. read → 판단 → 
 
 A changed Slack URL or title can precede rendered channel content. If BrowserTabs
 reports the selected tab as inactive and the body remains pending or belongs to the
-previous channel, compose with the browser-lanes explicit activation guidance:
-with extension 0.6.0 or newer, use `BrowserInteract action=activate_tab` on the observed
-clientId/tabId/expectedUrl, then read and verify the actual channel body. Do not
-activate every tab automatically or treat the activation receipt as collected context.
+previous channel, follow the explicit tab activation guidance in browser-lanes
+(`references/composition.md` from the Skill root): with extension 0.6.0 or newer,
+use `BrowserInteract action=activate_tab` on the observed clientId/tabId/expectedUrl,
+then read and verify the actual channel body. Do not activate every tab
+automatically or treat the activation receipt as collected context.

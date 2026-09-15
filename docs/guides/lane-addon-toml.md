@@ -104,7 +104,7 @@ directory = "skills"
 
 `directory`는 패키지 루트 아래의 Skill source 디렉터리다. 각 Skill은 기존 MASC 파서가 읽는
 `skills/<skill-name>/SKILL.md` 구조를 따른다. 본문이 참조하는 스크립트와 문서는 그 Skill 디렉터리
-아래에 둔다. [MSX 관측 Skill](../../addons/msx-observer/skills/msx-observe/SKILL.md)은 실제 예제이며,
+아래에 둔다. [MSX 관측 Skill](../../addons/msx-observer/skills/msx-observation-rows/SKILL.md)은 실제 예제이며,
 관측 좌표를 정리하는 스크립트와 프레임·게임 턴을 구분하는 참조 문서를 포함한다.
 
 설치된 패키지의 source는 기존 Skill snapshot service에 read-only로 추가된다. 원래 설정한

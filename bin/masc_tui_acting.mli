@@ -48,10 +48,10 @@ val retain :
   'a list ->
   'a list * int
 (** Trim a newest-first ring to a budget per class, answering what was kept
-    and how many were dropped. Events [visible Actions] spend [actions];
-    turn observations spend a budget of their own the size of [actions],
-    because the Turns fold needs them as long as the calls they number;
-    everything else spends [quiet].
+    and how many were dropped. Events [visible Actions] and turn
+    observations spend [actions] -- the Turns fold needs an observation
+    exactly as long as the calls it numbers, so it leaves with them in
+    arrival order; everything else spends [quiet].
 
     Trimming by arrival alone let one class evict the other: a chat stream
     sends one frame per token, so a single long reply spent the whole ring
@@ -190,11 +190,11 @@ val chunk_rows : traces:(string * string) list -> entry list -> row list
     (composite pushes, heartbeats, stream frames, waiting-queue changes,
     snapshots) stays hidden here too; the fold never readmits it as a
     pass-through row. Rows come back newest
-    first by latest activity. A chunk is one keeper turn: wire and ledger
-    members state the agent session's ordinal for their provider call, a
-    retained turn observation translates the ordinal to the keeper turn, and
-    a row reported after the next turn opened still goes to the turn that
-    made it. A settled
+    first by latest activity. A chunk is one keeper turn. A member that
+    states the agent session's ordinal for its provider call goes to the
+    keeper turn a retained turn observation gives that ordinal, even when it
+    is reported after the next turn opened; a member that states no ordinal
+    joins the keeper's newest chunk. A settled
     chunk names its tools (ledger plane preferred, wire plane standing in
     when the ledger is silent), tokens, and cost; a running one shows the
     calls so far. *)

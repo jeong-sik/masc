@@ -145,7 +145,6 @@ let keepers_json
             (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
               Threshold 300ms — lower than outer 500ms for more data. *)
             let dt_meta = ref 0.0 in
-            let dt_ka = ref 0.0 in
             let dt_audit = ref 0.0 in
             let dt_profile = ref 0.0 in
             let dt_phase = ref 0.0 in
@@ -155,12 +154,11 @@ let keepers_json
             if total_work > 0.3
             then
               Log.Dashboard.info
-                "[keepers_json:%s] sub-op: meta=%.0fms ka=%.0fms \
+                "[keepers_json:%s] sub-op: meta=%.0fms \
                  audit=%.0fms profile=%.0fms phase=%.0fms trust=%.0fms activity=%.0fms \
                  total=%.0fms"
                 name
                 (!dt_meta *. 1000.0)
-                (!dt_ka *. 1000.0)
                 (!dt_audit *. 1000.0)
                 (!dt_profile *. 1000.0)
                 (!dt_phase *. 1000.0)
@@ -227,11 +225,17 @@ let keepers_json
                            @ Keeper_status_bridge.attention_fields_json config meta
                            @ [ "runtime_trust", runtime_trust ])))
                   else (
-                    let t_ka = Time_compat.now () in
-                    let keepalive_running =
-                      Keeper_status_bridge.runtime_keepalive_running config meta
+                    (* One registry read for the row: [phase], [pipeline_stage],
+                       [keepalive_running] and the diagnostic's health all come
+                       from it, so they cannot describe two different moments. *)
+                    let t_phase = Time_compat.now () in
+                    let registry_phase =
+                      Keeper_registry.get_phase ~base_path:config.base_path meta.name
                     in
-                    dt_ka := Time_compat.now () -. t_ka;
+                    dt_phase := Time_compat.now () -. t_phase;
+                    let keepalive_running =
+                      Keeper_status_runtime.keepalive_running_of_phase registry_phase
+                    in
                     let now_ts = Time_compat.now () in
                     let created_ts =
                       Workspace_resilience.Time.parse_iso8601_opt meta.created_at
@@ -265,7 +269,7 @@ let keepers_json
                     let diagnostic =
                       Keeper_status_runtime.keeper_diagnostic_json
                         ~meta
-                        ~keepalive_running
+                        ~phase:registry_phase
                         ~history_items:[]
                         ~now_ts
                     in
@@ -302,11 +306,6 @@ let keepers_json
                       else
                         Keeper_status_runtime.keeper_surface_status ~diagnostic
                     in
-                    let t_phase = Time_compat.now () in
-                    let registry_phase =
-                      Keeper_registry.get_phase ~base_path:config.base_path meta.name
-                    in
-                    dt_phase := Time_compat.now () -. t_phase;
                     let pipeline_stage =
                       if meta.paused
                       then "paused"

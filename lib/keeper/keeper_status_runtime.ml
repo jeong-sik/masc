@@ -124,6 +124,7 @@ let string_of_fiber_health = function
 let keeper_health_to_string = function
   | KH_healthy -> "healthy"
   | KH_idle -> "idle"
+  | KH_failing -> "failing"
   | KH_offline -> "offline"
 
 (** Issue #8670: strict parser returning [None] on unknown strings so
@@ -133,6 +134,7 @@ let keeper_health_to_string = function
 let keeper_health_of_string_opt = function
   | "healthy" -> Some KH_healthy
   | "idle" -> Some KH_idle
+  | "failing" -> Some KH_failing
   | "offline" -> Some KH_offline
   | _ -> None
 
@@ -240,21 +242,57 @@ let classify_keeper_quiet_reason ~(meta : Keeper_meta_contract.keeper_meta) ~kee
     else Some Never_started
   else None
 
-(* Health is a projection of two facts the runtime already holds: whether the
-   registry phase admits a turn ([keepalive_running]) and whether any turn has
-   been recorded. No clock: a keeper in the middle of a long turn is as healthy
-   as one that just finished, and a stopped one reads offline the moment its
-   phase says so. *)
-let keeper_health_state ~meta ~keepalive_running : keeper_health =
-  if not keepalive_running then KH_offline
-  else if meta.runtime.usage.total_turns = 0
-          && meta.runtime.proactive_rt.count_total = 0
-  then KH_idle
-  else KH_healthy
+(* "Is the keepalive running" is a liveness question, so it is answered by
+   the phases in which the keepalive fiber is alive and cycling: Running and
+   Failing. [Keeper_registry.is_running] is the operator-facing "is it in
+   the Running phase" and excludes Failing; read through it, a keeper with a
+   turn-failure streak that was still executing turns was projected as
+   KH_offline and the TUI header drew "offline" beside "failing"
+   (msx-retro-mania, 2026-09-14). A keeper with no registry entry has no
+   keepalive. *)
+let keepalive_running_of_phase (phase : Keeper_state_machine.phase option) =
+  match phase with
+  | Some phase -> Keeper_state_machine.can_execute_turn phase
+  | None -> false
+
+(* Health is a projection of two facts the runtime already holds: the registry
+   phase and whether any turn has been recorded. No clock: a keeper in the
+   middle of a long turn is as healthy as one that just finished, and a stopped
+   one reads offline the moment its phase says so.
+
+   Failing is its own reading. Its keepalive still runs turns, so it is not
+   offline, but the state machine enters Failing only on evidence that turns or
+   heartbeats are failing or that the credential was archived. Read as healthy,
+   a keeper four failed turns deep drew "healthy" and "failing" on one TUI chat
+   header (msx-retro-mania, 2026-09-15). *)
+let keeper_health_state ~meta ~(phase : Keeper_state_machine.phase option)
+  : keeper_health =
+  match phase with
+  | Some Keeper_state_machine.Running ->
+      if meta.runtime.usage.total_turns = 0
+         && meta.runtime.proactive_rt.count_total = 0
+      then KH_idle
+      else KH_healthy
+  | Some Keeper_state_machine.Failing -> KH_failing
+  | Some
+      ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting )
+  | None -> KH_offline
 
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
   | KH_offline -> Recover
+  (* Recover, not the quiet-reason ladder below. A failing keeper's keepalive
+     is running, so the ladder would answer Direct_message, and a message only
+     queues one more turn behind the ones that are failing. Recovery (down, then
+     up) is what an operator does after reading the latest error, and
+     [keeper_recover] skips every keeper whose path is not Recover: any other
+     answer here refuses recovery to the keeper that needs it. *)
+  | KH_failing -> Recover
   | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some Keepalive_not_running -> Recover
@@ -266,6 +304,8 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
   match health_state with
   | KH_offline ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
+  | KH_failing ->
+      "Keeper turns are failing. Read the latest runtime error, then recover before relying on automation."
   | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some Proactive_disabled ->
@@ -328,6 +368,9 @@ let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
   let surface =
     match health_state with
     | KH_healthy -> Surface_active
+    (* A failing keeper is still executing turns. The display word stays the
+       one for that; health and phase carry the failure. *)
+    | KH_failing -> Surface_active
     | KH_idle -> Surface_idle
     | KH_offline -> Surface_offline
   in
@@ -335,11 +378,12 @@ let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
-    ~(keepalive_running : bool)
+    ~(phase : Keeper_state_machine.phase option)
     ~(history_items : Yojson.Safe.t list)
     ~(now_ts : float) : Yojson.Safe.t =
+  let keepalive_running = keepalive_running_of_phase phase in
   let quiet_reason = classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts in
-  let health_state = keeper_health_state ~meta ~keepalive_running in
+  let health_state = keeper_health_state ~meta ~phase in
   let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
   let last_reply_status, last_reply_at, last_reply_preview =
     keeper_reply_snapshot_of_history history_items

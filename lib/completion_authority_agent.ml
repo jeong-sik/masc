@@ -1024,17 +1024,22 @@ let queue_retry ~sw ~wait ~dispatch pending scope =
       match current with
       | Some _ -> Joined_running_timer
       | None ->
-        Eio.Fiber.fork ~sw (fun () ->
+        (* A daemon, because nothing waits for this timer and the switch must
+           not either: it only accelerates the next attempt at an obligation
+           the backlog already holds. As an ordinary fiber it kept a normally
+           returning [Switch.run] waiting out the whole interval. *)
+        Eio.Fiber.fork_daemon ~sw (fun () ->
            wait ();
            (* Detach the entire batch before publication. A retry arriving
               during dispatch owns the next timer and cannot be cleared by
               this one. A cancelled timer leaves the durable awaiting Tasks
               for the next runtime's boot sweep. *)
-          match Atomic.exchange pending None with
-          | None -> ()
-          | Some { keys; sweep } ->
-            dispatch
-              (if sweep then Whole_backlog else Targets (Review_keys.elements keys)));
+          (match Atomic.exchange pending None with
+           | None -> ()
+           | Some { keys; sweep } ->
+             dispatch
+               (if sweep then Whole_backlog else Targets (Review_keys.elements keys)));
+          `Stop_daemon);
         Armed_timer)
     else enqueue ()
   in
@@ -1163,10 +1168,13 @@ let request_rejection_delivery (runtime : runtime) =
 
 let retry_rejection_delivery (runtime : runtime) =
   if Atomic.compare_and_set runtime.rejection_retry_pending false true then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+    (* Same reason as the review timer: the retry is an accelerator, and the
+       reconcile backlog is the durable obligation. Nothing joins it. *)
+    Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
       Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
       Atomic.set runtime.rejection_retry_pending false;
-      request_rejection_delivery runtime)
+      request_rejection_delivery runtime;
+      `Stop_daemon)
 ;;
 
 let process_rejection_deliveries (runtime : runtime) =

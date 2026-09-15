@@ -5,3 +5,5 @@ turn, including operator-only and unavailable entries with their typed \
 availability. This is capability introspection, not connector content lookup. \
 Use keeper_capability_search to retrieve lexically relevant candidates."""
 additional_properties = false
+
+defer_loading = true

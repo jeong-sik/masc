@@ -21,8 +21,9 @@ type fiber_health =
     in Keeper_status_runtime) so operator_control_snapshot can parse JSON
     into the same type. *)
 type keeper_health =
-  | KH_healthy (** Keepalive running and at least one turn recorded *)
-  | KH_idle (** Keepalive running, no turn recorded yet *)
+  | KH_healthy (** Phase Running and at least one turn recorded *)
+  | KH_idle (** Phase Running, no turn recorded yet *)
+  | KH_failing (** Phase Failing: the keepalive still runs turns, and they fail *)
   | KH_offline (** Keepalive not running: the phase admits no turn *)
 
 (** Per-tool usage entry for keeper tool tracking.

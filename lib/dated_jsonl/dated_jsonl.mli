@@ -402,6 +402,24 @@ val load_tail_lines : string -> max_lines:int -> string list
     Reads backwards in chunks. Returns chronologically (oldest first). A
     missing file is an empty tail; other open and read errors are exceptions. *)
 
+(** One non-blank line of a tail and the byte offset in the file where it
+    starts. In a file that is only appended to, the offset names the line for
+    as long as the file exists, whatever the window it was read in. *)
+type tail_row =
+  { offset : int
+  ; line : string
+  }
+
+val load_tail_rows : string -> max_lines:int -> tail_row list
+(** {!load_tail_lines} with each line's starting offset. Same read, same
+    order, same errors. *)
+
+val map_tail_rows : string -> max_lines:int -> f:(tail_row -> 'a) -> 'a list
+(** {!load_tail_rows} with [f] applied to each row in the same pool job as the
+    read, so a caller that parses the rows does not come back to its own
+    domain between the read and the parse. [f] must not touch state owned by
+    the calling fiber. *)
+
 module For_testing : sig
   val mutex : t -> Eio.Mutex.t
   (** Expose the internal mutex so tests can verify sharing. *)

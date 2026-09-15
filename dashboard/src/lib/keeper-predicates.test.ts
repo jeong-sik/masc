@@ -103,6 +103,10 @@ describe('isKeeperOffline', () => {
       expect(isKeeperOffline({ diagnostic: { health_state } })).toBe(false)
     },
   )
+  // Failing phase 의 keeper 는 턴을 계속 돌리고 있다. 턴이 실패할 뿐 멈춘 게 아니다.
+  it('health=failing 은 턴이 실패하는 것이지 멈춘 것이 아니다', () => {
+    expect(isKeeperOffline({ diagnostic: { health_state: 'failing' } })).toBe(false)
+  })
   it.each(['offline', 'inactive', 'unbooted', 'stopped', 'active'])(
     'status=%s 는 판정에 관여하지 않는다',
     (status) => {
@@ -148,7 +152,7 @@ describe('running 판정은 phase 와 health 로만 한다', () => {
   )
 
   // phase 가 없는 스냅샷에서는 health 가 답한다.
-  it.each(['healthy', 'idle'])('phase 없이 health=%s 면 running', (health_state) => {
+  it.each(['healthy', 'idle', 'failing'])('phase 없이 health=%s 면 running', (health_state) => {
     expect(isKeeperRunningExcludingRestarting(
       k({ phase: null, diagnostic: { health_state } } as Partial<Keeper>),
     )).toBe(true)

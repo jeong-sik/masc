@@ -110,6 +110,11 @@ export function statusLabel(value?: string | null): string {
       return '스냅샷 준비 안 됨'
     case 'zombie':
       return '좀비'
+    // keeper_health_to_string for a keeper in the Failing phase. The same word
+    // as that phase's label (fleet-tone.ts PHASE_LABEL_KO.failing): one state,
+    // one word.
+    case 'failing':
+      return '오류 발생'
     case 'timeout':
       return '시간 초과'
     // keeper/keeper_board_attention_partition.ml (state_to_string): the

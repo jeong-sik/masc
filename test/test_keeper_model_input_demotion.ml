@@ -317,6 +317,45 @@ let stored_results_are_not_demoted_again () =
     (List.length planned.Demotion.pending)
 ;;
 
+(* [materialize] finds each marker's body by its tool_use_id among every
+   pending demotion. A lookup that answered with another entry would still
+   write a well-formed marker, pointing at another result's bytes, so each
+   stored blob is read back and compared with the body its message held. *)
+let each_marker_stores_its_own_body () =
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  let bodies = List.init 40 (fun i -> Printf.sprintf "result %d:" i ^ String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+  in
+  Alcotest.(check int)
+    "every aged body is planned"
+    (List.length bodies)
+    (List.length planned.Demotion.pending);
+  let outcome =
+    Demotion.materialize
+      ~store
+      ~pending:planned.Demotion.pending
+      planned.Demotion.messages
+  in
+  Alcotest.(check int) "no revert in a healthy store" 0 outcome.Demotion.reverted;
+  let stored =
+    List.map
+      (fun content ->
+         match Tool_output.decode_from_agent_core content with
+         | Tool_output.Decoded reference ->
+           (match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "a marker names a blob the store does not hold"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+         | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+           Alcotest.fail "every planned body leaves as a marker")
+      (markers outcome.Demotion.messages)
+  in
+  Alcotest.(check (list string)) "each marker stores its own body" bodies stored
+;;
+
 (* --- 5. Atoms retained by the raw cut keep their bodies ---------------- *)
 
 let raw_cut_retained_atoms_are_verbatim () =
@@ -741,6 +780,10 @@ let () =
             "existing markers are not demoted again"
             `Quick
             stored_results_are_not_demoted_again
+        ; Alcotest.test_case
+            "each marker stores its own body"
+            `Quick
+            each_marker_stores_its_own_body
         ; Alcotest.test_case
             "raw-cut-retained atoms keep their bodies"
             `Quick

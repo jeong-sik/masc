@@ -11465,9 +11465,11 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
-        # The paths row keeps each path's tail and the binary age. Cut from
-        # the right at 28 and 32 cells, the workspace under /var/folders and
-        # its .masc both read as the same "/var/folders/bv/…" prefix.
+        # The paths row keeps each path's tail and the binary age. #36354
+        # named a nested masc root against the "masc" label beside it
+        # ("<base>/.masc") instead of drawing the base path a second time,
+        # so a fixture whose masc root sits under its base path -- this
+        # one does -- reads the label, not the base path's own tail twice.
         drain_until_quiet(process, master_fd, output)
         rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
         paths_row = rows.get(screen_row_of(rows, b"  base "), b"")
@@ -11475,7 +11477,7 @@ def config_navigation_interaction() -> Interaction:
         # workspaces apart; a whole basename can be longer than a path's
         # share of a 100-column row.
         suffix = os.path.basename(base_path)[-8:].encode()
-        for needle in (suffix + b"   masc ", suffix + b"/.masc", b"binary age"):
+        for needle in (suffix + b"   masc ", b"masc <base>/.masc", b"binary age"):
             if needle not in paths_row:
                 raise AssertionError(
                     f"the Config paths row lost {needle!r}: {paths_row!r}"

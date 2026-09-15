@@ -274,6 +274,15 @@ jobs:
       - name: Sublibrary leaf boundary (RFC-0056 G1)
         run: python3 scripts/audit-sublib-cycle.py
 
+      # The third of that family, added by #36618: masc.opam is generated from
+      # dune-project (generate_opam_files true) and opam solve reads the
+      # generated file, so #36410 edited the constraint and the file opam
+      # reads never changed. The check regenerates and compares, which needs
+      # `dune build masc.opam` and therefore the switch -- it cannot run in
+      # the toolchain-free lint job either.
+      - name: masc.opam matches dune-project regeneration
+        run: bash scripts/check-opam-file-regenerated.sh
+
       - name: OCaml boundary ratchet
         env:
           OCAML_BOUNDARY_BASE_REF: ${{ github.event.pull_request.base.sha }}

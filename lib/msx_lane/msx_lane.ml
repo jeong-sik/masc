@@ -263,16 +263,22 @@ let entry_json (e : entry) : Yojson.Safe.t =
     ]
 ;;
 
+(* The file first: an edge the ledger file did not take is not an input the
+   machine's history records, so a checkpoint never carries it. The line sits
+   in the channel buffer until it is flushed, and [with_open_gen] closes with
+   [close_out_noerr], which drops a failed write (ENOSPC, EIO) without a word.
+   Flushing inside makes that failure raise here, before the edge is kept. *)
 let append_entry st e =
-  st.entries <- e :: st.entries;
-  st.input_count <- st.input_count + 1;
   Out_channel.with_open_gen
     [ Open_append; Open_creat; Open_wronly ]
     0o644
     st.ledger_path
     (fun oc ->
       output_string oc (Yojson.Safe.to_string (entry_json e));
-      output_char oc '\n')
+      output_char oc '\n';
+      flush oc);
+  st.entries <- e :: st.entries;
+  st.input_count <- st.input_count + 1
 ;;
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
@@ -504,6 +510,22 @@ let tap_one st ~who ~hold_frames ~step_frames k =
   advance st (step_frames - hold_frames)
 ;;
 
+(* Keys go down only inside a press. When recording an edge raises, the keys
+   still go up before the exception leaves: a key left held would be in the
+   next checkpoint, and the next refusal that releases its own keys would
+   release this one too while reporting that nothing changed. The body runs no
+   Eio operation, so nothing can cancel it between the press and this release. *)
+let releasing_on_raise st keys body =
+  match body () with
+  | result -> result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (* Releasing a key that is already up changes nothing. *)
+    (* See Msx.set_key: press_all placed every key, so no release can miss. *)
+    List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
@@ -525,24 +547,26 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
              a chord held together. *)
           (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
           List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
-          List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
-          Ok (observe st)
+          releasing_on_raise st keys (fun () ->
+            List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+            Ok (observe st))
         | Ok () ->
-          List.iter
-            (fun k ->
-              append_entry st
-                { at_frame = st.frame; who; key_name = key_to_string k; down = true })
-            keys;
-          advance st hold_frames;
-          List.iter
-            (fun k ->
-              (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
-              ignore (Msx.set_key st.m k ~pressed:false : bool);
-              append_entry st
-                { at_frame = st.frame; who; key_name = key_to_string k; down = false })
-            keys;
-          advance st (step_frames - hold_frames);
-          Ok (observe st)))
+          releasing_on_raise st keys (fun () ->
+            List.iter
+              (fun k ->
+                append_entry st
+                  { at_frame = st.frame; who; key_name = key_to_string k; down = true })
+              keys;
+            advance st hold_frames;
+            List.iter
+              (fun k ->
+                (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
+                ignore (Msx.set_key st.m k ~pressed:false : bool);
+                append_entry st
+                  { at_frame = st.frame; who; key_name = key_to_string k; down = false })
+              keys;
+            advance st (step_frames - hold_frames);
+            Ok (observe st))))
 ;;
 
 let ledger () =

@@ -893,8 +893,16 @@ let test_the_file_marks_are_in_the_sheet () =
         true
         (List.mem mark explained))
     Masc_tui_file_icon.kinds;
+  (* The eighth mark. The tree draws an arrow on a row that opens rather than
+     reads, and the sheet explained the seven file kinds beside it and not
+     that one -- the mark that says which of the two a row is. *)
+  Alcotest.(check bool) "the sheet explains the folder arrow" true
+    (List.mem Masc_tui_file_icon.folder_glyph explained);
   (* And nothing in the sheet the tree cannot draw. *)
-  let drawable = List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds in
+  let drawable =
+    Masc_tui_file_icon.folder_glyph
+    :: List.map Masc_tui_file_icon.glyph Masc_tui_file_icon.kinds
+  in
   List.iter
     (fun (mark, _) ->
       Alcotest.(check bool)
@@ -1167,8 +1175,8 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
-(* The sheet is the only place the eight keeper marks are named where a reader
-   can read all eight at once: the Keepers rows pair each glyph with its word
+(* The sheet is the only place the keeper marks are named where a reader
+   can read all of them at once: the Keepers rows pair each glyph with its word
    but show only the states the fleet is in, and the 34-cell roster pane beside
    the chat draws the glyph with no word at all. The list lived in
    Masc_tui_keeper_mark with no reader until the sheet took it. *)

@@ -1208,6 +1208,27 @@ let test_only_offline_is_dropped () =
   check bool "and one whose health did not read" true (says "unread-one");
   check bool "only the offline one is gone" false (says "gone-one")
 
+(* A failing keeper is still turning, and its turns are the ones an operator
+   most needs to read, so it stays beside the offline row that is dropped.
+   Its own mark and tone come from the roster, as every keeper's do. *)
+let test_a_failing_keeper_is_not_dropped () =
+  let input =
+    { fixture with
+      Pane.keepers =
+        Some
+          [ keeper ~health:(Some Masc.Tui_decode.Health_running) "running-one"
+          ; keeper ~mark:"!" ~tone:Pane.Warn
+              ~health:(Some Masc.Tui_decode.Health_failing) "failing-one"
+          ; keeper ~health:(Some Masc.Tui_decode.Health_offline) "gone-one"
+          ]
+    ; selected = Some "running-one"
+    }
+  in
+  let drawn = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let says name = List.exists (fun row -> contains name row) drawn in
+  check bool "a failing keeper draws" true (says "failing-one");
+  check bool "the offline one beside it is gone" false (says "gone-one")
+
 (* ── calls: marks, order, an opened call ───────────────────────────── *)
 
 module Contract = Agent_core.Tool_contract
@@ -1541,6 +1562,8 @@ let () =
             test_an_unread_roster_is_not_counted_as_none
         ; test_case "only offline is dropped" `Quick
             test_only_offline_is_dropped
+        ; test_case "a failing keeper is not dropped" `Quick
+            test_a_failing_keeper_is_not_dropped
         ] )
     ; ( "beside the roster"
       , [ test_case "only the selected keeper's record draws" `Quick

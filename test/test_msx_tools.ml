@@ -1,7 +1,8 @@
 (* MSX lane tools (RFC-0439 §6.1) — the five tools through Tool_misc.dispatch.
 
    The machine boots without ROMs (bus reads 0xFF) so the tests need no game
-   image. What they pin: the no-machine refusal, the frame clock, the ledger
+   image. What they pin: the no-machine refusal, that every refusal declares
+   it took no effect, the frame clock, the ledger
    edges with the caller's name, the key vocabulary, the per-call frame cap,
    the read-only classification, and that the descriptors and schemas exist. *)
 
@@ -39,8 +40,35 @@ let frame_of result =
 
 let is_completed result = Tool_result.failure_class result = None
 
+(* A failure the lane refused before touching anything says so. Undeclared, it
+   reads as effect-outcome-unknown and ends the turn of a Keeper that ran the
+   tool inside a composition. *)
+let took_no_effect (result : Tool_result.result) =
+  match result with
+  | Tool_result.Failed
+      { Tool_result.effect_disposition = Tool_result.Proven_pre_effect; _ } ->
+    true
+  | Tool_result.Failed
+      { Tool_result.effect_disposition =
+          Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown
+      ; _
+      }
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    false
+;;
+
+(* The history the lane is running. A fresh ROM-less load starts at the same
+   frame as the one it replaces, so only this tells a kept machine from a
+   replaced one. *)
+let incarnation () =
+  match Msx_lane.capture_with_identity () with
+  | Ok capture -> capture.Msx_lane.incarnation
+  | Error e -> fail (Msx_lane.error_to_string e)
+;;
+
 let rejected result =
   Tool_result.failure_class result = Some Tool_result.Workflow_rejection
+  && took_no_effect result
 ;;
 
 let test_no_machine () =
@@ -357,10 +385,14 @@ let test_press_validation () =
   check int "refusals do not move the clock" before
     (frame_of (dispatch ~base_path "masc_msx_screen" []));
   check int "refusals write no ledger edge" 0 (List.length (Msx_lane.ledger ()));
+  let loaded = incarnation () in
   let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "/nonexistent/roms") ] in
   check (option string) "a missing BIOS directory is a runtime failure"
     (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
-    (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r))
+    (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
+  check bool "the missing BIOS directory is refused before the machine changes" true
+    (took_no_effect r);
+  check string "the refused load leaves the loaded machine in place" loaded (incarnation ())
 ;;
 
 let test_inventory () =
@@ -764,6 +796,69 @@ let test_disk_backup_failure_preserves_machine () =
   read_guest_disk '~'
 ;;
 
+(* #36670: a press whose ledger edge cannot be written raises. The keys it had
+   put down used to stay down, so the next checkpoint carried them, and the next
+   refusal that released its own keys released them too while reporting that
+   nothing changed. The edge that failed to write stayed in the in-memory
+   ledger as well. Each broken ledger below makes the first append raise
+   before a frame runs, so the whole machine must read as it did. *)
+let test_press_that_raises_releases_its_keys () =
+  with_workspace @@ fun base_path ->
+  let loaded = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "machine load completes" true (is_completed loaded);
+  let ledger_path =
+    Filename.concat
+      (Filename.concat (Filename.concat base_path ".masc") "msx")
+      "ledger.jsonl"
+  in
+  let probe = Filename.concat base_path "probe.json" in
+  let machine () =
+    ignore (Msx_lane.save ~path:probe |> lane_observation "probe save");
+    match Yojson.Safe.from_file probe with
+    | `Assoc fields ->
+      (match List.assoc_opt "machine" fields with
+       | Some (`String bytes) -> bytes
+       | Some _ | None -> fail "the checkpoint carries no machine")
+    | _ -> fail "the checkpoint is not an object"
+  in
+  let before = machine () in
+  let edges_before = List.length (Msx_lane.ledger ()) in
+  let presses_raise ~ledger =
+    List.iter
+      (fun sequence ->
+        (match
+           Msx_lane.press ~who:"msx-test" ~keys:[ Msx.Space; Msx.Return ]
+             ~hold_frames:2 ~step_frames:4 ~sequence
+         with
+         | exception Sys_error _ -> ()
+         | Ok _ | Error _ ->
+           fail (Printf.sprintf "a press over %s must raise" ledger));
+        check string
+          (Printf.sprintf "%s, sequence=%b: no key stays held and no frame ran"
+             ledger sequence)
+          before (machine ());
+        check int
+          (Printf.sprintf "%s, sequence=%b: the unwritten edge is not in the ledger"
+             ledger sequence)
+          edges_before (List.length (Msx_lane.ledger ())))
+      [ false; true ]
+  in
+  (* A directory refuses the open. *)
+  Sys.remove ledger_path;
+  Sys.mkdir ledger_path 0o755;
+  presses_raise ~ledger:"a directory";
+  (* /dev/full takes the open and fails the write with ENOSPC. The line reaches
+     the device only when the channel flushes, and a close that swallows the
+     error let the press finish with the edge kept in memory alone. Linux has
+     the device; macOS does not. *)
+  if Sys.file_exists "/dev/full" then begin
+    Sys.rmdir ledger_path;
+    Unix.symlink "/dev/full" ledger_path;
+    presses_raise ~ledger:"/dev/full"
+  end
+  else Printf.printf "not run: this host has no /dev/full, so a failing write is unchecked\n%!"
+;;
+
 (* Bitmap modes draw into pixels, so their name table is noise; the
    observation sends an empty screen_text there instead of ~2 KB of it. The
    classification is what the diet hangs on, so pin every variant of
@@ -838,6 +933,8 @@ let test_incomplete_bios_triple_is_refused () =
   check (option string) "through the tool the incomplete triple is a runtime failure"
     (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
     (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
+  check bool "the incomplete triple is refused before any machine exists" true
+    (took_no_effect r);
   check bool "the tool's failure names the missing ROM" true
     (contains ~needle:"cbios_logo_msx2.rom" (Tool_result.message r));
   (* The inventory holding only the main ROM is chosen as the source and then
@@ -1083,6 +1180,7 @@ let () =
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
         ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
+        ; test_case "a press that raises releases its keys" `Quick test_press_that_raises_releases_its_keys
         ; test_case "disk boot smoke (host ROMs)" `Quick test_disk_boot_smoke
         ; test_case "key vocabulary" `Quick test_key_vocabulary
         ; test_case "bitmap mode classification" `Quick test_bitmap_mode_classification

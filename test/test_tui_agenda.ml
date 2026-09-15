@@ -405,8 +405,9 @@ let test_empty_sections_answer_in_words () =
                             ~awaiting:(Agenda.Read [])) in
   let text = joined lines in
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
-  check bool "so does the other" true (contains ~needle:"nobody is waiting" text);
-  check int "both headings are still drawn" 2 (List.length (tones_of lines Agenda.Heading))
+  check bool "so does the waiting section" true (contains ~needle:"nobody is waiting" text);
+  check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
+  check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 (* An empty section is an answer only once its list was read. With the server

@@ -7321,6 +7321,127 @@ let test_terminal_composition_literal_input_failure_runs_no_node () =
               (Option.is_none result.abort_turn)))
 ;;
 
+(* The msx-retro-mania request of 2026-09-15: a server restart emptied the MSX
+   lane, and the Keeper's province-end macro pressed keys into it. The lane
+   refused before touching anything, but the refusal was undeclared, so the
+   composition read it as effect-outcome-unknown and ended the whole request.
+   The same composition, same nodes, against an empty lane. *)
+let sangokushi_end_command_composition =
+  {|[[compositions]]
+name = "msx-end-command"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "press"
+tool = "masc_msx_press"
+[compositions.nodes.input]
+kind = "literal"
+value = { keys = ["0", "Return", "y"], sequence = true }
+
+[[compositions.nodes]]
+id = "settle"
+tool = "masc_msx_step_until_change"
+after = ["press"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "screen"
+tool = "masc_msx_screen"
+after = ["settle"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+let test_composition_over_an_empty_msx_lane_returns_the_refusal () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-empty-msx-lane"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"msx-end-command"
+           sangokushi_end_command_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
+                  ~content_transport:Runtime_official_client_tool.Codex
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error:(ref None)
+                  ~raw_trace_run:None
+                  ()
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal tool.name "keeper_compose_msx-end-command")
+              |> function
+              | Some tool -> tool
+              | None -> fail "the MSX composition was not projected"
+            in
+            let result = tool.call ~call_id:"empty-msx-lane-composition" (`Assoc []) in
+            check bool "the refusal is visible" false result.success;
+            let failure_payload = parse_json result.content in
+            check string
+              "the lane touched nothing, and the composition says so"
+              "proven_pre_effect"
+              Yojson.Safe.Util.(member "effect_disposition" failure_payload |> to_string);
+            let node = Yojson.Safe.Util.(member "cause" failure_payload |> member "node") in
+            check string
+              "the press is the node that did not complete"
+              "press"
+              Yojson.Safe.Util.(member "node_id" node |> to_string);
+            check string
+              "the Keeper reads what to do next"
+              (Msx_lane.error_to_string Msx_lane.No_machine)
+              Yojson.Safe.Util.(member "result" node |> member "message" |> to_string);
+            check int
+              "nothing after the press ran"
+              1
+              Yojson.Safe.Util.(member "settled" failure_payload |> to_list |> List.length);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result
+             | Masc.Keeper_tools_agent_core.External_effect_deferred
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
+               fail "a refusal before any effect changed the terminal effect state");
+            check bool
+              "the provider turn stays open so the Keeper can load or restore"
+              true
+              (Option.is_none result.abort_turn)))
+;;
+
 let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
   with_exec_fixture ~require_sandbox:true "composition-unknown-effect-terminal-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -9484,6 +9605,8 @@ let () =
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "literal input failure runs no composition node" `Quick
         test_terminal_composition_literal_input_failure_runs_no_node;
+      test_case "composition over an empty MSX lane returns the refusal" `Quick
+        test_composition_over_an_empty_msx_lane_returns_the_refusal;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "write then unchanged read completes" `Quick

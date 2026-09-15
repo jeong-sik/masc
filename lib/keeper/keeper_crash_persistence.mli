@@ -19,8 +19,14 @@ val enqueue_record :
   restart_count:int ->
   unit
 
-(** Start background drain fiber. Call once from server bootstrap.
-    Drains the internal queue and writes to Dated_jsonl. *)
+(** Start the background drain fiber and the flush that runs when [sw] closes.
+    Call once from server bootstrap.
+
+    The fiber drains the queue on its own interval and writes to Dated_jsonl.
+    It is a daemon, so the switch cancels it; the switch's release hook writes
+    whatever is still queued at that point. Both write one event per
+    cancellation-protected step, so a record is never taken from the queue
+    without reaching the store. *)
 val start_drain_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 
 (** Read recent crash events from disk. Performs I/O -- call from

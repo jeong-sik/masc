@@ -1216,6 +1216,69 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
              (Keeper_checkpoint_store.exact_snapshot_reference decoded))
       | Error _ -> fail "exact snapshot bytes did not decode")
 
+(* A save hashes the candidate bytes and its source check hashes the file on
+   disk. Both hashes run in the pool job that encodes or decodes the same
+   bytes. This drives the store from a fiber through a real one-domain pool,
+   so the pooled path is the one under test, and expects every reference to be
+   the SHA-256 of the file on disk at that moment. The seed file is rewritten
+   pretty-printed first, so a reference taken over re-encoded bytes instead of
+   the bytes on disk would not match. *)
+let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let session_id = "sess-pooled-digest" in
+  let digest_on_disk () =
+    Filename.concat session_dir (session_id ^ ".json")
+    |> Fs_compat.load_file
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
+  save_ok ~session_dir
+    (make_checkpoint ~session_id ~turn_count:3 ~marker:"seed")
+    "pooled seed save";
+  let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
+  Fs_compat.load_file canonical_path
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.pretty_to_string
+  |> Fs_compat.save_file canonical_path;
+  let source =
+    match
+      Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id
+    with
+    | Ok snapshot -> Keeper_checkpoint_store.exact_snapshot_reference snapshot
+    | Error _ -> fail "pooled exact snapshot load failed"
+  in
+  check string "a pooled load derives the digest of the file" (digest_on_disk ())
+    source.Keeper_checkpoint_ref.sha256;
+  (match
+     Keeper_checkpoint_store.save_agent_core_if_source ~session_dir
+       ~expected_source_ref:source
+       (make_checkpoint ~session_id ~turn_count:4 ~marker:"next")
+   with
+   | Keeper_checkpoint_store.Installed installed ->
+     check string "the installed ref is the digest of the bytes written"
+       (digest_on_disk ()) installed.installed_ref.sha256
+   | Keeper_checkpoint_store.Not_installed _ -> fail "pooled source-checked save was refused");
+  match
+    Keeper_checkpoint_store.save_agent_core_if_source ~session_dir
+      ~expected_source_ref:source
+      (make_checkpoint ~session_id ~turn_count:5 ~marker:"late")
+  with
+  | Keeper_checkpoint_store.Not_installed
+      { cause = Keeper_checkpoint_store.Source_changed moved; _ } ->
+    check string "the refusal names the digest now on disk" (digest_on_disk ())
+      moved.sha256
+  | Keeper_checkpoint_store.Not_installed _ | Keeper_checkpoint_store.Installed _ ->
+    fail "a save against a moved source was not refused as changed"
+
 (* RFC main-domain-scheduler-latency §8 P4b. After a save, the store answers
    the save watermark and the message count from its canonical summary while
    the file on disk is the one it wrote. The file is made unreadable to show
@@ -1532,6 +1595,8 @@ let () =
             test_post_commit_unwind_is_installed;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
+          test_case "pooled saves and loads derive the digest of the file" `Quick
+            test_pooled_saves_and_loads_derive_the_digest_of_the_file;
           test_case "structurally invalid checkpoint is refused at the store" `Quick
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
           test_case "a valid checkpoint still saves" `Quick

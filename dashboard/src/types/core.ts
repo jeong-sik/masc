@@ -605,7 +605,8 @@ export interface Goal {
 
 // --- Keeper ---
 
-type KeeperHealthState = 'healthy' | 'idle' | 'offline'
+// Exactly what Keeper_status_runtime.keeper_health_to_string serializes.
+type KeeperHealthState = 'healthy' | 'idle' | 'failing' | 'offline'
 
 // Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
 type KeeperQuietReason =

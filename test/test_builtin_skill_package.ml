@@ -112,7 +112,11 @@ let test_hard_link_preserved () = with_base (fun base ->
   Unix.unlink resource;
   Unix.link linked_target resource;
   (match Package.inspect ~base_path:base second with
-   | Error (Package.Invalid_path path) -> check string "linked resource rejected" resource path
+   (* [inspect] answers with the resolved path, so the expectation resolves
+      too: on macOS the temp root is /var/..., a symlink to /private/var/....
+      Lines 182, 302, 342 and 543 already compare this way. *)
+   | Error (Package.Invalid_path path) ->
+     check string "linked resource rejected" (Unix.realpath resource) path
    | _ -> fail "inspection must not assign a normal revision to linked resource");
   (match install base second with
    | Package.Keep_uninspectable _ -> ()

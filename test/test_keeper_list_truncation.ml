@@ -280,7 +280,7 @@ let test_detailed_row_carries_every_axis () =
 (* The two vocabularies share "idle" and "offline", so a keeper sitting on a
    shared value proves nothing about which one a field answers with. Only the
    words unique to each side can tell them apart. *)
-let health_only_words = [ "healthy" ]
+let health_only_words = [ "healthy"; "failing" ]
 let surface_only_words = [ "active"; "busy"; "listening" ]
 
 let test_health_is_a_health_word_not_a_surface_word () =

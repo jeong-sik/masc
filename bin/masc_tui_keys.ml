@@ -1262,8 +1262,7 @@ let help_sections ?current () =
            draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
            says a keeper exists and nothing else"). Selecting keepers until
            every state has been seen was the only way that reader could learn
-           the eight, and two of them -- stale and zombie -- may never be
-           selected.
+           the marks, and a rare one such as failing may never be selected.
 
            Masc_tui_keeper_mark carried this list for exactly this and nothing
            read it. Its shape is already the sheet's: a mark, and what it

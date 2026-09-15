@@ -304,8 +304,12 @@ export function fleetBand(row: FleetRow): FleetBand {
     return 'offline'
   }
   if (normalizedStatus === 'paused') return 'paused'
+  // A failing keeper still runs, so it is not offline, and its status word
+  // stays `active`. Health is the field that says its turns are failing, and
+  // that alone is reason to look at it.
   if (
-    row.runtime_blocker_class != null
+    diagnosticHealthState === 'failing'
+    || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
     || row.terminal_reason_severity === 'warn'

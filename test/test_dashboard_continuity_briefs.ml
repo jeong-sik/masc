@@ -100,6 +100,20 @@ let test_offline_health_is_stopped () =
   check string "lifecycle" "offline" (lifecycle_of row);
   check string "state" "critical" (state_of row)
 
+(* A failing keeper carries every activity signal a working one does, so read
+   as live it would land in the healthy branch and say "정상 동작 중" beside a
+   Failing phase. It is not offline either: its keepalive runs, so its
+   lifecycle still follows its own activity. *)
+let test_failing_health_is_not_healthy () =
+  let row =
+    build_one
+      (keeper ~health:"failing" ~status:"active" ~keepalive_running:true
+         ~tool_audit_at:"2001-09-09T01:46:40Z" ~turn_count:4 ())
+  in
+  check string "state" "critical" (state_of row);
+  check string "note" "오류 발생" (note_of row);
+  check string "lifecycle" "active" (lifecycle_of row)
+
 (* The operator pauses a keeper that was running a moment ago. Every activity
    signal still looks fresh, so the healthy branch is the one this row falls
    into unless the pause is classified on its own. Reporting a stopped keeper as
@@ -168,6 +182,8 @@ let () =
             test_reconciled_active_status_is_healthy_active;
           test_case "offline health is stopped" `Quick
             test_offline_health_is_stopped;
+          test_case "failing health is not healthy" `Quick
+            test_failing_health_is_not_healthy;
           test_case "paused keeper with fresh activity is not healthy" `Quick
             test_paused_keeper_with_fresh_activity_is_not_healthy;
           test_case "paused keeper is not critical" `Quick

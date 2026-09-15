@@ -737,6 +737,8 @@ let test_failed_durable_completion_is_explicitly_visible () =
 
 let test_observation_reads_do_not_wait_for_durable_writer () =
   let path = fresh_log_path "exact-lane-read-projection-" in
+  (* The child locks the log file itself, so the file exists before the fork. *)
+  Unix.close (Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600);
   let registry = R.create ~path () in
   let ready_read, ready_write = Unix.pipe ~cloexec:true () in
   match Unix.fork () with
@@ -750,7 +752,13 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
        Unix.close fd;
        Unix._exit 0
      with
-     | _ -> Unix._exit 2)
+     | e ->
+       (* The parent reads only the exit code, so the child says what went
+          wrong before it goes. Without this the failure is
+          "durable-lock child failed: exit 2" and names no cause: the ENOENT
+          #36638 fixed took a temporary print in here to find. *)
+       prerr_endline ("durable-lock child: " ^ Printexc.to_string e);
+       Unix._exit 2)
   | child ->
     Unix.close ready_write;
     let ready = Bytes.create 1 in
@@ -1041,6 +1049,31 @@ let test_a_partial_replay_leaves_payload_files_alone () =
   remove_if_exists path
 ;;
 
+(* A replay can read to the end and still skip a row it could not decode. That
+   row may have named payload files, so this replay removes nothing either. *)
+let test_a_replay_that_skipped_an_unreadable_row_leaves_payload_files_alone () =
+  let path = fresh_log_path "exact-lane-unreadable-row-" in
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"kept" ~lane:R.Librarian ~actor:"fixture"
+    ~started_at:1.0 ~input:(R.Exact_input (`String "kept input"));
+  mark_completed_exn registry ~run_id:"kept" ~outcome:R.Succeeded ~elapsed_s:0.1
+    ~output:(`String "kept output");
+  let unnamed = payload_run_dir path ~run_id:"named-by-the-unreadable-row" in
+  Unix.mkdir unnamed 0o700;
+  Fs_compat.save_file (Filename.concat unnamed "input-0.json") "{}";
+  Fs_compat.save_file path (Fs_compat.load_file path ^ "{\"event\":\"register\"}\n");
+  Fs_compat.invalidate_cached_writer path;
+  let read : Run_registry_core.cut_report = R.cut_replay_log ~execute:false path in
+  check bool "the replay reads to the end" true read.reached_end;
+  check int "and skips the one row it cannot decode" 1 read.malformed_lines;
+  let replayed = R.replay path in
+  check bool "a replay that skipped a row sweeps nothing" true (Sys.file_exists unnamed);
+  let kept = R.get replayed ~run_id:"kept" |> Option.get in
+  check bool "the runs it did read stay readable" true
+    (kept.input_availability = R.Available && kept.output_availability = Some R.Available);
+  remove_if_exists path
+;;
+
 (* A second registration of one id writes its input under a new name before
    the append. If that append fails, the row and the entry still name the first
    input, and its file is untouched. *)
@@ -1165,6 +1198,8 @@ let () =
             test_replay_removes_payload_files_no_row_names
         ; test_case "a partial replay leaves payload files alone" `Quick
             test_a_partial_replay_leaves_payload_files_alone
+        ; test_case "a replay that skipped an unreadable row leaves payload files alone" `Quick
+            test_a_replay_that_skipped_an_unreadable_row_leaves_payload_files_alone
         ; test_case "a failed second registration keeps the first payload" `Quick
             test_a_failed_second_registration_keeps_the_first_payload
         ; test_case "latest payloads survive blank rows and repeated replay" `Quick

@@ -18,6 +18,7 @@ type fiber_health =
 type keeper_health =
   | KH_healthy
   | KH_idle
+  | KH_failing
   | KH_offline
 
 (** {1 Per-tool usage tracking} *)

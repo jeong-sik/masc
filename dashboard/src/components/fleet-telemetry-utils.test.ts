@@ -304,6 +304,17 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })
 
+  it('raises attention for a failing keeper whose status still says active', () => {
+    // The Failing phase still runs turns, so the row is neither offline nor
+    // paused and its status word is `active`. Health is the only field that
+    // says the turns are failing.
+    expect(fleetBand(makeRow({
+      status: 'active',
+      keepalive_running: true,
+      diagnostic_health_state: 'failing',
+    }))).toBe('attention')
+  })
+
   it('does not raise attention on the folded status word alone', () => {
     // A resting keeper reaches the wire as 'inactive'. Badging the word made
     // every resting keeper look like it needed a look.

@@ -46,6 +46,14 @@ let read_everything store day_file =
       | _ -> None)
   in
   let tail = Dated_jsonl.load_tail_lines day_file ~max_lines:2 in
+  let tail_rows =
+    Dated_jsonl.load_tail_rows day_file ~max_lines:2
+    |> List.map (fun { Dated_jsonl.offset; line } -> Printf.sprintf "%d:%s" offset line)
+  in
+  let mapped_rows =
+    Dated_jsonl.map_tail_rows day_file ~max_lines:2 ~f:(fun { Dated_jsonl.offset; line } ->
+      Printf.sprintf "%d:%s" offset line)
+  in
   let latest =
     match
       Dated_jsonl.find_latest_entry_result store (function
@@ -64,7 +72,7 @@ let read_everything store day_file =
       | `Assoc fields -> List.assoc_opt "n" fields |> Option.map Yojson.Safe.to_string
       | _ -> None)
   in
-  [ recent; offset; strict; filtered; tail; latest; matching ]
+  [ recent; offset; strict; filtered; tail; latest; matching; tail_rows; mapped_rows ]
 ;;
 
 let with_pool env f =
@@ -89,7 +97,7 @@ let test_pool_and_inline_read_the_same () =
   let pooled = with_pool env (fun () -> read_everything store day_file) in
   check (list (list string)) "pooled reads equal inline reads" inline pooled;
   (match inline with
-   | [ recent; _; strict; filtered; tail; latest; matching ] ->
+   | [ recent; _; strict; filtered; tail; latest; matching; tail_rows; mapped_rows ] ->
      check (list string) "newest two parsed rows, oldest first"
        [ {|{"n":2}|}; {|{"n":3}|} ] recent;
      check int "strict read counts the malformed row" 4 (List.length strict);
@@ -97,7 +105,19 @@ let test_pool_and_inline_read_the_same () =
      check (list string) "tail loader returns the raw last lines"
        [ {|{"n":3}|}; "{not json" ] tail;
      check (list string) "the latest matching entry is found past the malformed row" [ "n=2" ] latest;
-     check (list string) "collect_matching keeps the newest two selected values" [ "2"; "3" ] matching
+     check (list string) "collect_matching keeps the newest two selected values" [ "2"; "3" ] matching;
+     let contents = In_channel.with_open_bin day_file In_channel.input_all in
+     let starts_of_last_two =
+       let length = String.length contents in
+       let last_newline = String.rindex_from contents (length - 2) '\n' in
+       let before_it = String.rindex_from contents (last_newline - 1) '\n' in
+       [ before_it + 1; last_newline + 1 ]
+     in
+     check (list string) "tail rows name the offset each line starts at"
+       (List.map2 (fun start line -> Printf.sprintf "%d:%s" start line) starts_of_last_two tail)
+       tail_rows;
+     check (list string) "a map over the tail rows sees the rows the loader returns"
+       tail_rows mapped_rows
    | _ -> fail "read_everything shape changed")
 ;;
 

@@ -6,6 +6,5 @@
  (modules test_tool_help_registry_shard_coverage_10101)
  (action
   (setenv MASC_BASE_PATH /tmp/test-tool-help-registry-shard-coverage-10101
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-tool-help-registry-shard-coverage-10101
-    (run %{test}))))
+   (run %{test})))
  (libraries masc_test_deps))

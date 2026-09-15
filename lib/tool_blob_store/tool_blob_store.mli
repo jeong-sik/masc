@@ -58,10 +58,12 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     Idempotent: the same bytes always yield the same content address. The
     first put of an address in this process writes it atomically, repairing
     any corrupt prior bytes without a duplicate read/hash. A later put of an
-    address this process wrote does not write again, because maintenance
-    deletes only from the offline helper under the BasePath process lease. If
-    {!fetch} then finds the file missing or corrupt, it forgets the address
-    and the next put writes it again.
+    address this process wrote with [put] does not write again, because
+    maintenance deletes only from the offline helper under the BasePath
+    process lease. If {!fetch} or {!fetch_range} then fails to return
+    validated bytes for it (missing, digest mismatch, or a read error), it
+    forgets the address and the next put writes it again. {!put_durable}
+    writes on every call and does not count as a write here.
 
     @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
     must handle this at their typed boundary and must not emit a marker for

@@ -4,6 +4,13 @@
 **OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 56-100, conditions/default_conditions) + `lib/keeper/keeper_registry.ml` (lines 750-775, register*)
 **Iteration**: 1 (Phase A-1, `/loop` plan `.claude/plans/breezy-napping-sketch.md`)
 
+## 등기 좌표 (2026-09-15 확정)
+
+- **등기지**: main `72683cf4` — 이 문서가 등기된 main 커밋.
+- **원 증거 수집 HEAD**: `b198526a` (2026-09-11T23:33:51Z, parent `c5e11659`) — PR #35280 계열, main 비도달(diverged, merge_base `51aa0168`). `git fetch origin b198526ac956048925b2410fd4dee49cbf75824b`로 회수 가능. 원장 실재는 2중 확정: analyst REST 200 (2026-09-15 17:09Z), lane-smith fetch 성공 (2026-09-15 17:17Z).
+- **재확증**: lane-smith가 `21f1a323` 체크아웃에서 동일 문서 blob `94d27a9f` 확인 (2026-09-15, 보충 좌표는 검증 레인 기록 참조).
+- 좌표 판정은 REST compare 2회 + 로컬 `merge-base` 1회의 독립 교차로 확정 (2026-09-15).
+
 ## TL;DR
 
 세 가지 spec coverage gap 발견. 둘은 OCaml ↔ TLA+ 비대칭(코드 우위), 하나는 OCaml 내부 명명 모호함. 모두 *런타임 버그가 아닌* refinement gap. 후속 RFC 후보로 적재 — 본 PR은 audit memo only.

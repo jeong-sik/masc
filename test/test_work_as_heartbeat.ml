@@ -45,17 +45,6 @@ let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in
   check bool "interval is positive" true (v > 0)
 
-let test_keeper_heartbeat_stale_window_tracks_cadence () =
-  check (float 0.1) "30s cycle respects the 300s snapshot producer" 360.0
-    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
-       ~keepalive_interval_s:30.0
-       ~snapshot_interval_s:300.0);
-  check (float 0.1) "300s cadence receives 60s slack" 360.0
-    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
-       ~keepalive_interval_s:300.0
-       ~snapshot_interval_s:30.0)
-;;
-
 let test_keeper_turn_record_freshness_tracks_cadence () =
   check (float 0.1) "short cadence preserves the historical 300s floor" 300.0
     (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
@@ -275,8 +264,6 @@ let () =
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;
       test_case "interval positive" `Quick test_keepalive_interval_positive;
-      test_case "stale window tracks cadence" `Quick
-        test_keeper_heartbeat_stale_window_tracks_cadence;
       test_case "turn-record freshness tracks cadence" `Quick
         test_keeper_turn_record_freshness_tracks_cadence;
       test_case "keeper metric freshness tracks runtime cadence" `Quick

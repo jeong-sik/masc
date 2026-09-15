@@ -136,11 +136,9 @@ let health_label reading =
   | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
 
 (* The roster header's tally, counted with the same function that labels the
-   status column so the header and the column cannot disagree. They did: the
-   tally folded [Surface_inactive] into "running", so ten rows reading
-   "inactive" sat under a header reading "10 running". Counting the label
-   itself removes the second spelling of the same reading rather than keeping
-   it in step by hand. *)
+   status column so the header and the column cannot disagree. Counting the
+   label itself removes the second spelling of the same reading rather than
+   keeping it in step by hand. *)
 let tally_by label_of readings =
   List.fold_left
     (fun counts reading ->

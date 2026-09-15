@@ -81,12 +81,12 @@ let add_client target = function
    the doctor reports for the same configuration and says the operator acts. *)
 let no_client_retry host =
   let cause = match Browser_lane_launcher.verdict host with
-    | Browser_lane_launcher.Absent | Browser_lane_launcher.Misconfigured ->
+    | Browser_lane_launcher.Absent | Browser_lane_launcher.Misconfigured
+    | Browser_lane_launcher.Connected | Browser_lane_launcher.Unverified ->
       Browser_lane_launcher.message host
     | Browser_lane_launcher.Aligned ->
-      Browser_lane_launcher.message host ^ " No browser with the MASC extension is polling \
-       this server. The operator opens that browser profile with the extension loaded, or \
-       reloads the extension so a new host starts." in
+      Browser_lane_launcher.message host ^ " The operator opens that browser profile with the \
+       extension loaded, or reloads the extension so a new host starts." in
   cause ^ " Only the operator can change this; retrying before they do returns the same \
            answer. No browser command was dispatched."
 
@@ -102,7 +102,7 @@ let selection_error ~base_path ~tool_name ~start_time error =
     Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~data (Yojson.Safe.to_string data) in
   let observe () =
-    Browser_lane_launcher.observe ~base_path ~serving_port:(Browser_lane.serving_port ()) in
+    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
   match error with
   | Browser_lane.No_live_client ->
     let host = observe () in

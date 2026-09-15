@@ -41,7 +41,12 @@ val reconcile_pending :
     for the next recovery. An {!Unroutable_producer} returns the Task to the
     backlog and is then acknowledged and counted in [unroutable]: retrying
     cannot create a Keeper queue, and a Task whose producer will never act
-    again has to be claimable by someone else. The verdict's reason and
+    again has to be claimable by someone else. The route is read once more
+    inside the backlog lock, so a Keeper queue that appears between the two
+    keeps the obligation instead of losing it to a release. A release that
+    fails is kept only when another interval could succeed; one that cannot
+    (no workspace, an unusable task id or authority) ends there rather than
+    becoming the permanent retry this path was built to remove. The verdict's reason and
     verification id travel with it on the handoff context. Delivery is at
     least once across the queue-write/source-ack crash window; the
     verification-keyed stimulus is information, not permission to mutate. *)

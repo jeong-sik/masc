@@ -96,7 +96,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
              let now_ts = Time_compat.now () in
              let diagnostic =
                Keeper_status_runtime.keeper_diagnostic_json
-                 ~config
                  ~meta
                  ~keepalive_running
                  ~history_items:[]

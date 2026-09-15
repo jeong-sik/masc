@@ -166,7 +166,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
     expect(state.kind).toBe('offline')
   })
 
-  it.each(['stale', 'degraded', 'zombie'])('health=%s 는 offline 이 아니다', (health_state) => {
+  it.each(['healthy', 'idle'])('health=%s 는 offline 이 아니다', (health_state) => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ diagnostic: { health_state } } as Partial<Keeper>),
       composite: null,

@@ -2,12 +2,11 @@
 
     masc declares minimum/maximum/exclusiveMinimum/exclusiveMaximum/
     minLength/maxLength/minItems/maxItems across its tool schemas, but
-    [Tool_bridge.params_of_json_schema] projects a schema onto the AGENT_CORE
-    [tool_param] record (name/type/required), dropping every bound. Agent Core
-    validation hook therefore never saw them, and a caller learned about an
-    out-of-range value only if the handler happened to re-check it — which
-    is how [keeper_artifact_read] answered [max_bytes=565244] with a message
-    that named [sha256] first (2026-08-05 20:06:36).
+    Agent-Core's input validation reads only type/enum/const/required on
+    root properties, never a bound. A caller learned about an out-of-range
+    value only if the handler happened to re-check it — which is how
+    [keeper_artifact_read] answered [max_bytes=565244] with a message that
+    named [sha256] first (2026-08-05 20:06:36).
 
     These tests pin that the bounds are read from the raw schema, that the
     rejection names the field and the bound, that a schema without a bound

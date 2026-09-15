@@ -722,7 +722,7 @@ export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean 
 // export needed.
 const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_state']>> =
   new Set<NonNullable<KeeperDiagnostic['health_state']>>([
-    'healthy', 'idle', 'stale', 'degraded', 'offline',
+    'healthy', 'idle', 'offline',
   ])
 
 const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
@@ -732,7 +732,7 @@ const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reas
 
 const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
   new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
-    'auto_restart', 'recover', 'probe', 'direct_message',
+    'recover', 'probe', 'direct_message',
   ])
 
 const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =

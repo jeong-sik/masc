@@ -1,44 +1,71 @@
 (** Where an installed browser-lane host sends its polls, beside the port the
-    workspace connection names and the port this process serves the lane on.
-    It reads files only: it never says that a host process is running or
-    connected. [masc doctor] and the browser tools answer from this one
-    observation and its {!verdict}. *)
+    workspace connection names and what this process observes of the lane it
+    serves. It reads files and this process's lane state only. [masc doctor],
+    the dashboard's onboarding check and the browser tools answer from this
+    one observation and its {!verdict}. *)
 
 (** What install-host.sh left under [<base-path>/.masc/browser-lane/host]:
-    the [launch] script Firefox runs and the [launch.json] declaration beside
-    it that says where that host takes its server address from. *)
+    the [launch] script Firefox runs and the [launch.json] declaration the
+    same installation wrote beside it.
+
+    [launch.json] is an object with exactly two fields: [destination], whose
+    one value is ["workspace_connection"], and [launcher_sha256], the
+    lowercase hex SHA-256 of the [launch] bytes. A missing, duplicated or
+    unknown field, or any other value, makes it [Unreadable]: a field this
+    reader does not know could change what the host does, so it is refused
+    rather than ignored. *)
 type launcher =
   | Not_installed
   | Undeclared
       (** [launch] exists with no declaration beside it, so this observation
           cannot say where that host polls. *)
-  | Unreadable  (** The declaration exists but does not decode. *)
+  | Unreadable
+      (** The declaration or the launcher cannot be read, or the declaration
+          is not the object described above. *)
+  | Describes_another_launcher
+      (** The declaration's [launcher_sha256] is not the digest of the
+          [launch] beside it: they were not written by one installation. *)
   | Follows_workspace
-      (** The host reads the workspace connection port, and moves to a new
-          port only once its current server stops answering the lane and the
-          new one answers it. *)
+      (** The host reads the workspace connection port when it starts. After
+          a failed request it reads the port again, stays while its current
+          server still answers the lane, and moves only to an address that
+          answers. *)
+
+(** What this process observes of the lane it serves. *)
+type server =
+  | Not_serving
+      (** No bound listener is known in this process: [masc doctor], or a
+          server before its listener binds. Which port a host should reach
+          is not observed here. *)
+  | Serving of { port : int; polling : Browser_lane.client_info list }
+      (** The port this server's listener bound and the browser hosts whose
+          poll lease on it is current. *)
+
+val current_server : unit -> server
 
 type t =
   { base_path : string
   ; launcher : launcher
   ; workspace_port : (int, Workspace_connection.error) result
         (** The port connection.toml names, or the default when it names none. *)
-  ; serving_port : int option
-        (** The port this process serves the browser-lane routes on; [None]
-            in a process that serves none, such as [masc doctor]. *)
+  ; server : server
   }
 
-val observe : base_path:string -> serving_port:int option -> t
+val observe : base_path:string -> server:server -> t
 
 type verdict =
-  | Absent  (** No launcher is installed. *)
+  | Absent  (** No launcher is installed and no browser host polls here. *)
+  | Connected  (** A browser host polls this server now. *)
   | Aligned
-      (** The host takes the workspace port, and that port is the one this
-          process serves on, or no server runs in this process to compare. *)
+      (** No host polls, and the declared launcher's host would start on the
+          workspace port, which is the port this server bound. *)
+  | Unverified
+      (** The declared launcher follows a readable workspace port, and no
+          server in this process says which port a host should reach. *)
   | Misconfigured
-      (** The host cannot be shown to reach this server: an undeclared or
-          unreadable launcher, a workspace port that cannot be read, or a
-          workspace port that differs from the serving port. *)
+      (** No host polls here, and the launcher is undeclared, unreadable or
+          declared for other contents, the workspace port cannot be read, or
+          the workspace port differs from the port this server bound. *)
 
 val verdict : t -> verdict
 
@@ -46,5 +73,6 @@ val verdict : t -> verdict
 val message : t -> string
 
 (** [launcher], [workspace_port], [workspace_port_error], [serving_port],
-    [verdict] and [message], for a tool result a Keeper reads. *)
+    [polling_hosts], [verdict] and [message], for a tool result a Keeper
+    reads. The two server fields are null when no server is observed. *)
 val to_json : t -> Yojson.Safe.t

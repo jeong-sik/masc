@@ -7,12 +7,9 @@ let paused_glyph = "\xe2\x97\x8b" (* ○ hollow: stopped on purpose *)
 let unread_glyph = "-"
 
 let health_glyph : Reading.keeper_health_reading -> string = function
-  | Reading.Health_running -> "\xe2\x97\x8f" (* ● filled: alive and working *)
-  | Reading.Health_idle -> "\xc2\xb7" (* · small: alive, nothing recent *)
+  | Reading.Health_running -> "\xe2\x97\x8f" (* ● filled: keepalive running, has turned *)
+  | Reading.Health_idle -> "\xc2\xb7" (* · small: keepalive running, no turn yet *)
   | Reading.Health_offline -> "\xc3\x97" (* × gone *)
-  | Reading.Health_stale -> "?" (* the last signal is too old to trust *)
-  | Reading.Health_degraded -> "!" (* its own status did not read *)
-  | Reading.Health_zombie -> "\xe2\x80\xa1" (* ‡ an entry with no fiber *)
 
 let glyph ~paused reading =
   match reading with
@@ -24,9 +21,6 @@ let legend =
   [ health_glyph Reading.Health_running, "healthy"
   ; health_glyph Reading.Health_idle, "idle"
   ; paused_glyph, "paused"
-  ; health_glyph Reading.Health_stale, "stale"
-  ; health_glyph Reading.Health_degraded, "degraded"
-  ; health_glyph Reading.Health_zombie, "zombie"
   ; health_glyph Reading.Health_offline, "offline"
   ; unread_glyph, "unread"
   ]
@@ -63,7 +57,7 @@ let sandboxes = [ Docker; Microvm; Local ]
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
-  [ "HEALTH", "heartbeat / readiness"
+  [ "HEALTH", "keepalive / turn history"
   ; "LIFECYCLE", "the keeper process"
   ; "TURN", "time since the last turn"
   ; "Mode " ^ letters activation_letter activations, words activation_word activations

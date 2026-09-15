@@ -170,11 +170,11 @@ let load_active_tasks (base_path : string) :
          a frame that touches the filesystem per row is a frame that stutters.
          Same rows, same load, same answer the rejection delivery computes. *)
       , Some
-          (Operator_task_attention.project ~config
+          (Masc.Operator_task_attention.project ~config
              observation.observed_backlog.tasks
            |> List.map (fun item ->
-                { Masc_tui_agenda.what = Operator_task_attention.summary item
-                ; since_iso = Operator_task_attention.waiting_since item
+                { Masc_tui_agenda.what = Masc.Operator_task_attention.summary item
+                ; since_iso = Masc.Operator_task_attention.waiting_since item
                 })) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
@@ -1102,7 +1102,6 @@ let load_transport_health ~(host : string) ~(port : int) :
 let keeper_liveness_of_briefs briefs =
   let empty =
     { klc_active = 0
-    ; klc_inactive = 0
     ; klc_offline = 0
     ; klc_idle = 0
     ; klc_paused = 0
@@ -1120,8 +1119,6 @@ let keeper_liveness_of_briefs briefs =
               match surface with
               | Keeper_status_runtime.Surface_active ->
                   { counts with klc_active = counts.klc_active + 1 }
-              | Keeper_status_runtime.Surface_inactive ->
-                  { counts with klc_inactive = counts.klc_inactive + 1 }
               | Keeper_status_runtime.Surface_offline ->
                   { counts with klc_offline = counts.klc_offline + 1 }
               | Keeper_status_runtime.Surface_idle ->

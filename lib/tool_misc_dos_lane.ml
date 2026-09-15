@@ -219,7 +219,7 @@ let resolve_program ~base_path name =
 let relay_to_board ~author content =
   try
     let result =
-      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Unprojected "masc_board_post"
+      Board_tool_dispatch.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_post"
         (`Assoc
           [ ("title", `String "DOS 아케이드")
           ; ("content", `String content)

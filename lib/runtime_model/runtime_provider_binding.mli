@@ -22,8 +22,6 @@ val provider_endpoint_label_of_config : Llm_provider.Provider_config.t -> string
 
 val local_runtime_label : string -> string
 
-val label_matches_runtime_id : label:string -> runtime_id:string -> bool
-
 val provider_name_matches_default_local_openai_runtime : string -> bool
 
 val provider_name_matches_kind_default :

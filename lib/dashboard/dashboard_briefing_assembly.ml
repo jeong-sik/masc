@@ -148,12 +148,11 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            in
            let pressure_rank =
              match health with
-             (* Ranked by health rather than by the status word, which folded
-                stale, degraded and zombie together and then folded that into
-                offline here. A late heartbeat and a dead fiber are different
-                amounts of trouble. *)
-             | Some (Keeper_types.KH_offline | KH_zombie) -> 3
-             | Some (KH_healthy | KH_idle | KH_stale | KH_degraded)
+             (* Ranked by health rather than by the status word: a keeper
+                whose keepalive is gone outranks one that has not turned yet,
+                which outranks one that is working. *)
+             | Some Keeper_types.KH_offline -> 3
+             | Some (KH_healthy | KH_idle)
              | None ->
                if
                  Option.exists
@@ -163,7 +162,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                else (
                  match health with
                  | Some Keeper_types.KH_idle -> 1
-                 | Some (KH_healthy | KH_stale | KH_degraded | KH_zombie | KH_offline)
+                 | Some (KH_healthy | KH_offline)
                  | None -> 0)
            in
            Some

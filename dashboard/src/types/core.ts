@@ -605,7 +605,7 @@ export interface Goal {
 
 // --- Keeper ---
 
-type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
+type KeeperHealthState = 'healthy' | 'idle' | 'offline'
 
 // Exactly what Keeper_status_runtime.keeper_quiet_reason serializes.
 type KeeperQuietReason =
@@ -616,7 +616,6 @@ type KeeperQuietReason =
 
 // Exactly what Keeper_status_runtime.keeper_next_action_path serializes.
 type KeeperNextActionPath =
-  | 'auto_restart'
   | 'recover'
   | 'probe'
   | 'direct_message'
@@ -1362,7 +1361,6 @@ export interface Keeper {
   status: string
   keepalive_running?: boolean
   keeper_keepalive_interval_s?: number | null
-  heartbeat_stale_after_s?: number | null
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
   activation_mode?: KeeperActivationMode
@@ -1391,10 +1389,6 @@ export interface Keeper {
   } | null
   created_at?: string
   updated_at?: string
-  last_heartbeat?: string
-  /** Non-null when the heartbeat ledger could not be read — the operator
-      surface shows the error instead of substituting a stale timestamp. */
-  heartbeat_observation_error?: string | null
   keeper_age_s?: number
   last_turn_ago_s?: number
   last_handoff_ago_s?: number

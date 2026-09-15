@@ -2062,7 +2062,7 @@ let handle_masc_schedule_with_outcome
   =
   let ctx : Tool_schedule.context =
     { config
-    ; agent_name = meta.name
+    ; caller = Tool_schedule.Named_caller meta.name
     ; stamp_keeper_wake_result_delivery =
         (fun ~payload ->
            Schedule_payload_projection.set_keeper_wake_result_delivery

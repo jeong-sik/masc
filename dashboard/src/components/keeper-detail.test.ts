@@ -317,7 +317,7 @@ describe('KeeperDetailPage', () => {
       diagnostic: {
         summary: 'Keeper runtime is reconciling back into live presence.',
         continuity_state: 'recovering',
-        health_state: 'stale',
+        health_state: 'healthy',
         quiet_reason: null,
         next_action_path: 'recover',
         recoverable: true,

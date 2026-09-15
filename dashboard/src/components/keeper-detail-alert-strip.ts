@@ -20,7 +20,6 @@ import {
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
-import { keeperHeartbeatStaleMs } from '../config/constants'
 import {
   attentionReasonLabel,
   canonicalAttentionReason,
@@ -186,10 +185,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const observedRuntimeOutcome =
     runtimeOutcome || latestRuntimeMetric?.runtime_outcome?.trim() || null
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
-  const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
-  const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
-  const hbStale = hbAgeMs != null
-    && hbAgeMs > keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   const activity = keeperActivityDisplay(keeper)
   const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null
@@ -255,7 +250,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const toneClass = isPaused || runtimeBlocker || hbStale
+  const toneClass = isPaused || runtimeBlocker
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabelText = keeperRuntimeBlockerLabel(runtimeBlockerClass)
@@ -309,10 +304,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               : null}`}
         ${isPaused && keeper.keepalive_running
           ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
-          : null}
-        ${hbStale
-          ? html`<${RuntimeBadge} tone="bad">하트비트 끊김</${RuntimeBadge}>
-            <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${runtimeBlockerClass
           ? html`

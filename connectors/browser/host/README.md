@@ -53,11 +53,17 @@ its current server no longer answers `/browser-lane/ping` and the new port
 does; otherwise it retries where it is. `MASC_HTTP_BASE_URL` or
 `MASC_HTTP_PORT` in the browser's environment fixes the address instead, as
 `masc-browser-host --server URL` does for a manual run; neither is re-read.
-The installer also writes `launch.json` beside the launcher, which `masc
-doctor` and the browser tools read to say where the host takes its address
-from. If a host was installed before `launch.json` existed, its launcher may
-fix a port: run the installer again for that workspace and reload the
-extension.
+A result is sent again only when its request may not have reached the server;
+a result the server answered with any status is logged and the host returns to
+polling. The installer also writes `launch.json` beside the launcher with the
+launcher's SHA-256, which the onboarding check and the browser tools read to
+say where the host takes its address from; a launcher edited afterwards no
+longer matches it. If a host was installed before `launch.json` existed, its
+launcher may fix a port: run the installer again for that workspace and reload
+the extension. To point a running host at a server on another port, save that
+port with `masc workspace-connection --port PORT --save` and reload the
+extension; a host that is still connected to a server answering on its old
+address stays there.
 `--token-file` defaults to `<base-path>/.masc/browser-lane/token`; relative
 paths resolve against the base path. For a browser launched by the desktop,
 use explicit installer arguments so its shell environment is unnecessary.

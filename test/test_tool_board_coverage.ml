@@ -44,11 +44,11 @@ let cleanup () =
 
 (* The MCP route: MASC hands the result over whole. *)
 let dispatch name args =
-  let result = Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name args in
+  let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name args in
   ((Tool_result.is_success result), (Tool_result.message result))
 
 let dispatch_result name args =
-  Board_tool.handle_tool ~result_boundary:Tool_output.Unprojected name args
+  Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name args
 
 let check_failure_class name expected result =
   let actual =
@@ -1415,8 +1415,9 @@ let official_client_lane =
 let agent_core_lane =
   Tool_output.Projected_for_model Tool_output.agent_core_model_projection
 
-(* A page as its reader gets it: [body] is the whole result text, the bytes a
-   projection measures; the rest is read back from its JSON. *)
+(* A page as its reader gets it: [body] is the text the model reads, which is
+   what a boundary measures, and the rest is the position the result carries
+   beside it -- read back through its decoder, never parsed out of the text. *)
 type page_view =
   { body : string
   ; thread : string
@@ -1426,21 +1427,27 @@ type page_view =
   ; next_offset : int option
   }
 
-let page_view_of body =
-  let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string body in
-  let pagination = member "pagination" json in
-  let next_offset = member "next_offset" pagination |> to_int_option in
-  Alcotest.(check bool)
-    "has_more agrees with next_offset"
-    (Option.is_some next_offset)
-    (member "has_more" pagination |> to_bool);
+let page_view_of ~body ~metadata =
+  let position =
+    match Board.Comment_page.Position.of_metadata metadata with
+    | Some position -> position
+    | None -> Alcotest.failf "the page carries no position: %s" body
+  in
+  let first_line =
+    match String.index_opt body '\n' with
+    | Some index -> String.sub body 0 index
+    | None -> body
+  in
+  Alcotest.(check string)
+    "the page's first line is the position, from the one printer"
+    (Board.Comment_page.Position.line position)
+    first_line;
   { body
-  ; thread = member "thread" json |> to_string
-  ; offset = member "offset" pagination |> to_int
-  ; returned = member "returned" pagination |> to_int
-  ; total = member "total" pagination |> to_int
-  ; next_offset
+  ; thread = body
+  ; offset = position.Board.Comment_page.Position.offset
+  ; returned = position.Board.Comment_page.Position.returned
+  ; total = position.Board.Comment_page.Position.total
+  ; next_offset = position.Board.Comment_page.Position.next_offset
   }
 
 let read_page ~result_boundary ~label post_id args =
@@ -1451,7 +1458,7 @@ let read_page ~result_boundary ~label post_id args =
       (post_get_args post_id args)
   in
   Alcotest.(check bool) (label ^ " get ok") true (Tool_result.is_success result);
-  page_view_of (Tool_result.message result)
+  page_view_of ~body:(Tool_result.message result) ~metadata:(Tool_result.metadata result)
 
 let check_page ~label page ~offset ~returned ~total ~next_offset =
   Alcotest.(check int) (label ^ ": offset") offset page.offset;
@@ -1523,7 +1530,7 @@ let test_post_get_comment_pages_carry_their_range () =
   cleanup ();
   let post_id = create_post_with_comments ~count:105 in
   let read ~label args =
-    read_page ~result_boundary:Tool_output.Unprojected ~label post_id args
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
   in
   let default_page = read ~label:"default page" [] in
   check_page
@@ -1574,14 +1581,14 @@ let test_post_get_comment_pages_carry_their_range () =
   let small_post_id = create_post_with_comments ~count:2 in
   check_page
     ~label:"small thread in one page"
-    (read_page ~result_boundary:Tool_output.Unprojected ~label:"small" small_post_id [])
+    (read_page ~result_boundary:Tool_output.Sent_to_client ~label:"small" small_post_id [])
     ~offset:0
     ~returned:2
     ~total:2
     ~next_offset:None;
   let empty_post_id = create_post_with_comments ~count:0 in
   let empty_page =
-    read_page ~result_boundary:Tool_output.Unprojected ~label:"empty" empty_post_id []
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label:"empty" empty_post_id []
   in
   check_page ~label:"empty thread" empty_page ~offset:0 ~returned:0 ~total:0 ~next_offset:None;
   Alcotest.(check bool) "empty thread says so" true (contains empty_page.thread "No comments.");
@@ -1614,7 +1621,80 @@ let test_post_get_refuses_page_arguments_that_are_not_integers () =
     ; ( "literal past the int range"
       , [ "comment_offset", `Intlit "99999999999999999999999" ]
       , "comment_offset must be an integer this server can hold" )
+    ; ( "float past the int range"
+      , [ "comment_offset", `Float 1e30 ]
+      , "comment_offset must be an integer this server can hold" )
     ]
+
+(* What the model reads is the thread. A page whose data was a JSON object
+   reached the model as that object on one line, thread text and all, which is
+   the escaped wrapper this tool exists to avoid. The bridge is the path a
+   Keeper's result takes, so the check runs through it. *)
+let test_post_get_reaches_the_model_as_text () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:3 in
+  let result =
+    Board_tool.handle_tool
+      ~result_boundary:official_client_lane
+      "masc_board_post_get"
+      (post_get_args post_id [])
+  in
+  match
+    Tool_bridge.to_agent_core_typed_result
+      ~model_projection:Tool_output.default_model_projection
+      result
+  with
+  | Error error ->
+    Alcotest.failf "the bridge refused the page: %s" error.Agent_core.Llm_provider.Types.message
+  | Ok output ->
+    let content = output.Agent_core.Llm_provider.Types.content in
+    Alcotest.(check bool)
+      "the position is the first line the model reads"
+      true
+      (String.starts_with ~prefix:"[comments 0-2 of 3" content);
+    Alcotest.(check bool) "the thread is drawn in lines" true (String.contains content '\n');
+    Alcotest.(check bool)
+      "no line arrives escaped"
+      false
+      (contains content "\\n");
+    Alcotest.(check bool)
+      "the model is not handed a JSON object"
+      false
+      (match Yojson.Safe.from_string content with
+       | `Assoc _ -> true
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+       | exception Yojson.Json_error _ -> false);
+    (match
+       Board.Comment_page.Position.of_metadata
+         output.Agent_core.Llm_provider.Types._meta
+     with
+     | Some position ->
+       Alcotest.(check int)
+         "the position rides beside the text"
+         3
+         position.Board.Comment_page.Position.total
+     | None -> Alcotest.fail "the bridged result carries no page position")
+
+(* A JSON number with no fractional part is an integer, and the tool-call
+   validator lets it through, so the handler must read it the same way. *)
+let test_post_get_accepts_an_integer_valued_float () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:4 in
+  check_page
+    ~label:"integer-valued float page"
+    (read_page
+       ~result_boundary:Tool_output.Sent_to_client
+       ~label:"integer-valued float page"
+       post_id
+       [ "comment_offset", `Float 2.0; "comment_limit", `Float 2.0 ])
+    ~offset:2
+    ~returned:2
+    ~total:4
+    ~next_offset:None
 
 (* On the official-client lane a thread whose comments do not fit one inline
    result arrives as pages that each do, chained by next_offset, and every
@@ -1673,7 +1753,7 @@ let test_post_get_page_follows_the_lane_ceiling () =
     (String.length agent_core.body <= Common.max_agent_core_inline_result_bytes);
   check_page
     ~label:"MCP caller"
-    (read_page ~result_boundary:Tool_output.Unprojected ~label:"MCP caller" post_id [])
+    (read_page ~result_boundary:Tool_output.Sent_to_client ~label:"MCP caller" post_id [])
     ~offset:0
     ~returned:comment_count
     ~total:comment_count
@@ -1693,12 +1773,16 @@ let test_keeper_board_read_pages_by_the_projection_it_is_given () =
   let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
   let keeper_meta = make_keeper_meta ~name:"thread-reader-keeper" () in
   let read result_projection =
-    Keeper_tool_board_runtime.handle_board_tool
-      ~meta:keeper_meta
-      ~result_projection
-      ~name:"masc_board_post_get"
-      ~args:(post_get_args post_id [])
-    |> page_view_of
+    let execution =
+      Keeper_tool_board_runtime.handle_board_tool_with_outcome
+        ~meta:keeper_meta
+        ~result_projection
+        ~name:"masc_board_post_get"
+        ~args:(post_get_args post_id [])
+    in
+    page_view_of
+      ~body:execution.Keeper_tool_execution.raw_output
+      ~metadata:execution.Keeper_tool_execution.metadata
   in
   check_page
     ~label:"agent-core projection"
@@ -1797,7 +1881,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
   check_page
     ~label:"before the sweep"
     (read_page
-       ~result_boundary:Tool_output.Unprojected
+       ~result_boundary:Tool_output.Sent_to_client
        ~label:"before the sweep"
        post_id
        [ "comment_limit", `Int page_limit ])
@@ -1830,7 +1914,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
   let remaining = comment_count - 1 in
   let next =
     read_page
-      ~result_boundary:Tool_output.Unprojected
+      ~result_boundary:Tool_output.Sent_to_client
       ~label:"after the sweep"
       post_id
       [ "comment_offset", `Int page_limit; "comment_limit", `Int page_limit ]
@@ -1871,7 +1955,7 @@ let test_post_get_draws_replies_below_the_indent_cap () =
       (List.init chain_depth (fun index -> index + 1))
   in
   let total = chain_depth + 1 in
-  let page = read_page ~result_boundary:Tool_output.Unprojected ~label:"deep thread" post_id [] in
+  let page = read_page ~result_boundary:Tool_output.Sent_to_client ~label:"deep thread" post_id [] in
   List.iter (fun id -> Alcotest.(check bool) (id ^ " is drawn") true (contains page.thread id)) ids;
   check_page ~label:"deep thread page" page ~offset:0 ~returned:total ~total ~next_offset:None;
   Alcotest.(check bool)
@@ -1905,7 +1989,7 @@ let test_post_get_draws_replies_below_the_indent_cap () =
   let continued_limit = 2 in
   let continued =
     read_page
-      ~result_boundary:Tool_output.Unprojected
+      ~result_boundary:Tool_output.Sent_to_client
       ~label:"page starting mid-chain"
       post_id
       [ "comment_offset", `Int continued_offset; "comment_limit", `Int continued_limit ]
@@ -1950,7 +2034,7 @@ let test_post_get_header_counts_the_comments_it_read () =
   let post = Hashtbl.find store.Board.posts post_id in
   let drifted_count = 999 in
   Hashtbl.replace store.Board.posts post_id { post with Board.reply_count = drifted_count };
-  let page = read_page ~result_boundary:Tool_output.Unprojected ~label:"header" post_id [] in
+  let page = read_page ~result_boundary:Tool_output.Sent_to_client ~label:"header" post_id [] in
   Alcotest.(check bool) "header" true (contains page.thread "[3 replies]");
   check_page ~label:"page" page ~offset:0 ~returned:3 ~total:3 ~next_offset:None
 
@@ -2434,6 +2518,14 @@ let () =
             "get refuses page arguments that are not integers"
             `Quick
             test_post_get_refuses_page_arguments_that_are_not_integers;
+          Alcotest.test_case
+            "get accepts an integer-valued float"
+            `Quick
+            test_post_get_accepts_an_integer_valued_float;
+          Alcotest.test_case
+            "get reaches the model as text"
+            `Quick
+            test_post_get_reaches_the_model_as_text;
           Alcotest.test_case
             "get long thread pages fit inline and chain"
             `Quick

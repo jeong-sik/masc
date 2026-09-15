@@ -177,11 +177,119 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
        Alcotest.(check (list string)) "the verification id travels with it"
          [ verification_id ] handoff.evidence_refs;
        Alcotest.(check (option string)) "the deciding authority is the releaser"
-         (Some "repair-verifier-run") handoff.updated_by
+         (Some "repair-verifier-run") handoff.updated_by;
+       (* The three fields above are also what the verdict's own rejection
+          handoff carries, so they hold whether or not the release writes one.
+          These do not: they are the release saying why the task came back and
+          that anyone may take it. *)
+       Alcotest.(check bool) "the note says the verdict had nowhere to go" true
+         (Astring.String.is_infix ~affix:"no producer Keeper" handoff.summary);
+       Alcotest.(check (option string)) "and what the next agent does with it"
+         (Some "Any agent may claim this task and answer the rejection")
+         handoff.next_step;
+       Alcotest.(check bool) "the task is offered rather than held" true
+         (handoff.reclaim_policy = Some D.Allow_reclaim)
      | { task_status; _ } ->
        Alcotest.failf "a rejection with no Keeper must release the Task, found %s"
          (D.task_status_to_string task_status));
     reconcile config ~delivered:0 ~retained:0)
+
+(* The status is half the guard and the assignee is the other half. A task
+   that stayed [InProgress] but changed hands belongs to whoever holds it now,
+   and releasing it would take work away from an agent that is still there. *)
+let test_a_task_held_by_someone_else_is_not_released () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-handed-over" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    let tasks =
+      List.map
+        (fun (task : D.task) ->
+           { task with
+             task_status =
+               D.InProgress { assignee = "someone-else"; started_at = "2026-09-09T00:00:00Z" }
+           })
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks };
+    let before = only_task config in
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0;
+    Alcotest.(check string) "the new holder keeps the task"
+      (D.show_task before) (D.show_task (only_task config)))
+
+(* The route is read before the backlog lock is taken. A Keeper meta landing at
+   the producer's name in between means the verdict can be delivered after all,
+   and releasing the task then would lose the delivery the queue now accepts.
+   Called directly: the race is exactly the window reconcile cannot open. *)
+let test_a_queue_that_appears_before_the_lock_keeps_the_task () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-then-keeper" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let before = only_task config in
+    match
+      W.release_unroutable_rejected_task_r config ~authority:system ~task_id
+        ~producer ~verification_id ~reason
+        ~still_unroutable:(fun () -> Ok false)
+        ()
+    with
+    | Ok W.Producer_became_routable ->
+      Alcotest.(check string) "the task waits for the delivery it can now have"
+        (D.show_task before) (D.show_task (only_task config));
+      check_pending config 1
+    | Ok _ -> Alcotest.fail "a routable producer must not have its task released"
+    | Error error -> Alcotest.fail (D.masc_error_to_string error))
+
+(* Release precedes acknowledgement. A release that fails must therefore leave
+   the obligation standing: if the order were the other way, this obligation
+   would be gone and the task would stay held by a name that will never act. *)
+let test_a_failed_release_keeps_the_obligation () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-unwritable" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let backlog_dir = Filename.dirname (Workspace_backlog.backlog_path config) in
+    let mode = (Unix.stat backlog_dir).Unix.st_perm in
+    Unix.chmod backlog_dir 0o555;
+    let report = ok (Wake.reconcile_pending ~config) in
+    Unix.chmod backlog_dir mode;
+    if report.Wake.unroutable > 0
+    then
+      Alcotest.fail
+        "the fixture could not make the backlog unwritable, so this case proves \
+         nothing about the order";
+    Alcotest.(check int) "a failed release is kept for the next interval" 1
+      report.Wake.retained;
+    check_pending config 1;
+    (match only_task config with
+     | { task_status = D.InProgress _; _ } -> ()
+     | { task_status; _ } ->
+       Alcotest.failf "a failed release must not move the task, found %s"
+         (D.task_status_to_string task_status));
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0)
+
+(* A release that fails the same way every interval is the shape #36461
+   removed. An obligation whose task id is not a task id can never be released,
+   so it ends here with the reason on the record rather than being retried for
+   good. *)
+let test_a_release_that_can_never_succeed_ends_the_obligation () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-unusable-id" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let backlog = ok (Workspace_backlog.read_backlog_r config) in
+    let broken =
+      List.map
+        (fun (item : D.pending_completion_rejection) ->
+           { item with task_id = "task/001" })
+        backlog.pending_completion_rejections
+    in
+    W.write_backlog config { backlog with pending_completion_rejections = broken };
+    reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
+    check_pending config 0)
 
 (* Between the verdict and this delivery the same producer name can submit
    again. That submission is the current answer, so the obligation ends without
@@ -408,6 +516,14 @@ let () =
           `Quick test_rejection_with_no_keeper_returns_the_task_to_todo
       ; Alcotest.test_case "a task that moved on is left alone"
           `Quick test_release_leaves_a_task_that_moved_on
+      ; Alcotest.test_case "a task held by someone else is left alone"
+          `Quick test_a_task_held_by_someone_else_is_not_released
+      ; Alcotest.test_case "a queue that appears before the lock keeps the task"
+          `Quick test_a_queue_that_appears_before_the_lock_keeps_the_task
+      ; Alcotest.test_case "a failed release keeps the obligation"
+          `Quick test_a_failed_release_keeps_the_obligation
+      ; Alcotest.test_case "a release that can never succeed ends the obligation"
+          `Quick test_a_release_that_can_never_succeed_ends_the_obligation
       ; Alcotest.test_case "a deleted task discharges the obligation"
           `Quick test_release_discharges_when_the_task_is_gone
       ; Alcotest.test_case "release before acknowledgement replays idempotently"

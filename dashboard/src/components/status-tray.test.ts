@@ -12,7 +12,7 @@ import {
   dashboardWsReady,
 } from '../dashboard-ws-state'
 import { route } from '../router'
-import { keepers, keeperHeartbeats, tasks } from '../store'
+import { keepers, tasks } from '../store'
 import { journal } from '../sse'
 import { errors } from './common/error-notification-state'
 import { DashboardStatusTray, summarizeStatusTray } from './status-tray'
@@ -52,7 +52,6 @@ describe('summarizeStatusTray', () => {
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [],
       unacknowledgedErrors: 0,
@@ -76,7 +75,6 @@ describe('summarizeStatusTray', () => {
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [],
       unacknowledgedErrors: 0,
@@ -88,7 +86,7 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.transport.detail).toContain('dashboard/hello')
   })
 
-  it('rolls stale keeper, verification, and error counts into tray items', () => {
+  it('rolls keeper attention, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
       wsConnected: true,
       wsReady: true,
@@ -103,7 +101,6 @@ describe('summarizeStatusTray', () => {
         keeper('alpha'),
         keeper('beta', { needs_attention: true }),
       ],
-      staleKeeperNames: new Set(['alpha']),
       tasks: [
         task('t1', 'awaiting_verification'),
         task('t2', 'done'),
@@ -115,13 +112,12 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.items.transport.tone).toBe('ok')
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.value).toBe('fresh 1/2')
-    expect(summary.items.fleet.detail).toBe('1 stale heartbeat; freshness is separate from running fibers')
+    expect(summary.items.fleet.value).toBe('2')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
     expect(summary.items.attention.tone).toBe('err')
     expect(summary.items.attention.value).toBe('4')
     expect(summary.counts).toMatchObject({
-      freshKeepers: 1,
-      staleKeepers: 1,
+      totalKeepers: 2,
       keeperAttention: 1,
       pendingVerificationTasks: 1,
       unacknowledgedErrors: 2,
@@ -152,7 +148,6 @@ describe('summarizeStatusTray', () => {
           },
         }),
       ],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [],
       unacknowledgedErrors: 0,
@@ -161,7 +156,7 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.counts.keeperAttention).toBe(1)
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.detail).toBe('1 keeper need attention; heartbeat freshness is current')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
     expect(summary.items.attention.tone).toBe('warn')
     expect(summary.items.attention.value).toBe('1')
   })
@@ -178,7 +173,6 @@ describe('summarizeStatusTray', () => {
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [],
       unacknowledgedErrors: 0,
@@ -202,7 +196,6 @@ describe('summarizeStatusTray', () => {
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [
         { agent: 'new', text: 'new warning', timestamp: NOW - 1000, kind: 'keepers', severity: 'warn' },
@@ -229,7 +222,6 @@ describe('summarizeStatusTray', () => {
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
-      staleKeeperNames: new Set(),
       tasks: [],
       journalEntries: [
         { agent: 'first', text: 'ring buffer first entry', timestamp: NOW - 20_000, kind: 'system' },
@@ -252,7 +244,6 @@ describe('DashboardStatusTray', () => {
     dashboardWsLastError.value = null
     _resetDashboardWsCounterForTests()
     keepers.value = [keeper('alpha')]
-    keeperHeartbeats.value = new Map()
     tasks.value = []
     journal.value = [
       { agent: 'alpha', text: 'keeper completed a pass', timestamp: NOW, kind: 'keepers' },
@@ -263,7 +254,6 @@ describe('DashboardStatusTray', () => {
   afterEach(() => {
     cleanup()
     keepers.value = []
-    keeperHeartbeats.value = new Map()
     tasks.value = []
     journal.value = []
     errors.value = []

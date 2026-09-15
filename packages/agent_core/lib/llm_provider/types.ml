@@ -1239,6 +1239,78 @@ type message =
   }
 [@@deriving show]
 
+module Message_value = struct
+  type t = message
+
+  let equal (left : t) (right : t) = Stdlib.compare left right = 0
+  let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
+
+  (* A string contributes its length, bytes at a fixed stride of
+     [length / string_hint_samples] (fewer than [2 * string_hint_samples] of
+     them), and its last byte, so the hash stays independent of tool-result body
+     size. [Hashtbl.hash] would hash every byte of the first strings it reaches.
+     A string shorter than [2 * string_hint_samples] contributes every byte: ids
+     such as [call_00000123] share their length and most of their bytes. *)
+  let string_hint_samples = 32
+
+  let string_hint value =
+    let length = String.length value in
+    if length = 0
+    then 0
+    else (
+      let step = max 1 (length / string_hint_samples) in
+      let rec sample accumulator index =
+        if index >= length
+        then accumulator
+        else
+          sample
+            (mix accumulator (Char.code (String.unsafe_get value index)))
+            (index + step)
+      in
+      mix (sample length 0) (Char.code (String.unsafe_get value (length - 1))))
+  ;;
+
+  let optional_string_hint = function
+    | None -> 0
+    | Some value -> string_hint value
+  ;;
+
+  let role_hint : role -> int = function
+    | System -> 1
+    | User -> 2
+    | Assistant -> 3
+    | Tool -> 4
+  ;;
+
+  (* The content blocks carry the distinguishing bytes. [name] and
+     [tool_call_id] are [None] on every message of a live 13,871-message
+     checkpoint (2026-09-15), so without the blocks the hash takes one value per
+     role and a lookup walks that role's whole history. *)
+  let block_hint : content_block -> int = function
+    | Text text -> mix 1 (string_hint text)
+    | Thinking { content; signature } ->
+      mix (mix 2 (string_hint content)) (optional_string_hint signature)
+    | ReasoningDetails { reasoning_content; details } ->
+      mix (mix 3 (optional_string_hint reasoning_content)) (List.length details)
+    | RedactedThinking data -> mix 4 (string_hint data)
+    | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
+    | ToolResult { tool_use_id; content; _ } ->
+      mix (mix 6 (string_hint tool_use_id)) (string_hint content)
+    | Image { data; _ } -> mix 7 (string_hint data)
+    | Document { data; _ } -> mix 8 (string_hint data)
+    | Audio { data; _ } -> mix 9 (string_hint data)
+  ;;
+
+  let hash (message : t) =
+    List.fold_left
+      (fun accumulator block -> mix accumulator (block_hint block))
+      (mix
+         (mix (role_hint message.role) (optional_string_hint message.name))
+         (optional_string_hint message.tool_call_id))
+      message.content
+  ;;
+end
+
 (** {1 Response Types} *)
 
 (** Stop reason from API.

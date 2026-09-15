@@ -2335,6 +2335,7 @@
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)
+(include stanzas/test_builtin_skill_judgement.inc)
 (include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
@@ -5515,6 +5516,7 @@
  (libraries alcotest eio eio.mock cstruct yojson masc.browser_host))
 
 (include stanzas/test_browser_native_host.inc)
+(include stanzas/test_browser_lane_routes.inc)
 
 (test
  (name test_shell_ir_with_sandbox)

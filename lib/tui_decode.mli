@@ -1072,8 +1072,9 @@ val keeper_phase_is_running : keeper_phase -> bool
     the implementation so a new phase cannot silently count as not-running. *)
 
 type keeper_health
-(** A validated keeper health reading — whether the keeper is reporting on
-    time. Behind the decoder boundary for the same reason as {!keeper_phase}:
+(** A validated keeper health reading — whether the keeper's keepalive is
+    running and whether it has turned yet. Behind the decoder boundary for
+    the same reason as {!keeper_phase}:
     a TUI executable should not need a second dependency on the Keeper runtime
     library to name one. *)
 
@@ -1081,21 +1082,16 @@ val keeper_health_of_string : string -> keeper_health option
 val keeper_health_to_string : keeper_health -> string
 
 type keeper_health_reading =
-  | Health_running  (** Keepalive alive, turns recent, nothing quiet about it *)
-  | Health_idle  (** Keepalive alive, no recent activity *)
-  | Health_offline  (** No agent present, or the agent says it is inactive *)
-  | Health_stale  (** The last signal is older than the health window *)
-  | Health_degraded  (** The agent's status file did not read or decode *)
-  | Health_zombie  (** Registry entry outstanding, its fiber already ended *)
+  | Health_running  (** Keepalive running and at least one turn recorded *)
+  | Health_idle  (** Keepalive running, no turn recorded yet *)
+  | Health_offline  (** Keepalive not running: the phase admits no turn *)
 
 val keeper_health_reading : keeper_health -> keeper_health_reading
 (** The health reading as a variant a surface can match.
 
     {!keeper_health_to_string} is for showing a person a word. A surface that
     branches on health matched that word instead, which put a renamed label
-    one edit away from silently reading as the healthy case -- and collapsed
-    stale, degraded, and zombie into it, so three broken keepers drew the
-    same mark as a working one. *)
+    one edit away from silently reading as the healthy case. *)
 
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous

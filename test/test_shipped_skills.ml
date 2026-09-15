@@ -52,9 +52,9 @@ let instantiate name args =
   | Error error -> fail (Catalog.instantiation_error_to_string error)
 ;;
 
-(* Node inputs are checked against each tool's input schema only when the node
-   runs, so a misspelled field loads cleanly. Running the plan with a stub
-   dispatch goes through that check for every node. *)
+(* Node inputs are checked against each tool's input schema when the plan runs,
+   not when the Skill loads, so a misspelled field loads cleanly. Running the
+   plan with a stub dispatch goes through that check for every node. *)
 let run_plan plan ~answer =
   let calls = ref [] in
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
@@ -242,6 +242,50 @@ let test_work_intake_names_every_page_bound () =
       [ "scheduled"; "due"; "running" ])
 ;;
 
+(* [query] reaches all three searches, and only masc_board_search bounds it (200
+   characters). The bound is a property of a bound parameter, not of any
+   search result, so the call is refused before the memory search runs instead
+   of after it. *)
+let test_prior_art_refuses_an_over_long_query_before_any_search () =
+  Eio_main.run (fun _ ->
+    let plan =
+      instantiate "prior-art" (`Assoc [ "query", `String (String.make 201 'q') ])
+    in
+    let result, calls =
+      run_plan plan ~answer:(fun tool -> fail ("a search ran with an invalid query: " ^ tool))
+    in
+    check (list string) "no search ran" [] (List.map fst calls);
+    match result with
+    | Ok _ -> fail "prior-art completed with a query over the board bound"
+    | Error failure ->
+      check int "nothing settled" 0 (List.length failure.Executor.settled);
+      (match failure.cause with
+       | Executor.Plan_execution_failed
+           { error =
+               Plan.Input_validation_failed
+                 { node_id
+                 ; rejection =
+                     { Masc.Tool_input_validation.violation =
+                         Masc.Tool_input_validation.Argument_out_of_range
+                           { path = "query"
+                           ; keyword =
+                               Masc.Tool_input_validation.Count_bound
+                                 Masc.Tool_input_validation.Max_length
+                           }
+                     ; _
+                     }
+                 ; _
+                 }
+           ; _
+           } ->
+         check string "the board search owns the bound" "board" (Plan.Node_id.to_string node_id)
+       | Executor.Plan_execution_failed _
+       | Executor.Tool_did_not_complete _
+       | Executor.Node_observation_failed _
+       | Executor.Outer_completion_mismatch _ ->
+         fail "the over-long query lost its typed refusal"))
+;;
+
 let () =
   run
     "shipped skills"
@@ -264,6 +308,10 @@ let () =
             "work-intake names every page bound"
             `Quick
             test_work_intake_names_every_page_bound
+        ; test_case
+            "prior-art refuses an over-long query before any search"
+            `Quick
+            test_prior_art_refuses_an_over_long_query_before_any_search
         ] )
     ]
 ;;

@@ -49,7 +49,6 @@ let status ~(config : Workspace.config) (meta : keeper_meta) =
   let now_ts = Time_compat.now () in
   let diagnostic =
     Keeper_status_runtime.keeper_diagnostic_json
-      ~config
       ~meta ~keepalive_running ~history_items:[] ~now_ts
     |> Keeper_status_runtime.augment_keeper_diagnostic_json
          ~keepalive_running

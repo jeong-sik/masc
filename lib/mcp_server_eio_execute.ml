@@ -394,7 +394,13 @@ let execute_tool_eio
                  | Mod_schedule ->
                    Tool_schedule.dispatch
                      { Tool_schedule.config
-                     ; agent_name
+                     ; (* The endpoint's own typed origin decides whether it
+                          knows the caller: a name it minted for a session
+                          that gave none is no one's across sessions. *)
+                       caller =
+                         (if caller_identity.agent_name_is_ephemeral
+                          then Tool_schedule.Unnamed_caller
+                          else Tool_schedule.Named_caller agent_name)
                      ; stamp_keeper_wake_result_delivery =
                          (fun ~payload ->
                             Schedule_payload_projection

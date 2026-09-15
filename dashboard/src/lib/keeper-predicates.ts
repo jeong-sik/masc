@@ -18,7 +18,7 @@
 // superset of the historical chains. Adding a new axis here updates
 // every call site simultaneously.
 
-import type { Keeper } from '../types/core'
+import type { Keeper, KeeperDiagnostic } from '../types/core'
 
 const PAUSED_PHASE = 'Paused'
 const PAUSED_LOWER_TOKEN = 'paused'
@@ -127,8 +127,8 @@ function healthToken(keeper: KeeperOfflineInput): string | null {
 
 /** Operator considers the keeper offline / down on either axis that
  *  states it directly: a terminal lifecycle phase (Offline/Stopped/Crashed)
- *  or `health_state = offline`, which the backend computes fresh from
- *  `keepalive_running` and heartbeat age.
+ *  or `health_state = offline`, which the backend computes from the keeper's
+ *  registry phase (`keepalive_running`).
  *
  *  It deliberately ignores `keeper.status`. That field folds health and
  *  phase back into one word and is refreshed by a different path than the
@@ -136,9 +136,7 @@ function healthToken(keeper: KeeperOfflineInput): string | null {
  *  2026-08-24: `rondo` carried `status=offline` beside `health=healthy`,
  *  `phase=Running` for the whole observation window. Reading it here made
  *  a live keeper look shut down, which offered `boot` and `purge` and hid
- *  `wakeup`. `inactive` was the worse half: it stood for stale, degraded
- *  and zombie at once, so a keeper that had merely gone quiet was counted
- *  as one that had stopped. */
+ *  `wakeup`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
   if (
@@ -234,15 +232,16 @@ const RUNNING_PHASES_LOWERCASE: ReadonlySet<string> = new Set<string>(
   [...RUNNING_PHASES_EXCLUDING_RESTARTING].map(p => p.toLowerCase()),
 )
 
-// Health values that mean the process is still taking turns. `stale` is one
-// of them on purpose: a late heartbeat is a keeper that has gone quiet, not
-// one that has stopped, and an operator still needs shutdown on it.
-const RUNNING_HEALTH: ReadonlySet<string> = new Set<string>([
+// Health values that mean the keepalive is running, whether or not a turn
+// has been recorded yet. Typed against the health union so a value that
+// leaves the union leaves this set at compile time; the string view is what
+// the lowercased token is looked up in.
+type KeeperHealthState = NonNullable<KeeperDiagnostic['health_state']>
+const RUNNING_HEALTH: ReadonlySet<KeeperHealthState> = new Set<KeeperHealthState>([
   'healthy',
   'idle',
-  'stale',
-  'degraded',
 ])
+const RUNNING_HEALTH_TOKENS: ReadonlySet<string> = RUNNING_HEALTH
 
 /** Keeper is "running" for action-panel purposes — turn-producing,
  *  alive, but explicitly *not* `Restarting`. The action panel routes
@@ -289,5 +288,5 @@ export function isKeeperRunningExcludingRestarting(
   // first, so a `Crashed` or `Restarting` keeper whose cached status still
   // said `active` came back running and the panel offered it a pause button.
   const health = healthToken(keeper)
-  return health !== null && RUNNING_HEALTH.has(health)
+  return health !== null && RUNNING_HEALTH_TOKENS.has(health)
 }

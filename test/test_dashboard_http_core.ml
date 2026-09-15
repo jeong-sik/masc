@@ -5729,7 +5729,7 @@ let () =
             test_run_dashboard_compute_nested_cache_does_not_starve;
           test_case "shell payload includes paths diagnostics" `Quick
             test_dashboard_shell_http_json_includes_paths;
-          test_case "shell runtime base_path prefers preserved input" `Quick
+          test_case "shell runtime base_path is the published owner" `Quick
             test_dashboard_shell_http_json_reports_the_published_base_path;
           test_case "runtime resolution accepts server repo under base path" `Quick
             test_runtime_resolution_accepts_server_repo_inside_base_path;

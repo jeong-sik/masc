@@ -21,7 +21,7 @@ module Registry = Masc.Keeper_registry
 module Profile = Masc.Keeper_types_profile
 
 let submitter = "alpha"
-let composition_tool = "keeper_compose_background-snapshot"
+let composition_tool = "keeper_compose_memory-background"
 
 (* A worker settles in single-digit milliseconds, so this is a generous bound
    on "the wake never arrived" rather than a latency assertion. Measured

@@ -150,6 +150,87 @@ let test_prior_art_bounds_every_search () =
       (Yojson.Safe.Util.member "compact" board = `Bool true))
 ;;
 
+(* A tool whose schema leaves additionalProperties open accepts a misspelled
+   field without a word, and the node then runs on the tool default the
+   composition meant to replace -- keeper_tasks_list is one of them. So the
+   field names are held against the declared properties, not only against
+   the schema check that running the plan applies. *)
+let check_inputs_declared plan calls =
+  List.iter
+    (fun (node : Plan.node) ->
+       let node_id = Plan.Node_id.to_string node.id in
+       match Plan.descriptor plan node.id with
+       | None -> fail ("no descriptor for node " ^ node_id)
+       | Some descriptor ->
+         let declared =
+           Yojson.Safe.Util.(
+             descriptor.Masc.Keeper_tool_descriptor.input_schema
+             |> member "properties"
+             |> keys)
+         in
+         Yojson.Safe.Util.keys (input_of calls node_id)
+         |> List.iter (fun field ->
+           check
+             bool
+             (node_id ^ " passes a field " ^ node.tool_name ^ " declares: " ^ field)
+             true
+             (List.mem field declared)))
+    (Plan.nodes plan)
+;;
+
+let test_work_intake_names_every_page_bound () =
+  Eio_main.run (fun _ ->
+    let plan = instantiate "work-intake" (`Assoc []) in
+    let answer = function
+      | "keeper_tasks_list" ->
+        `Assoc
+          [ "backlog_authority", `String "primary"
+          ; "degraded", `Bool false
+          ; "projection", `String "compact"
+          ; "kind", `String "snapshot"
+          ; "revision", `String "tasks:fixture"
+          ; "snapshot", `List []
+          ]
+      | "masc_board_list" ->
+        `Assoc
+          [ "kind", `String "snapshot"
+          ; "revision", `String "board:fixture"
+          ; "snapshot", `String "Posts (0)"
+          ]
+      | "masc_ask_status" ->
+        `Assoc [ "open_count", `Int 0; "returned", `Int 0; "asks", `List [] ]
+      | "masc_schedule_list" -> `Assoc [ "status", `String "ok"; "schedules", `List [] ]
+      | tool -> fail ("unexpected tool: " ^ tool)
+    in
+    let result, calls = run_plan plan ~answer in
+    (match result with
+     | Ok _ -> ()
+     | Error _ -> fail "work-intake did not complete against valid tool answers");
+    check
+      (list string)
+      "all four reads run"
+      [ "answers"; "board"; "scheduled"; "tasks" ]
+      (List.sort String.compare (List.map fst calls));
+    check_inputs_declared plan calls;
+    let tasks = input_of calls "tasks" in
+    let board = input_of calls "board" in
+    let answers = input_of calls "answers" in
+    let scheduled = input_of calls "scheduled" in
+    let names_limit json = Yojson.Safe.Util.member "limit" json <> `Null in
+    check string "tasks reads who holds work" "in_progress" (string_member "status" tasks);
+    check string "tasks asks for compact rows" "compact" (string_member "projection" tasks);
+    check bool "tasks names its limit" true (names_limit tasks);
+    check string "board orders by latest activity" "updated" (string_member "sort_by" board);
+    check bool "board asks for compact rows" true
+      (Yojson.Safe.Util.member "compact" board = `Bool true);
+    check bool "board names its limit" true (names_limit board);
+    check bool "answers reads open questions only" true
+      (Yojson.Safe.Util.member "include_resolved" answers = `Bool false);
+    check string "schedules are the caller's own" "self" (string_member "owner" scheduled);
+    check string "schedules still waiting to fire" "scheduled" (string_member "status" scheduled);
+    check bool "schedules name their limit" true (names_limit scheduled))
+;;
+
 let () =
   run
     "shipped skills"
@@ -168,6 +249,10 @@ let () =
             "prior-art bounds every search"
             `Quick
             test_prior_art_bounds_every_search
+        ; test_case
+            "work-intake names every page bound"
+            `Quick
+            test_work_intake_names_every_page_bound
         ] )
     ]
 ;;

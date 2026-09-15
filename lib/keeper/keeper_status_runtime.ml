@@ -17,10 +17,6 @@ let agent_staleness_threshold_s = 120.0
 let turn_cycle_execution_slack_s = 120.0
 let turn_record_freshness_floor_s = 300.0
 
-(* A keepalive loop that has only just started reads as recovering rather
-   than unhealthy until this window passes ([keeper_continuity_state]). *)
-let keepalive_recovery_window_s = 60.0
-
 let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
   Float.max
     turn_record_freshness_floor_s
@@ -149,11 +145,6 @@ let keeper_health_or_offline ~source s =
         source
         s;
       KH_offline
-
-let keeper_continuity_to_string = function
-  | Continuity_healthy -> "healthy"
-  | Continuity_recovering -> "recovering"
-  | Continuity_not_running -> "not_running"
 
 let json_string_opt key json = Json_util.get_string_nonempty json key
 
@@ -285,69 +276,6 @@ let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reaso
           "Keeper metadata exists but no reply turn has been recorded yet."
       | Some Starting_up | None ->
           "Keeper is reachable. Send a direct message for an immediate response.")
-
-let keeper_continuity_state
-    ~(keepalive_running : bool)
-    ~(keepalive_started_at : float option)
-    ~(health_state : keeper_health)
-    ~(now_ts : float) : keeper_continuity =
-  let healthy_like =
-    match health_state with
-    | KH_healthy | KH_idle -> true
-    | KH_offline -> false
-  in
-  let recently_started =
-    match keepalive_started_at with
-    | Some started_at -> now_ts -. started_at < keepalive_recovery_window_s
-    | None -> false
-  in
-  if not keepalive_running then Continuity_not_running
-  else if recently_started || not healthy_like then Continuity_recovering
-  else Continuity_healthy
-
-let keeper_lifecycle_summary = function
-  | Continuity_not_running ->
-      "Keeper runtime is not running. The runtime should reconcile it."
-  | Continuity_recovering ->
-      "Keeper runtime is reconciling back into live presence."
-  | Continuity_healthy ->
-      "Keeper runtime is aligned with the durable keeper state."
-
-let augment_keeper_diagnostic_json
-    ~(keepalive_running : bool)
-    ~(keepalive_started_at : float option)
-    ~(now_ts : float)
-    (diagnostic : Yojson.Safe.t) : Yojson.Safe.t =
-  let health_state =
-    json_string_opt "health_state" diagnostic
-    |> Option.value ~default:"offline"
-    |> keeper_health_or_offline ~source:"augment_keeper_diagnostic_json"
-  in
-  let continuity_state =
-    keeper_continuity_state ~keepalive_running
-      ~keepalive_started_at ~health_state ~now_ts
-  in
-  let lifecycle_summary = keeper_lifecycle_summary continuity_state in
-  let continuity_str = keeper_continuity_to_string continuity_state in
-  let summary =
-    match json_string_opt "summary" diagnostic with
-    | Some base when continuity_state = Continuity_healthy -> base
-    | Some _ | None -> lifecycle_summary
-  in
-  match diagnostic with
-  | `Assoc fields ->
-      let filtered =
-        fields
-        |> List.filter (fun (key, _) ->
-               not
-                 (String.equal key "summary"
-                 || String.equal key "continuity_state"))
-      in
-      `Assoc
-        (("summary", `String summary)
-        :: ("continuity_state", `String continuity_str)
-        :: filtered)
-  | other -> other
 
 (* RFC-0089 — the keeper "surface status" is the display status that
    [keeper_surface_status] derives from keeper health. It is carried on the wire

@@ -25,12 +25,6 @@ type keeper_health =
   | KH_idle (** Keepalive running, no turn recorded yet *)
   | KH_offline (** Keepalive not running: the phase admits no turn *)
 
-(** Keeper continuity state — derived from health + keepalive status. *)
-type keeper_continuity =
-  | Continuity_healthy (** Runtime aligned with durable state *)
-  | Continuity_recovering (** Reconciling back into live presence *)
-  | Continuity_not_running (** Keepalive fiber not running *)
-
 (** Per-tool usage entry for keeper tool tracking.
     Defined here so Keeper_registry can embed it without depending
     on Keeper_tools_agent_core (avoids module init order issues). *)

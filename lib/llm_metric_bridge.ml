@@ -46,8 +46,6 @@ let inc_counter ?(delta = 1.0) name ~labels =
   Otel_metric_store.inc_counter name ~labels ~delta ()
 ;;
 
-let set_gauge name ~labels value = Otel_metric_store.set_gauge name ~labels value
-
 let observe_seconds name ~labels seconds =
   Otel_metric_store.observe_histogram name ~labels seconds
 ;;
@@ -251,18 +249,6 @@ let emit_retry ~provider ~model_id ~attempt =
       ]
 ;;
 
-let emit_circuit_state ~provider ~model_id ~provider_key ~state =
-  note_provider ~model_id ~provider;
-  set_gauge
-    Otel_metric_store.metric_llm_provider_circuit_state
-    ~labels:
-      [ ("provider", provider)
-      ; ("model", model_id)
-      ; ("provider_key", provider_key)
-      ]
-    (float_of_int (Metrics.circuit_state_to_int state))
-;;
-
 let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
   note_provider ~model_id ~provider;
   let labels = provider_model_labels ~provider ~model_id in
@@ -378,7 +364,6 @@ let make_sink () : Metrics.t =
         | None -> ())
   ; on_error = emit_error
   ; on_http_status = emit_http_status
-  ; on_circuit_state = emit_circuit_state
   ; on_capability_drop = emit_capability_drop
   ; on_retry = emit_retry
   ; on_token_usage = emit_token_usage

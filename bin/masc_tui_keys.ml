@@ -1301,6 +1301,13 @@ let help_sections ?current () =
              an operator reading them asked what "받아서 씀" received and
              wrote (2026-09-14). *)
           ; ("Chat marks", Masc_tui_keeper_chat_transcript.legend)
+          (* The first column of Config's two list panes. The prompt registry
+             draws three marks and the params list two, and the words for
+             them were only in the detail pane below the list -- for the one
+             row the cursor was on. A reader scanning twenty rows could tell
+             a marked row from an unmarked one and not what the mark said. *)
+          ; ("Prompt marks", Masc_tui_config_mark.prompt_legend)
+          ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
 
 let footer_hints_browser_lane =

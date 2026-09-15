@@ -94,17 +94,17 @@ let availability_of_yojson json =
     let* fields = Json.object_fields error in
     let* code = Json.string_field "code" fields in
     let* message = Json.string_field "message" fields in
+    let message_only error =
+      let* () = Json.exact_fields ~required:[ "code"; "message" ] fields in
+      Ok error
+    in
     let* error =
       match code with
-      | "source_unavailable" | "missing_registration" | "missing_completion"
-      | "invalid_payload" | "snapshot_changed" ->
-        let* () = Json.exact_fields ~required:[ "code"; "message" ] fields in
-        Ok (match code with
-            | "source_unavailable" -> Source_unavailable message
-            | "missing_registration" -> Missing_registration
-            | "missing_completion" -> Missing_completion
-            | "invalid_payload" -> Invalid_payload message
-            | _ -> Snapshot_changed)
+      | "source_unavailable" -> message_only (Source_unavailable message)
+      | "missing_registration" -> message_only Missing_registration
+      | "missing_completion" -> message_only Missing_completion
+      | "invalid_payload" -> message_only (Invalid_payload message)
+      | "snapshot_changed" -> message_only Snapshot_changed
       | _ -> Error (Printf.sprintf "unknown payload error code %S" code)
     in
     Ok (Unavailable error)
@@ -406,17 +406,21 @@ let completion_error_to_string = function
    holds the row shape and this name together. *)
 let storage_filename = "exact-lane-runs-v6.jsonl"
 
-(* Next to the log: [<dir>/exact-lane-run-payloads/<run_id>/input.json] and
-   [output.json]. *)
+(* Next to the log: [<dir>/exact-lane-run-payloads/<run_id>/input-<sha256>.json]
+   and [output-<sha256>.json]. The digest is part of the name, so writing a new
+   value for a run never replaces the bytes a durable row already names: a
+   second registration of one id whose append then fails leaves the first
+   registration's file as it was. *)
 let payload_dirname = "exact-lane-run-payloads"
 
 type payload_kind =
   | Input_payload
   | Output_payload
 
-let payload_leaf = function
-  | Input_payload -> "input.json"
-  | Output_payload -> "output.json"
+let payload_leaf kind ~sha256 =
+  match kind with
+  | Input_payload -> Printf.sprintf "input-%s.json" sha256
+  | Output_payload -> Printf.sprintf "output-%s.json" sha256
 ;;
 
 (* A run id names a directory. Producers mint them with [Random_id.prefixed];
@@ -433,24 +437,20 @@ let payload_run_dir ~log_path ~run_id =
   Filename.concat (Filename.concat (Filename.dirname log_path) payload_dirname) run_id
 ;;
 
-let payload_path ~log_path ~run_id kind =
-  Filename.concat (payload_run_dir ~log_path ~run_id) (payload_leaf kind)
-;;
-
-let encoded_payload value =
-  let text = Yojson.Safe.to_string value in
-  text, In_file { bytes = String.length text; sha256 = Digestif.SHA256.(digest_string text |> to_hex) }
+let payload_path ~log_path ~run_id kind ~sha256 =
+  Filename.concat (payload_run_dir ~log_path ~run_id) (payload_leaf kind ~sha256)
 ;;
 
 (* Written before the row that points at it, so a durable row always names a
-   file that exists. A row whose append then fails leaves the file behind. *)
+   file that exists. A row whose append then fails leaves the file behind for
+   the replay sweep. *)
 let write_payload ~log_path ~run_id kind value =
-  let text, source = encoded_payload value in
+  let text = Yojson.Safe.to_string value in
+  let sha256 = Digestif.SHA256.(digest_string text |> to_hex) in
   match
-    Keeper_fs.save_bytes_durable_atomic (payload_path ~log_path ~run_id kind)
-      text
+    Keeper_fs.save_bytes_durable_atomic (payload_path ~log_path ~run_id kind ~sha256) text
   with
-  | Ok () -> Ok source
+  | Ok () -> Ok (In_file { bytes = String.length text; sha256 })
   | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
 ;;
 
@@ -545,18 +545,26 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
 module String_set = Set.Make (String)
 
 (* A run's payload files leave with the run: when retention evicts it from the
-   store, or when replay finds a directory no retained row names (a payload
-   written before a row whose append failed). A removal that fails is logged
-   and the directory stays; nothing reads it. *)
+   store, or when a replay that read the whole log finds a directory no
+   retained row names. Every entry of the directory goes, including a temporary
+   file a crashed write left behind. A removal that fails is logged and the
+   directory stays; nothing reads it. *)
+let remove_files_in ~dir ~keep =
+  Array.iter
+    (fun name ->
+       if not (String_set.mem name keep) then Sys.remove (Filename.concat dir name))
+    (Sys.readdir dir)
+;;
+
 let remove_payload_dir ~log_path ~run_id =
+  let dir = payload_run_dir ~log_path ~run_id in
   try
-    List.iter
-      (fun kind ->
-         let path = payload_path ~log_path ~run_id kind in
-         if Sys.file_exists path then Sys.remove path)
-      [ Input_payload; Output_payload ];
-    let dir = payload_run_dir ~log_path ~run_id in
-    if Sys.file_exists dir then Unix.rmdir dir
+    Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
+      if Sys.file_exists dir
+      then (
+        remove_files_in ~dir ~keep:String_set.empty;
+        Unix.rmdir dir));
+    Keeper_fs.invalidate_dir dir
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -584,23 +592,66 @@ let publish_projection t =
       previous
 ;;
 
-let remove_unreferenced_payload_dirs t ~log_path =
+let referenced_leaves (entry : Store.entry) =
+  let leaf kind = function
+    | In_file { sha256; _ } -> [ payload_leaf kind ~sha256 ]
+    | In_row -> []
+  in
+  let output =
+    match entry.status with
+    | Store.Running -> []
+    | Store.Completed completion -> leaf Output_payload completion.output_source
+  in
+  String_set.of_list (leaf Input_payload entry.registration.input_source @ output)
+;;
+
+(* Only after a replay that read every row and refused none: a replay whose
+   read failed or stopped at a torn tail publishes fewer runs than the log
+   holds, and sweeping against that would delete payloads the log still
+   names. *)
+let sweep_payload_dirs t ~log_path =
   let root = Filename.concat (Filename.dirname log_path) payload_dirname in
-  match Sys.readdir root with
-  | exception Sys_error _ when not (Sys.file_exists root) -> ()
-  | exception (Sys_error _ as exn) ->
-    Log.Keeper.warn
-      "exact_lane_run_registry: could not list payload files under %s: %s"
-      root
-      (Printexc.to_string exn)
-  | names ->
-    let retained =
-      String_set.of_list (List.map (fun run -> run.run_id) (Atomic.get t.projection))
+  let sweep () =
+    let referenced = Hashtbl.create 1024 in
+    List.iter
+      (fun (entry : Store.entry) -> Hashtbl.replace referenced entry.id (referenced_leaves entry))
+      (Store.list_entries t.store);
+    let sweep_entry name =
+      let path = Filename.concat root name in
+      match Hashtbl.find_opt referenced name, Sys.is_directory path with
+      | None, true -> remove_payload_dir ~log_path ~run_id:name
+      | Some keep, true ->
+        (* A retained run keeps the files its row names; a superseded
+           registration of the same id and a torn temporary file go. *)
+        Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
+          remove_files_in ~dir:path ~keep)
+      | (None | Some _), false -> Sys.remove path
     in
     Array.iter
-      (fun run_id ->
-         if not (String_set.mem run_id retained) then remove_payload_dir ~log_path ~run_id)
-      names
+      (fun name ->
+         try sweep_entry name with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | (Sys_error _ | Unix.Unix_error _) as exn ->
+           Log.Keeper.warn
+             "exact_lane_run_registry: could not sweep payload entry %s under %s: %s"
+             name
+             root
+             (Printexc.to_string exn))
+      (Sys.readdir root)
+  in
+  match Store.replay_status t.store with
+  | Run_registry_core.Replayed { reached_end = true; malformed_lines = 0; _ } ->
+    if Sys.file_exists root
+    then (
+      try sweep () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | (Sys_error _ | Unix.Unix_error _) as exn ->
+        Log.Keeper.warn
+          "exact_lane_run_registry: could not list payload entries under %s: %s"
+          root
+          (Printexc.to_string exn))
+  | Run_registry_core.Replayed _ | Run_registry_core.Log_absent | Run_registry_core.Not_replayed
+    -> ()
 ;;
 
 let make ?path store =
@@ -619,7 +670,7 @@ let make ?path store =
 let create ?path () = make ?path (Store.create ?path ())
 let replay path =
   let t = make ~path (Store.replay path) in
-  remove_unreferenced_payload_dirs t ~log_path:path;
+  sweep_payload_dirs t ~log_path:path;
   t
 ;;
 
@@ -639,15 +690,17 @@ let replay path =
 let register_running t ~run_id ~lane ~actor ~started_at ~input =
   if not (run_id_is_a_segment run_id)
   then invalid_arg (Printf.sprintf "exact lane run id %S is not a path segment" run_id);
+  (* Outside the lock: the file name carries its digest, so this write shares
+     nothing with another run's or with this run's earlier files. *)
+  let input_source =
+    match t.path, input with
+    | None, Exact_input _ -> In_row
+    | Some log_path, Exact_input value ->
+      (match write_payload ~log_path ~run_id Input_payload value with
+       | Ok source -> source
+       | Error detail -> raise (Sys_error detail))
+  in
   Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
-    let input_source =
-      match t.path, input with
-      | None, Exact_input _ -> In_row
-      | Some log_path, Exact_input value ->
-        (match write_payload ~log_path ~run_id Input_payload value with
-         | Ok source -> source
-         | Error detail -> raise (Sys_error detail))
-    in
     Store.register
       t.store
       ~id:run_id
@@ -659,22 +712,24 @@ let register_running t ~run_id ~lane ~actor ~started_at ~input =
 ;;
 
 let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+  (* Outside the lock, as in [register_running]. A run that stops being known
+     before the lock is taken leaves this file for the replay sweep. *)
+  let stored =
+    match t.path with
+    | None -> Ok In_row
+    | Some log_path ->
+      (match Store.get_metadata t.store ~id:run_id with
+       | None -> Error `Unknown
+       | Some _ ->
+         (match write_payload ~log_path ~run_id Output_payload output with
+          | Ok source -> Ok source
+          | Error detail ->
+            Error
+              (`Persistence_failed
+                { Run_registry_core.detail; state = Run_registry_core.Not_persisted })))
+  in
   let result =
     Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
-      let stored =
-        match t.path with
-        | None -> Ok In_row
-        | Some log_path ->
-          (match Store.get_metadata t.store ~id:run_id with
-           | None -> Error `Unknown
-           | Some _ ->
-             (match write_payload ~log_path ~run_id Output_payload output with
-              | Ok source -> Ok source
-              | Error detail ->
-                Error
-                  (`Persistence_failed
-                    { Run_registry_core.detail; state = Run_registry_core.Not_persisted })))
-      in
       let completed =
         match stored with
         | Error _ as error -> error
@@ -768,7 +823,7 @@ let recent_runs t ~limit ~before =
 (* A detail read opens the run's payload file and checks it against the size
    and SHA-256 its row recorded. It never reads the log. *)
 let read_payload_file ~log_path ~run_id kind ~bytes ~sha256 ~missing =
-  let path = payload_path ~log_path ~run_id kind in
+  let path = payload_path ~log_path ~run_id kind ~sha256 in
   match Fs_compat.load_file path with
   | exception Sys_error detail ->
     (match Unix.stat path with

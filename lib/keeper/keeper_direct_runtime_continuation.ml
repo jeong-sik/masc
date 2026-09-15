@@ -97,36 +97,29 @@ let consume ~base_path ~keeper_name ~operation_id admission =
   Owner.resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id
     ~observed:admission.observed |> owner_result
 
-(* A deferred lane whose failure was the provider throttling must not be
-   re-claimed the instant the child exits — that re-issues the same rejected
-   call in a tight loop (the chat-lane retry storm of the 2026-09-10 drain
-   investigation). The chat lane sleeps its retry by the same capped backoff
-   rule the heartbeat lane applies to its cycle, with one difference: the
-   chat lane has no cycle cadence, so it passes 0 as the floor and the
-   provider's Retry-After hint is authoritative (the shared 60s default still
-   guards a missing or garbage hint). Other failure routes stay immediately
-   eligible because re-running them is how they recover. *)
-let retry_not_before ~now (failure : Agent_core.Error.t) =
-  match
+(* A deferred chat retry is claimable when the next dispatch the heartbeat
+   would make is (RFC-provider-path-rest §3.4). Both lanes read
+   [Keeper_turn_driver.next_dispatch_after_failure], so they answer one failure
+   the same way: a suffix whose walk head serves is claimable now; a resting
+   head or capacity backpressure keeps the retry until its release. Claiming a
+   retry on a resting path re-issues a refused call in a tight loop (the chat
+   lane retry storm of the 2026-09-10 drain investigation). *)
+let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
+  let route =
     Keeper_runtime_failure_route.route_of_error
-      ~boundary:Keeper_runtime_failure_route.Agent_core_execution failure
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      lane.failure
+  in
+  match
+    Keeper_turn_driver.next_dispatch_after_failure
+      ~now
+      ~route
+      ~assignment_id:lane.assignment_id
+      (Some lane)
   with
-  | Keeper_runtime_failure_route.Retry_after_observed
-      { retry_class =
-          ( Keeper_runtime_failure_route.Rate_limited
-          | Keeper_runtime_failure_route.Hard_quota
-          | Keeper_runtime_failure_route.Capacity_backpressure )
-      ; retry_after
-      } ->
-    Some
-      (now
-       +. Keeper_runtime_failure_route.retry_backoff_sec
-            ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-            ~retry_after_hint:retry_after
-            ~cadence_sec:0.0)
-  | Keeper_runtime_failure_route.Retry_after_observed _
-  | Keeper_runtime_failure_route.Rotate_now _
-  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> None
+  | None | Some (Keeper_turn_driver.Dispatch_now { runtime_id = _ }) -> None
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _; wait = _ }) ->
+    Some release_at
 
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
     (lane : Keeper_turn_driver.deferred_runtime_lane) =
@@ -136,7 +129,7 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
     | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
       Error "direct runtime checkpoint retention is not durably confirmed" in
   let checkpoint = Checkpoint.exact_snapshot_reference snapshot in
-  let not_before = retry_not_before ~now:(Time_compat.now ()) lane.failure in
+  let not_before = retry_not_before ~now:(Time_compat.now ()) lane in
   let* continuation = Semantic.runtime_retry ~not_before ~checkpoint ~assignment_id:lane.assignment_id
     ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id
     ~later_runtime_ids:lane.later_runtime_ids in
@@ -150,4 +143,5 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
 
 module For_testing = struct
   let validate_scope = validate_scope
+  let retry_not_before = retry_not_before
 end

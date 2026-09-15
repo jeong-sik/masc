@@ -56,6 +56,16 @@ let held_observation (state : state) =
   observe_source ~observed:state.keeper_tool_approvals_observed
     ~error:state.keeper_tool_approvals_error state.keeper_tool_approvals
 
+(* The word for a source nothing has come back from, in one place. The three
+   sources that carry a bare option rather than an {!observation} -- the GC,
+   the scheduler and the transport -- spelled it by hand, and the pulse card
+   and the section under it did not agree: of the same [sid_gc] being [None]
+   the card said "GC not observed" and the section "GC telemetry not
+   observed", and of the same [sid_scheduler] the card said "Lag not
+   observed" and the section "Scheduler telemetry not observed". Both pairs
+   were on screen together. *)
+let not_observed = "not observed"
+
 (* What a state is called, once. The pulse row and the section row below it
    draw the same observation of the same source -- "Gate ..." on one and
    "Pending Gate Calls: ..." on the other -- so a state named twice is a state
@@ -63,7 +73,7 @@ let held_observation (state : state) =
    pulse and "not observed" in the section. *)
 let observation_name = function
   | Current _ -> ""
-  | Not_observed -> "not observed"
+  | Not_observed -> not_observed
   (* One word where a number goes: the cell has no room for the reason, and
      both states are the same answer to "how many" -- none that was read. *)
   | Read_failed _ | Unavailable _ -> "unavailable"
@@ -208,7 +218,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (Printf.sprintf "Heap %s / live %s"
          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words),
        Printf.sprintf "%s workers · minor %s" domains (format_words gc.sgc_minor_heap_size))
-    | None -> "GC not observed", "Workers " ^ domains
+    | None -> "GC " ^ not_observed, "Workers " ^ domains
   in
   let c2_l1, c2_l2, c2_tone = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
@@ -219,7 +229,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
        if s.ssch_stalls > 0 then Theme.warn () else Theme.recede ())
     (* One condition -- no scheduler reading at all -- so both halves of the
        card name it the same way. *)
-    | None -> "Lag not observed", "Probe not observed", Theme.recede ()
+    | None -> "Lag " ^ not_observed, "Probe " ^ not_observed, Theme.recede ()
   in
   let c3_l1, c3_l2 = match kpis.tasks with
     | Some count ->
@@ -268,7 +278,7 @@ let render_section_fleet ~cols (state : state) =
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
   let gc_lines = match gc with
-    | None -> [ "    GC telemetry not observed" ]
+    | None -> [ "    " ^ not_observed ]
     | Some gc ->
       [ Printf.sprintf "    Heap %s · live %s · configured minor heap %s"
           (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
@@ -281,7 +291,7 @@ let render_section_fleet ~cols (state : state) =
           (format_megawords gc.sgc_major_words) ]
   in
   let scheduler_lines = match scheduler with
-    | None -> [ "    Scheduler telemetry not observed" ]
+    | None -> [ "    " ^ not_observed ]
     | Some sched when sched.ssch_samples <= 0 ->
       [ "    No latency samples in the producer window"
       ; Printf.sprintf "    Probe %s · worker domains %s"
@@ -299,7 +309,7 @@ let render_section_fleet ~cols (state : state) =
       ; "    Scheduler delay measures runtime responsiveness, not task output." ]
   in
   let transport_lines = match state.transport with
-    | None -> [ "    Transport telemetry not observed" ]
+    | None -> [ "    " ^ not_observed ]
     | Some transport ->
       [ Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
           transport.th_sse_sessions

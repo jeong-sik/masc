@@ -650,11 +650,20 @@ enum = ["scene", "scene"]|} with
     [ "empty member", {|["scene", ""]|}, "", Catalog.Empty_value
     ; "leading whitespace", {|[" scene", "regions"]|}, " scene", Catalog.Padded_value
     ; "trailing whitespace", {|["scene", "regions "]|}, "regions ", Catalog.Padded_value
-    ; "line break inside", {|["scene", "re\ngions"]|}, "re\ngions", Catalog.Line_break_in_value
-    ; ( "member separator inside"
+    ; "line feed inside", {|["scene", "re\ngions"]|}, "re\ngions", Catalog.Line_break_in_value
+    ; ( "carriage return inside"
+      , {|["scene", "re\rgions"]|}
+      , "re\rgions"
+      , Catalog.Line_break_in_value )
+    ; ( "spaced separator inside"
       , {|["scene | regions", "text"]|}
       , "scene | regions"
       , Catalog.Separator_in_value )
+    ; "separator ending a member", {|["x |", "y"]|}, "x |", Catalog.Separator_in_value
+    ; ( "padding is reported before a separator"
+      , {|[" x|y", "z"]|}
+      , " x|y"
+      , Catalog.Padded_value )
     ];
   (match parse_error {|type = "string"
 enum = "scene"|} with

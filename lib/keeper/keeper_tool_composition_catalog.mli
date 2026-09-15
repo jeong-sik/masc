@@ -14,12 +14,14 @@ type expected_value =
   | Array_value
 
 (** Why an [enum] member cannot be offered to a model. A provider that
-    cannot carry [enum] writes the members unquoted into the parameter's
-    description, joined by
-    [Llm_provider.Backend_openai_serialize.enum_vocabulary_separator]. There
-    an empty member shows as nothing, surrounding whitespace is lost, a line
-    break splits the text, and a member containing the separator reads as two
-    members, while the call is still checked against the exact member. *)
+    cannot carry [enum] gets the members written unquoted into the parameter's
+    description ([Agent_core.Types.enum_vocabulary_text]). There an empty
+    member shows as nothing, surrounding whitespace is lost, a line break
+    splits the text, and a member containing
+    [Agent_core.Types.enum_member_separator] cannot be told apart from two
+    members, while the call is still checked against the exact member. The
+    faults are checked in the order listed, and the first one found is
+    reported. *)
 type enum_value_fault =
   | Empty_value
   | Padded_value

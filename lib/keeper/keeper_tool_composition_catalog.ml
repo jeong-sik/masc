@@ -407,9 +407,10 @@ and parse_array_template ~path fields =
 
 (* A member the model could not send back exactly. A provider that cannot
    carry [enum] gets the members written unquoted into the parameter's own
-   description (Backend_openai_serialize.conformant_schema_value), joined by
-   the separator it exports, while the call is still checked against the
-   exact member. *)
+   description (Agent_core.Types.enum_vocabulary_text), while the call is
+   still checked against the exact member. Any separator character in a
+   member is refused, not only the spaced form the text uses: ["x |"] next to
+   ["y"] would read as ["x"] and ["| y"]. *)
 let enum_value_fault value =
   if String.equal value ""
   then Some Empty_value
@@ -417,10 +418,7 @@ let enum_value_fault value =
   then Some Padded_value
   else if String.contains value '\n' || String.contains value '\r'
   then Some Line_break_in_value
-  else if
-    String_util.contains_substring
-      value
-      Llm_provider.Backend_openai_serialize.enum_vocabulary_separator
+  else if String.contains value Agent_core.Types.enum_member_separator
   then Some Separator_in_value
   else None
 ;;
@@ -767,8 +765,8 @@ let error_to_string = function
       | Line_break_in_value -> "contains a line break"
       | Separator_in_value ->
         Printf.sprintf
-          "contains %S, which separates members when they are written into a description"
-          Llm_provider.Backend_openai_serialize.enum_vocabulary_separator
+          "contains %C, which separates members when they are written into a description"
+          Agent_core.Types.enum_member_separator
     in
     Printf.sprintf "enum member %S at %s %s" value (String.concat "." path) problem
   | Duplicate_param_enum_value { path; value } ->

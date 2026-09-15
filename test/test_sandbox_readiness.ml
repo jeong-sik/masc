@@ -14,6 +14,7 @@ let apple_inventory = ["container";"list";"-a";"--format";"json"], Ok "[]"
 let apple_build ~rosetta = ["container";"system";"property";"list";"--format";"json"],
   Ok (Printf.sprintf {|{"build":{"cpus":2,"memory":"2048mb","rosetta":%b},"container":{"cpus":4}}|} rosetta)
 let rosetta_receipt = ["pkgutil";"--pkg-info";"com.apple.pkg.RosettaUpdateAuto"]
+let apple_ready = [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"]
 let test_service_not_presence () =
   let missing = probe linux [] S.Docker in
   check bool "missing command classified" true
@@ -103,7 +104,6 @@ let test_commit_conflict () =
         check string "other editor bytes preserved" edited
           (In_channel.with_open_text path In_channel.input_all)))
 let microvm_without_backend = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
-let apple_ready = [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"]
 (* F107. A microvm declaration that names no backend is refused by the
    selection itself; on origin/main it silently became Apple Container on
    macOS 26 arm64 while every other host was refused, so the written TOML on a

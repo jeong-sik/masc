@@ -194,6 +194,8 @@ let create_scoped_client ~sw env uri =
        holds by construction instead of by an argument about which callers
        can reach the same client at once. *)
     Eio.Cancel.protect (fun () ->
+      (* fire-and-forget: the bool says whether this caller was the one that
+         settled [stop], and no cleanup site needs to know. *)
       ignore (Eio.Promise.try_resolve stop_request () : bool))
   in
   let close () =

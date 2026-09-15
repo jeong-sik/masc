@@ -3125,12 +3125,21 @@ let armed_budget ~phase ~first_event_timeout ~body_timeout ~idle_timeout =
    A read that started inside the budget and finished stands, even when it
    finished in the pass the budget ran out: what it read had been asked for
    in time. A read that starts once the budget has run out stands only when
-   it took nothing new from [reader]'s flow -- the lines that had already
-   arrived, such as the delimiter that came with a first token. Taking new
-   bytes then is a timeout even when the flow hands them over: a submitted
-   read can still complete after its fiber was cancelled, so a stream that
-   kept sending would otherwise outlast a total budget line by line. *)
-let read_within_budget ~clock ~anchor ~seconds ~reader read =
+   it never waited for the flow -- the bytes were already in a buffer between
+   the socket and here, such as the delimiter that came with a first token,
+   or a whole first event the response's opening chunk carried. A read that
+   waited does not stand: a submitted read can still complete after its fiber
+   was cancelled (io_uring hands over the bytes the kernel had already been
+   asked for), so a stream that kept sending would otherwise outlast a total
+   budget line by line.
+
+   Whether it waited is what the cancellation says. The budget's arm cancels
+   this read when it wins, and a read that took bytes already in hand never
+   reaches a scheduling point to be cancelled at. Counting bytes named the
+   wrong thing: this reader's buffer is the last of four between the socket
+   and the parser, and a first token still sitting in the cohttp connection's
+   buffer arrives here as new bytes. *)
+let read_within_budget ~clock ~anchor ~seconds read =
   let anchored_at =
     match !anchor with
     | Some t -> t
@@ -3140,12 +3149,14 @@ let read_within_budget ~clock ~anchor ~seconds ~reader read =
       t
   in
   let remaining = anchored_at +. seconds -. Eio.Time.now clock in
-  let received () = Eio.Buf_read.consumed_bytes reader + Eio.Buf_read.buffered_bytes reader in
-  let received_before = received () in
-  match Under_deadline.run clock remaining read with
+  match
+    Under_deadline.run clock remaining (fun () ->
+      let line = read () in
+      line, Eio.Fiber.is_cancelled ())
+  with
   | Error `Timeout -> raise Eio.Time.Timeout
-  | Ok line ->
-    if Float.compare remaining 0. > 0 || received () = received_before
+  | Ok (line, waited_for_the_flow) ->
+    if Float.compare remaining 0. > 0 || not waited_for_the_flow
     then line
     else raise Eio.Time.Timeout
 ;;
@@ -3252,7 +3263,7 @@ let read_sse
     let parsed =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader inner
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds inner
       | Some _, None -> inner ()
       (* No clock: nothing can be armed. Misconfiguration (an explicit
          deadline without a clock) already failed loud at entry, so this is
@@ -3391,7 +3402,7 @@ let read_ndjson
     let line =
       match clock, budget with
       | Some c, Some (Gap seconds | Total seconds) ->
-        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds ~reader (fun () ->
+        read_within_budget ~clock:c ~anchor:budget_anchor ~seconds (fun () ->
           Eio.Buf_read.line reader)
       | Some _, None -> Eio.Buf_read.line reader
       (* No clock: nothing can be armed. See [read_sse] for why this is

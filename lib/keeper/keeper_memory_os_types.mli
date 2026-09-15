@@ -278,6 +278,11 @@ val derived
     lowercase hexadecimal characters. *)
 val is_memory_id : string -> bool
 
+(** The shape {!is_memory_id} accepts, as a noun phrase a refusal can quote:
+    ["sha256:" followed by 64 lowercase hex digits]. Stated here so a surface
+    telling a model what it wanted cannot drift from the predicate. *)
+val memory_id_shape : string
+
 (** SHA-256 of the exact claim bytes. This derived identifier is used only for
     retention, duplicate rejection, and observability. *)
 val memory_id : fact -> string

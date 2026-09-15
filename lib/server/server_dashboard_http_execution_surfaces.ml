@@ -1356,8 +1356,14 @@ let dashboard_execution_http_response ~sw ~clock context =
         let (_ : bool) = publish_execution_error_if_current ~generation exn in
         raise exn
     in
+    (* A refresh that finished, and published, as its window closed is the
+       result: the window's error must not be published over it. *)
     (match
-       Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (compute_and_track ()))
+       Watched_work.run
+         ~watcher:(fun () ->
+           Eio.Time.sleep clock timeout_sec;
+           Error `Timeout)
+         (fun () -> Ok (compute_and_track ()))
      with
      | Ok json -> json
      | Error `Timeout ->

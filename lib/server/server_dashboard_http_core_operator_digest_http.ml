@@ -106,8 +106,13 @@ let operator_digest_http_json ~state ~sw ~clock request =
         ""
     in
     let compute () =
+      (* A digest that finished as its window closed is the digest. *)
       match
-        Eio.Time.with_timeout clock Core_cache.dashboard_request_timeout_s (fun () ->
+        Watched_work.run
+          ~watcher:(fun () ->
+            Eio.Time.sleep clock Core_cache.dashboard_request_timeout_s;
+            Error `Timeout)
+          (fun () ->
           Ok
             (Core_runtime.run_dashboard_compute
                ~mode:Offloaded_readonly

@@ -2121,24 +2121,30 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
      log and exit so external process managers can restart the server.
      Prevents zombie-listener state where the socket is open but HTTP
      requests hang because init is stuck. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run ~name:"startup-watchdog" @@ fun _ ->
-    try
-      let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
-      Eio.Time.sleep clock timeout_sec;
-      let current = Server_startup_state.snapshot () in
-      if not current.state_ready then (
-        let elapsed = Server_startup_state.elapsed_since_start () in
-        Log.Server.error
-          "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
-          timeout_sec elapsed
-          (Server_startup_state.phase_to_string current.phase);
-        exit 1)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.error "startup watchdog fiber failed: %s"
-        (Printexc.to_string exn));
+  (* A daemon: the watchdog only sleeps and then reads a flag, so nothing
+     waits for it and the switch must not either. As an ordinary fiber it
+     kept a normally returning [Switch.run] parked for the rest of the
+     timeout. Cancelling it loses nothing -- a closing switch means the
+     process is already ending, which is what the watchdog would force. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
+      try
+        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+        Eio.Time.sleep clock timeout_sec;
+        let current = Server_startup_state.snapshot () in
+        if not current.state_ready then (
+          let elapsed = Server_startup_state.elapsed_since_start () in
+          Log.Server.error
+            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
+            timeout_sec elapsed
+            (Server_startup_state.phase_to_string current.phase);
+          exit 1)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.error "startup watchdog fiber failed: %s"
+          (Printexc.to_string exn));
+    `Stop_daemon);
 
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler

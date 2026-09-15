@@ -189,9 +189,12 @@ let create_scoped_client ~sw env uri =
   let request_close () =
     (* Delivering [stop] is this caller's job and must happen even while it
        unwinds. It suspends nowhere, so protecting it costs nothing and buys
-       the guarantee every cleanup site depends on: this call returns. *)
+       the guarantee every cleanup site now depends on: this call returns.
+       [try_resolve] rather than a check and a resolve, so that guarantee
+       holds by construction instead of by an argument about which callers
+       can reach the same client at once. *)
     Eio.Cancel.protect (fun () ->
-      if not (Eio.Promise.is_resolved stop) then Eio.Promise.resolve stop_request ())
+      ignore (Eio.Promise.try_resolve stop_request () : bool))
   in
   let close () =
     request_close ();

@@ -87,10 +87,10 @@ let spawn_lock_for t key =
 
 (* An answer that arrived as the window closed is the answer; the window's
    verdict stands only when none had. *)
-let await_answer t ~timeout ~what promise =
+let await_answer ~clock ~timeout ~what promise =
   Watched_work.run
     ~watcher:(fun () ->
-      Eio.Time.sleep t.clock timeout;
+      Eio.Time.sleep clock timeout;
       Error (Printf.sprintf "%s timed out after %.0fs" what timeout))
     (fun () -> Eio.Promise.await promise)
 ;;
@@ -157,7 +157,7 @@ let start_locked t ~key ~language ~workspace_root =
             ~client_id:pool_client_id
         in
         match
-          await_answer t ~timeout:initialize_timeout_sec ~what:"initialize" promise
+          await_answer ~clock:t.clock ~timeout:initialize_timeout_sec ~what:"initialize" promise
         with
         | Error reason -> Error (Server_failed { lang_id; reason })
         | Ok _capabilities ->
@@ -203,7 +203,7 @@ let ask t ~language ~workspace_root ~method_ ~params =
     let promise =
       Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id
     in
-    (match await_answer t ~timeout:request_timeout_sec ~what:method_ promise with
+    (match await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise with
      | Error reason ->
        Error
          (Server_failed
@@ -246,3 +246,7 @@ let with_pool ~clock ~proc_mgr ~servers f =
     let t = create ~sw ~clock ~proc_mgr ~servers in
     Fun.protect ~finally:(fun () -> close t) (fun () -> f t))
 ;;
+
+module For_testing = struct
+  let await_answer = await_answer
+end

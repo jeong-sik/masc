@@ -2,12 +2,12 @@
     for the keeper sandbox.
 
     [keeper_sandbox_container_name] — names the per-turn sandbox
-    container using [masc-keeper-<safe_filename>-<pid>-<ms>-<seq>]
-    so two concurrent keeper turns can never collide on a single
-    container name even within the same process. The trailing [seq]
-    is an Atomic counter that increments monotonically, eliminating
-    the millisecond-resolution collision window that 64 concurrent
-    keepers could trigger.
+    container from this process's pid, the wall-clock millisecond and
+    an Atomic counter, so two concurrent keeper turns can never collide
+    on a single container name even within the same process. The
+    counter increments monotonically, eliminating the
+    millisecond-resolution collision window that 64 concurrent keepers
+    could trigger. The spelling is {!Keeper_sandbox_container_name}'s.
 
     [keeper_private_container_root] — thin alias to
     [Keeper_sandbox.container_root] returning the fixed
@@ -17,21 +17,20 @@
     path, returns the corresponding container-side path. If
     host_cwd is *inside* the sandbox host root, the suffix is
     appended to container_root; otherwise the call falls back to
-    container_root so the keeper still lands inside its sandbox.
-
-    Verbatim extract from [Keeper_sandbox_docker]; all 3 functions
-    are exposed by the parent .mli at lines 37, 40, 45. *)
+    container_root so the keeper still lands inside its sandbox. *)
 
 let oneshot_container_counter : int Atomic.t = Atomic.make 0
 
 let keeper_sandbox_container_name (meta : Keeper_meta_contract.keeper_meta) =
   let seq = Atomic.fetch_and_add oneshot_container_counter 1 in
-  Printf.sprintf
-    "masc-keeper-%s-%d-%d-%d"
-    (Workspace_utils.safe_filename meta.name)
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
-    seq
+  Keeper_sandbox_container_name.make
+    (Keeper_sandbox_container_name.Docker_oneshot
+       { keeper_name = meta.name
+         (* DET-OK: pid and wall-clock ms make a one-shot name unique per run. *)
+       ; pid = Unix.getpid ()
+       ; started_ms = int_of_float (Unix.gettimeofday () *. 1000.0)
+       ; seq
+       })
 ;;
 
 let keeper_private_container_root (meta : Keeper_meta_contract.keeper_meta) =

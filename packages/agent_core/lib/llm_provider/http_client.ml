@@ -3212,18 +3212,13 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* Only a payload line renews a gap budget; a total budget runs to the
-       first token whatever arrives in between. The switch to the inter-token
-       budget is not made here: a data field is provider bytes, not
-       necessarily model output, and only the consumer can tell an opening
-       frame from a token. [dispatch_event] moves [phase] when [on_data]
-       reports [Output].
-       [Sse_comment] is already filtered inside [inner]; the only non-field
-       line [inner] can return is [Sse_blank]. *)
-    (match parsed with
-     | Sse_data _ -> renew_after_payload ~anchor:budget_anchor budget
-     | Sse_event_type _ | Sse_blank | Sse_ignored_field -> ()
-     | Sse_comment -> () (* unreachable: filtered in [inner] *));
+    (* Nothing renews a budget here. A data field is provider bytes, not model
+       output -- a keep-alive carries one, and renewing on it let a provider
+       hold an open stream for the whole turn while producing nothing. Only
+       the consumer can tell production from a keep-alive, so the gap budget
+       is renewed in [dispatch_event], on the [Output] the consumer reports.
+       A total budget is not renewed at all: it runs to the first output
+       whatever arrives in between. *)
     parsed
   in
   let current_event_type = ref None in
@@ -3245,7 +3240,13 @@ let read_sse
              ~anchor:budget_anchor
              ~first_event_timeout
              ~body_timeout
-             ~idle_timeout
+             ~idle_timeout;
+           (* Production is what an inter-token gap measures between, so this
+              is where the gap budget starts again. [renew_after_payload]
+              leaves a total budget alone. *)
+           renew_after_payload
+             ~anchor:budget_anchor
+             (armed_budget ~phase:!phase ~first_event_timeout ~body_timeout ~idle_timeout)
          | Continue Prelude | Stop -> ());
         continuation)
       else Continue Prelude

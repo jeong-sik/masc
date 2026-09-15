@@ -376,6 +376,13 @@ val capability_provider_label : t -> string
     [model_capabilities_override] or an exact [provider_id]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+(** Context window, in tokens, that a request with [config] is sized against:
+    the caller's [max_context] when set, otherwise the window of the model row
+    {!capabilities_for_config_model} finds. [None] when neither declares one;
+    a provider-level default is not a window for a model it has no row for.
+    Context-limit admission and response telemetry both read this. *)
+val context_window : t -> int option
+
 (** Derive a provider-safe schema name for native structured-output APIs
     that require one (for example Openai's [json_schema.name]). *)
 val structured_output_name_of_schema : Yojson.Safe.t -> string

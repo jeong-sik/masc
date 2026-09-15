@@ -204,11 +204,15 @@ let of_json json =
   Ok {document_id;url;title;width;height;scroll_x;scroll_y;nodes;truncated;view;scope}
 let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (request : Browser_surface.request) ~max_chars =
   let started = Mtime_clock.elapsed_ns () in
-  let* tab_id = match request.tab_id with Some id -> Ok id | None -> Error "scene requires tabId" in
-  let* target = Browser_surface.resolved_target request
-    |> Result.map_error Browser_lane.selection_error_code in
-  let* json = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
-    ~timeout_sec:20. |> Browser_surface.decode_answer in
+  let unobserved result = Result.map_error (fun detail -> Browser_surface.Unobserved detail) result in
+  let* tab_id = match request.tab_id with
+    | Some id -> Ok id | None -> Error (Browser_surface.Unobserved "scene requires tabId") in
+  let* target = Browser_lane.resolve_target request.route
+    |> Result.map_error (fun error -> Browser_surface.Unselected error) in
+  let* answer = Browser_lane.issue_for ~target ~verb:(Browser_lane.Page_scene {tab_id;max_chars;view;scope})
+    ~timeout_sec:20. |> Result.map_error (fun error -> Browser_surface.Unselected error) in
+  unobserved @@
+  let* json = Browser_surface.decode_answer answer in
   let* scene = of_json json in
   let* () = match expected_url with
     | Some url when scene.url <> url ->
@@ -232,7 +236,7 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
        values so first-key and last-key consumers see the same observation. *)
     let fields = List.filter (fun (key, _) ->
       not (List.mem key ["source"; "clientId"; "elapsed_ms"])) fields in
-    Ok (`Assoc (fields @ ["source",`String (match request.source with Live -> "live" | Automation -> "automation");
+    Ok (`Assoc (fields @ ["source",`String (Browser_surface.source_name request.route);
       "clientId",Browser_surface.client_id_json target;"elapsed_ms",`Float elapsed_ms]))
   | _ -> Error "scene must be an object"
 
@@ -264,4 +268,5 @@ let read_request = function
         | Some (`Int value) when value>=1 && value<=100_000 -> Ok value
         | _ -> Error "maxChars must be between 1 and 100000" in
       read ~view ?scope ?expected_url ?navigation_source request ~max_chars
+      |> Result.map_error Browser_surface.failure_message
   | _ -> Error "scene request must be an object"

@@ -29,8 +29,10 @@ bash connectors/browser/install-host.sh \
 ```
 
 The launcher records no server address: the host reads the port from the
-workspace's `.masc/config/connection.toml` and reads it again after a failed
-poll, so a server restarted on another port is found without reinstalling.
+workspace's `.masc/config/connection.toml`. After a failed poll it reads that
+file again and moves to the port it names only when the current server no
+longer answers and the new port does, so a server restarted on another port is
+found without reinstalling.
 
 The installer supports macOS and Linux and registers a Mozilla native-messaging
 manifest. `--manifest-dir` selects a different manifest directory when needed.

@@ -95,7 +95,7 @@ let test_timeout_releases_session () =
     Eio.Switch.run (fun sw ->
       Lane.install_automation_executor (Some (Driver.execute driver));
       Eio.Switch.on_release sw (fun () -> Lane.install_automation_executor None);
-      let read () = Lane.issue ~lane_name:"automation"
+      let read () = Lane.issue_automation
           ~verb:(Lane.Page_read {tab_id=None;max_chars=None}) ~timeout_sec:0.01 in
       (match read () with Lane.Timed_out -> () | _ -> fail "native deadline not enforced");
       check bool "I/O cancelled before timeout returns" true !cancelled;

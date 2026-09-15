@@ -33,8 +33,10 @@ scope가 null이면 생략한다. 선택 요소와 읽기 범위는 다르므로
 ## 필요한 동선만 선택하기
 
 사이트별 지침은 이 스킬의 참조 파일에 있다. 요청한 사이트에 맞는 파일만 읽고, 다른
-사이트나 모든 참조를 미리 읽지 않는다. 같은 revision의 파일을 이미 읽어 가지고 있으면
-다시 읽지 않는다.
+사이트나 모든 참조를 미리 읽지 않는다. 이번 대화에 이미 읽은 참조 내용이 남아 있으면
+다시 읽지 않는다. `keeper_skill`의 Available 목록에 요청한 사이트용 스킬이 따로 있으면
+(운영자가 추가한 사이트 스킬 등) 그것도 읽어 이 스킬과 함께 쓴다. identity는 그 목록에서
+복사한다.
 
 - Slack Web 채널 찾기, 메시지·스레드 수집: [Slack Web](references/sites/slack.md).
 - 공개 Reddit·X/Twitter형 피드·스레드: [공개 소셜 공통](references/sites/public-social.md)과

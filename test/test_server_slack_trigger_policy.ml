@@ -41,8 +41,7 @@ let with_temp_base f =
          (Unix.getpid ())
          (Random.bits ()))
   in
-  with_env Env_config_core.base_path_env_key base_path (fun () ->
-    with_env Env_config_core.base_path_input_env_key base_path f)
+  with_env Env_config_core.base_path_env_key base_path f
 ;;
 
 let with_temp_toml content f =

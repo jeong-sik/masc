@@ -437,7 +437,6 @@ let render_overview (state : state) =
                 else Some (Printf.sprintf "%d %s" count label))
               [ (l.klc_paused, "paused")
               ; (l.klc_offline, "offline")
-              ; (l.klc_inactive, "inactive")
               ; (l.klc_idle, "idle")
               ; (l.klc_unreadable, "unreadable")
               ]
@@ -6485,7 +6484,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       in
                       let line =
                         Printf.sprintf "    %s %s → %s%s"
-                          (if selected then "▸" else " ")
+                          (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then "  (this Keeper)"
@@ -11761,7 +11760,7 @@ let render_code (state : state) =
              did not, leaving two cyans in one column. *)
           let marker =
             if node.Masc.Tui_decode.wt_has_children then
-              if selected then "\xe2\x96\xb8 "
+              if selected then Masc_tui_theme.Glyph.current_entry ^ " "
               (* The mark colour the files below it take. A folder is not a
                  kind of file, and the arrow already says which of the two
                  this row is. *)
@@ -14414,7 +14413,7 @@ let render_palette (state : state) =
       |> List.filteri (fun i _ -> i >= first && i < first + budget)
       |> List.iteri (fun visible_index (label, _) ->
            if first + visible_index = cursor then
-             c.push_selected (" \xe2\x96\xb8 " ^ label)
+             c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ label)
            else c.push ("   " ^ label));
       if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
 
@@ -14688,7 +14687,7 @@ let render_answering (state : state) =
     (* The cursor is a gutter caret, not a full-row band: the row keeps its
        tone, and rows Enter cannot act on never wear the caret. *)
     let caret =
-      if selected && Option.is_some line.Masc_tui_answering.target then "\xe2\x96\xb8 "
+      if selected && Option.is_some line.Masc_tui_answering.target then Masc_tui_theme.Glyph.current_entry ^ " "
       else "  "
     in
     caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset

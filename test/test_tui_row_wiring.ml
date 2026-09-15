@@ -227,7 +227,7 @@ let test_the_fleet_row_reads_the_control_planes_own_word () =
     (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
        ~binding_name:"keeper_liveness_of_briefs"
        ~literals:
-         [ "active"; "inactive"; "offline"; "idle"; "paused" ]);
+         [ "active"; "offline"; "idle"; "paused" ]);
   Alcotest.(check bool) "and the summary row reads the counts" true
     (reads ~binding_name:"render_overview" ~fields:[ "ov_keeper_liveness" ] > 0)
 

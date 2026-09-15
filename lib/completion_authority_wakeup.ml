@@ -85,20 +85,37 @@ type recovery_report = { delivered : int; unroutable : int; retained : int }
    the safe order: a crash between the two replays the release, which reads the
    status again and does nothing the second time, while acknowledging first
    would strand the Task with nothing left to retry. *)
-(* Which release failures are worth another interval. Retrying is the safe
-   direction for a transient fault and the wrong one for a permanent fault:
-   #36461 removed a retry that could never succeed, and a release that fails
-   the same way every time would put it back. The three named below cannot
-   change while the obligation stands — the workspace is not initialised, the
-   task id on the obligation is not a task id, the authority on it carries no
-   identity — so they end the obligation and say so loudly. Everything else
-   keeps it. *)
+(* Which release failures can be ended here rather than kept for the next
+   interval. Two conditions, and both have to hold.
+
+   It has to be permanent: #36461 removed a retry that could never succeed,
+   and a release that fails the same way every interval would put it back.
+
+   It also has to be *dischargeable*, which is the condition the first pass
+   of this got wrong. Ending an obligation means acknowledging it, and
+   {!Workspace_task_rejection_outbox.acknowledge} takes the same lock and
+   makes the same backlog write the release just failed at. So a failure that
+   says the backlog cannot be read, written or locked cannot be ended either:
+   the only thing left to do with it is keep it, which is also the right thing.
+   [NotInitialized] was in the permanent set and is wrong twice over — the
+   acknowledgement would fail for the same reason, and an uninitialised
+   workspace fails the outbox read long before a release is attempted.
+
+   That leaves the two that fail while the backlog is still writable: an
+   obligation carrying a task id that is not a task id, and one carrying an
+   authority with no identity. Neither can change while the obligation stands.
+   Both are close to unreachable — the verdict path refuses a blank authority
+   before the obligation exists — which is the point: if one does appear, it
+   appeared through a route nobody expected, and retrying it forever is how
+   that stays invisible. *)
 let release_failure_is_permanent (error : Masc_domain.masc_error) =
   match error with
   | Masc_domain.System system ->
     (match system with
-     | Masc_domain.System_error.NotInitialized
      | Masc_domain.System_error.ValidationError _ -> true
+     (* Every one of these says the backlog itself is unavailable, so the
+        acknowledgement that would end the obligation fails with it. *)
+     | Masc_domain.System_error.NotInitialized
      | Masc_domain.System_error.IoError _
      | Masc_domain.System_error.StorageError _
      | Masc_domain.System_error.LockContention _
@@ -123,12 +140,12 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
 
 let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejection) =
   (* Asked again inside the backlog lock: the routing answer above was read
-     before it, and a Keeper meta can land at the producer's name in between. *)
+     before it, and a Keeper meta can land at the producer's name in between.
+     Through the reader that writes nothing — [resolve] repairs an off-canon
+     meta in place, and an fsync of another Keeper's file under a lease-backed
+     lock widens the window where the lease expires while still held. *)
   let still_unroutable () =
-    match Keeper_producer_route.resolve ~config item.producer with
-    | Ok Keeper_producer_route.No_keeper -> Ok true
-    | Ok (Keeper_producer_route.Keeper _) -> Ok false
-    | Error detail -> Error detail
+    Ok (Keeper_producer_route.has_no_queue_without_writing ~config item.producer)
   in
   match
     Workspace_task.release_unroutable_rejected_task_r

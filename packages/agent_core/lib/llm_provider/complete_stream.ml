@@ -510,11 +510,13 @@ let complete_stream_http
       let position = ref (Before_first_output Http_client.Awaiting_first_event) in
       (* Kept apart from [first_token_at_ref], which also needs a latency
          counter. *)
-      let first_output_seen () =
-        match !position with
-        | After_first_output _ -> true
-        | Before_first_output _ -> false
-      in
+      (* Whether the event being dispatched right now carried production. The
+         reader renews the inter-token gap on the [Output] this reports, so a
+         keep-alive must not report one: a provider sending nothing but
+         heartbeats would otherwise hold the stream for the whole turn. Set
+         per event in [project_event] and read once by
+         [continue_unless_failed]. *)
+      let produced_this_event = ref false in
       (* The last named production moves the position; before the first
          output it is the label a stall is reported under, after it the
          phase. *)
@@ -533,6 +535,16 @@ let complete_stream_http
          state nowhere. Every Anthropic turn ends with a content_block_stop,
          so a stall after a text block's stop is an idle gap in
          streaming_answer, not one while streaming a tool call. *)
+      (* Production is what an inter-token gap measures between. Named over the
+         stream's own kinds so a new kind has to say which it is. A heartbeat
+         is the provider saying the socket is alive, not the model saying
+         anything, and [`Done] ends the stream rather than continuing it. *)
+      let kind_is_production = function
+        | `Thinking | `Answer | `Tool_call_start | `Tool_call_arg_delta
+        | `Tool_call_complete -> true
+        | `Skip | `Substrate | `Heartbeat | `Done | `Wire_error _
+        | `Provider_reported_error | `Capability_mismatch -> false
+      in
       let classify_chunk_kind ~block_kind_at (evt : Types.sse_event) =
         match evt with
         | Types.MessageStart _ -> `Skip
@@ -737,11 +749,13 @@ let complete_stream_http
                   then first_token_at_ref := elapsed_ms;
                   let produce = produce ~first_token in
                   emit_stream_event on_event emitted_evt;
-                  match
+                  let kind =
                     classify_chunk_kind
                       ~block_kind_at:(Complete_stream_acc.block_kind_at acc)
                       emitted_evt
-                  with
+                  in
+                  if kind_is_production kind then produced_this_event := true;
+                  match kind with
                   | `Skip -> ()
                   | `Thinking ->
                     produce Http_client.Streaming_thinking;
@@ -870,9 +884,11 @@ let complete_stream_http
                  [Prelude], so the prefill behind it stays under the
                  first-event bound. *)
               let continue_unless_failed () =
+                let produced = !produced_this_event in
+                produced_this_event := false;
                 if Complete_stream_acc.stream_failed acc
                 then Http_client.Stop
-                else if first_output_seen ()
+                else if produced
                 then Http_client.Continue Http_client.Output
                 else Http_client.Continue Http_client.Prelude
               in

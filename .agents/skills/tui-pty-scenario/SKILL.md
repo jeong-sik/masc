@@ -46,7 +46,8 @@ python3 test/test_tui_keyboard_input.py "$EXE" <family> --scenario "<설명>" --
 - `--scenario` 는 `run_terminal_scenario(description=...)` 의 설명과 정확히 같아야 한다.
   실패 트레이스백에 찍힌 호출 줄에서 설명을 복사한다.
 - 모르는 설명을 주면 터미널을 열기 전에 exit 2 로 끝나고, 그 설명이 있는 가족을 알려 준다.
-- 같은 설명이 한 가족에 두 번 있으면 둘 다 돈다. 끝줄 `PASS (N selected scenario runs)` 의 N 으로 확인한다.
+- 한 가족 안에서 설명은 하나씩이다. 같은 설명을 두 번 쓰면 `--list` 와 `--scenario` 가 이름을 모으다 실패한다.
+  끝줄 `PASS (N selected scenario runs)` 의 N 이 실제로 돈 개수다.
 - `--list` 도 바이너리 경로를 받는다. 두 가족이 증거용으로 바이너리를 해시하기 때문이다.
 
 한 가족은 첫 실패에서 멈춘다. 그 뒤 시나리오는 검증되지 않은 상태로 남는다. 앞쪽이 main 에서 이미
@@ -139,6 +140,8 @@ gh workflow run test.yml --ref <branch> -f suite=test_tui_keyboard_input   # 기
 ## Gotchas
 
 - 설명이 같은 시나리오가 다른 가족에도 있다. `--scenario` 는 고른 가족 안에서만 찾는다.
-- `chat-atomic` 과 `browser-scene` 가족은 `test/dune` 규칙이 없다. 손으로만 돈다.
+- 가족을 새로 만들면 `test/dune` 규칙과 `runtest` 연결을 같이 넣는다. 빠지면
+  `test/test_tui_keyboard_scenario_selection.py` 가 실패한다. `memory-journal` 만 규칙은 있고
+  `runtest` 연결은 일부러 뺐다(Linux 러너에서 멈춘다, `test/dune` 주석). 그 예외는 그 테스트에 적혀 있다.
 - 가족 몇 개(`msx-retained-tick`, `tools-purpose` 등)는 PASS 줄 앞에 증거 JSON 줄을 찍는다.
   `--list` 는 그런 출력을 stderr 로 돌려서 stdout 에는 이름만 남긴다.

@@ -35,18 +35,18 @@ let is_uri_scheme_char ch =
   || Char.equal ch '.'
 ;;
 
+(* A top-level recursion: a local one closing over [s] allocated a closure at
+   every boundary position a data URL scan visits. *)
+let rec prefix_matches_ci s pos prefix index =
+  index = String.length prefix
+  || (Char.equal (Char.lowercase_ascii s.[pos + index]) (Char.lowercase_ascii prefix.[index])
+      && prefix_matches_ci s pos prefix (index + 1))
+;;
+
 let starts_with_ci_at s pos ~prefix =
-  let len = String.length s in
-  let prefix_len = String.length prefix in
-  if pos < 0 || pos + prefix_len > len
-  then false
-  else (
-    let rec loop i =
-      i = prefix_len
-      || (Char.equal (Char.lowercase_ascii s.[pos + i]) (Char.lowercase_ascii prefix.[i])
-          && loop (i + 1))
-    in
-    loop 0)
+  pos >= 0
+  && pos + String.length prefix <= String.length s
+  && prefix_matches_ci s pos prefix 0
 ;;
 
 let is_data_url_boundary s pos = pos = 0 || not (is_uri_scheme_char s.[pos - 1])
@@ -136,26 +136,53 @@ let has_prefix_at s pos prefix =
   pos >= 0 && pos + String.length prefix <= String.length s && prefix_matches s pos prefix 0
 ;;
 
-(* The first occurrence of [prefix] that starts at or after [pos] and ends by
-   [stop]. *)
-let rec find_prefix_before s ~stop prefix pos =
-  if pos + String.length prefix > stop
+let rec find_prefix s pos prefix =
+  if pos + String.length prefix > String.length s
   then None
   else if has_prefix_at s pos prefix
   then Some pos
-  else find_prefix_before s ~stop prefix (pos + 1)
+  else find_prefix s (pos + 1) prefix
 ;;
 
-let find_prefix s pos prefix = find_prefix_before s ~stop:(String.length s) prefix pos
+(* Where a prefix next occurs, as far as one redaction has looked. *)
+type next_occurrence =
+  | Not_looked
+  | Occurs_at of int
+  | Occurs_nowhere_after
+
+type prefix_cursor =
+  { prefix : string
+  ; mutable next : next_occurrence
+  }
+
+(* The first occurrence of the cursor's prefix at or after [pos]. The positions
+   one redaction asks about never decrease, so an occurrence found earlier
+   answers every later ask until [pos] passes it, and each prefix reads the
+   text once. Looking again from every [pos] made a run of one prefix ahead of
+   a later occurrence of another quadratic: 120 KB of [key=a ] before a
+   [Bearer ] took 19 s. *)
+let next_occurrence s cursor ~pos =
+  match cursor.next with
+  | Occurs_at index when index >= pos -> Some index
+  | Occurs_nowhere_after -> None
+  | Not_looked | Occurs_at _ ->
+    let found = find_prefix s pos cursor.prefix in
+    cursor.next
+    <- (match found with
+        | Some index -> Occurs_at index
+        | None -> Occurs_nowhere_after);
+    found
+;;
 
 (* The first prefix in list order that occurs in [[pos, stop)], at its first
-   occurrence. *)
+   occurrence there. *)
 let rec first_listed_occurrence s ~pos ~stop = function
   | [] -> None
-  | prefix :: rest ->
-    (match find_prefix_before s ~stop prefix pos with
-     | Some index -> Some (index, prefix)
-     | None -> first_listed_occurrence s ~pos ~stop rest)
+  | cursor :: rest ->
+    (match next_occurrence s cursor ~pos with
+     | Some index when index + String.length cursor.prefix <= stop ->
+       Some (index, cursor.prefix)
+     | Some _ | None -> first_listed_occurrence s ~pos ~stop rest)
 ;;
 
 (** Redact every occurrence of a prefix by replacing the token that follows it
@@ -171,8 +198,9 @@ let rec first_listed_occurrence s ~pos ~stop = function
     it is rather than marked. *)
 let redact_prefixes s prefixes =
   let buf = Buffer.create (String.length s) in
+  let cursors = List.map (fun prefix -> { prefix; next = Not_looked }) prefixes in
   let rec redact_range pos stop =
-    match first_listed_occurrence s ~pos ~stop prefixes with
+    match first_listed_occurrence s ~pos ~stop cursors with
     | None -> Buffer.add_substring buf s pos (stop - pos)
     | Some (index, prefix) ->
       redact_range pos index;

@@ -35,6 +35,28 @@ let test_a_prefix_keeps_the_token_it_claims () =
   check string "ordinary text" "plain text" (redact "plain text")
 ;;
 
+(* Each prefix reads the text once. Looking for every prefix again after each
+   redacted token made a long run of one prefix ahead of another quadratic:
+   120 KB of [key=a ] before a [Bearer ] took 19 s, where one pass takes
+   milliseconds. *)
+let repeated_credentials = 20_000
+let linear_scan_cpu_budget_s = 2.0
+
+let test_a_long_run_of_one_prefix_ahead_of_another_is_one_pass () =
+  let run = String.concat "" (List.init repeated_credentials (fun _ -> "key=a ")) in
+  let started = Sys.time () in
+  let redacted = redact (run ^ "Bearer x") in
+  let elapsed = Sys.time () -. started in
+  let expected_run =
+    String.concat "" (List.init repeated_credentials (fun _ -> "key=[REDACTED] "))
+  in
+  check string "every token redacted" (expected_run ^ "Bearer [REDACTED]") redacted;
+  check bool
+    (Printf.sprintf "scan took %.3fs of CPU" elapsed)
+    true
+    (elapsed < linear_scan_cpu_budget_s)
+;;
+
 let () =
   run
     "Secret_redactor"
@@ -47,6 +69,10 @@ let () =
             "a prefix keeps the token it claims"
             `Quick
             test_a_prefix_keeps_the_token_it_claims
+        ; test_case
+            "a long run of one prefix ahead of another is one pass"
+            `Quick
+            test_a_long_run_of_one_prefix_ahead_of_another_is_one_pass
         ] )
     ]
 ;;
